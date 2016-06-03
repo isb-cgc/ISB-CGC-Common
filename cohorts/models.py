@@ -46,7 +46,7 @@ class Cohort(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.TextField(null=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now_add=True)
+    last_date_saved = models.DateTimeField(auto_now=True)
     objects = CohortManager()
 
     def sample_size(self):
