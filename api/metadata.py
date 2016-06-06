@@ -1049,6 +1049,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         resulting_samples = {}
 
         # Loop through the features
+        start = time.time()
         for key, feature in valid_attrs.items():
             # Get a count for each feature
             table_values = {}
@@ -1093,6 +1094,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                     sample_query += query_clause
 
                     cursor.execute(query, where_clause['value_tuple'])
+                    print >> sys.stdout, query + " " + where_clause['value_tuple'].__str__()
                     for row in cursor.fetchall():
                         if not row[0] in table_values:
                             table_values[row[0]] = 0
@@ -1112,6 +1114,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 cursor.close()
 
             feature['values'] = table_values
+
+        stop = time.time()
+        logger.debug(
+            "[BENCHMARKING] Time to query counts for filters: " + (stop - start).__str__())
 
         sample_set = ()
         for sample in resulting_samples:
@@ -1767,7 +1773,8 @@ class Meta_Endpoints_API(remote.Service):
                                                page=messages.IntegerField(2),
                                                limit=messages.IntegerField(3),
                                                token=messages.StringField(4),
-                                               platform_count_only=messages.StringField(5)
+                                               platform_count_only=messages.StringField(5),
+                                               offset=messages.IntegerField(6)
                                                )
     @endpoints.method(GET_RESOURCE, SampleFiles,
                       path='cohort_files', http_method='GET',
@@ -1783,6 +1790,7 @@ class Meta_Endpoints_API(remote.Service):
         is_dbGaP_authorized = False
         user_email = None
         user_id = None
+
         if endpoints.get_current_user() is not None:
             user_email = endpoints.get_current_user().email()
 
@@ -1820,6 +1828,9 @@ class Meta_Endpoints_API(remote.Service):
         if request.__getattribute__('page') is not None:
             page = request.page
             offset = (page - 1) * 20
+        elif request.__getattribute__('offset') is not None:
+            offset = request.offset
+
         if request.__getattribute__('limit') is not None:
             limit = request.limit
 
@@ -1860,13 +1871,14 @@ class Meta_Endpoints_API(remote.Service):
             query += ' and Platform in ("' + '","'.join(platform_selector_list) + '")'
 
         query_tuple = sample_list
-        if limit != -1:
+        if limit > 0:
             query += ' limit %s'
             query_tuple += (limit,)
 
-        if offset != 0:
+        if offset > 0 and limit > 0:
             query += ' offset %s'
             query_tuple += (offset,)
+
         query += ';'
 
         try:
@@ -1905,7 +1917,7 @@ class Meta_Endpoints_API(remote.Service):
                             else:
                                 item['DatafileNameKey'] = ''
 
-                        file_list.append(FileDetails(sample=item['SampleBarcode'], cloudstorage_location=item['DatafileNameKey'], filename=item['DatafileName'], pipeline=item['Pipeline'], platform=item['Platform'], datalevel=item['DataLevel'], datatype=(item['Datatype'] or ""), gg_readgroupset_id=item['GG_readgroupset_id']))
+                        file_list.append(FileDetails(sample=item['SampleBarcode'], cloudstorage_location=item['DatafileNameKey'], filename=item['DatafileName'], pipeline=item['Pipeline'], platform=item['Platform'], datalevel=item['DataLevel'], datatype=(item['Datatype'] or " "), gg_readgroupset_id=item['GG_readgroupset_id']))
                 else:
                     file_list.append(FileDetails(sample='None', filename='', pipeline='', platform='', datalevel=''))
             return SampleFiles(total_file_count=count, page=page, platform_count_list=platform_count_list, file_list=file_list)

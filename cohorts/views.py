@@ -49,6 +49,8 @@ from bq_data_access.cohort_bigquery import BigQueryCohortSupport
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
 
+MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
+
 def convert(data):
     if isinstance(data, basestring):
         return str(data)
@@ -1020,23 +1022,44 @@ def streaming_csv_view(request, cohort_id=0):
         messages.error('Cohort provided does not exist.')
         return redirect('/user_landing')
 
+    total_expected = int(request.GET.get('total'))
+
+    limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
+
     token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    data_url = METADATA_API + ('v1/cohort_files?cohort_id=%s&token=%s&limit=-1' % (cohort_id, token))
+    data_url = METADATA_API + ('v1/cohort_files?cohort_id=%s&token=%s&limit=%s' % (cohort_id, token, limit.__str__()))
     if 'params' in request.GET:
         params = request.GET.get('params').split(',')
 
         for param in params:
             data_url += '&' + param + '=True'
 
-    result = urlfetch.fetch(data_url, deadline=60)
-    items = json.loads(result.content)
-    if 'file_list' in items:
-        file_list = items['file_list']
+    keep_fetching = True
+    file_list = []
+    offset = None
+
+    while keep_fetching:
+        print >> sys.stdout, 'Fetching ' + data_url
+        result = urlfetch.fetch(data_url+('&offset='+offset.__str__() if offset else ''), deadline=60)
+        items = json.loads(result.content)
+
+        if 'file_list' in items:
+            file_list += items['file_list']
+            offset = file_list.__len__()
+        else:
+            keep_fetching = False
+            if 'error' in items:
+                messages.error(request, items['error']['message'])
+            return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+
+        keep_fetching = (offset < total_expected)
+
+
+    if file_list.__len__() > 0:
         """A view that streams a large CSV file."""
         # Generate a sequence of rows. The range is based on the maximum number of
         # rows that can be handled by a single sheet in most spreadsheet
         # applications.
-        rows = ()
         rows = (["Sample", "Platform", "Pipeline", "DataLevel", "Data Type", "CloudStorageLocation"],)
         for file in file_list:
             rows += ([file['sample'], file['platform'], file['pipeline'], file['datalevel'], file['datatype'], file['cloudstorage_location']],)
@@ -1047,9 +1070,6 @@ def streaming_csv_view(request, cohort_id=0):
         response['Content-Disposition'] = 'attachment; filename="file_list.csv"'
         return response
 
-    elif 'error' in items:
-        messages.error(request, items['error']['message'])
-        return redirect(reverse('cohort_filelist', kwargs={'cohort_id':cohort_id}))
     return render(request)
 
 @login_required
