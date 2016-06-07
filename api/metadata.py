@@ -1767,7 +1767,6 @@ class Meta_Endpoints_API(remote.Service):
             if db: db.close()
             raise endpoints.NotFoundException('Error in meta_domains')
 
-
     GET_RESOURCE = endpoints.ResourceContainer(IncomingPlatformSelection,
                                                cohort_id=messages.IntegerField(1, required=True),
                                                page=messages.IntegerField(2),
@@ -1776,6 +1775,7 @@ class Meta_Endpoints_API(remote.Service):
                                                platform_count_only=messages.StringField(5),
                                                offset=messages.IntegerField(6)
                                                )
+
     @endpoints.method(GET_RESOURCE, SampleFiles,
                       path='cohort_files', http_method='GET',
                       name='meta.cohort_files')
@@ -1871,13 +1871,14 @@ class Meta_Endpoints_API(remote.Service):
             query += ' and Platform in ("' + '","'.join(platform_selector_list) + '")'
 
         query_tuple = sample_list
+
         if limit > 0:
             query += ' limit %s'
             query_tuple += (limit,)
-
-        if offset > 0 and limit > 0:
-            query += ' offset %s'
-            query_tuple += (offset,)
+            # Offset is only valid when there is a limit
+            if offset > 0:
+                query += ' offset %s'
+                query_tuple += (offset,)
 
         query += ';'
 

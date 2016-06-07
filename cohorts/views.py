@@ -50,6 +50,7 @@ debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
+MAX_SEL_FILES = settings.MAX_FILES_IGV
 
 def convert(data):
     if isinstance(data, basestring):
@@ -950,7 +951,8 @@ def cohort_filelist(request, cohort_id=0):
                                                             # 'page': items['page'],
                                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
                                                             'platform_counts': items['platform_count_list'],
-                                                            'filelist': file_list})
+                                                            'filelist': file_list,
+                                                            'sel_file_max': MAX_SEL_FILES})
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
@@ -1016,6 +1018,7 @@ class Echo(object):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
 
+
 def streaming_csv_view(request, cohort_id=0):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     if cohort_id == 0:
@@ -1023,11 +1026,11 @@ def streaming_csv_view(request, cohort_id=0):
         return redirect('/user_landing')
 
     total_expected = int(request.GET.get('total'))
-
     limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
     token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
     data_url = METADATA_API + ('v1/cohort_files?cohort_id=%s&token=%s&limit=%s' % (cohort_id, token, limit.__str__()))
+
     if 'params' in request.GET:
         params = request.GET.get('params').split(',')
 
@@ -1039,21 +1042,24 @@ def streaming_csv_view(request, cohort_id=0):
     offset = None
 
     while keep_fetching:
-        print >> sys.stdout, 'Fetching ' + data_url
         result = urlfetch.fetch(data_url+('&offset='+offset.__str__() if offset else ''), deadline=60)
         items = json.loads(result.content)
 
         if 'file_list' in items:
             file_list += items['file_list']
+            # offsets are counted from row 0, so setting the offset to the current number of
+            # retrieved rows will start the next request on the row we want
             offset = file_list.__len__()
         else:
-            keep_fetching = False
             if 'error' in items:
                 messages.error(request, items['error']['message'])
             return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
-        keep_fetching = (offset < total_expected)
+        keep_fetching = ((offset < total_expected) and ('file_list' in items))
 
+    if file_list.__len__() < total_expected:
+        messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
+        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
     if file_list.__len__() > 0:
         """A view that streams a large CSV file."""
@@ -1072,6 +1078,7 @@ def streaming_csv_view(request, cohort_id=0):
 
     return render(request)
 
+
 @login_required
 def unshare_cohort(request, cohort_id=0):
 
@@ -1089,6 +1096,7 @@ def unshare_cohort(request, cohort_id=0):
     return JsonResponse({
         'status': 'success'
     })
+
 
 @login_required
 def get_metadata(request):
