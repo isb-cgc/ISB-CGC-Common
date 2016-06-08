@@ -20,6 +20,8 @@ import json
 import collections
 import csv
 import sys
+import time
+import logging
 import urllib
 import re
 
@@ -51,6 +53,8 @@ urlfetch.set_default_fetch_deadline(60)
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
+
+logger = logging.getLogger(__name__)
 
 def convert(data):
     if isinstance(data, basestring):
@@ -274,7 +278,11 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     payload = {
         'token': token
     }
+    start = time.time()
     results = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
+    stop = time.time()
+    logger.debug("[BANCHMAKRING] Time to receive response from "+data_url+ ": " (stop-start).__str__())
+
     results = json.loads(results.content)
     totals = results['total']
 
