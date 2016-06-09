@@ -17,7 +17,7 @@ limitations under the License.
 """
 
 import operator
-
+import sys
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
@@ -115,7 +115,7 @@ class Cohort(models.Model):
     Creates a historical list of the filters applied to produce this cohort
     '''
     def get_filter_history(self):
-        filter_history = []
+        filter_history = {}
 
         sources = Source.objects.filter(cohort=self)
 
@@ -128,7 +128,7 @@ class Cohort(models.Model):
                     filters = []
                     for source_filter in source_filters:
                         filters.append(source_filter.name+": "+source_filter.value)
-                    filter_history.append(filters)
+                    filter_history[source.cohort] = filters
                 sources = Source.objects.filter(cohort=source.parent)
 
         return filter_history
@@ -141,16 +141,16 @@ class Cohort(models.Model):
     def get_revision_history(self):
         revision_list = []
         sources = Source.objects.filter(cohort=self)
+        source_filters = None
 
         while sources:
             # single parent
             if len(sources) == 1:
                 source = sources[0]
                 if source.type == Source.FILTERS:
-                    # This signals that get_filters or get_filter_history should be used to
-                    # determine this cohort's filters
-                    if 'Applied Filters.' not in revision_list:
-                        revision_list.append('Applied Filters.')
+                    if source_filters is None:
+                        source_filters = self.get_filter_history()
+                    revision_list.append({'type': 'filter', 'vals': source_filters[source.cohort]})
                 elif source.type == Source.CLONE:
                     revision_list.append('Cloned from %s.' % source.parent.name)
                 elif source.type == Source.PLOT_SEL:

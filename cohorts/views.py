@@ -821,10 +821,10 @@ def set_operation(request):
                 for cohort in cohorts:
                     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
-            elif op=='complement':
+            elif op == 'complement':
                 source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                 source.save()
-                for cohort in subtract_cohorts:
+                for cohort in subtracted_cohorts:
                     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
 
