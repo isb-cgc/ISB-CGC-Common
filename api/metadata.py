@@ -1761,14 +1761,15 @@ class Meta_Endpoints_API(remote.Service):
             if db: db.close()
             raise endpoints.NotFoundException('Error in meta_domains')
 
-
     GET_RESOURCE = endpoints.ResourceContainer(IncomingPlatformSelection,
                                                cohort_id=messages.IntegerField(1, required=True),
                                                page=messages.IntegerField(2),
                                                limit=messages.IntegerField(3),
                                                token=messages.StringField(4),
-                                               platform_count_only=messages.StringField(5)
+                                               platform_count_only=messages.StringField(5),
+                                               offset=messages.IntegerField(6)
                                                )
+
     @endpoints.method(GET_RESOURCE, SampleFiles,
                       path='cohort_files', http_method='GET',
                       name='meta.cohort_files')
@@ -1783,6 +1784,7 @@ class Meta_Endpoints_API(remote.Service):
         is_dbGaP_authorized = False
         user_email = None
         user_id = None
+
         if endpoints.get_current_user() is not None:
             user_email = endpoints.get_current_user().email()
 
@@ -1820,6 +1822,9 @@ class Meta_Endpoints_API(remote.Service):
         if request.__getattribute__('page') is not None:
             page = request.page
             offset = (page - 1) * 20
+        elif request.__getattribute__('offset') is not None:
+            offset = request.offset
+
         if request.__getattribute__('limit') is not None:
             limit = request.limit
 
@@ -1860,13 +1865,15 @@ class Meta_Endpoints_API(remote.Service):
             query += ' and Platform in ("' + '","'.join(platform_selector_list) + '")'
 
         query_tuple = sample_list
-        if limit != -1:
+
+        if limit > 0:
             query += ' limit %s'
             query_tuple += (limit,)
+            # Offset is only valid when there is a limit
+            if offset > 0:
+                query += ' offset %s'
+                query_tuple += (offset,)
 
-        if offset != 0:
-            query += ' offset %s'
-            query_tuple += (offset,)
         query += ';'
 
         try:
@@ -1905,7 +1912,7 @@ class Meta_Endpoints_API(remote.Service):
                             else:
                                 item['DatafileNameKey'] = ''
 
-                        file_list.append(FileDetails(sample=item['SampleBarcode'], cloudstorage_location=item['DatafileNameKey'], filename=item['DatafileName'], pipeline=item['Pipeline'], platform=item['Platform'], datalevel=item['DataLevel'], datatype=(item['Datatype'] or ""), gg_readgroupset_id=item['GG_readgroupset_id']))
+                        file_list.append(FileDetails(sample=item['SampleBarcode'], cloudstorage_location=item['DatafileNameKey'], filename=item['DatafileName'], pipeline=item['Pipeline'], platform=item['Platform'], datalevel=item['DataLevel'], datatype=(item['Datatype'] or " "), gg_readgroupset_id=item['GG_readgroupset_id']))
                 else:
                     file_list.append(FileDetails(sample='None', filename='', pipeline='', platform='', datalevel=''))
             return SampleFiles(total_file_count=count, page=page, platform_count_list=platform_count_list, file_list=file_list)
@@ -2093,6 +2100,7 @@ class Meta_Endpoints_API_v2(remote.Service):
             request_finished.send(self)
 
     POST_RESOURCE = endpoints.ResourceContainer(IncomingMetadataCount)
+
     @endpoints.method(POST_RESOURCE, MetadataCountsItem,
                       path='metadata_counts', http_method='POST',
                       name='meta.metadata_counts')
@@ -2121,7 +2129,16 @@ class Meta_Endpoints_API_v2(remote.Service):
             cohort_id = str(request.cohort_id)
             sample_ids = query_samples_and_studies(cohort_id, 'study_id')
 
+        start = time.time()
         counts_and_totals = count_metadata(user, cohort_id, sample_ids, filters)
+        stop = time.time()
+        logger.debug(
+            "[BENCHMARKING] Time to query metadata_counts "
+                + (" for cohort "+cohort_id if cohort_id is not None else "")
+                + (" and" if cohort_id is not None and filters.__len__() > 0 else "")
+                + (" filters "+filters.__str__() if filters.__len__() > 0 else "")
+                + ": " + (stop - start).__str__()
+        )
 
         request_finished.send(self)
         return MetadataCountsItem(count=counts_and_totals['counts'], total=counts_and_totals['total'])
@@ -2239,7 +2256,7 @@ class Meta_Endpoints_API_v2(remote.Service):
                     # This barcode was not in our cohort's list of barcodes, skip it
                     continue
 
-                results.append( SampleBarcodeItem(sample_barcode=row[0], study_id=table_settings['study_id']) )
+                results.append(SampleBarcodeItem(sample_barcode=row[0], study_id=table_settings['study_id']) )
             cursor.close()
         db.close()
         request_finished.send(self)
@@ -2468,7 +2485,16 @@ class Meta_Endpoints_API_v2(remote.Service):
 
             participants = get_participant_count(sample_ids)
 
+        start = time.time()
         counts_and_total = count_metadata(user, cohort_id, samples_by_study, filters)
+        stop = time.time()
+        logger.debug(
+            "[BENCHMARKING] Time to query metadata_counts "
+                + (" for cohort "+cohort_id if cohort_id is not None else "")
+                + (" and" if cohort_id is not None and filters.__len__() > 0 else "")
+                + (" filters "+filters.__str__() if filters.__len__() > 0 else "")
+                + ": " + (stop - start).__str__()
+        )
 
         db = sql_connection()
 
