@@ -112,6 +112,28 @@ class Cohort(models.Model):
         return filter_list
 
     '''
+    Creates a historical list of the filters applied to produce this cohort
+    '''
+    def get_filter_history(self):
+        filter_history = []
+
+        sources = Source.objects.filter(cohort=self)
+
+        while sources:
+            # single parent
+            if len(sources) == 1:
+                source = sources[0]
+                if source.type == Source.FILTERS:
+                    source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
+                    filters = []
+                    for source_filter in source_filters:
+                        filters.append(source_filter.name+": "+source_filter.value)
+                    filter_history.append(filters)
+                sources = Source.objects.filter(cohort=source.parent)
+
+        return filter_history
+
+    '''
     Returns a list of notes from its parents.
     Will only continue up the chain if there is only one parent and it was created by applying filters.
 
@@ -125,7 +147,10 @@ class Cohort(models.Model):
             if len(sources) == 1:
                 source = sources[0]
                 if source.type == Source.FILTERS:
-                    revision_list.append('Applied Filters.')
+                    # This signals that get_filters or get_filter_history should be used to
+                    # determine this cohort's filters
+                    if 'Applied Filters.' not in revision_list:
+                        revision_list.append('Applied Filters.')
                 elif source.type == Source.CLONE:
                     revision_list.append('Cloned from %s.' % source.parent.name)
                 elif source.type == Source.PLOT_SEL:
