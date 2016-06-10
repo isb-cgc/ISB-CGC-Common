@@ -386,6 +386,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     template = 'cohorts/new_cohort.html'
 
+    logger.debug("Cohort ID is "+cohort_id.__str__())
+
     if cohort_id != 0:
         try:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -612,7 +614,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
                 worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
                 worksheet_model.add_cohort(cohort)
-                redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_model.id, 'worksheet_id' : worksheet_model.id})
+                redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
 
     return redirect(redirect_url) # redirect to search/ with search parameters just saved
 
@@ -821,10 +823,10 @@ def set_operation(request):
                 for cohort in cohorts:
                     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
-            elif op=='complement':
+            elif op == 'complement':
                 source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                 source.save()
-                for cohort in subtract_cohorts:
+                for cohort in subtracted_cohorts:
                     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
 
