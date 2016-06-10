@@ -287,6 +287,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     totals = results['total']
 
     if USER_DATA_ON:
+        print >> sys.stdout, "User Data on"
         # Add in user data
         user_attr = ['user_project','user_study']
         projects = Project.get_user_projects(request.user, True)
@@ -332,6 +333,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             'name': 'user_studies',
             'values': user_studies
         })
+
+    print >> sys.stdout, "past user data"
 
     # Get and sort counts
     attr_details = {
@@ -386,6 +389,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     template = 'cohorts/new_cohort.html'
 
+    logger.debug("Cohort ID is "+cohort_id.__str__())
+
     if cohort_id != 0:
         try:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -409,6 +414,11 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             # Cohort doesn't exist, return to user landing with error.
             messages.error(request, 'The cohort you were looking for does not exist.')
             return redirect('cohort_list')
+
+    print >> sys.stdout, "Template vals: "+template_values['cohort'].__str__()
+    print >> sys.stdout, "Template vals: " + template_values['total_samples'].__str__()
+    print >> sys.stdout, "Template vals: " + template_values['total_patients'].__str__()
+    print >> sys.stdout, "Template vals: " + template_values['shared_with_users'].__str__()
 
     return render(request, template, template_values)
 
@@ -612,7 +622,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
                 worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
                 worksheet_model.add_cohort(cohort)
-                redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_model.id, 'worksheet_id' : worksheet_model.id})
+                redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
 
     return redirect(redirect_url) # redirect to search/ with search parameters just saved
 

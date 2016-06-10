@@ -115,21 +115,28 @@ class Cohort(models.Model):
     Creates a historical list of the filters applied to produce this cohort
     '''
     def get_filter_history(self):
-        filter_history = {}
+        filter_history = None
 
         sources = Source.objects.filter(cohort=self)
 
-        while sources:
+        keep_traversing = True
+
+        while sources and keep_traversing:
             # single parent
             if len(sources) == 1:
                 source = sources[0]
                 if source.type == Source.FILTERS:
+                    if filter_history is None:
+                        filter_history = {}
                     source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
                     filters = []
                     for source_filter in source_filters:
                         filters.append(source_filter.name+": "+source_filter.value)
-                    filter_history[source.cohort] = filters
-                sources = Source.objects.filter(cohort=source.parent)
+                    filter_history[source.cohort.id] = filters
+            else:
+                keep_traversing = False
+
+            sources = Source.objects.filter(cohort=source.parent)
 
         return filter_history
 
@@ -150,7 +157,7 @@ class Cohort(models.Model):
                 if source.type == Source.FILTERS:
                     if source_filters is None:
                         source_filters = self.get_filter_history()
-                    revision_list.append({'type': 'filter', 'vals': source_filters[source.cohort]})
+                    revision_list.append({'type': 'filter', 'vals': source_filters[source.cohort.id]})
                 elif source.type == Source.CLONE:
                     revision_list.append('Cloned from %s.' % source.parent.name)
                 elif source.type == Source.PLOT_SEL:
@@ -176,6 +183,8 @@ class Cohort(models.Model):
                 sources = []
         if len(revision_list) == 0:
             revision_list = ['There is no revision history.']
+
+        print >> sys.stdout, "Revision list: "+revision_list.__str__()
         return revision_list
 
     class Meta:
