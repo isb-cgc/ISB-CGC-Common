@@ -184,7 +184,6 @@ class Cohort(models.Model):
         if len(revision_list) == 0:
             revision_list = ['There is no revision history.']
 
-        print >> sys.stdout, "Revision list: "+revision_list.__str__()
         return revision_list
 
     class Meta:
