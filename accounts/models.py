@@ -56,6 +56,8 @@ class GoogleProject(models.Model):
 
 class AuthorizedDataset(models.Model):
     name = models.CharField(max_length=256, null=False)
+    whitelist_id = models.CharField(max_length=256, null=False)
+    acl_google_group = models.CharField(max_length=256, null=False)
 
 class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)
@@ -64,4 +66,4 @@ class UserAuthorizedDatasets(models.Model):
 class ServiceAccount(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     service_account = models.CharField(max_length=1024, null=False)
-    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
+    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True) # Null means open access only
