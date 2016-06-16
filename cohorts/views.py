@@ -353,6 +353,7 @@ def query_samples_and_studies(parameter, bucket_by=None):
 def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     """ Used by the web application."""
     filters = {}
+    result = {}
     sample_ids = None
     samples_by_study = None
 
