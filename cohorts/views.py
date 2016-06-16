@@ -464,7 +464,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
         cursor.execute(query_str, value_tuple)
         stop = time.time()
         logger.debug("[BENCHMARKING] Time to query platforms in metadata_counts_platform_list for cohort '" +
-                     cohort_id + "': " + (stop - start).__str__())
+                     cohort_id if cohort_id is not None else 'None' + "': " + (stop - start).__str__())
         for row in cursor.fetchall():
             item = {
                 'DNAseq_data': str(row['DNAseq_data']),
@@ -479,9 +479,11 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
         cursor.close()
         db.close()
 
-        return {'items': data, 'count': counts_and_total['counts'],
+        result = {'items': data, 'count': counts_and_total['counts'],
                 'participants': counts_and_total['participants'],
                 'total': counts_and_total['total']}
+
+        return result
 
     except Exception as e:
         print traceback.format_exc()
