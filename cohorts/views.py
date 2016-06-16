@@ -353,7 +353,6 @@ def query_samples_and_studies(parameter, bucket_by=None):
 def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     """ Used by the web application."""
     filters = {}
-    result = {}
     sample_ids = None
     samples_by_study = None
 
@@ -480,11 +479,9 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
         cursor.close()
         db.close()
 
-        result = {'items': data, 'count': counts_and_total['counts'],
+        return {'items': data, 'count': counts_and_total['counts'],
                 'participants': counts_and_total['participants'],
                 'total': counts_and_total['total']}
-
-        return result
 
     except Exception as e:
         print traceback.format_exc()
@@ -1559,5 +1556,8 @@ def get_metadata(request):
 
     # results = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
     results = metadata_counts_platform_list(filters, cohort, user, limit)
+
+    if not results:
+        results = {}
 
     return JsonResponse(results)
