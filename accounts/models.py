@@ -46,10 +46,24 @@ class Bucket(models.Model):
         return self.bucket_name
 
 class GoogleProject(models.Model):
-    user = models.OneToOneField(User, null=False)
+    user = models.ForeignKey(User, null=False)
     project_name = models.CharField(max_length=150)
     project_id = models.CharField(max_length=150)
-    big_query_dataset = models.CharField(max_length=150,null=True)
+    big_query_dataset = models.CharField(max_length=150, null=True)
 
     def __str__(self):
         return self.project_name
+
+class AuthorizedDataset(models.Model):
+    name = models.CharField(max_length=256, null=False)
+    whitelist_id = models.CharField(max_length=256, null=False)
+    acl_google_group = models.CharField(max_length=256, null=False)
+
+class UserAuthorizedDatasets(models.Model):
+    nih_user = models.ForeignKey(NIH_User, null=False)
+    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
+
+class ServiceAccount(models.Model):
+    google_project = models.ForeignKey(GoogleProject, null=False)
+    service_account = models.CharField(max_length=1024, null=False)
+    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True) # Null means open access only
