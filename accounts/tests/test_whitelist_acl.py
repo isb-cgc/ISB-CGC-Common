@@ -18,13 +18,16 @@ limitations under the License.
 
 import csv
 import logging
+import os
 from StringIO import StringIO
+import sys
 
 from django.test import TestCase
 
 from django.contrib.auth.models import User
 from accounts.models import NIH_User
 from tasks.nih_whitelist_processor.nih_user_task import parse_whitelist_and_run_task
+
 
 logging.basicConfig(
     level=logging.INFO
@@ -38,6 +41,10 @@ def build_csv(fields, rows):
     writer.writerows(rows)
 
     return output.getvalue()
+
+
+def get_database_alias():
+    return 'default'
 
 
 class OneUserTestCase(TestCase):
@@ -69,7 +76,7 @@ class OneUserTestCase(TestCase):
 
         nih_user.save()
 
-        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv)
+        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv, get_database_alias())
         self.assertEqual(0, len(acl_tasks['delete_from_acl']))
 
         nih_user = NIH_User.objects.get(NIH_username='nih_test_mcuser')
@@ -103,7 +110,7 @@ class OneUserTestCase(TestCase):
 
         nih_user.save()
 
-        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv)
+        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv, get_database_alias())
         self.assertEqual(1, len(acl_tasks['delete_from_acl']))
 
         nih_user = NIH_User.objects.get(NIH_username='nih_test_mcuser')
@@ -135,7 +142,7 @@ class OneUserTestCase(TestCase):
 
         nih_user.save()
 
-        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv)
+        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv, get_database_alias())
         self.assertEqual(1, len(acl_tasks['delete_from_acl']))
 
     def test_one_not_whitelisted_user(self):
@@ -160,7 +167,7 @@ class OneUserTestCase(TestCase):
 
         nih_user.save()
 
-        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv)
+        acl_tasks = parse_whitelist_and_run_task(acl_group_members, whitelist_csv, get_database_alias())
         self.assertEqual(0, len(acl_tasks['delete_from_acl']))
 
         nih_user = NIH_User.objects.get(NIH_username='nih_test_mcuser')
