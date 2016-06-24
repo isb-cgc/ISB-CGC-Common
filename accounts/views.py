@@ -77,24 +77,42 @@ class ACLDeleteAction(object):
         self.user_email = user_email
 
 
+class UnlinkAccountsResult(object):
+    def __init__(self, unlinked_nih_users, acl_delete_actions):
+        self.unlinked_nih_users = unlinked_nih_users
+        self.acl_delete_actions = acl_delete_actions
+
+
 def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
     """
+    This function modifies the 'NIH_User' objects!
+
+    1. Finds a NIH_User object with the given user_id that has the "linked" field set to True. The "linked"
+       field is then set to "False".
+       Exception case: If there are multiple NIH_User objects with the given user_id that also have "linked"
+       set to True
+
+    2. Creates a list of associated email addresses of NIH_user objects that have to be removed from
+       the controlled data ACL group.
+
 
     Args:
-        user_id:
+        user_id: ID of the User object associated with the NIH_User object.
+        acl_group_name: Name of the access control Google Group.
 
-    Returns:
+    Returns: An UnlinkAccountsResult object.
 
+    Throws: ObjectDoesNotExist if no NIH_User object is found with the given user_id
     """
-    result = {
-        'unlinked_multiple_found': 0,
-        'delete_from_acl': []
-    }
+
+    unlinked_nih_users = []
+    delete_from_acl = []
 
     try:
         nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.save()
+        unlinked_nih_users.append((user_id, nih_account_to_unlink.NIH_username))
 
     except MultipleObjectsReturned, e:
         nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
@@ -102,13 +120,13 @@ def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
         for user in nih_user_query_set:
             user.linked = False
             user.save()
-            result['unlinked_multiple_found'] += 1
+            unlinked_nih_users.append((user_id, user.NIH_username))
 
     user_email = User.objects.get(id=user_id).email
 
-    result['delete_from_acl'].append(ACLDeleteAction(acl_group_name, user_email))
+    delete_from_acl.append(ACLDeleteAction(acl_group_name, user_email))
 
-    return result
+    return UnlinkAccountsResult(unlinked_nih_users, delete_from_acl)
 
 
 @login_required
