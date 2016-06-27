@@ -1382,6 +1382,7 @@ def cohort_filelist(request, cohort_id=0):
                                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
                                                             'platform_counts': items['platform_count_list'],
                                                             'filelist': file_list,
+                                                            'file_list_max': MAX_FILE_LIST_ENTRIES,
                                                             'sel_file_max': MAX_SEL_FILES})
 
 @login_required
