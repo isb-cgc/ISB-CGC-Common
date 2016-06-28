@@ -18,12 +18,13 @@ limitations under the License.
 
 import logging
 
+from django.contrib.auth.models import User
 from django.test import TestCase
 
-from accounts.models import AuthorizedDataset
+from accounts.models import NIH_User, AuthorizedDataset, UserAuthorizedDatasets
 
 from tasks.nih_whitelist_processor.utils import NIHWhitelist
-from tasks.nih_whitelist_processor.django_utils import NIHDatasetAdder
+from tasks.nih_whitelist_processor.django_utils import ERAUserAuthDatasetUpdater, NIHDatasetAdder
 from tasks.tests.data_generators import create_csv_file_object
 
 logging.basicConfig(
@@ -86,4 +87,40 @@ class OneDatasetTestCase(TestCase):
 
         dataset = AuthorizedDataset.objects.get(whitelist_id='phs000456')
         self.assertEquals(dataset.whitelist_id, 'phs000456')
+
+
+class TestUserAuthDatasets(TestCase):
+    def test_one_line(self):
+        test_csv_data = [
+            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+             'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
+        ]
+
+        user = User(first_name='User', last_name='McName', username='test_mcuser', email='test@email.com')
+        user.save()
+
+        nih_user = NIH_User(user=user,
+                            NIH_username='USERNAME1',
+                            NIH_assertion='012345689',
+                            dbGaP_authorized=True,
+                            active=True,
+                            linked=True
+                            )
+
+        nih_user.save()
+
+        # At this point, nih_user should not have any authorized datasets
+        self.assertEquals(UserAuthorizedDatasets.objects.filter(nih_user=nih_user).count(), 0)
+
+        # Parse whitelist and created populate AuthorizedDataset objects
+        self.assertEquals(AuthorizedDataset.objects.count(), 0)
+        whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
+        NIHDatasetAdder(whitelist).process_whitelist()
+        self.assertEquals(AuthorizedDataset.objects.count(), 1)
+        dataset_phs000123 = AuthorizedDataset.objects.get(whitelist_id='phs000123')
+
+        era_user_auth_updater = ERAUserAuthDatasetUpdater(nih_user, whitelist)
+        era_user_auth_updater.process()
+        self.assertEquals(UserAuthorizedDatasets.objects.count(), 1)
+        self.assertEquals(UserAuthorizedDatasets.objects.filter(nih_user=nih_user, authorized_dataset=dataset_phs000123).count(), 1)
 
