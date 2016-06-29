@@ -27,6 +27,7 @@ import traceback
 import copy
 import urllib
 import re
+import MySQLdb
 
 from django.utils import formats
 from django.shortcuts import render, redirect
@@ -64,6 +65,29 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 
 logger = logging.getLogger(__name__)
 
+
+# Database connection - does not check for AppEngine
+def get_sql_connection():
+    database = settings.DATABASES['default']
+    try:
+        connect_options = {
+            'host': database['HOST'],
+            'db': database['NAME'],
+            'user': database['USER'],
+            'passwd': database['PASSWORD']
+        }
+
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
+            connect_options['ssl'] = database['OPTIONS']['ssl']
+
+        db = MySQLdb.connect(**connect_options)
+
+        return db
+
+    except:
+        print >> sys.stderr, "[ERROR] Exception in get_sql_connection(): ", sys.exc_info()[0]
+
+
 def convert(data):
     if isinstance(data, basestring):
         return str(data)
@@ -86,7 +110,7 @@ METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 # TODO: needs to be refactored to use other samples tables
 def get_participant_count(filter="", cohort_id=None):
 
-    db = sql_connection()
+    db = get_sql_connection()
     cursor = None
 
     cohort_in = -56 if cohort_id is None else cohort_id
@@ -126,7 +150,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             'sample_barcode': build_where_clause({'sample_barcode': samples_by_study}),
         }
 
-    db = sql_connection()
+    db = get_sql_connection()
     django.setup()
 
     try:
@@ -282,7 +306,7 @@ def query_samples_and_studies(parameter, bucket_by=None):
         bucket_by = None
 
     try:
-        db = sql_connection()
+        db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
         start = time.time()
         cursor.execute(query_str, (parameter,))
@@ -342,7 +366,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
         + ": " + (stop - start).__str__()
     )
 
-    db = sql_connection()
+    db = get_sql_connection()
 
     filter_clause = build_filter_clause(filters)
     cohort_in = cohort_id if cohort_id is not None else -56
