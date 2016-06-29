@@ -20,7 +20,6 @@ import json
 import collections
 import csv
 import sys
-import os
 import time
 import logging
 import json
@@ -69,7 +68,6 @@ logger = logging.getLogger(__name__)
 
 # Database connection - does not check for AppEngine
 def get_sql_connection():
-    env = os.getenv('SERVER_SOFTWARE')
     database = settings.DATABASES['default']
     try:
         connect_options = {
@@ -83,10 +81,11 @@ def get_sql_connection():
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
-    except:
-        print >> sys.stderr, "Unexpected ERROR in get_sql_connection(): ", sys.exc_info()[0]
 
-    return db
+        return db
+
+    except:
+        print >> sys.stderr, "[ERROR] Exception in get_sql_connection(): ", sys.exc_info()[0]
 
 
 def convert(data):
