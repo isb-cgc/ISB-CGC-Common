@@ -84,30 +84,23 @@ METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 ''' Begin metadata counting methods '''
 
 # TODO: needs to be refactored to use other samples tables
-def get_participant_count(sample_ids):
+def get_participant_count(filter="", cohort_id=None):
 
     db = sql_connection()
     cursor = None
 
+    cohort_id = -56 if cohort_id is None else cohort_id.__str__()
+
     try:
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-        participant_query = 'SELECT COUNT(DISTINCT ParticipantBarcode) AS ParticipantCount FROM metadata_samples WHERE SampleBarcode IN ('
-        first = True
-        samples = ()
-        for barcode in sample_ids:
-            samples += (barcode,)
-            if first:
-                participant_query += '%s'
-                first = False
-            else:
-                participant_query += ',%s'
+        sproc_def = 'CALL get_participant_count('
+        sproc_def += '"%s",' % filter
+        sproc_def += '%s);' % cohort_id
 
-        participant_query += ');'
-        count = 0
-        cursor.execute(participant_query, samples)
+        cursor.execute(sproc_def)
         for row in cursor.fetchall():
-            count = row['ParticipantCount']
+            count = row['participant_count']
 
         return count
 
@@ -212,79 +205,57 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         resulting_samples = {}
 
         # Loop through the features
-        for key, feature in valid_attrs.items():
-            # Get a count for each feature
-            table_values = {}
-            feature['total'] = 0
-            for table in feature['tables']:
-                # Check if the filters make this table 0 anyway
-                # We do this to avoid SQL errors for columns that don't exist
-                should_be_queried = True
-                if cohort_id and sample_tables[table]['sample_ids'] is None:
-                    should_be_queried = False
 
-                for key, filter in filters.items():
-                    if table not in filter['tables']:
-                        should_be_queried = False
-                        break
+        filter_copy = copy.deepcopy(filters)
+        key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
+        filter_clause = build_filter_clause(filter_copy, alt_key_map=key_map)
+        counts = {}
 
-                # Build Filter Where Clause
-                filter_copy = copy.deepcopy(filters)
-                key_map = table_key_map[table] if table in table_key_map else False
-                where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
-                col_name = feature['name']
-                if key_map and key in key_map:
-                    col_name = key_map[key]
+        filter_clause = filter_clause if filter_clause is not None else ""
+        cohort_id = cohort_id.__str__() if cohort_id is not None else "-56"
 
-                cursor = db.cursor()
-                if should_be_queried:
-                    # Query the table for counts and values
-                    query = ('SELECT DISTINCT %s, COUNT(1) as count FROM %s') % (col_name, table)
-                    sample_query = ('SELECT DISTINCT %s AS sample_id FROM %s') % ('SampleBarcode' if table == 'metadata_samples' else 'sample_barcode', table)
-                    query_clause = ''
-                    if where_clause['query_str']:
-                        query_clause = ' WHERE ' + where_clause['query_str']
-                    if sample_tables[table]['sample_ids']:
-                        barcode_key = 'SampleBarcode' if table == 'metadata_samples' else 'sample_barcode'
-                        addt_cond = sample_tables[table]['sample_ids'][barcode_key]['query_str']
-                        if addt_cond and where_clause['query_str']:
-                            query_clause += ' AND ' + addt_cond
-                        elif addt_cond:
-                            query_clause = ' WHERE ' + addt_cond
-                        where_clause['value_tuple'] += sample_tables[table]['sample_ids'][barcode_key]['value_tuple']
-                    query += query_clause + (' GROUP BY %s ' % col_name)
-                    sample_query += query_clause
+        cursor = db.cursor()
 
-                    cursor.execute(query, where_clause['value_tuple'])
-                    for row in cursor.fetchall():
-                        if not row[0] in table_values:
-                            table_values[row[0]] = 0
-                        table_values[row[0]] += int(row[1])
-                        feature['total'] += int(row[1])
+        sproc = ""
+        if cohort_id is not None or filter_clause is not None:
+            results = cursor.callproc('get_filtered_counts', [filter_clause, cohort_id])
+            print >> sys.stdout, "Results: " + results.__str__()
+        else:
+            results = cursor.callproc('get_raw_counts')
+            print >> sys.stdout, "Results: " + results.__str__()
 
-                    cursor.execute(sample_query, where_clause['value_tuple'])
-                    for row in cursor.fetchall():
-                        resulting_samples[row[0]] = 1
-                else:
-                    # Just get the values so we can have them be 0
-                    cursor.execute(('SELECT DISTINCT %s FROM %s') % (col_name, table))
-                    for row in cursor.fetchall():
-                        if not row[0] in table_values:
-                            table_values[row[0]] = 0
+        print >> sys.stdout, "Rowcount: " + cursor.rowcount.__str__()
 
-                cursor.close()
+        colset = cursor.description
+        col_headers = []
+        if colset is not None:
+            col_headers = [i[0] for i in cursor.description]
+        if not col_headers[0] in counts:
+            counts[col_headers[0]] = {}
+        while row in cursor.fetchone():
+            print >> "row: " + sys.stdout, row.__str__()
+            counts[col_headers[0]][row[0]] = int(row[1])
 
-            feature['values'] = table_values
+        while cursor.nextset():
+            print >> sys.stdout, "Rowcount: " + cursor.rowcount.__str__()
+            colset = cursor.description
+            if colset is not None:
+                col_headers = [i[0] for i in cursor.description]
+            if not col_headers[0] in counts:
+                counts[col_headers[0]] = {}
+            for row in cursor.fetchall():
+                print >> "row: " + sys.stdout, row.__str__()
+                counts[col_headers[0]][row[0]] = int(row[1])
 
-        sample_set = ()
-        for sample in resulting_samples:
-            sample_set += (sample,)
+        print >> sys.stdout, counts.__str__()
 
-        counts_and_total['participants'] = get_participant_count(sample_set) if sample_set.__len__() > 0 else 0
+        counts_and_total['participants'] = get_participant_count(filter_clause, cohort_id)
         counts_and_total['counts'] = []
         counts_and_total['total'] = 0
+
         for key, feature in valid_attrs.items():
             value_list = []
+            feature['values'] = counts[feature['name']]
 
             # Special case for age ranges
             if key == 'CLIN:age_at_initial_pathologic_diagnosis':
