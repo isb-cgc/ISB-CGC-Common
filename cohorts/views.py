@@ -260,9 +260,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         else:
             make_tmp_table_str += "FROM metadata_samples ms "
 
+        key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
+
         if filters.__len__() > 0:
             filter_copy = copy.deepcopy(filters)
-            key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
             where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
             make_tmp_table_str += "WHERE " if cohort_id is None else "AND "
             make_tmp_table_str += where_clause['query_str']
@@ -363,7 +364,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     counts_and_total = count_metadata(user, cohort_id, None, filters)
     stop = time.time()
     logger.debug(
-        "[BENCHMARKING] Time to query metadata_counts "
+        "[BENCHMARKING] Time to query metadata_counts"
         + (" for cohort " + cohort_id if cohort_id is not None else "")
         + (" and" if cohort_id is not None and filters.__len__() > 0 else "")
         + (" filters " + filters.__str__() if filters.__len__() > 0 else "")
@@ -406,7 +407,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
         # TODO: This should take into account variable tables; may require a UNION statement or similar
         if cohort_id is not None:
-            query_str += """FROM cohorts_samples cs "
+            query_str += """FROM cohorts_samples cs
                 JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
                 WHERE cohort_id = %s """
             params_tuple += (cohort_id,)
