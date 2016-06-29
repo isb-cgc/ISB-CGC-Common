@@ -89,16 +89,12 @@ def get_participant_count(filter="", cohort_id=None):
     db = sql_connection()
     cursor = None
 
-    cohort_id = -56 if cohort_id is None else cohort_id.__str__()
+    cohort_in = -56 if cohort_id is None else cohort_id
 
     try:
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-        sproc_def = 'CALL get_participant_count('
-        sproc_def += '"%s",' % filter
-        sproc_def += '%s);' % cohort_id
-
-        cursor.execute(sproc_def)
+        cursor.callproc('get_participant_count', [filter, cohort_in, ])
         for row in cursor.fetchall():
             count = row['participant_count']
 
@@ -202,29 +198,22 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             if not obj['tables']:
                 filters[key]['tables'].append('metadata_samples')
 
-        resulting_samples = {}
-
-        # Loop through the features
-
         filter_copy = copy.deepcopy(filters)
         key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
         filter_clause = build_filter_clause(filter_copy, alt_key_map=key_map)
         counts = {}
 
         filter_clause = filter_clause if filter_clause is not None else ""
-        cohort_id = cohort_id.__str__() if cohort_id is not None else "-56"
+        cohort_in = cohort_id if cohort_id is not None else -56
+
+        print >> sys.stdout, "sproc filter: " +filter_clause
 
         cursor = db.cursor()
 
-        sproc = ""
         if cohort_id is not None or filter_clause is not None:
-            results = cursor.callproc('get_filtered_counts', [filter_clause, cohort_id])
-            print >> sys.stdout, "Results: " + results.__str__()
+            cursor.callproc('get_filtered_counts', [filter_clause, cohort_in])
         else:
-            results = cursor.callproc('get_raw_counts')
-            print >> sys.stdout, "Results: " + results.__str__()
-
-        print >> sys.stdout, "Rowcount: " + cursor.rowcount.__str__()
+            cursor.callproc('get_raw_counts')
 
         colset = cursor.description
         col_headers = []
@@ -232,22 +221,23 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             col_headers = [i[0] for i in cursor.description]
         if not col_headers[0] in counts:
             counts[col_headers[0]] = {}
-        while row in cursor.fetchone():
-            print >> "row: " + sys.stdout, row.__str__()
-            counts[col_headers[0]][row[0]] = int(row[1])
+            counts[col_headers[0]]['counts'] = {}
+            counts[col_headers[0]]['total'] = 0
+        for row in cursor.fetchall():
+            counts[col_headers[0]]['counts'][row[0]] = int(row[1])
+            counts[col_headers[0]]['total'] += int(row[1])
 
         while cursor.nextset():
-            print >> sys.stdout, "Rowcount: " + cursor.rowcount.__str__()
             colset = cursor.description
             if colset is not None:
                 col_headers = [i[0] for i in cursor.description]
             if not col_headers[0] in counts:
                 counts[col_headers[0]] = {}
+                counts[col_headers[0]]['counts'] = {}
+                counts[col_headers[0]]['total'] = 0
             for row in cursor.fetchall():
-                print >> "row: " + sys.stdout, row.__str__()
-                counts[col_headers[0]][row[0]] = int(row[1])
-
-        print >> sys.stdout, counts.__str__()
+                counts[col_headers[0]]['counts'][row[0]] = int(row[1])
+                counts[col_headers[0]]['total'] += int(row[1])
 
         counts_and_total['participants'] = get_participant_count(filter_clause, cohort_id)
         counts_and_total['counts'] = []
@@ -255,7 +245,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
         for key, feature in valid_attrs.items():
             value_list = []
-            feature['values'] = counts[feature['name']]
+            feature['values'] = counts[feature['name']]['counts']
+            feature['total'] = counts[feature['name']]['total']
 
             # Special case for age ranges
             if key == 'CLIN:age_at_initial_pathologic_diagnosis':
@@ -324,8 +315,6 @@ def query_samples_and_studies(parameter, bucket_by=None):
 def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     """ Used by the web application."""
     filters = {}
-    sample_ids = None
-    samples_by_study = None
 
     if req_filters is not None:
         logging.debug("req_filters: " + req_filters.__str__())
@@ -342,21 +331,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
                 'Filters must be a valid JSON formatted array with objects containing both key and value properties'
             )
 
-    # Check for passed in saved search id
-    if cohort_id is not None:
-        samples = query_samples_and_studies(cohort_id, )
-
-        sample_ids = ()
-        samples_by_study = {}
-
-        for sample in samples:
-            sample_ids += (sample['sample_id'],)
-            if sample['study_id'] not in samples_by_study:
-                samples_by_study[sample['study_id']] = []
-            samples_by_study[sample['study_id']].append(sample['sample_id'])
-
     start = time.time()
-    counts_and_total = count_metadata(user, cohort_id, samples_by_study, filters)
+    counts_and_total = count_metadata(user, cohort_id, None, filters)
     stop = time.time()
     logger.debug(
         "[BENCHMARKING] Time to query metadata_counts "
@@ -368,74 +344,18 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
     db = sql_connection()
 
-    query_str = "SELECT " \
-                "IF(has_Illumina_DNASeq=1, " \
-                "'Yes', 'None'" \
-                ") AS DNAseq_data," \
-                "IF (has_SNP6=1, 'Genome_Wide_SNP_6', 'None') as cnvrPlatform," \
-                "CASE" \
-                "  WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=0" \
-                "    THEN 'HiSeq/BCGSC'" \
-                "  WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=1" \
-                "    THEN 'HiSeq/BCGSC and UNC V2'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0" \
-                "    THEN 'HiSeq/UNC V2'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=1" \
-                "    THEN 'GA and HiSeq/UNC V2'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=1 and has_UNC_GA_RNASeq=0" \
-                "    THEN 'HiSeq/UNC V2 and GA/BCGSC'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=1 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0" \
-                "    THEN 'HiSeq/UNC V2 and BCGSC'" \
-                "  WHEN has_BCGSC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0" \
-                "    THEN 'GA/BCGSC'" \
-                "  WHEN has_UNC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0" \
-                "    THEN 'GA/UNC V2'" \
-                "  ELSE 'None'" \
-                "END AS gexpPlatform," \
-                "CASE " \
-                "   WHEN has_27k=1 and has_450k=0" \
-                "     THEN 'HumanMethylation27'" \
-                "   WHEN has_27k=0 and has_450k=1" \
-                "     THEN 'HumanMethylation450'" \
-                "   WHEN has_27k=1 and has_450k=1" \
-                "     THEN '27k and 450k'" \
-                "   ELSE 'None'" \
-                "END AS methPlatform," \
-                "CASE " \
-                "   WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=0" \
-                "      THEN 'IlluminaHiSeq_miRNASeq'" \
-                "   WHEN has_HiSeq_miRnaSeq=0 and has_GA_miRNASeq=1" \
-                "      THEN 'IlluminaGA_miRNASeq'" \
-                "   WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=1" \
-                "      THEN 'GA and HiSeq'" \
-                "   ELSE 'None'" \
-                "END AS mirnPlatform," \
-                "IF (has_RPPA=1, 'MDA_RPPA_Core', 'None') AS rppaPlatform " \
-                "FROM metadata_samples "
-
-    value_tuple = ()
-    if len(filters) > 0:
-        where_clause = build_where_clause(filters)
-        query_str += ' WHERE ' + where_clause['query_str']
-        value_tuple = where_clause['value_tuple']
-
-    if sample_ids:
-        if query_str.rfind('WHERE') >= 0:
-            query_str += ' and SampleBarcode in %s' % (sample_ids,)
-        else:
-            query_str += ' WHERE SampleBarcode in %s' % (sample_ids,)
-
-    query_str += ';'
+    filter_clause = build_filter_clause(filters)
+    cohort_in = cohort_id if cohort_id is not None else -56
 
     data = []
 
     try:
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
         start = time.time()
-        cursor.execute(query_str, value_tuple)
+        cursor.callproc('get_platforms', [filter_clause, cohort_in, ])
         stop = time.time()
         logger.debug("[BENCHMARKING] Time to query platforms in metadata_counts_platform_list for cohort '" +
-                     cohort_id if cohort_id is not None else 'None' + "': " + (stop - start).__str__())
+                     (cohort_id if cohort_id is not None else 'None') + "': " + (stop - start).__str__())
         for row in cursor.fetchall():
             item = {
                 'DNAseq_data': str(row['DNAseq_data']),
@@ -447,15 +367,13 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             }
             data.append(item)
 
-        cursor.close()
-        db.close()
-
         return {'items': data, 'count': counts_and_total['counts'],
                 'participants': counts_and_total['participants'],
                 'total': counts_and_total['total']}
 
     except Exception as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
