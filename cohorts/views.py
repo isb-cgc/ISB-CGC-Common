@@ -138,8 +138,6 @@ def get_participant_count(filter="", cohort_id=None):
             query_str += where_clause['query_str']
             param_tuple += where_clause['value_tuple']
 
-        if debug: print >> sys.stdout, query_str
-
         cursor.execute(query_str, param_tuple)
 
         for row in cursor.fetchall():
@@ -245,15 +243,13 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             if not obj['tables']:
                 filters[key]['tables'].append('metadata_samples')
 
-        counts = {}
-
         tmp_table_name = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
-
-        cursor = db.cursor()
-
         make_tmp_table_str = "CREATE TEMPORARY TABLE " + tmp_table_name + " AS SELECT * "
 
         params_tuple = ()
+        counts = {}
+
+        cursor = db.cursor()
 
         # TODO: This should take into account variable tables; may require a UNION statement or similar
         if cohort_id is not None:
@@ -296,8 +292,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
                 if should_be_queried:
                     count_query_set.append('SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;' % (col_name, tmp_table_name, col_name, ))
-
-        print >> sys.stdout, count_query_set.__str__()
 
         for query_str in count_query_set:
             cursor.execute(query_str)
@@ -352,7 +346,6 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     filters = {}
 
     if req_filters is not None:
-        logging.debug("req_filters: " + req_filters.__str__())
         try:
             for this_filter in req_filters:
                 key = this_filter['key']
