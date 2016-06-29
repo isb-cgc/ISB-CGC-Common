@@ -21,6 +21,7 @@ import collections
 import csv
 import sys
 import random
+import string
 import time
 import logging
 import json
@@ -66,21 +67,9 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 
 logger = logging.getLogger(__name__)
 
-# Credit to unwind@SO and random guy@SO
-# http://stackoverflow.com/questions/2063425/python-elegant-inverse-function-of-intstring-base/15140779
-def digit_to_char(digit):
-    if digit < 10:
-        return str(digit)
-    return chr(ord('a') + digit - 10)
-
-def str_base(number,base):
-    if number < 0:
-        return '-' + str_base(-number, base)
-    (d, m) = divmod(number, base)
-    if d > 0:
-        return str_base(d, base) + digit_to_char(m)
-    return digit_to_char(m)
-
+# Get a set of random characters of 'length'
+def make_id(length):
+    return ''.join(random.sample(string.ascii_lowercase, length))
 
 # Database connection - does not check for AppEngine
 def get_sql_connection():
@@ -258,9 +247,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
         counts = {}
 
-        time_str = re.sub(r"[^\d]", "", time.time().__str__())
-        slice_to = int(random.random() * (len(time_str) - 5))
-        tmp_table_name = "filtered_samples_tmp_" + user.id.__str__() + "_" + str_base(int(time_str[slice_to:]), 36)
+        tmp_table_name = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
 
         cursor = db.cursor()
 
@@ -287,47 +274,33 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
         make_tmp_table_str += ";"
 
-        if debug: print >> sys.stdout, make_tmp_table_str
-
         cursor.execute(make_tmp_table_str, params_tuple)
 
-        # TODO: this should be built off the list of features and attributes
-        count_query_set = ['SELECT DISTINCT gender, COUNT(1) as count FROM %s GROUP BY gender;',
-                           'SELECT DISTINCT vital_status, COUNT(1) as count FROM %s GROUP BY vital_status;',
-                           'SELECT DISTINCT residual_tumor, COUNT(1) as count FROM %s GROUP BY residual_tumor;',
-                           'SELECT DISTINCT person_neoplasm_cancer_status, COUNT(1) as count FROM %s GROUP BY person_neoplasm_cancer_status;',
-                           'SELECT DISTINCT age_at_initial_pathologic_diagnosis, COUNT(1) as count FROM %s GROUP BY age_at_initial_pathologic_diagnosis;',
-                           'SELECT DISTINCT icd_o_3_histology, COUNT(1) as count FROM %s GROUP BY icd_o_3_histology;',
-                           'SELECT DISTINCT has_GA_miRNASeq, COUNT(1) as count FROM %s GROUP BY has_GA_miRNASeq;',
-                           'SELECT DISTINCT has_BCGSC_GA_RNASeq, COUNT(1) as count FROM %s GROUP BY has_BCGSC_GA_RNASeq;',
-                           'SELECT DISTINCT histological_type, COUNT(1) as count FROM %s GROUP BY histological_type;',
-                           'SELECT DISTINCT race, COUNT(1) as count FROM %s GROUP BY race;',
-                           'SELECT DISTINCT has_27k, COUNT(1) as count FROM %s GROUP BY has_27k;',
-                           'SELECT DISTINCT Project, COUNT(1) as count FROM %s GROUP BY Project;',
-                           'SELECT DISTINCT pathologic_stage, COUNT(1) as count FROM %s GROUP BY pathologic_stage;',
-                           'SELECT DISTINCT has_SNP6, COUNT(1) as count FROM %s GROUP BY has_SNP6;',
-                           'SELECT DISTINCT prior_dx, COUNT(1) as count FROM %s GROUP BY prior_dx;',
-                           'SELECT DISTINCT has_HiSeq_miRnaSeq, COUNT(1) as count FROM %s GROUP BY has_HiSeq_miRnaSeq;',
-                           'SELECT DISTINCT has_UNC_HiSeq_RNASeq, COUNT(1) as count FROM %s GROUP BY has_UNC_HiSeq_RNASeq;',
-                           'SELECT DISTINCT Study, COUNT(1) as count FROM %s GROUP BY Study;',
-                           'SELECT DISTINCT tumor_type, COUNT(1) as count FROM %s GROUP BY tumor_type;',
-                           'SELECT DISTINCT icd_o_3_site, COUNT(1) as count FROM %s GROUP BY icd_o_3_site;',
-                           'SELECT DISTINCT tobacco_smoking_history, COUNT(1) as count FROM %s GROUP BY tobacco_smoking_history;',
-                           'SELECT DISTINCT has_RPPA, COUNT(1) as count FROM %s GROUP BY has_RPPA;',
-                           'SELECT DISTINCT icd_10, COUNT(1) as count FROM %s GROUP BY icd_10;',
-                           'SELECT DISTINCT tumor_tissue_site, COUNT(1) as count FROM %s GROUP BY tumor_tissue_site;',
-                           'SELECT DISTINCT ethnicity, COUNT(1) as count FROM %s GROUP BY ethnicity;',
-                           'SELECT DISTINCT has_Illumina_DNASeq, COUNT(1) as count FROM %s GROUP BY has_Illumina_DNASeq;',
-                           'SELECT DISTINCT neoplasm_histologic_grade, COUNT(1) as count FROM %s GROUP BY neoplasm_histologic_grade;',
-                           'SELECT DISTINCT country, COUNT(1) as count FROM %s GROUP BY country;',
-                           'SELECT DISTINCT has_BCGSC_HiSeq_RNASeq, COUNT(1) as count FROM %s GROUP BY has_BCGSC_HiSeq_RNASeq;',
-                           'SELECT DISTINCT has_UNC_GA_RNASeq, COUNT(1) as count FROM %s GROUP BY has_UNC_GA_RNASeq;',
-                           'SELECT DISTINCT new_tumor_event_after_initial_treatment, COUNT(1) as count FROM %s GROUP BY new_tumor_event_after_initial_treatment;',
-                           'SELECT DISTINCT has_450k, COUNT(1) as count FROM %s GROUP BY has_450k;',
-                           'SELECT DISTINCT SampleTypeCode, COUNT(1) as count FROM %s GROUP BY SampleTypeCode;']
+        count_query_set = []
+
+        for key, feature in valid_attrs.items():
+            # TODO: This should be restructured to deal with features and user data
+            for table in feature['tables']:
+                # Check if the filters make this table 0 anyway
+                # We do this to avoid SQL errors for columns that don't exist
+                should_be_queried = True
+
+                for key, filter in filters.items():
+                    if table not in filter['tables']:
+                        should_be_queried = False
+                        break
+
+                col_name = feature['name']
+                if key_map and key in key_map:
+                    col_name = key_map[key]
+
+                if should_be_queried:
+                    count_query_set.append('SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;' % (col_name, tmp_table_name, col_name, ))
+
+        print >> sys.stdout, count_query_set.__str__()
 
         for query_str in count_query_set:
-            cursor.execute(query_str % tmp_table_name)
+            cursor.execute(query_str)
             colset = cursor.description
             col_headers = []
             if colset is not None:
@@ -375,48 +348,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         if db and db.open: db.close()
 
 
-def query_samples_and_studies(parameter, bucket_by=None):
-
-    query_str = 'SELECT sample_id, study_id FROM cohorts_samples WHERE cohort_id=%s;'
-
-    if bucket_by is not None and bucket_by not in query_str:
-        logging.error("Cannot group barcodes: column '" + bucket_by +
-                      "' not found in query string '" + query_str + "'. Barcodes will not be grouped.")
-        bucket_by = None
-
-    try:
-        db = get_sql_connection()
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
-        start = time.time()
-        cursor.execute(query_str, (parameter,))
-        stop = time.time()
-        logger.debug("[BENCHMARKING] Time to query sample IDs for cohort '" + parameter + "': " + (
-            stop - start).__str__())
-
-        samples = ()
-
-        if bucket_by is not None:
-            samples = {}
-
-        for row in cursor.fetchall():
-            if bucket_by is not None:
-                if row[bucket_by] not in samples:
-                    samples[row[bucket_by]] = []
-                samples[row[bucket_by]].append(row['sample_id'])
-            else:
-                samples += ({"sample_id": row['sample_id'], "study_id": row['study_id']},)
-        cursor.close()
-        db.close()
-
-        return samples
-
-    except (TypeError, IndexError) as e:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-
 def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
-    """ Used by the web application."""
     filters = {}
 
     if req_filters is not None:
@@ -445,15 +377,10 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
         + ": " + (stop - start).__str__()
     )
 
-    db = get_sql_connection()
-
-    where_clause = build_filter_clause(filters)
-
-
-
     data = []
 
     try:
+        db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
         query_str = """
@@ -499,6 +426,12 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             query_str += "WHERE " if cohort_id is None else "AND "
             query_str += where_clause['query_str']
             params_tuple += where_clause['value_tuple']
+
+        if limit is not None:
+            query_str += " LIMIT %s;"
+            params_tuple += (limit,)
+        else:
+            query_str += ";"
 
         start = time.time()
         cursor.execute(query_str, params_tuple)
@@ -1569,31 +1502,15 @@ def unshare_cohort(request, cohort_id=0):
 
 @login_required
 def get_metadata(request):
-    # endpoint = request.GET.get('endpoint', 'metadata_counts')
-    # version = request.GET.get('version', 'v1')
     filters = json.loads(request.GET.get('filters', '{}'))
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
-    access_token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
 
+    access_token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
     social_account_id = SocialToken.objects.get(token=access_token).account_id
     user_id = SocialAccount.objects.get(id=social_account_id).user_id
     user = Django_User.objects.get(id=user_id)
 
-    payload = {
-        'token': access_token,
-        'filters': filters
-    }
-    # data_url = METADATA_API + ('%s/%s/' % (version, endpoint))
-    if cohort:
-        # data_url += ('&cohort_id=%s' % (cohort,))
-        payload['cohort_id'] = cohort
-
-    if limit:
-        # data_url += ('&limit=%s' % (limit,))
-        payload['limit'] = limit
-
-    # results = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
     results = metadata_counts_platform_list(filters, cohort, user, limit)
 
     if not results:
