@@ -20,6 +20,7 @@ import json
 import collections
 import csv
 import sys
+import random
 import time
 import logging
 import json
@@ -64,6 +65,21 @@ MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
 
 logger = logging.getLogger(__name__)
+
+# Credit to unwind@SO and random guy@SO
+# http://stackoverflow.com/questions/2063425/python-elegant-inverse-function-of-intstring-base/15140779
+def digit_to_char(digit):
+    if digit < 10:
+        return str(digit)
+    return chr(ord('a') + digit - 10)
+
+def str_base(number,base):
+    if number < 0:
+        return '-' + str_base(-number, base)
+    (d, m) = divmod(number, base)
+    if d > 0:
+        return str_base(d, base) + digit_to_char(m)
+    return digit_to_char(m)
 
 
 # Database connection - does not check for AppEngine
@@ -113,12 +129,30 @@ def get_participant_count(filter="", cohort_id=None):
     db = get_sql_connection()
     cursor = None
 
-    cohort_in = -56 if cohort_id is None else cohort_id
-
     try:
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-        cursor.callproc('get_participant_count', [filter, cohort_in, ])
+        param_tuple = ()
+
+        query_str = "SELECT COUNT(DISTINCT ParticipantBarcode) AS participant_count "
+
+        if cohort_id is not None:
+            query_str += "FROM cohorts_samples cs JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
+            query_str += "WHERE cs.cohort_id = %s "
+            param_tuple += (cohort_id,)
+        else:
+            query_str += "FROM metadata_samples ms "
+
+        if filter.__len__() > 0:
+            where_clause = build_where_clause(filter)
+            query_str += "WHERE " if cohort_id is None else "AND "
+            query_str += where_clause['query_str']
+            param_tuple += where_clause['value_tuple']
+
+        if debug: print >> sys.stdout, query_str
+
+        cursor.execute(query_str, param_tuple)
+
         for row in cursor.fetchall():
             count = row['participant_count']
 
@@ -222,37 +256,80 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             if not obj['tables']:
                 filters[key]['tables'].append('metadata_samples')
 
-        filter_copy = copy.deepcopy(filters)
-        key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
-        filter_clause = build_filter_clause(filter_copy, alt_key_map=key_map)
         counts = {}
 
-        filter_clause = filter_clause if filter_clause is not None else ""
-        cohort_in = cohort_id if cohort_id is not None else -56
-
-        print >> sys.stdout, "sproc filter: " +filter_clause
+        time_str = re.sub(r"[^\d]", "", time.time().__str__())
+        slice_to = int(random.random() * (len(time_str) - 5))
+        tmp_table_name = "filtered_samples_tmp_" + user.id.__str__() + "_" + str_base(int(time_str[slice_to:]), 36)
 
         cursor = db.cursor()
 
-        if cohort_id is not None or filter_clause is not None:
-            cursor.callproc('get_filtered_counts', [filter_clause, cohort_in])
+        make_tmp_table_str = "CREATE TEMPORARY TABLE " + tmp_table_name + " AS SELECT * "
+
+        params_tuple = ()
+
+        # TODO: This should take into account variable tables; may require a UNION statement or similar
+        if cohort_id is not None:
+            make_tmp_table_str += "FROM cohorts_samples cs "
+            make_tmp_table_str += "JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
+            make_tmp_table_str += "WHERE cohort_id = %s "
+            params_tuple += (cohort_id,)
         else:
-            cursor.callproc('get_raw_counts')
+            make_tmp_table_str += "FROM metadata_samples ms "
 
-        colset = cursor.description
-        col_headers = []
-        if colset is not None:
-            col_headers = [i[0] for i in cursor.description]
-        if not col_headers[0] in counts:
-            counts[col_headers[0]] = {}
-            counts[col_headers[0]]['counts'] = {}
-            counts[col_headers[0]]['total'] = 0
-        for row in cursor.fetchall():
-            counts[col_headers[0]]['counts'][row[0]] = int(row[1])
-            counts[col_headers[0]]['total'] += int(row[1])
+        if filters.__len__() > 0:
+            filter_copy = copy.deepcopy(filters)
+            key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
+            where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
+            make_tmp_table_str += "WHERE " if cohort_id is None else "AND "
+            make_tmp_table_str += where_clause['query_str']
+            params_tuple += where_clause['value_tuple']
 
-        while cursor.nextset():
+        make_tmp_table_str += ";"
+
+        if debug: print >> sys.stdout, make_tmp_table_str
+
+        cursor.execute(make_tmp_table_str, params_tuple)
+
+        # TODO: this should be built off the list of features and attributes
+        count_query_set = ['SELECT DISTINCT gender, COUNT(1) as count FROM %s GROUP BY gender;',
+                           'SELECT DISTINCT vital_status, COUNT(1) as count FROM %s GROUP BY vital_status;',
+                           'SELECT DISTINCT residual_tumor, COUNT(1) as count FROM %s GROUP BY residual_tumor;',
+                           'SELECT DISTINCT person_neoplasm_cancer_status, COUNT(1) as count FROM %s GROUP BY person_neoplasm_cancer_status;',
+                           'SELECT DISTINCT age_at_initial_pathologic_diagnosis, COUNT(1) as count FROM %s GROUP BY age_at_initial_pathologic_diagnosis;',
+                           'SELECT DISTINCT icd_o_3_histology, COUNT(1) as count FROM %s GROUP BY icd_o_3_histology;',
+                           'SELECT DISTINCT has_GA_miRNASeq, COUNT(1) as count FROM %s GROUP BY has_GA_miRNASeq;',
+                           'SELECT DISTINCT has_BCGSC_GA_RNASeq, COUNT(1) as count FROM %s GROUP BY has_BCGSC_GA_RNASeq;',
+                           'SELECT DISTINCT histological_type, COUNT(1) as count FROM %s GROUP BY histological_type;',
+                           'SELECT DISTINCT race, COUNT(1) as count FROM %s GROUP BY race;',
+                           'SELECT DISTINCT has_27k, COUNT(1) as count FROM %s GROUP BY has_27k;',
+                           'SELECT DISTINCT Project, COUNT(1) as count FROM %s GROUP BY Project;',
+                           'SELECT DISTINCT pathologic_stage, COUNT(1) as count FROM %s GROUP BY pathologic_stage;',
+                           'SELECT DISTINCT has_SNP6, COUNT(1) as count FROM %s GROUP BY has_SNP6;',
+                           'SELECT DISTINCT prior_dx, COUNT(1) as count FROM %s GROUP BY prior_dx;',
+                           'SELECT DISTINCT has_HiSeq_miRnaSeq, COUNT(1) as count FROM %s GROUP BY has_HiSeq_miRnaSeq;',
+                           'SELECT DISTINCT has_UNC_HiSeq_RNASeq, COUNT(1) as count FROM %s GROUP BY has_UNC_HiSeq_RNASeq;',
+                           'SELECT DISTINCT Study, COUNT(1) as count FROM %s GROUP BY Study;',
+                           'SELECT DISTINCT tumor_type, COUNT(1) as count FROM %s GROUP BY tumor_type;',
+                           'SELECT DISTINCT icd_o_3_site, COUNT(1) as count FROM %s GROUP BY icd_o_3_site;',
+                           'SELECT DISTINCT tobacco_smoking_history, COUNT(1) as count FROM %s GROUP BY tobacco_smoking_history;',
+                           'SELECT DISTINCT has_RPPA, COUNT(1) as count FROM %s GROUP BY has_RPPA;',
+                           'SELECT DISTINCT icd_10, COUNT(1) as count FROM %s GROUP BY icd_10;',
+                           'SELECT DISTINCT tumor_tissue_site, COUNT(1) as count FROM %s GROUP BY tumor_tissue_site;',
+                           'SELECT DISTINCT ethnicity, COUNT(1) as count FROM %s GROUP BY ethnicity;',
+                           'SELECT DISTINCT has_Illumina_DNASeq, COUNT(1) as count FROM %s GROUP BY has_Illumina_DNASeq;',
+                           'SELECT DISTINCT neoplasm_histologic_grade, COUNT(1) as count FROM %s GROUP BY neoplasm_histologic_grade;',
+                           'SELECT DISTINCT country, COUNT(1) as count FROM %s GROUP BY country;',
+                           'SELECT DISTINCT has_BCGSC_HiSeq_RNASeq, COUNT(1) as count FROM %s GROUP BY has_BCGSC_HiSeq_RNASeq;',
+                           'SELECT DISTINCT has_UNC_GA_RNASeq, COUNT(1) as count FROM %s GROUP BY has_UNC_GA_RNASeq;',
+                           'SELECT DISTINCT new_tumor_event_after_initial_treatment, COUNT(1) as count FROM %s GROUP BY new_tumor_event_after_initial_treatment;',
+                           'SELECT DISTINCT has_450k, COUNT(1) as count FROM %s GROUP BY has_450k;',
+                           'SELECT DISTINCT SampleTypeCode, COUNT(1) as count FROM %s GROUP BY SampleTypeCode;']
+
+        for query_str in count_query_set:
+            cursor.execute(query_str % tmp_table_name)
             colset = cursor.description
+            col_headers = []
             if colset is not None:
                 col_headers = [i[0] for i in cursor.description]
             if not col_headers[0] in counts:
@@ -263,7 +340,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 counts[col_headers[0]]['counts'][row[0]] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
 
-        counts_and_total['participants'] = get_participant_count(filter_clause, cohort_id)
+        # Drop the temporary table
+        cursor.execute("DROP TEMPORARY TABLE IF EXISTS " + tmp_table_name);
+
+        counts_and_total['participants'] = get_participant_count(filters, cohort_id)
         counts_and_total['counts'] = []
         counts_and_total['total'] = 0
 
@@ -286,12 +366,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             if feature['total'] > counts_and_total['total']:
                 counts_and_total['total'] = feature['total']
 
-        db.close()
-
         return counts_and_total
 
     except (Exception) as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
@@ -312,7 +391,7 @@ def query_samples_and_studies(parameter, bucket_by=None):
         cursor.execute(query_str, (parameter,))
         stop = time.time()
         logger.debug("[BENCHMARKING] Time to query sample IDs for cohort '" + parameter + "': " + (
-        stop - start).__str__())
+            stop - start).__str__())
 
         samples = ()
 
@@ -368,15 +447,61 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
     db = get_sql_connection()
 
-    filter_clause = build_filter_clause(filters)
-    cohort_in = cohort_id if cohort_id is not None else -56
+    where_clause = build_filter_clause(filters)
+
+
 
     data = []
 
     try:
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+        query_str = """
+            SELECT IF(has_Illumina_DNASeq=1,'Yes', 'None') AS DNAseq_data,
+                IF (has_SNP6=1, 'Genome_Wide_SNP_6', 'None') as cnvrPlatform,
+                CASE
+                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'HiSeq/BCGSC'
+                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=1 THEN 'HiSeq/BCGSC and UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=1 THEN 'GA and HiSeq/UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=1 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and GA/BCGSC'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=1 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and BCGSC'
+                    WHEN has_BCGSC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/BCGSC'
+                    WHEN has_UNC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/UNC V2' ELSE 'None'
+                END AS gexpPlatform,
+                CASE
+                    WHEN has_27k=1 and has_450k=0 THEN 'HumanMethylation27'
+                    WHEN has_27k=0 and has_450k=1 THEN 'HumanMethylation450'
+                    WHEN has_27k=1 and has_450k=1 THEN '27k and 450k' ELSE 'None'
+                END AS methPlatform,
+                CASE
+                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=0 THEN 'IlluminaHiSeq_miRNASeq'
+                    WHEN has_HiSeq_miRnaSeq=0 and has_GA_miRNASeq=1 THEN 'IlluminaGA_miRNASeq'
+                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=1 THEN 'GA and HiSeq'	ELSE 'None'
+                END AS mirnPlatform,
+                IF (has_RPPA=1, 'MDA_RPPA_Core', 'None') AS rppaPlatform
+        """
+
+        params_tuple = ()
+
+        # TODO: This should take into account variable tables; may require a UNION statement or similar
+        if cohort_id is not None:
+            query_str += """FROM cohorts_samples cs "
+                JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
+                WHERE cohort_id = %s """
+            params_tuple += (cohort_id,)
+        else:
+            query_str += "FROM metadata_samples ms "
+
+        if filters.__len__() > 0:
+            filter_copy = copy.deepcopy(filters)
+            where_clause = build_where_clause(filter_copy)
+            query_str += "WHERE " if cohort_id is None else "AND "
+            query_str += where_clause['query_str']
+            params_tuple += where_clause['value_tuple']
+
         start = time.time()
-        cursor.callproc('get_platforms', [filter_clause, cohort_in, ])
+        cursor.execute(query_str, params_tuple)
         stop = time.time()
         logger.debug("[BENCHMARKING] Time to query platforms in metadata_counts_platform_list for cohort '" +
                      (cohort_id if cohort_id is not None else 'None') + "': " + (stop - start).__str__())
