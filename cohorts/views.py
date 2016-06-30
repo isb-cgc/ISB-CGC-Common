@@ -665,10 +665,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     clin_attr_dsp = []
     clin_attr_dsp += clin_attr
 
-    access_token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    social_account_id = SocialToken.objects.get(token=access_token).account_id
-    user_id = SocialAccount.objects.get(id=social_account_id).user_id
-    user = Django_User.objects.get(id=user_id)
+    user = Django_User.objects.get(id=request.user.id)
 
     start = time.time()
     results = metadata_counts_platform_list(None, cohort_id if cohort_id else None, user, None)
@@ -762,8 +759,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'data_attr': data_attr,
         'molec_attr': molec_attr,
         'base_url': settings.BASE_URL,
-        'base_api_url': settings.BASE_API_URL,
-        'token': access_token
+        'base_api_url': settings.BASE_API_URL
     }
 
     if USER_DATA_ON:
@@ -1506,10 +1502,7 @@ def get_metadata(request):
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
 
-    access_token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    social_account_id = SocialToken.objects.get(token=access_token).account_id
-    user_id = SocialAccount.objects.get(id=social_account_id).user_id
-    user = Django_User.objects.get(id=user_id)
+    user = Django_User.objects.get(id=request.user.id)
 
     results = metadata_counts_platform_list(filters, cohort, user, limit)
 
