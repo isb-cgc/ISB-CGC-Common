@@ -55,6 +55,7 @@ from workbooks.models import Workbook, Worksheet, Worksheet_plot
 from projects.models import Project, Study, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
 from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
+from accounts.models import NIH_User
 
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
@@ -1337,7 +1338,10 @@ def cohort_filelist(request, cohort_id=0):
     items = json.loads(result.content)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
-
+    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    has_access = False
+    if len(nih_user) > 0:
+        has_access = True
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,
                                                             'base_url': settings.BASE_URL,
@@ -1348,7 +1352,8 @@ def cohort_filelist(request, cohort_id=0):
                                                             'platform_counts': items['platform_count_list'],
                                                             'filelist': file_list,
                                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
-                                                            'sel_file_max': MAX_SEL_FILES})
+                                                            'sel_file_max': MAX_SEL_FILES,
+                                                            'has_access': has_access})
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
