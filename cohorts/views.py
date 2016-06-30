@@ -457,58 +457,61 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
 
 def data_availability_sort(key, value, data_attr, attr_details):
-
-    print >> sys.stdout, key.__str__() + ":" + value.__str__()
-
     if key == 'has_Illumina_DNASeq':
         attr_details['DNA_sequencing'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
     if key == 'has_SNP6':
         attr_details['SNP_CN'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
     if key == 'has_RPPA':
         attr_details['Protein'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
+
     if key == 'has_27k':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['DNA_methylation'].append({
             'value': '27k',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_450k':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['DNA_methylation'].append({
             'value': '450k',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_HiSeq_miRnaSeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['miRNA_sequencing'].append({
             'value': 'Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_GA_miRNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['miRNA_sequencing'].append({
             'value': 'Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_UNC_HiSeq_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'UNC Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_UNC_GA_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'UNC Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_BCGSC_HiSeq_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'BCGSC Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_BCGSC_GA_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'BCGSC Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
-
-    print >> sys.stdout, attr_details.__str__()
-
 
 @login_required
 def public_cohort_list(request):
@@ -700,18 +703,18 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             project_counts[study.project_id] += count
 
             user_studies += ({
-                            'count': str(count),
-                            'value': study.name,
-                            'id'   : study.id
-                          },)
+                'count': str(count),
+                'value': study.name,
+                'id'   : study.id
+            },)
 
         user_projects = []
         for project in projects:
             user_projects += ({
-                                'count': str(project_counts[project.id]) if project.id in project_counts else 0,
-                                'value': project.name,
-                                'id'   : project.id
-                                },)
+                'count': str(project_counts[project.id]) if project.id in project_counts else 0,
+                'value': project.name,
+                'id'   : project.id
+            },)
 
         results['count'].append({
             'name': 'user_projects',
