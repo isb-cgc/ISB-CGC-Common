@@ -104,8 +104,11 @@ class TestWhitelistMultiACL(TestCase):
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)
-        self.assertEquals(result.user_auth_dataset_update_result[0].added_datasets, set(['phs000123']))
-        self.assertEquals(result.user_auth_dataset_update_result[0].revoked_datasets, set([]))
+        self.assertEquals(result.user_auth_dataset_update_result[0].added_dataset_ids, set(['phs000123']))
+        self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set([]))
+
+        # The service account should not be removed
+        self.assertEquals(len(result.service_account_remove_list), 0)
 
     def test_one_user_auth_dataset(self):
         """
@@ -125,5 +128,95 @@ class TestWhitelistMultiACL(TestCase):
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)
-        self.assertEquals(result.user_auth_dataset_update_result[0].added_datasets, set([]))
-        self.assertEquals(result.user_auth_dataset_update_result[0].revoked_datasets, set([]))
+        self.assertEquals(result.user_auth_dataset_update_result[0].added_dataset_ids, set([]))
+        self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set([]))
+
+        # The service account should not be removed
+        self.assertEquals(len(result.service_account_remove_list), 0)
+
+
+class TestWhitelistServiceAccountRevoke(TestCase):
+    def setUp(self):
+        test_dataset_mapping = {
+            'phs000123': {
+                'name': 'This is a study',
+                'parent_study': 'phs000111',
+                'acl_group': 'acl-phs000123'
+            },
+            'phs000456': {
+                'name': 'Another study',
+                'parent_study': 'phs000444',
+                'acl_group': 'acl-phs000456'
+            }
+        }
+
+        self.dataset_acl_mapping = DatasetToACLMapping(test_dataset_mapping)
+
+        self.auth_user = User(first_name='Test', last_name='User', username='test_user', email='test@email.com')
+        self.auth_user.save()
+
+        self.nih_user = NIH_User(user=self.auth_user,
+                                 NIH_username='USERNAME1',
+                                 NIH_assertion='012345689',
+                                 dbGaP_authorized=True,
+                                 active=True)
+
+        self.nih_user.save()
+
+        self.auth_dataset_123 = AuthorizedDataset(name="dataset1", whitelist_id='phs000123', acl_google_group='test_acl')
+        self.auth_dataset_123.save()
+
+        self.project_123 = GoogleProject(user=self.auth_user,
+                                     project_name="project1",
+                                     project_id="123",
+                                     big_query_dataset="bq_dataset1")
+        self.project_123.save()
+
+        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
+                                      authorized_dataset=self.auth_dataset_123)
+        self.account_123.save()
+
+        self.auth_dataset_456 = AuthorizedDataset(name="dataset1", whitelist_id='phs000456', acl_google_group='test_acl')
+        self.auth_dataset_456.save()
+
+        self.project_456 = GoogleProject(user=self.auth_user,
+                                         project_name="project1",
+                                         project_id="456",
+                                         big_query_dataset="bq_dataset2")
+        self.project_456.save()
+
+        self.account_456 = ServiceAccount(google_project=self.project_456, service_account="abc_456",
+                                          authorized_dataset=self.auth_dataset_456)
+        self.account_456.save()
+
+    def test_one_user_auth_dataset(self):
+        """
+        Test that the dataset (phs000123) in the whitelist is not marked to be either added or revoked for the user.
+
+        Dataset 'phs000456' has to be marked for revocation, as should the ServiceAccount matching the
+        UserAuthorizedDataset for 'phs000456'.
+
+        """
+        test_csv_data = [
+            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+             'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000',
+             '']
+        ]
+
+        whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
+
+        uad_123 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_123)
+        uad_123.save()
+
+        uad_456 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_456)
+        uad_456.save()
+
+        dsu = AccessControlUpdater(whitelist)
+        result = dsu.process()
+
+        self.assertEquals(len(result.skipped_era_logins), 0)
+        self.assertEquals(result.user_auth_dataset_update_result[0].added_dataset_ids, set([]))
+        self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set(['phs000456']))
+
+        self.assertEquals(len(result.service_account_remove_list), 1)
+        self.assertEquals(result.service_account_remove_list[0], 'abc_456')
