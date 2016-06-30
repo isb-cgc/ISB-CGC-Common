@@ -458,6 +458,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
 def data_availability_sort(key, value, data_attr, attr_details):
 
+    print >> sys.stdout, key.__str__() + ":" + value.__str__()
+
     if key == 'has_Illumina_DNASeq':
         attr_details['DNA_sequencing'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
     if key == 'has_SNP6':
@@ -504,6 +506,10 @@ def data_availability_sort(key, value, data_attr, attr_details):
             'value': 'BCGSC Illumina GA',
             'count': [v['count'] for v in value if v['value'] == 'True'][0]
         })
+
+    print >> sys.stdout, attr_details.__str__()
+
+
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
@@ -656,18 +662,17 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     clin_attr_dsp = []
     clin_attr_dsp += clin_attr
 
-    token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    data_url = METADATA_API + 'v2/metadata_counts'
-    payload = {
-        'token': token
-    }
+    access_token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
+    social_account_id = SocialToken.objects.get(token=access_token).account_id
+    user_id = SocialAccount.objects.get(id=social_account_id).user_id
+    user = Django_User.objects.get(id=user_id)
+
     start = time.time()
-    results = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
+    results = metadata_counts_platform_list(None, cohort_id if cohort_id else None, user, None)
 
     stop = time.time()
-    logger.debug("[BENCHMAKRING] Time to receive response from "+data_url+": "+(stop-start).__str__())
+    logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
 
-    results = json.loads(results.content)
     totals = results['total']
 
     if USER_DATA_ON:
@@ -725,7 +730,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     }
     keys = []
     for item in results['count']:
-        #print item
         key = item['name']
         values = item['values']
 
@@ -740,10 +744,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     for key, value in attr_details.items():
         results['count'].append({
-                                    'name': key,
-                                    'values': value,
-                                    'id': None
-                                 })
+            'name': key,
+            'values': value,
+            'id': None
+         })
 
     template_values = {
         'request': request,
@@ -756,7 +760,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'molec_attr': molec_attr,
         'base_url': settings.BASE_URL,
         'base_api_url': settings.BASE_API_URL,
-        'token': token
+        'token': access_token
     }
 
     if USER_DATA_ON:
@@ -770,7 +774,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     template = 'cohorts/new_cohort.html'
 
-    logger.debug("Cohort ID is "+cohort_id.__str__())
+    template_values['metadata_counts'] = results
 
     if cohort_id != 0:
         try:
@@ -791,7 +795,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['total_samples'] = len(cohort.samples_set.all())
             template_values['total_patients'] = len(cohort.patients_set.all())
             template_values['shared_with_users'] = shared_with_users
-            # template_values['metadata_counts_platform_list'] = metadata_counts_platform_list(request)
         except ObjectDoesNotExist:
             # Cohort doesn't exist, return to user landing with error.
             messages.error(request, 'The cohort you were looking for does not exist.')
