@@ -323,6 +323,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             # Special case for age ranges
             if key == 'CLIN:age_at_initial_pathologic_diagnosis':
                 feature['values'] = normalize_ages(feature['values'])
+            elif key == 'CLIN:BMI':
+                feature['values'] = normalize_BMI(feature['values'])
 
             for value, count in feature['values'].items():
                 if feature['name'].startswith('has_'):
@@ -612,7 +614,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'person_neoplasm_cancer_status',
         'new_tumor_event_after_initial_treatment',
         'neoplasm_histologic_grade',
-        # 'bmi',
+        'BMI',
+        'hpv_status',
         'residual_tumor',
         # 'targeted_molecular_therapy', TODO: Add to metadata_samples
         'tobacco_smoking_history',
@@ -791,7 +794,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['total_samples'] = len(cohort.samples_set.all())
             template_values['total_patients'] = len(cohort.patients_set.all())
             template_values['shared_with_users'] = shared_with_users
-            # template_values['metadata_counts_platform_list'] = metadata_counts_platform_list(request)
         except ObjectDoesNotExist:
             # Cohort doesn't exist, return to user landing with error.
             messages.error(request, 'The cohort you were looking for does not exist.')
