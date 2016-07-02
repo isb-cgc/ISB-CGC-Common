@@ -216,7 +216,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
 
         self.assertEquals(len(result.skipped_era_logins), 0)
         self.assertEquals(result.user_auth_dataset_update_result[0].added_dataset_ids, set([]))
-        self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set(['phs000456']))
+        self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set([('phs000456', uad_456.pk)]))
 
         self.assertEquals(len(result.service_account_remove_list), 1)
-        self.assertEquals(result.service_account_remove_list[0], 'abc_456')
+        self.assertEquals(result.service_account_remove_list[0], ('abc_456', 'phs000456'))
