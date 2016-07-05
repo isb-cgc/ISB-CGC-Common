@@ -138,15 +138,16 @@ def unlink_accounts(request):
     except ObjectDoesNotExist as e:
         logger.error("NIH_User not found for user_id {}".format(user_id))
 
-    num_unlinked = result['unlinked_multiple_found']
-    if num_unlinked > 0:
+    num_unlinked = len(result.unlinked_nih_users)
+    if num_unlinked > 1:
         logger.warn("Error: more than one NIH User account linked to user id %d".format(user_id))
 
     directory_service, http_auth = get_directory_resource()
-    for action in result['delete_from_acl']:
+    for action in result.acl_delete_actions:
+        user_email = action.user_email
         try:
             directory_service.members().delete(groupKey=action.acl_group_name,
-                                               memberKey=action.user_email).execute(http=http_auth)
+                                               memberKey=user_email).execute(http=http_auth)
         except HttpError, e:
             logger.error("{} could not be deleted from {}, probably because they were not a member" .format(user_email, CONTROLLED_ACL_GOOGLE_GROUP))
             logger.exception(e)
