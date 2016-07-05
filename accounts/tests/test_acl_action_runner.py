@@ -18,10 +18,9 @@ limitations under the License.
 
 import csv
 import logging
-import os
 from StringIO import StringIO
-import sys
 
+from django.core.exceptions import ObjectDoesNotExist
 from django.test import TestCase
 
 from django.contrib.auth.models import User
@@ -156,7 +155,10 @@ class TestAccessControlActionRunner(TestCase):
         self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set(['456@institution.org']))
 
         acl_runner = AccessControlActionRunner(acl_action_list, acl_controller, dataset_acl_mapping)
-
         acl_runner.run_actions()
 
         self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set([]))
+
+        # The UserAuthorizedDatasets entry for auth_dataset_456 should have been removed
+        self.assertEquals(UserAuthorizedDatasets.objects.count(), 1)
+        self.assertEquals(UserAuthorizedDatasets.objects.filter(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_456).count(), 0)
