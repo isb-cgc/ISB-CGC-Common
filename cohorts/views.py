@@ -1513,5 +1513,35 @@ def get_metadata(request):
 
     if not results:
         results = {}
+    else:
+
+        data_attr = [
+            'DNA_sequencing',
+            'RNA_sequencing',
+            'miRNA_sequencing',
+            'Protein',
+            'SNP_CN',
+            'DNA_methylation',
+        ]
+
+        attr_details = {
+            'RNA_sequencing': [],
+            'miRNA_sequencing': [],
+            'DNA_methylation': [],
+        }
+
+        for item in results['count']:
+            key = item['name']
+            values = item['values']
+
+            if key.startswith('has_'):
+                data_availability_sort(key, values, data_attr, attr_details)
+
+        for key, value in attr_details.items():
+            results['count'].append({
+                'name': key,
+                'values': value,
+                'id': None
+            })
 
     return JsonResponse(results)
