@@ -111,6 +111,29 @@ METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 # This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 
+def get_filter_values():
+    db = get_sql_connection()
+    cursor = None
+
+    filter_values = {}
+
+    get_filter_vals = 'SELECT DISTINCT %s FROM metadata_samples;'
+
+    try:
+        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+        for attr in METADATA_SHORTLIST:
+            cursor.execute(get_filter_vals % attr)
+            filter_values[attr] = ()
+            for row in cursor.fetchall():
+                filter_values[attr] += ((row[0] if row[0] is not None else 'None',)
+
+    except Exception as e:
+        print traceback.format_exc()
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
 ''' Begin metadata counting methods '''
 
 # TODO: needs to be refactored to use other samples tables
@@ -148,6 +171,7 @@ def get_participant_count(filter="", cohort_id=None):
 
     except Exception as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
@@ -775,6 +799,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     template = 'cohorts/new_cohort.html'
 
     template_values['metadata_counts'] = results
+
+    template_values['filter_values'] = get_filter_values()
 
     if cohort_id != 0:
         try:
