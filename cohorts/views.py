@@ -148,6 +148,7 @@ def get_participant_count(filter="", cohort_id=None):
 
     except Exception as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
@@ -174,6 +175,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
     db = get_sql_connection()
     django.setup()
+
+    cursor = None
 
     try:
         # Add TCGA attributes to the list of available attributes
@@ -373,6 +376,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     )
 
     data = []
+
+    cursor = None
 
     try:
         db = get_sql_connection()
