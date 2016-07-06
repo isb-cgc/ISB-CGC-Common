@@ -377,6 +377,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
     data = []
 
+    cursor = None
+
     try:
         db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
