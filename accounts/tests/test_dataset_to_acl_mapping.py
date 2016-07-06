@@ -22,7 +22,7 @@ from StringIO import StringIO
 
 from django.test import TestCase
 
-from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
+from tasks.nih_whitelist_processor.utils import DatasetToACLMapping, DatasetConfig
 
 logging.basicConfig(
     level=logging.INFO
@@ -79,4 +79,32 @@ class TestMapping(TestCase):
 
         self.assertEquals(mapping.get_dataset_name('phs000123'), 'This is a study')
         self.assertEquals(mapping.get_acl_group_name('phs000123'), 'acl-phs000123')
+
+
+class TestDatasetConfig(TestCase):
+    def test_one_whitelist(self):
+        test_config_json = """
+        {
+            "whitelist_files": [
+                {
+                    "bucket": "gcs-bucket-name",
+                    "file": "whitelist_file"
+                }
+            ],
+            "acl_mapping": {
+                "pjs": {
+                    "name": "This Is a Dataset",
+                    "parent_study": "",
+                    "acl_group": "dataset@groups.org"
+                }
+            }
+        }
+        """
+
+        dsc = DatasetConfig.from_json_string(test_config_json)
+
+        self.assertEquals(dsc.whitelist_config[0]['bucket'], 'gcs-bucket-name')
+
+
+
 
