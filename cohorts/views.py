@@ -55,6 +55,7 @@ from workbooks.models import Workbook, Worksheet, Worksheet_plot
 from projects.models import Project, Study, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
 from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
+from accounts.models import NIH_User
 
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
@@ -459,53 +460,62 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
 
 def data_availability_sort(key, value, data_attr, attr_details):
-
     if key == 'has_Illumina_DNASeq':
         attr_details['DNA_sequencing'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
     if key == 'has_SNP6':
         attr_details['SNP_CN'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
     if key == 'has_RPPA':
         attr_details['Protein'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
+
     if key == 'has_27k':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['DNA_methylation'].append({
             'value': '27k',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_450k':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['DNA_methylation'].append({
             'value': '450k',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_HiSeq_miRnaSeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['miRNA_sequencing'].append({
             'value': 'Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_GA_miRNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['miRNA_sequencing'].append({
             'value': 'Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_UNC_HiSeq_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'UNC Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_UNC_GA_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'UNC Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_BCGSC_HiSeq_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'BCGSC Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_BCGSC_GA_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'BCGSC Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
+
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
@@ -659,18 +669,14 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     clin_attr_dsp = []
     clin_attr_dsp += clin_attr
 
-    token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    data_url = METADATA_API + 'v2/metadata_counts'
-    payload = {
-        'token': token
-    }
+    user = Django_User.objects.get(id=request.user.id)
+
     start = time.time()
-    results = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
+    results = metadata_counts_platform_list(None, cohort_id if cohort_id else None, user, None)
 
     stop = time.time()
-    logger.debug("[BENCHMAKRING] Time to receive response from "+data_url+": "+(stop-start).__str__())
+    logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
 
-    results = json.loads(results.content)
     totals = results['total']
 
     if USER_DATA_ON:
@@ -698,18 +704,18 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             project_counts[study.project_id] += count
 
             user_studies += ({
-                            'count': str(count),
-                            'value': study.name,
-                            'id'   : study.id
-                          },)
+                'count': str(count),
+                'value': study.name,
+                'id'   : study.id
+            },)
 
         user_projects = []
         for project in projects:
             user_projects += ({
-                                'count': str(project_counts[project.id]) if project.id in project_counts else 0,
-                                'value': project.name,
-                                'id'   : project.id
-                                },)
+                'count': str(project_counts[project.id]) if project.id in project_counts else 0,
+                'value': project.name,
+                'id'   : project.id
+            },)
 
         results['count'].append({
             'name': 'user_projects',
@@ -728,7 +734,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     }
     keys = []
     for item in results['count']:
-        #print item
         key = item['name']
         values = item['values']
 
@@ -743,10 +748,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     for key, value in attr_details.items():
         results['count'].append({
-                                    'name': key,
-                                    'values': value,
-                                    'id': None
-                                 })
+            'name': key,
+            'values': value,
+            'id': None
+         })
 
     template_values = {
         'request': request,
@@ -758,8 +763,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'data_attr': data_attr,
         'molec_attr': molec_attr,
         'base_url': settings.BASE_URL,
-        'base_api_url': settings.BASE_API_URL,
-        'token': token
+        'base_api_url': settings.BASE_API_URL
     }
 
     if USER_DATA_ON:
@@ -773,7 +777,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     template = 'cohorts/new_cohort.html'
 
-    logger.debug("Cohort ID is "+cohort_id.__str__())
+    template_values['metadata_counts'] = results
 
     if cohort_id != 0:
         try:
@@ -1339,7 +1343,10 @@ def cohort_filelist(request, cohort_id=0):
     items = json.loads(result.content)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
-
+    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    has_access = False
+    if len(nih_user) > 0:
+        has_access = True
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,
                                                             'base_url': settings.BASE_URL,
@@ -1350,7 +1357,8 @@ def cohort_filelist(request, cohort_id=0):
                                                             'platform_counts': items['platform_count_list'],
                                                             'filelist': file_list,
                                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
-                                                            'sel_file_max': MAX_SEL_FILES})
+                                                            'sel_file_max': MAX_SEL_FILES,
+                                                            'has_access': has_access})
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
@@ -1502,14 +1510,41 @@ def get_metadata(request):
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
 
-    access_token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    social_account_id = SocialToken.objects.get(token=access_token).account_id
-    user_id = SocialAccount.objects.get(id=social_account_id).user_id
-    user = Django_User.objects.get(id=user_id)
+    user = Django_User.objects.get(id=request.user.id)
 
     results = metadata_counts_platform_list(filters, cohort, user, limit)
 
     if not results:
         results = {}
+    else:
+
+        data_attr = [
+            'DNA_sequencing',
+            'RNA_sequencing',
+            'miRNA_sequencing',
+            'Protein',
+            'SNP_CN',
+            'DNA_methylation',
+        ]
+
+        attr_details = {
+            'RNA_sequencing': [],
+            'miRNA_sequencing': [],
+            'DNA_methylation': [],
+        }
+
+        for item in results['count']:
+            key = item['name']
+            values = item['values']
+
+            if key.startswith('has_'):
+                data_availability_sort(key, values, data_attr, attr_details)
+
+        for key, value in attr_details.items():
+            results['count'].append({
+                'name': key,
+                'values': value,
+                'id': None
+            })
 
     return JsonResponse(results)
