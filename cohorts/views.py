@@ -1345,7 +1345,7 @@ def cohort_filelist(request, cohort_id=0):
     items = json.loads(result.content)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
-    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
     has_access = False
     if len(nih_user) > 0:
         has_access = True
