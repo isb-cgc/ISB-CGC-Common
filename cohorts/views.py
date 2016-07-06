@@ -204,6 +204,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
     db = get_sql_connection()
     django.setup()
 
+    cursor = None
+
     try:
         # Add TCGA attributes to the list of available attributes
         if 'user_studies' not in filters or 'tcga' in filters['user_studies']['values']:
@@ -405,6 +407,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     )
 
     data = []
+
+    cursor = None
 
     try:
         db = get_sql_connection()
@@ -1372,7 +1376,7 @@ def cohort_filelist(request, cohort_id=0):
     items = json.loads(result.content)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
-    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
     has_access = False
     if len(nih_user) > 0:
         has_access = True
