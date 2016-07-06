@@ -176,6 +176,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
     db = get_sql_connection()
     django.setup()
 
+    cursor = None
+
     try:
         # Add TCGA attributes to the list of available attributes
         if 'user_studies' not in filters or 'tcga' in filters['user_studies']['values']:
