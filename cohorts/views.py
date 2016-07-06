@@ -148,6 +148,7 @@ def get_participant_count(filter="", cohort_id=None):
 
     except Exception as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
