@@ -120,13 +120,18 @@ def get_filter_values():
     get_filter_vals = 'SELECT DISTINCT %s FROM metadata_samples;'
 
     try:
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+        cursor = db.cursor()
 
         for attr in METADATA_SHORTLIST:
-            cursor.execute(get_filter_vals % attr)
-            filter_values[attr] = ()
-            for row in cursor.fetchall():
-                filter_values[attr] += ((row[0] if row[0] is not None else 'None',)
+            # We only want the values of columns which are not numeric ranges and not true/false
+            # The t/f and numeric range values are
+            if not attr.startswith('has_') and not attr == 'bmi' and not attr.startswith('age_'):
+                cursor.execute(get_filter_vals % attr)
+                filter_values[attr] = ()
+                for row in cursor.fetchall():
+                    filter_values[attr] += (row[0] if row[0] is not None else 'None',)
+
+        return filter_values
 
     except Exception as e:
         print traceback.format_exc()
@@ -800,7 +805,16 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     template_values['metadata_counts'] = results
 
-    template_values['filter_values'] = get_filter_values()
+    filter_values = get_filter_values()
+
+    for attr_count in template_values['attr_list_count']:
+        attr_counts = attr_count['values']
+        print >> sys.stdout, attr_count.__str__()
+        if attr_count['name'] in filter_values:
+            for value in filter_values[attr_count['name']]:
+                results = [x for x in attr_counts if x['value'] == value]
+                if len(results) <= 0:
+                    attr_counts.append({'count': 0, 'value': value})
 
     if cohort_id != 0:
         try:
