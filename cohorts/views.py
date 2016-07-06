@@ -322,8 +322,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                     col_name = key_map[key]
 
                 if should_be_queried:
-                    count_query_set.append('SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;' % (col_name, tmp_table_name, col_name, ))
+                    count_query_set.append(('SELECT DISTINCT ms.%s, IF(counts.count IS NULL,0,counts.count) AS count FROM %s AS ms LEFT JOIN ' +
+                        '(SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) as counts ' +
+                        'ON counts.%s = ms.%s;') % (col_name, 'metadata_samples', col_name, tmp_table_name, col_name, col_name, col_name,))
 
+        print >> sys.stdout, count_query_set.__str__()
         for query_str in count_query_set:
             cursor.execute(query_str)
             colset = cursor.description
@@ -804,17 +807,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     template = 'cohorts/new_cohort.html'
 
     template_values['metadata_counts'] = results
-
-    filter_values = get_filter_values()
-
-    for attr_count in template_values['attr_list_count']:
-        attr_counts = attr_count['values']
-        print >> sys.stdout, attr_count.__str__()
-        if attr_count['name'] in filter_values:
-            for value in filter_values[attr_count['name']]:
-                results = [x for x in attr_counts if x['value'] == value]
-                if len(results) <= 0:
-                    attr_counts.append({'count': 0, 'value': value})
 
     if cohort_id != 0:
         try:
