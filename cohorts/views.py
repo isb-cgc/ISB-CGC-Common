@@ -111,6 +111,34 @@ METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 # This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 
+def get_filter_values():
+    db = get_sql_connection()
+    cursor = None
+
+    filter_values = {}
+
+    get_filter_vals = 'SELECT DISTINCT %s FROM metadata_samples;'
+
+    try:
+        cursor = db.cursor()
+
+        for attr in METADATA_SHORTLIST:
+            # We only want the values of columns which are not numeric ranges and not true/false
+            # The t/f and numeric range values are
+            if not attr.startswith('has_') and not attr == 'bmi' and not attr.startswith('age_'):
+                cursor.execute(get_filter_vals % attr)
+                filter_values[attr] = ()
+                for row in cursor.fetchall():
+                    filter_values[attr] += (row[0] if row[0] is not None else 'None',)
+
+        return filter_values
+
+    except Exception as e:
+        print traceback.format_exc()
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
 ''' Begin metadata counting methods '''
 
 # TODO: needs to be refactored to use other samples tables
@@ -148,6 +176,7 @@ def get_participant_count(filter="", cohort_id=None):
 
     except Exception as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
@@ -174,6 +203,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
     db = get_sql_connection()
     django.setup()
+
+    cursor = None
 
     try:
         # Add TCGA attributes to the list of available attributes
@@ -293,8 +324,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                     col_name = key_map[key]
 
                 if should_be_queried:
-                    count_query_set.append('SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;' % (col_name, tmp_table_name, col_name, ))
+                    count_query_set.append(('SELECT DISTINCT ms.%s, IF(counts.count IS NULL,0,counts.count) AS count FROM %s AS ms LEFT JOIN ' +
+                        '(SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) as counts ' +
+                        'ON counts.%s = ms.%s;') % (col_name, 'metadata_samples', col_name, tmp_table_name, col_name, col_name, col_name,))
 
+        print >> sys.stdout, count_query_set.__str__()
         for query_str in count_query_set:
             cursor.execute(query_str)
             colset = cursor.description
@@ -375,6 +409,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     )
 
     data = []
+
+    cursor = None
 
     try:
         db = get_sql_connection()
@@ -1343,7 +1379,7 @@ def cohort_filelist(request, cohort_id=0):
     items = json.loads(result.content)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
-    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
     has_access = False
     if len(nih_user) > 0:
         has_access = True
