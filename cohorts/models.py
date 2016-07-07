@@ -112,13 +112,36 @@ class Cohort(models.Model):
         return filter_list
 
     '''
-    Returns the most recent set of filters applied to this cohort
+    Returns the current filters which are active (i.e. strips anything which is mututally exclusive)
     '''
     def get_current_filters(self):
-        filter_list = []
-        filter_list.extend(Filters.objects.filter(resulting_cohort=self))
+        filters = {}
+        cohort = self
+        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
+        while cohort:
+            for filter in Filters.objects.filter(resulting_cohort=cohort):
+                if not filter.name in filters:
+                    filters[filter.name] = {}
+                    filters[filter.name]['id'] = cohort.id
+                    filters[filter.name]['values'] = []
 
-        return filter_list
+                if filters[filter.name]['id'] == cohort.id:
+                    filters[filter.name]['values'].append(filter.value)
+
+
+            sources = Source.objects.filter(cohort=cohort)
+            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+                cohort = sources[0].parent
+            else:
+                cohort = None
+
+        current_filters = []
+
+        for filter in filters:
+            for value in filters[filter]['values']:
+                current_filters.append({'name': str(filter), 'value': str(value)})
+
+        return current_filters
 
 
     '''
@@ -139,6 +162,7 @@ class Cohort(models.Model):
             else:
                 cohort = None
 
+        print >> sys.stdout, "Creation filters: " + filter_list.__str__()
         return filter_list
 
     '''
