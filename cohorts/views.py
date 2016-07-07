@@ -20,6 +20,8 @@ import json
 import collections
 import csv
 import sys
+import random
+import string
 import time
 import logging
 import json
@@ -53,6 +55,7 @@ from workbooks.models import Workbook, Worksheet, Worksheet_plot
 from projects.models import Project, Study, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
 from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
+from accounts.models import NIH_User
 
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
@@ -65,6 +68,9 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 
 logger = logging.getLogger(__name__)
 
+# Get a set of random characters of 'length'
+def make_id(length):
+    return ''.join(random.sample(string.ascii_lowercase, length))
 
 # Database connection - does not check for AppEngine
 def get_sql_connection():
@@ -105,10 +111,38 @@ METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 # This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 
+def get_filter_values():
+    db = get_sql_connection()
+    cursor = None
+
+    filter_values = {}
+
+    get_filter_vals = 'SELECT DISTINCT %s FROM metadata_samples;'
+
+    try:
+        cursor = db.cursor()
+
+        for attr in METADATA_SHORTLIST:
+            # We only want the values of columns which are not numeric ranges and not true/false
+            # The t/f and numeric range values are
+            if not attr.startswith('has_') and not attr == 'bmi' and not attr.startswith('age_'):
+                cursor.execute(get_filter_vals % attr)
+                filter_values[attr] = ()
+                for row in cursor.fetchall():
+                    filter_values[attr] += (row[0] if row[0] is not None else 'None',)
+
+        return filter_values
+
+    except Exception as e:
+        print traceback.format_exc()
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
 ''' Begin metadata counting methods '''
 
 # TODO: needs to be refactored to use other samples tables
-def get_participant_count(sample_ids):
+def get_participant_count(filter="", cohort_id=None):
 
     db = get_sql_connection()
     cursor = None
@@ -116,27 +150,33 @@ def get_participant_count(sample_ids):
     try:
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-        participant_query = 'SELECT COUNT(DISTINCT ParticipantBarcode) AS ParticipantCount FROM metadata_samples WHERE SampleBarcode IN ('
-        first = True
-        samples = ()
-        for barcode in sample_ids:
-            samples += (barcode,)
-            if first:
-                participant_query += '%s'
-                first = False
-            else:
-                participant_query += ',%s'
+        param_tuple = ()
 
-        participant_query += ');'
-        count = 0
-        cursor.execute(participant_query, samples)
+        query_str = "SELECT COUNT(DISTINCT ParticipantBarcode) AS participant_count "
+
+        if cohort_id is not None:
+            query_str += "FROM cohorts_samples cs JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
+            query_str += "WHERE cs.cohort_id = %s "
+            param_tuple += (cohort_id,)
+        else:
+            query_str += "FROM metadata_samples ms "
+
+        if filter.__len__() > 0:
+            where_clause = build_where_clause(filter)
+            query_str += "WHERE " if cohort_id is None else "AND "
+            query_str += where_clause['query_str']
+            param_tuple += where_clause['value_tuple']
+
+        cursor.execute(query_str, param_tuple)
+
         for row in cursor.fetchall():
-            count = row['ParticipantCount']
+            count = row['participant_count']
 
         return count
 
     except Exception as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
@@ -163,6 +203,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
     db = get_sql_connection()
     django.setup()
+
+    cursor = None
 
     try:
         # Add TCGA attributes to the list of available attributes
@@ -233,86 +275,91 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             if not obj['tables']:
                 filters[key]['tables'].append('metadata_samples')
 
-        resulting_samples = {}
+        tmp_table_name = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+        make_tmp_table_str = "CREATE TEMPORARY TABLE " + tmp_table_name + " AS SELECT * "
 
-        # Loop through the features
+        params_tuple = ()
+        counts = {}
+
+        cursor = db.cursor()
+
+        # TODO: This should take into account variable tables; may require a UNION statement or similar
+        if cohort_id is not None:
+            make_tmp_table_str += "FROM cohorts_samples cs "
+            make_tmp_table_str += "JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
+            make_tmp_table_str += "WHERE cohort_id = %s "
+            params_tuple += (cohort_id,)
+        else:
+            make_tmp_table_str += "FROM metadata_samples ms "
+
+        key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
+
+        if filters.__len__() > 0:
+            filter_copy = copy.deepcopy(filters)
+            where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
+            make_tmp_table_str += "WHERE " if cohort_id is None else "AND "
+            make_tmp_table_str += where_clause['query_str']
+            params_tuple += where_clause['value_tuple']
+
+        make_tmp_table_str += ";"
+
+        cursor.execute(make_tmp_table_str, params_tuple)
+
+        count_query_set = []
+
         for key, feature in valid_attrs.items():
-            # Get a count for each feature
-            table_values = {}
-            feature['total'] = 0
+            # TODO: This should be restructured to deal with features and user data
             for table in feature['tables']:
                 # Check if the filters make this table 0 anyway
                 # We do this to avoid SQL errors for columns that don't exist
                 should_be_queried = True
-                if cohort_id and sample_tables[table]['sample_ids'] is None:
-                    should_be_queried = False
 
                 for key, filter in filters.items():
                     if table not in filter['tables']:
                         should_be_queried = False
                         break
 
-                # Build Filter Where Clause
-                filter_copy = copy.deepcopy(filters)
-                key_map = table_key_map[table] if table in table_key_map else False
-                where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
                 col_name = feature['name']
                 if key_map and key in key_map:
                     col_name = key_map[key]
 
-                cursor = db.cursor()
                 if should_be_queried:
-                    # Query the table for counts and values
-                    query = ('SELECT DISTINCT %s, COUNT(1) as count FROM %s') % (col_name, table)
-                    sample_query = ('SELECT DISTINCT %s AS sample_id FROM %s') % ('SampleBarcode' if table == 'metadata_samples' else 'sample_barcode', table)
-                    query_clause = ''
-                    if where_clause['query_str']:
-                        query_clause = ' WHERE ' + where_clause['query_str']
-                    if sample_tables[table]['sample_ids']:
-                        barcode_key = 'SampleBarcode' if table == 'metadata_samples' else 'sample_barcode'
-                        addt_cond = sample_tables[table]['sample_ids'][barcode_key]['query_str']
-                        if addt_cond and where_clause['query_str']:
-                            query_clause += ' AND ' + addt_cond
-                        elif addt_cond:
-                            query_clause = ' WHERE ' + addt_cond
-                        where_clause['value_tuple'] += sample_tables[table]['sample_ids'][barcode_key]['value_tuple']
-                    query += query_clause + (' GROUP BY %s ' % col_name)
-                    sample_query += query_clause
+                    count_query_set.append(('SELECT DISTINCT ms.%s, IF(counts.count IS NULL,0,counts.count) AS count FROM %s AS ms LEFT JOIN ' +
+                        '(SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) as counts ' +
+                        'ON counts.%s = ms.%s;') % (col_name, 'metadata_samples', col_name, tmp_table_name, col_name, col_name, col_name,))
 
-                    cursor.execute(query, where_clause['value_tuple'])
-                    for row in cursor.fetchall():
-                        if not row[0] in table_values:
-                            table_values[row[0]] = 0
-                        table_values[row[0]] += int(row[1])
-                        feature['total'] += int(row[1])
+        print >> sys.stdout, count_query_set.__str__()
+        for query_str in count_query_set:
+            cursor.execute(query_str)
+            colset = cursor.description
+            col_headers = []
+            if colset is not None:
+                col_headers = [i[0] for i in cursor.description]
+            if not col_headers[0] in counts:
+                counts[col_headers[0]] = {}
+                counts[col_headers[0]]['counts'] = {}
+                counts[col_headers[0]]['total'] = 0
+            for row in cursor.fetchall():
+                counts[col_headers[0]]['counts'][row[0]] = int(row[1])
+                counts[col_headers[0]]['total'] += int(row[1])
 
-                    cursor.execute(sample_query, where_clause['value_tuple'])
-                    for row in cursor.fetchall():
-                        resulting_samples[row[0]] = 1
-                else:
-                    # Just get the values so we can have them be 0
-                    cursor.execute(('SELECT DISTINCT %s FROM %s') % (col_name, table))
-                    for row in cursor.fetchall():
-                        if not row[0] in table_values:
-                            table_values[row[0]] = 0
+        # Drop the temporary table
+        cursor.execute("DROP TEMPORARY TABLE IF EXISTS " + tmp_table_name);
 
-                cursor.close()
-
-            feature['values'] = table_values
-
-        sample_set = ()
-        for sample in resulting_samples:
-            sample_set += (sample,)
-
-        counts_and_total['participants'] = get_participant_count(sample_set) if sample_set.__len__() > 0 else 0
+        counts_and_total['participants'] = get_participant_count(filters, cohort_id)
         counts_and_total['counts'] = []
         counts_and_total['total'] = 0
+
         for key, feature in valid_attrs.items():
             value_list = []
+            feature['values'] = counts[feature['name']]['counts']
+            feature['total'] = counts[feature['name']]['total']
 
             # Special case for age ranges
             if key == 'CLIN:age_at_initial_pathologic_diagnosis':
                 feature['values'] = normalize_ages(feature['values'])
+            elif key == 'CLIN:BMI':
+                feature['values'] = normalize_BMI(feature['values'])
 
             for value, count in feature['values'].items():
                 if feature['name'].startswith('has_'):
@@ -324,64 +371,19 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             if feature['total'] > counts_and_total['total']:
                 counts_and_total['total'] = feature['total']
 
-        db.close()
-
         return counts_and_total
 
     except (Exception) as e:
         print traceback.format_exc()
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-
-def query_samples_and_studies(parameter, bucket_by=None):
-
-    query_str = 'SELECT sample_id, study_id FROM cohorts_samples WHERE cohort_id=%s;'
-
-    if bucket_by is not None and bucket_by not in query_str:
-        logging.error("Cannot group barcodes: column '" + bucket_by +
-                      "' not found in query string '" + query_str + "'. Barcodes will not be grouped.")
-        bucket_by = None
-
-    try:
-        db = get_sql_connection()
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
-        start = time.time()
-        cursor.execute(query_str, (parameter,))
-        stop = time.time()
-        logger.debug("[BENCHMARKING] Time to query sample IDs for cohort '" + parameter + "': " + (
-        stop - start).__str__())
-
-        samples = ()
-
-        if bucket_by is not None:
-            samples = {}
-
-        for row in cursor.fetchall():
-            if bucket_by is not None:
-                if row[bucket_by] not in samples:
-                    samples[row[bucket_by]] = []
-                samples[row[bucket_by]].append(row['sample_id'])
-            else:
-                samples += ({"sample_id": row['sample_id'], "study_id": row['study_id']},)
-        cursor.close()
-        db.close()
-
-        return samples
-
-    except (TypeError, IndexError) as e:
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
 
 def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
-    """ Used by the web application."""
     filters = {}
-    sample_ids = None
-    samples_by_study = None
 
     if req_filters is not None:
-        logging.debug("req_filters: " + req_filters.__str__())
         try:
             for this_filter in req_filters:
                 key = this_filter['key']
@@ -395,100 +397,80 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
                 'Filters must be a valid JSON formatted array with objects containing both key and value properties'
             )
 
-    # Check for passed in saved search id
-    if cohort_id is not None:
-        samples = query_samples_and_studies(cohort_id, )
-
-        sample_ids = ()
-        samples_by_study = {}
-
-        for sample in samples:
-            sample_ids += (sample['sample_id'],)
-            if sample['study_id'] not in samples_by_study:
-                samples_by_study[sample['study_id']] = []
-            samples_by_study[sample['study_id']].append(sample['sample_id'])
-
     start = time.time()
-    counts_and_total = count_metadata(user, cohort_id, samples_by_study, filters)
+    counts_and_total = count_metadata(user, cohort_id, None, filters)
     stop = time.time()
     logger.debug(
-        "[BENCHMARKING] Time to query metadata_counts "
+        "[BENCHMARKING] Time to query metadata_counts"
         + (" for cohort " + cohort_id if cohort_id is not None else "")
         + (" and" if cohort_id is not None and filters.__len__() > 0 else "")
         + (" filters " + filters.__str__() if filters.__len__() > 0 else "")
         + ": " + (stop - start).__str__()
     )
 
-    db = get_sql_connection()
-
-    query_str = "SELECT " \
-                "IF(has_Illumina_DNASeq=1, " \
-                "'Yes', 'None'" \
-                ") AS DNAseq_data," \
-                "IF (has_SNP6=1, 'Genome_Wide_SNP_6', 'None') as cnvrPlatform," \
-                "CASE" \
-                "  WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=0" \
-                "    THEN 'HiSeq/BCGSC'" \
-                "  WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=1" \
-                "    THEN 'HiSeq/BCGSC and UNC V2'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0" \
-                "    THEN 'HiSeq/UNC V2'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=1" \
-                "    THEN 'GA and HiSeq/UNC V2'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=1 and has_UNC_GA_RNASeq=0" \
-                "    THEN 'HiSeq/UNC V2 and GA/BCGSC'" \
-                "  WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=1 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0" \
-                "    THEN 'HiSeq/UNC V2 and BCGSC'" \
-                "  WHEN has_BCGSC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0" \
-                "    THEN 'GA/BCGSC'" \
-                "  WHEN has_UNC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0" \
-                "    THEN 'GA/UNC V2'" \
-                "  ELSE 'None'" \
-                "END AS gexpPlatform," \
-                "CASE " \
-                "   WHEN has_27k=1 and has_450k=0" \
-                "     THEN 'HumanMethylation27'" \
-                "   WHEN has_27k=0 and has_450k=1" \
-                "     THEN 'HumanMethylation450'" \
-                "   WHEN has_27k=1 and has_450k=1" \
-                "     THEN '27k and 450k'" \
-                "   ELSE 'None'" \
-                "END AS methPlatform," \
-                "CASE " \
-                "   WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=0" \
-                "      THEN 'IlluminaHiSeq_miRNASeq'" \
-                "   WHEN has_HiSeq_miRnaSeq=0 and has_GA_miRNASeq=1" \
-                "      THEN 'IlluminaGA_miRNASeq'" \
-                "   WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=1" \
-                "      THEN 'GA and HiSeq'" \
-                "   ELSE 'None'" \
-                "END AS mirnPlatform," \
-                "IF (has_RPPA=1, 'MDA_RPPA_Core', 'None') AS rppaPlatform " \
-                "FROM metadata_samples "
-
-    value_tuple = ()
-    if len(filters) > 0:
-        where_clause = build_where_clause(filters)
-        query_str += ' WHERE ' + where_clause['query_str']
-        value_tuple = where_clause['value_tuple']
-
-    if sample_ids:
-        if query_str.rfind('WHERE') >= 0:
-            query_str += ' and SampleBarcode in %s' % (sample_ids,)
-        else:
-            query_str += ' WHERE SampleBarcode in %s' % (sample_ids,)
-
-    query_str += ';'
-
     data = []
 
+    cursor = None
+
     try:
+        db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+        query_str = """
+            SELECT IF(has_Illumina_DNASeq=1,'Yes', 'None') AS DNAseq_data,
+                IF (has_SNP6=1, 'Genome_Wide_SNP_6', 'None') as cnvrPlatform,
+                CASE
+                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'HiSeq/BCGSC'
+                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=1 THEN 'HiSeq/BCGSC and UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=1 THEN 'GA and HiSeq/UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=1 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and GA/BCGSC'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=1 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and BCGSC'
+                    WHEN has_BCGSC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/BCGSC'
+                    WHEN has_UNC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/UNC V2' ELSE 'None'
+                END AS gexpPlatform,
+                CASE
+                    WHEN has_27k=1 and has_450k=0 THEN 'HumanMethylation27'
+                    WHEN has_27k=0 and has_450k=1 THEN 'HumanMethylation450'
+                    WHEN has_27k=1 and has_450k=1 THEN '27k and 450k' ELSE 'None'
+                END AS methPlatform,
+                CASE
+                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=0 THEN 'IlluminaHiSeq_miRNASeq'
+                    WHEN has_HiSeq_miRnaSeq=0 and has_GA_miRNASeq=1 THEN 'IlluminaGA_miRNASeq'
+                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=1 THEN 'GA and HiSeq'	ELSE 'None'
+                END AS mirnPlatform,
+                IF (has_RPPA=1, 'MDA_RPPA_Core', 'None') AS rppaPlatform
+        """
+
+        params_tuple = ()
+
+        # TODO: This should take into account variable tables; may require a UNION statement or similar
+        if cohort_id is not None:
+            query_str += """FROM cohorts_samples cs
+                JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
+                WHERE cohort_id = %s """
+            params_tuple += (cohort_id,)
+        else:
+            query_str += "FROM metadata_samples ms "
+
+        if filters.__len__() > 0:
+            filter_copy = copy.deepcopy(filters)
+            where_clause = build_where_clause(filter_copy)
+            query_str += "WHERE " if cohort_id is None else "AND "
+            query_str += where_clause['query_str']
+            params_tuple += where_clause['value_tuple']
+
+        if limit is not None:
+            query_str += " LIMIT %s;"
+            params_tuple += (limit,)
+        else:
+            query_str += ";"
+
         start = time.time()
-        cursor.execute(query_str, value_tuple)
+        cursor.execute(query_str, params_tuple)
         stop = time.time()
         logger.debug("[BENCHMARKING] Time to query platforms in metadata_counts_platform_list for cohort '" +
-                     cohort_id if cohort_id is not None else 'None' + "': " + (stop - start).__str__())
+                     (cohort_id if cohort_id is not None else 'None') + "': " + (stop - start).__str__())
         for row in cursor.fetchall():
             item = {
                 'DNAseq_data': str(row['DNAseq_data']),
@@ -500,15 +482,13 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             }
             data.append(item)
 
-        cursor.close()
-        db.close()
-
         return {'items': data, 'count': counts_and_total['counts'],
                 'participants': counts_and_total['participants'],
                 'total': counts_and_total['total']}
 
     except Exception as e:
         print traceback.format_exc()
+    finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
@@ -516,53 +496,62 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
 
 def data_availability_sort(key, value, data_attr, attr_details):
-
     if key == 'has_Illumina_DNASeq':
         attr_details['DNA_sequencing'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
     if key == 'has_SNP6':
         attr_details['SNP_CN'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
     if key == 'has_RPPA':
         attr_details['Protein'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
+
     if key == 'has_27k':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['DNA_methylation'].append({
             'value': '27k',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_450k':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['DNA_methylation'].append({
             'value': '450k',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_HiSeq_miRnaSeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['miRNA_sequencing'].append({
             'value': 'Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_GA_miRNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['miRNA_sequencing'].append({
             'value': 'Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_UNC_HiSeq_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'UNC Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_UNC_GA_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'UNC Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_BCGSC_HiSeq_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'BCGSC Illumina HiSeq',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
     if key == 'has_BCGSC_GA_RNASeq':
+        count = [v['count'] for v in value if v['value'] == 'True']
         attr_details['RNA_sequencing'].append({
             'value': 'BCGSC Illumina GA',
-            'count': [v['count'] for v in value if v['value'] == 'True'][0]
+            'count': count[0] if count.__len__() > 0 else 0
         })
+
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
@@ -671,7 +660,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'person_neoplasm_cancer_status',
         'new_tumor_event_after_initial_treatment',
         'neoplasm_histologic_grade',
-        # 'bmi',
+        'BMI',
+        'hpv_status',
         'residual_tumor',
         # 'targeted_molecular_therapy', TODO: Add to metadata_samples
         'tobacco_smoking_history',
@@ -715,18 +705,14 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     clin_attr_dsp = []
     clin_attr_dsp += clin_attr
 
-    token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    data_url = METADATA_API + 'v2/metadata_counts'
-    payload = {
-        'token': token
-    }
+    user = Django_User.objects.get(id=request.user.id)
+
     start = time.time()
-    results = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
+    results = metadata_counts_platform_list(None, cohort_id if cohort_id else None, user, None)
 
     stop = time.time()
-    logger.debug("[BENCHMAKRING] Time to receive response from "+data_url+": "+(stop-start).__str__())
+    logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
 
-    results = json.loads(results.content)
     totals = results['total']
 
     if USER_DATA_ON:
@@ -754,18 +740,18 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             project_counts[study.project_id] += count
 
             user_studies += ({
-                            'count': str(count),
-                            'value': study.name,
-                            'id'   : study.id
-                          },)
+                'count': str(count),
+                'value': study.name,
+                'id'   : study.id
+            },)
 
         user_projects = []
         for project in projects:
             user_projects += ({
-                                'count': str(project_counts[project.id]) if project.id in project_counts else 0,
-                                'value': project.name,
-                                'id'   : project.id
-                                },)
+                'count': str(project_counts[project.id]) if project.id in project_counts else 0,
+                'value': project.name,
+                'id'   : project.id
+            },)
 
         results['count'].append({
             'name': 'user_projects',
@@ -784,7 +770,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     }
     keys = []
     for item in results['count']:
-        #print item
         key = item['name']
         values = item['values']
 
@@ -799,10 +784,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     for key, value in attr_details.items():
         results['count'].append({
-                                    'name': key,
-                                    'values': value,
-                                    'id': None
-                                 })
+            'name': key,
+            'values': value,
+            'id': None
+         })
 
     template_values = {
         'request': request,
@@ -814,8 +799,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'data_attr': data_attr,
         'molec_attr': molec_attr,
         'base_url': settings.BASE_URL,
-        'base_api_url': settings.BASE_API_URL,
-        'token': token
+        'base_api_url': settings.BASE_API_URL
     }
 
     if USER_DATA_ON:
@@ -829,7 +813,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     template = 'cohorts/new_cohort.html'
 
-    logger.debug("Cohort ID is "+cohort_id.__str__())
+    template_values['metadata_counts'] = results
 
     if cohort_id != 0:
         try:
@@ -850,7 +834,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['total_samples'] = len(cohort.samples_set.all())
             template_values['total_patients'] = len(cohort.patients_set.all())
             template_values['shared_with_users'] = shared_with_users
-            # template_values['metadata_counts_platform_list'] = metadata_counts_platform_list(request)
         except ObjectDoesNotExist:
             # Cohort doesn't exist, return to user landing with error.
             messages.error(request, 'The cohort you were looking for does not exist.')
@@ -1396,7 +1379,10 @@ def cohort_filelist(request, cohort_id=0):
     items = json.loads(result.content)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
-
+    nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
+    has_access = False
+    if len(nih_user) > 0:
+        has_access = True
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,
                                                             'base_url': settings.BASE_URL,
@@ -1407,7 +1393,8 @@ def cohort_filelist(request, cohort_id=0):
                                                             'platform_counts': items['platform_count_list'],
                                                             'filelist': file_list,
                                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
-                                                            'sel_file_max': MAX_SEL_FILES})
+                                                            'sel_file_max': MAX_SEL_FILES,
+                                                            'has_access': has_access})
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
@@ -1555,34 +1542,45 @@ def unshare_cohort(request, cohort_id=0):
 
 @login_required
 def get_metadata(request):
-    # endpoint = request.GET.get('endpoint', 'metadata_counts')
-    # version = request.GET.get('version', 'v1')
     filters = json.loads(request.GET.get('filters', '{}'))
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
-    access_token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
 
-    social_account_id = SocialToken.objects.get(token=access_token).account_id
-    user_id = SocialAccount.objects.get(id=social_account_id).user_id
-    user = Django_User.objects.get(id=user_id)
+    user = Django_User.objects.get(id=request.user.id)
 
-    payload = {
-        'token': access_token,
-        'filters': filters
-    }
-    # data_url = METADATA_API + ('%s/%s/' % (version, endpoint))
-    if cohort:
-        # data_url += ('&cohort_id=%s' % (cohort,))
-        payload['cohort_id'] = cohort
-
-    if limit:
-        # data_url += ('&limit=%s' % (limit,))
-        payload['limit'] = limit
-
-    # results = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
     results = metadata_counts_platform_list(filters, cohort, user, limit)
 
     if not results:
         results = {}
+    else:
+
+        data_attr = [
+            'DNA_sequencing',
+            'RNA_sequencing',
+            'miRNA_sequencing',
+            'Protein',
+            'SNP_CN',
+            'DNA_methylation',
+        ]
+
+        attr_details = {
+            'RNA_sequencing': [],
+            'miRNA_sequencing': [],
+            'DNA_methylation': [],
+        }
+
+        for item in results['count']:
+            key = item['name']
+            values = item['values']
+
+            if key.startswith('has_'):
+                data_availability_sort(key, values, data_attr, attr_details)
+
+        for key, value in attr_details.items():
+            results['count'].append({
+                'name': key,
+                'values': value,
+                'id': None
+            })
 
     return JsonResponse(results)
