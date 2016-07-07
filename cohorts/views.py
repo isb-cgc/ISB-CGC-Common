@@ -328,7 +328,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                         '(SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) as counts ' +
                         'ON counts.%s = ms.%s;') % (col_name, 'metadata_samples', col_name, tmp_table_name, col_name, col_name, col_name,))
 
-        print >> sys.stdout, count_query_set.__str__()
         for query_str in count_query_set:
             cursor.execute(query_str)
             colset = cursor.description
@@ -922,6 +921,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         filters = request.POST.getlist('filters')
         projects = request.user.project_set.all()
 
+        # TODO: Make this a query in the view
         token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
         data_url = METADATA_API + 'v2/metadata_sample_list'
         payload = {
@@ -938,6 +938,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 parent.save()
 
         if filters:
+
             filter_obj = []
             for filter in filters:
                 tmp = json.loads(filter)
