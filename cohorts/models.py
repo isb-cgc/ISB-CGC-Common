@@ -112,6 +112,36 @@ class Cohort(models.Model):
         return filter_list
 
     '''
+    Returns the most recent set of filters applied to this cohort
+    '''
+    def get_current_filters(self):
+        filter_list = []
+        filter_list.extend(Filters.objects.filter(resulting_cohort=self))
+
+        return filter_list
+
+
+    '''
+    Returns the first (i.e. 'creation') set of filters applied to this cohort
+
+    Filters are only returned if each of the parents in the chain were created using 1+ filters.
+    If a cohort is created using some other method, the chain is broken.
+    '''
+    def get_creation_filters(self):
+        filter_list = []
+        cohort = self
+        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
+        while cohort:
+            filter_list = Filters.objects.filter(resulting_cohort=cohort)
+            sources = Source.objects.filter(cohort=cohort)
+            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+                cohort = sources[0].parent
+            else:
+                cohort = None
+
+        return filter_list
+
+    '''
     Creates a historical list of the filters applied to produce this cohort
     '''
     def get_filter_history(self):
