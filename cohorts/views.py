@@ -328,7 +328,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                         '(SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) as counts ' +
                         'ON counts.%s = ms.%s;') % (col_name, 'metadata_samples', col_name, tmp_table_name, col_name, col_name, col_name,))
 
-        print >> sys.stdout, count_query_set.__str__()
         for query_str in count_query_set:
             cursor.execute(query_str)
             colset = cursor.description
@@ -919,6 +918,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         filters = request.POST.getlist('filters')
         projects = request.user.project_set.all()
 
+        # TODO: Make this a query in the view
         token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
         data_url = METADATA_API + 'v2/metadata_sample_list'
         payload = {
@@ -935,32 +935,45 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 parent.save()
 
         if filters:
+            filters_list = Filters.objects.filter(resulting_cohort=source).values('name', 'value') if source is not None else []
+            current_filters = {}
+
+            for flt in filters_list:
+                name = str(flt['name']).split(':')[1]
+                if name not in current_filters:
+                    current_filters[name] = []
+                current_filters[name].append(str(flt['value']))
+
             filter_obj = []
             for filter in filters:
                 tmp = json.loads(filter)
                 key = tmp['feature']['name']
                 val = tmp['value']['name']
 
-                if 'id' in tmp['feature'] and tmp['feature']['id']:
-                    key = tmp['feature']['id']
+                # Do not filter on a filter we already have
+                if key in current_filters and val not in current_filters[key]:
+                        if 'id' in tmp['feature'] and tmp['feature']['id']:
+                            key = tmp['feature']['id']
 
-                if 'id' in tmp['value'] and tmp['value']['id']:
-                    val = tmp['value']['id']
+                        if 'id' in tmp['value'] and tmp['value']['id']:
+                            val = tmp['value']['id']
 
-                if key == 'user_projects':
-                    proj = projects.get(id=val)
-                    studies = proj.study_set.all()
-                    for study in studies:
-                        filter_obj.append({
-                            'key': 'user_studies',
-                            'value': str(study.id)
-                        })
+                        if key == 'user_projects':
+                            proj = projects.get(id=val)
+                            studies = proj.study_set.all()
+                            for study in studies:
+                                filter_obj.append({
+                                    'key': 'user_studies',
+                                    'value': str(study.id)
+                                })
 
-                else :
-                    filter_obj.append({
-                        'key': key,
-                        'value': val
-                    })
+                        else :
+                            filter_obj.append({
+                                'key': key,
+                                'value': val
+                            })
+                else:
+                    print >> sys.stdout, "This filter is already applied: " + key + ":" + val
 
             if len(filter_obj):
                 # data_url += '&filters=' + re.sub(r'\s+', '', urllib.quote( json.dumps(filter_obj) ))
