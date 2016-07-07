@@ -28,6 +28,7 @@ class NIH_User(models.Model):
     NIH_assertion_expiration = models.DateTimeField(null=True)
     dbGaP_authorized = models.BooleanField(default=False)
     active = models.BooleanField(default=True)
+    linked = models.BooleanField(default=True)
 
     class Meta:
         verbose_name = "NIH User"
@@ -45,6 +46,7 @@ class Bucket(models.Model):
     def __str__(self):
         return self.bucket_name
 
+
 class GoogleProject(models.Model):
     user = models.ForeignKey(User, null=False)
     project_name = models.CharField(max_length=150)
@@ -54,14 +56,17 @@ class GoogleProject(models.Model):
     def __str__(self):
         return self.project_name
 
+
 class AuthorizedDataset(models.Model):
     name = models.CharField(max_length=256, null=False)
     whitelist_id = models.CharField(max_length=256, null=False)
     acl_google_group = models.CharField(max_length=256, null=False)
 
+
 class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
+
 
 class ServiceAccount(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)

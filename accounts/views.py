@@ -70,27 +70,87 @@ def extended_logout_view(request):
     response = account_views.logout(request)
     return response
 
+
+class ACLDeleteAction(object):
+    def __init__(self, acl_group_name, user_email):
+        self.acl_group_name = acl_group_name
+        self.user_email = user_email
+
+
+class UnlinkAccountsResult(object):
+    def __init__(self, unlinked_nih_users, acl_delete_actions):
+        self.unlinked_nih_users = unlinked_nih_users
+        self.acl_delete_actions = acl_delete_actions
+
+
+def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
+    """
+    This function modifies the 'NIH_User' objects!
+
+    1. Finds a NIH_User object with the given user_id that has the "linked" field set to True. The "linked"
+       field is then set to "False".
+       Exception case: If there are multiple NIH_User objects with the given user_id that also have "linked"
+       set to True
+
+    2. Creates a list of associated email addresses of NIH_user objects that have to be removed from
+       the controlled data ACL group.
+
+
+    Args:
+        user_id: ID of the User object associated with the NIH_User object.
+        acl_group_name: Name of the access control Google Group.
+
+    Returns: An UnlinkAccountsResult object.
+
+    Throws: ObjectDoesNotExist if no NIH_User object is found with the given user_id
+    """
+
+    unlinked_nih_users = []
+    delete_from_acl = []
+
+    try:
+        nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
+        nih_account_to_unlink.linked = False
+        nih_account_to_unlink.save()
+        unlinked_nih_users.append((user_id, nih_account_to_unlink.NIH_username))
+
+    except MultipleObjectsReturned, e:
+        nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
+
+        for user in nih_user_query_set:
+            user.linked = False
+            user.save()
+            unlinked_nih_users.append((user_id, user.NIH_username))
+
+    user_email = User.objects.get(id=user_id).email
+
+    delete_from_acl.append(ACLDeleteAction(acl_group_name, user_email))
+
+    return UnlinkAccountsResult(unlinked_nih_users, delete_from_acl)
+
+
 @login_required
 def unlink_accounts(request):
+    user_id = request.user.id
+
+    try:
+        result = unlink_accounts_and_get_acl_tasks(user_id, CONTROLLED_ACL_GOOGLE_GROUP)
+    except ObjectDoesNotExist as e:
+        logger.error("NIH_User not found for user_id {}".format(user_id))
+
+    num_unlinked = len(result.unlinked_nih_users)
+    if num_unlinked > 1:
+        logger.warn("Error: more than one NIH User account linked to user id %d".format(user_id))
 
     directory_service, http_auth = get_directory_resource()
-    try:
-        nih_account_to_unlink = NIH_User.objects.get(user_id=request.user.id)
-        nih_account_to_unlink.delete()
-        # todo: delete from google group
-
-    except (ObjectDoesNotExist, MultipleObjectsReturned), e:
-        if type(e) is MultipleObjectsReturned:
-            logger.warn("Error %s: more than one NIH User account linked to user id %d" % (str(e), request.user.id))
-            NIH_User.objects.filter(user_id=request.user.id).delete()
-            # todo: delete from google group
-
-    user_email = User.objects.get(id=request.user.id).email
-    try:
-        directory_service.members().delete(groupKey=CONTROLLED_ACL_GOOGLE_GROUP,
-                                           memberKey=user_email).execute(http=http_auth)
-    except HttpError, e:
-        logger.info("%s could not be deleted from %s, probably because they were not a member: %s" % (user_email, CONTROLLED_ACL_GOOGLE_GROUP, e))
+    for action in result.acl_delete_actions:
+        user_email = action.user_email
+        try:
+            directory_service.members().delete(groupKey=action.acl_group_name,
+                                               memberKey=user_email).execute(http=http_auth)
+        except HttpError, e:
+            logger.error("{} could not be deleted from {}, probably because they were not a member" .format(user_email, CONTROLLED_ACL_GOOGLE_GROUP))
+            logger.exception(e)
 
     # redirect to user detail page
-    return redirect('/users/' + str(request.user.id))
+    return redirect('/users/' + str(user_id))
