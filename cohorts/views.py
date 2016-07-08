@@ -360,6 +360,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             # Special case for age ranges
             if key == 'CLIN:age_at_initial_pathologic_diagnosis':
                 feature['values'] = normalize_ages(feature['values'])
+            elif key == 'CLIN:bmi':
+                feature['values'] = normalize_bmi(feature['values'])
 
             for value, count in feature['values'].items():
                 if feature['name'].startswith('has_'):
@@ -660,7 +662,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'person_neoplasm_cancer_status',
         'new_tumor_event_after_initial_treatment',
         'neoplasm_histologic_grade',
-        # 'bmi',
+        'bmi',
+        'hpv_status',
         'residual_tumor',
         # 'targeted_molecular_therapy', TODO: Add to metadata_samples
         'tobacco_smoking_history',
@@ -921,6 +924,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         filters = request.POST.getlist('filters')
         projects = request.user.project_set.all()
 
+        # TODO: Make this a query in the view
         token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
         data_url = METADATA_API + 'v2/metadata_sample_list'
         payload = {
@@ -937,6 +941,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 parent.save()
 
         if filters:
+
             filter_obj = []
             for filter in filters:
                 tmp = json.loads(filter)
