@@ -61,7 +61,7 @@ class AuthorizedDataset(models.Model):
     name = models.CharField(max_length=256, null=False)
     whitelist_id = models.CharField(max_length=256, null=False)
     acl_google_group = models.CharField(max_length=256, null=False)
-
+    public = models.BooleanField(default=False)
 
 class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)
