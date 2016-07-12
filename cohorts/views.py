@@ -60,6 +60,31 @@ from accounts.models import NIH_User
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
 
+# For database values which have display names which are needed by templates but not stored directly in the dsatabase
+DISPLAY_NAME_DD = {
+    'SampleTypeCode': {
+        '01': 'Primary Solid Tumor',
+        '02': 'Recurrent Solid Tumor',
+        '03': 'Primary Blood Derived Cancer - Peripheral Blood',
+        '04': 'Recurrent Blood Derived Cancer - Bone Marrow',
+        '05': 'Additional - New Primary',
+        '06': 'Metastatic',
+        '07': 'Additional Metastatic',
+        '08': 'Human Tumor Original Cells',
+        '09': 'Primary Blood Derived Cancer - Bone Marrow',
+        '10': 'Blood Derived Normal',
+        '11': 'Solid Tissue Normal',
+        '12': 'Buccal Cell Normal',
+        '13': 'EBV Immortalized Normal',
+        '14': 'Bone Marrow Normal',
+        '20': 'Control Analyte',
+        '40': 'Recurrent Blood Derived Cancer - Peripheral Blood',
+        '50': 'Cell Lines',
+        '60': 'Primary Xenograft Tissue',
+        '61': 'Cell Line Derived Xenograft Tissue',
+    },
+}
+
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
 
@@ -124,7 +149,6 @@ def get_filter_values():
 
         for attr in METADATA_SHORTLIST:
             # We only want the values of columns which are not numeric ranges and not true/false
-            # The t/f and numeric range values are
             if not attr.startswith('has_') and not attr == 'bmi' and not attr.startswith('age_'):
                 cursor.execute(get_filter_vals % attr)
                 filter_values[attr] = ()
@@ -367,7 +391,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 if feature['name'].startswith('has_'):
                     value = 'True' if value else 'False'
 
-                value_list.append({'value': str(value), 'count': count})
+                if feature['name'] in DISPLAY_NAME_DD:
+                    value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
+                else:
+                    value_list.append({'value': str(value), 'count': count})
 
             counts_and_total['counts'].append({'name': feature['name'], 'values': value_list, 'id': key, 'total': feature['total']})
             if feature['total'] > counts_and_total['total']:
@@ -1036,7 +1063,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 messages.info(request, 'Changes applied successfully.')
             else:
                 redirect_url = reverse('cohort_list')
-                messages.info(request, 'Cohort, %s, created successfully.' % cohort.name)
+                messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
 
             if workbook_id and worksheet_id :
                 Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
