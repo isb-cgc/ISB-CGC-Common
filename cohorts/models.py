@@ -112,6 +112,60 @@ class Cohort(models.Model):
         return filter_list
 
     '''
+    Returns the current filters which are active (i.e. strips anything which is mututally exclusive)
+    '''
+    def get_current_filters(self):
+        filters = {}
+        cohort = self
+        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
+        while cohort:
+            for filter in Filters.objects.filter(resulting_cohort=cohort):
+                if not filter.name in filters:
+                    filters[filter.name] = {}
+                    filters[filter.name]['id'] = cohort.id
+                    filters[filter.name]['values'] = []
+
+                if filters[filter.name]['id'] == cohort.id:
+                    filters[filter.name]['values'].append(filter.value)
+
+
+            sources = Source.objects.filter(cohort=cohort)
+            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+                cohort = sources[0].parent
+            else:
+                cohort = None
+
+        current_filters = []
+
+        for filter in filters:
+            for value in filters[filter]['values']:
+                current_filters.append({'name': str(filter), 'value': str(value)})
+
+        return current_filters
+
+
+    '''
+    Returns the first (i.e. 'creation') set of filters applied to this cohort
+
+    Filters are only returned if each of the parents in the chain were created using 1+ filters.
+    If a cohort is created using some other method, the chain is broken.
+    '''
+    def get_creation_filters(self):
+        filter_list = []
+        cohort = self
+        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
+        while cohort:
+            filter_list = Filters.objects.filter(resulting_cohort=cohort)
+            sources = Source.objects.filter(cohort=cohort)
+            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+                cohort = sources[0].parent
+            else:
+                cohort = None
+
+        print >> sys.stdout, "Creation filters: " + filter_list.__str__()
+        return filter_list
+
+    '''
     Creates a historical list of the filters applied to produce this cohort
     '''
     def get_filter_history(self):
