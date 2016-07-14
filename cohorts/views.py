@@ -59,6 +59,7 @@ from accounts.models import NIH_User
 
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
+from api.metadata import MUTATION_SHORTLIST
 
 # For database values which have display names which are needed by templates but not stored directly in the dsatabase
 DISPLAY_NAME_DD = {
@@ -83,6 +84,16 @@ DISPLAY_NAME_DD = {
         '60': 'Primary Xenograft Tissue',
         '61': 'Cell Line Derived Xenograft Tissue',
     },
+    'Somatic_Mutations': {
+        'Missense_Mutation': 'Missense Mutation',
+        'Frame_Shift_Ins': 'Frame Shift: Insertion',
+        'Frame_Shift_Del': 'Frame Shift: Deletion',
+        'Nonsense_Mutation': 'Nonsense Mutation',
+        'Splice_Site': 'Splice Site',
+        'Silent': 'Silent',
+        'RNA': 'RNA',
+        'Intron': 'Intron',
+    }
 }
 
 debug = settings.DEBUG # RO global for this file
@@ -165,6 +176,7 @@ def get_filter_values():
 
 ''' Begin metadata counting methods '''
 
+
 # TODO: needs to be refactored to use other samples tables
 def get_participant_count(filter="", cohort_id=None):
 
@@ -203,6 +215,10 @@ def get_participant_count(filter="", cohort_id=None):
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
+
+
+def count_mutations(user, filters=None):
+    counts_and_total = {}
 
 
 def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
@@ -699,20 +715,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'icd_o_3_histology'
     ]
 
-    # data_attr = [
-    #     'has_Illumina_DNASeq',
-    #     'has_BCGSC_HiSeq_RNASeq',
-    #     'has_UNC_HiSeq_RNASeq',
-    #     'has_BCGSC_GA_RNASeq',
-    #     'has_UNC_GA_RNASeq',
-    #     'has_HiSeq_miRnaSeq',
-    #     'has_GA_miRNASeq',
-    #     'has_RPPA',
-    #     'has_SNP6',
-    #     'has_27k',
-    #     'has_450k'
-    # ]
-
     data_attr = [
         'DNA_sequencing',
         'RNA_sequencing',
@@ -721,6 +723,27 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'SNP_CN',
         'DNA_methylation'
     ]
+
+    mutation_attr = {
+        'cat': [
+            {'name': 'Silent', 'value': 'silent', 'count': 0, 'attrs': {
+                'silent': 1,
+                'RNA': 1,
+                'intron': 1,
+            }},
+            {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
+                'Frame_Shift_Ins': 1,
+                'Frame_Shift_Del': 1,
+                'Missense_Mutation': 1,
+                'Nonsense_Mutation': 1,
+                'Splice_Site': 1,
+            }},
+        ],
+        'attr': {}
+    }
+
+    for mut_attr in MUTATION_SHORTLIST:
+        mutation_attr[mut_attr] = {'name': DISPLAY_NAME_DD['Somatic_Mutations'][mut_attr], 'value': mut_attr, 'count': 0}
 
     molec_attr = [
         'somatic_mutation_status',
@@ -828,7 +851,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'data_attr': data_attr,
         'molec_attr': molec_attr,
         'base_url': settings.BASE_URL,
-        'base_api_url': settings.BASE_API_URL
+        'base_api_url': settings.BASE_API_URL,
+        'mutation_attr': mutation_attr,
     }
 
     if USER_DATA_ON:
