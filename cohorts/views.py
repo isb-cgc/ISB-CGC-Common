@@ -60,6 +60,32 @@ from accounts.models import NIH_User
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
 
+# For database values which have display names which are needed by templates but not stored directly in the dsatabase
+DISPLAY_NAME_DD = {
+    'SampleTypeCode': {
+        '01': 'Primary Solid Tumor',
+        '02': 'Recurrent Solid Tumor',
+        '03': 'Primary Blood Derived Cancer - Peripheral Blood',
+        '04': 'Recurrent Blood Derived Cancer - Bone Marrow',
+        '05': 'Additional - New Primary',
+        '06': 'Metastatic',
+        '07': 'Additional Metastatic',
+        '08': 'Human Tumor Original Cells',
+        '09': 'Primary Blood Derived Cancer - Bone Marrow',
+        '10': 'Blood Derived Normal',
+        '11': 'Solid Tissue Normal',
+        '12': 'Buccal Cell Normal',
+        '13': 'EBV Immortalized Normal',
+        '14': 'Bone Marrow Normal',
+        '20': 'Control Analyte',
+        '40': 'Recurrent Blood Derived Cancer - Peripheral Blood',
+        '50': 'Cell Lines',
+        '60': 'Primary Xenograft Tissue',
+        '61': 'Cell Line Derived Xenograft Tissue',
+        'None': 'N/A'
+    },
+}
+
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
 
@@ -110,6 +136,33 @@ COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
 METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 # This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
+
+def get_filter_values():
+    db = get_sql_connection()
+    cursor = None
+
+    filter_values = {}
+
+    get_filter_vals = 'SELECT DISTINCT %s FROM metadata_samples;'
+
+    try:
+        cursor = db.cursor()
+
+        for attr in METADATA_SHORTLIST:
+            # We only want the values of columns which are not numeric ranges and not true/false
+            if not attr.startswith('has_') and not attr == 'bmi' and not attr.startswith('age_'):
+                cursor.execute(get_filter_vals % attr)
+                filter_values[attr] = ()
+                for row in cursor.fetchall():
+                    filter_values[attr] += (row[0] if row[0] is not None else 'None',)
+
+        return filter_values
+
+    except Exception as e:
+        print traceback.format_exc()
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
 
 ''' Begin metadata counting methods '''
 
@@ -296,7 +349,12 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                     col_name = key_map[key]
 
                 if should_be_queried:
-                    count_query_set.append('SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;' % (col_name, tmp_table_name, col_name, ))
+                    count_query_set.append(
+                        ('SELECT DISTINCT ms.%s, IF(counts.count IS NULL,0,counts.count) AS count FROM %s AS ms ' +
+                        'LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) as counts ON ' +
+                        'counts.%s = ms.%s;') % (col_name, 'metadata_samples', col_name, tmp_table_name, col_name,
+                                                 col_name, col_name,)
+                    )
 
         for query_str in count_query_set:
             cursor.execute(query_str)
@@ -327,12 +385,17 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             # Special case for age ranges
             if key == 'CLIN:age_at_initial_pathologic_diagnosis':
                 feature['values'] = normalize_ages(feature['values'])
+            elif key == 'CLIN:bmi':
+                feature['values'] = normalize_bmi(feature['values'])
 
             for value, count in feature['values'].items():
                 if feature['name'].startswith('has_'):
                     value = 'True' if value else 'False'
 
-                value_list.append({'value': str(value), 'count': count})
+                if feature['name'] in DISPLAY_NAME_DD:
+                    value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
+                else:
+                    value_list.append({'value': str(value), 'count': count})
 
             counts_and_total['counts'].append({'name': feature['name'], 'values': value_list, 'id': key, 'total': feature['total']})
             if feature['total'] > counts_and_total['total']:
@@ -627,7 +690,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'person_neoplasm_cancer_status',
         'new_tumor_event_after_initial_treatment',
         'neoplasm_histologic_grade',
-        # 'bmi',
+        'bmi',
+        'hpv_status',
         'residual_tumor',
         # 'targeted_molecular_therapy', TODO: Add to metadata_samples
         'tobacco_smoking_history',
@@ -888,6 +952,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         filters = request.POST.getlist('filters')
         projects = request.user.project_set.all()
 
+        # TODO: Make this a query in the view
         token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
         data_url = METADATA_API + 'v2/metadata_sample_list'
         payload = {
@@ -904,6 +969,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 parent.save()
 
         if filters:
+
             filter_obj = []
             for filter in filters:
                 tmp = json.loads(filter)
@@ -998,7 +1064,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 messages.info(request, 'Changes applied successfully.')
             else:
                 redirect_url = reverse('cohort_list')
-                messages.info(request, 'Cohort, %s, created successfully.' % cohort.name)
+                messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
 
             if workbook_id and worksheet_id :
                 Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
