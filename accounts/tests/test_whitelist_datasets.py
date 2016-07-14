@@ -35,7 +35,7 @@ logging.basicConfig(
 class OneDatasetTestCase(TestCase):
     def test_one_line(self):
         test_csv_data = [
-            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
@@ -60,7 +60,7 @@ class OneDatasetTestCase(TestCase):
 
     def test_one_line_multiple_datasets(self):
         test_csv_data = [
-            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
@@ -87,9 +87,9 @@ class OneDatasetTestCase(TestCase):
 
     def test_two_lines(self):
         test_csv_data = [
-            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', ''],
-            ['Second User', 'SECONDUSR', 'eRA', 'PI', 'seconduser@fake.com', '555-555-5555', 'active', 'phs000456',
+            ['Second User', 'SECONDUSR', 'eRA', 'PI', 'seconduser@fake.com', '555-555-5555', 'active', 'phs000456.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
