@@ -312,7 +312,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         cursor = db.cursor()
 
         # We need to perform 2 sets of queries: one with each filter excluded from the others, against the full
-        # metadata_samples/cohort JOIN, and one where all filters are applied to create a temporart table, and
+        # metadata_samples/cohort JOIN, and one where all filters are applied to create a temporary table, and
         # attributes *outside* that set are counted
 
         unfiltered_attr = []
