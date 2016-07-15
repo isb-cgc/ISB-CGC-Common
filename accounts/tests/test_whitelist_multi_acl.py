@@ -26,7 +26,6 @@ from django.test import TestCase
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
-from tasks.nih_whitelist_processor.nih_user_task import get_acl_tasks_and_set_user_dbgap_flags_new
 from tasks.nih_whitelist_processor.utils import NIHWhitelist, DatasetToACLMapping
 from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater
 from tasks.tests.data_generators import create_csv_file_object
@@ -95,7 +94,7 @@ class TestWhitelistMultiACL(TestCase):
         """
 
         test_csv_data = [
-            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
@@ -115,7 +114,7 @@ class TestWhitelistMultiACL(TestCase):
         Test that the dataset (phs000123) in the whitelist is not marked to be either added or revoked for the user.
         """
         test_csv_data = [
-            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
@@ -198,7 +197,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
 
         """
         test_csv_data = [
-            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000',
              '']
         ]
