@@ -330,13 +330,19 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 filter_copy = copy.deepcopy(filters)
                 del filter_copy[filter]
                 if filter_copy.__len__() <= 0:
-                    exclusionary_filter[filter.split(':')[-1]] = {'query_str': None, 'value_tuple': None}
+                    ex_where_clause = {'query_str': None, 'value_tuple': None}
                 else:
                     ex_where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
-                    if cohort_id is not None:
-                        ex_where_clause['query_str'] += ' AND cs.cohort_id=%s'
-                        ex_where_clause['value_tuple'] += (cohort_id,)
-                    exclusionary_filter[filter.split(':')[-1]] = ex_where_clause
+                if cohort_id is not None:
+                    if ex_where_clause['query_str'] is not None:
+                        ex_where_clause['query_str'] += ' AND '
+                    else:
+                        ex_where_clause['query_str'] = ''
+                        ex_where_clause['value_tuple'] = ()
+                    ex_where_clause['query_str'] += ' cs.cohort_id=%s '
+                    ex_where_clause['value_tuple'] += (cohort_id,)
+
+                exclusionary_filter[filter.split(':')[-1]] = ex_where_clause
 
         print >> sys.stdout, filters.__str__()
         print >> sys.stdout, unfiltered_attr.__str__()
@@ -355,7 +361,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             if cohort_id is not None:
                 make_tmp_table_str += "FROM cohorts_samples cs "
                 make_tmp_table_str += "JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
-                make_tmp_table_str += "WHERE cohort_id = %s "
+                make_tmp_table_str += "WHERE cs.cohort_id = %s "
                 params_tuple += (cohort_id,)
             else:
                 make_tmp_table_str += "FROM metadata_samples ms "
@@ -366,6 +372,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
+            print >> sys.stdout, make_tmp_table_str
             cursor.execute(make_tmp_table_str, params_tuple)
         else:
             query_table_name = 'metadata_samples'
@@ -428,6 +435,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             for row in cursor.fetchall():
                 counts[col_headers[0]]['counts'][row[0]] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
+
+        print >> sys.stdout, counts.__str__()
 
         # Drop the temporary table, if we made one
         if tmp_table_name is not None:
