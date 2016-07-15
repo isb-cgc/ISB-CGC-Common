@@ -349,11 +349,14 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                     col_name = key_map[key]
 
                 if should_be_queried:
-                    count_query_set.append(
-                        ('SELECT DISTINCT ms.%s, IF(counts.count IS NULL,0,counts.count) AS count FROM %s AS ms ' +
-                        'LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) as counts ON ' +
-                        'counts.%s = ms.%s;') % (col_name, 'metadata_samples', col_name, tmp_table_name, col_name,
-                                                 col_name, col_name,)
+                    count_query_set.append(("""
+                        SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS
+                        count
+                        FROM %s AS ms
+                        LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
+                        ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
+                      """)
+                        % (col_name, col_name, col_name, 'metadata_samples', col_name, tmp_table_name, col_name, col_name, col_name, col_name, col_name)
                     )
 
         for query_str in count_query_set:
