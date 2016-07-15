@@ -83,6 +83,7 @@ DISPLAY_NAME_DD = {
         '50': 'Cell Lines',
         '60': 'Primary Xenograft Tissue',
         '61': 'Cell Line Derived Xenograft Tissue',
+        'None': 'N/A'
     },
     'Somatic_Mutations': {
         'Missense_Mutation': 'Missense Mutation',
