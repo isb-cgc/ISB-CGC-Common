@@ -348,6 +348,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 exclusionary_filter[filter.split(':')[-1]] = ex_where_clause
 
         base_table = 'metadata_samples'
+        filter_table = 'metadata_samples'
         tmp_cohort_table = None
         tmp_filter_table = None
 
@@ -368,6 +369,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         if unfiltered_attr.__len__() > 0 and filters.__len__() > 0:
             # TODO: This should take into account variable tables; may require a UNION statement or similar
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            filter_table = tmp_filter_table
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ' % (tmp_filter_table, base_table,)
 
             if filters.__len__() > 0:
@@ -403,7 +405,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                             FROM %s ms
                             LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
                             ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
-                          """) % (col_name, col_name, col_name, 'metadata_samples', col_name, tmp_filter_table, col_name, col_name, col_name, col_name, col_name),
+                          """) % (col_name, col_name, col_name, 'metadata_samples', col_name, filter_table, col_name, col_name, col_name, col_name, col_name),
                         'params': None, })
                     else:
                         subquery = base_table + ((' WHERE ' + exclusionary_filter[col_name]['query_str']) if exclusionary_filter[col_name]['query_str'] else ' ')
