@@ -167,24 +167,25 @@ def get_filter_values():
 ''' Begin metadata counting methods '''
 
 # TODO: needs to be refactored to use other samples tables
-def get_participant_count(filter="", cohort_id=None):
+def get_participant_and_sample_count(filter="", cohort_id=None):
 
     db = get_sql_connection()
     cursor = None
+    counts = {}
 
     try:
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
         param_tuple = ()
 
-        query_str = "SELECT COUNT(DISTINCT ParticipantBarcode) AS participant_count "
+        query_str_lead = "SELECT COUNT(DISTINCT %s) AS %s "
 
         if cohort_id is not None:
-            query_str += "FROM cohorts_samples cs JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
+            query_str = "FROM cohorts_samples cs JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
             query_str += "WHERE cs.cohort_id = %s "
             param_tuple += (cohort_id,)
         else:
-            query_str += "FROM metadata_samples ms "
+            query_str = "FROM metadata_samples ms "
 
         if filter.__len__() > 0:
             where_clause = build_where_clause(filter)
@@ -192,12 +193,17 @@ def get_participant_count(filter="", cohort_id=None):
             query_str += where_clause['query_str']
             param_tuple += where_clause['value_tuple']
 
-        cursor.execute(query_str, param_tuple)
+        cursor.execute((query_str_lead % ('ParticipantBarcode', 'participant_count')) + query_str, param_tuple)
 
         for row in cursor.fetchall():
-            count = row['participant_count']
+            counts['participant_count'] = row['participant_count']
 
-        return count
+        cursor.execute((query_str_lead % ('SampleBarcode', 'sample_count')) + query_str, param_tuple)
+
+        for row in cursor.fetchall():
+            counts['sample_count'] = row['sample_count']
+
+        return counts
 
     except Exception as e:
         print traceback.format_exc()
@@ -442,9 +448,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         if tmp_table_name is not None:
             cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_table_name)
 
-        counts_and_total['participants'] = get_participant_count(filters, cohort_id)
+        sample_and_participant_counts = get_participant_and_sample_count(filters, cohort_id);
+
+        counts_and_total['participants'] = sample_and_participant_counts['participant_count']
+        counts_and_total['total'] = sample_and_participant_counts['sample_count']
         counts_and_total['counts'] = []
-        counts_and_total['total'] = 0
 
         for key, feature in valid_attrs.items():
             value_list = []
@@ -467,8 +475,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                     value_list.append({'value': str(value), 'count': count})
 
             counts_and_total['counts'].append({'name': feature['name'], 'values': value_list, 'id': key, 'total': feature['total']})
-            if feature['total'] > counts_and_total['total']:
-                counts_and_total['total'] = feature['total']
 
         return counts_and_total
 
