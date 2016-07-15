@@ -350,9 +350,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
                 exclusionary_filter[filter.split(':')[-1]] = ex_where_clause
 
-        print >> sys.stdout, filters.__str__()
-        print >> sys.stdout, unfiltered_attr.__str__()
-
         query_table_name = None
         tmp_table_name = None
 
@@ -378,7 +375,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
-            print >> sys.stdout, make_tmp_table_str
             cursor.execute(make_tmp_table_str, params_tuple)
         else:
             query_table_name = 'metadata_samples'
@@ -424,7 +420,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                         'params': exclusionary_filter[col_name]['value_tuple']})
 
         for query in count_query_set:
-            print >> sys.stdout, query.__str__()
             if 'params' in query and query['params'] is not None:
                 cursor.execute(query['query_str'], query['params'])
             else:
@@ -441,8 +436,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             for row in cursor.fetchall():
                 counts[col_headers[0]]['counts'][row[0]] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
-
-        print >> sys.stdout, counts.__str__()
 
         # Drop the temporary table, if we made one
         if tmp_table_name is not None:
