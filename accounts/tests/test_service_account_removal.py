@@ -24,7 +24,7 @@ from django.test import TestCase
 from accounts.models import NIH_User, AuthorizedDataset, GoogleProject, ServiceAccount
 
 from tasks.nih_whitelist_processor.django_utils import ServiceAccountDatasetRemover
-from tasks.tests.data_generators import create_csv_file_object
+
 
 logging.basicConfig(
     level=logging.INFO
