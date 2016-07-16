@@ -85,11 +85,3 @@ class TestUserAuthDatasets(TestCase):
         revoked_user_datasets = era_user_auth_updater.get_revoked_user_datasets(current_user_datasets,
                                                                                 era_user_auth_updater.get_datasets_from_whitelist())
         self.assertEquals(revoked_user_datasets, set([]))
-
-        era_user_auth_updater.process()
-        # The missing dataset should have been added for nih_user
-        self.assertEquals(UserAuthorizedDatasets.objects.count(), 1)
-        self.assertEquals(UserAuthorizedDatasets.objects.filter(nih_user=nih_user).count(), 1)
-        self.assertEquals(UserAuthorizedDatasets.objects.filter(nih_user=nih_user, authorized_dataset=dataset_phs000123).count(), 1)
-
-
