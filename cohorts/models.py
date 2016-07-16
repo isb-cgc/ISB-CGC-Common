@@ -162,7 +162,6 @@ class Cohort(models.Model):
             else:
                 cohort = None
 
-        print >> sys.stdout, "Creation filters: " + filter_list.__str__()
         return filter_list
 
     '''

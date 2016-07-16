@@ -336,14 +336,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                     ex_where_clause = {'query_str': None, 'value_tuple': None}
                 else:
                     ex_where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
-                if cohort_id is not None:
-                    if ex_where_clause['query_str'] is not None:
-                        ex_where_clause['query_str'] += ' AND '
-                    else:
-                        ex_where_clause['query_str'] = ''
-                        ex_where_clause['value_tuple'] = ()
-                    ex_where_clause['query_str'] += ' cs.cohort_id=%s '
-                    ex_where_clause['value_tuple'] += (cohort_id,)
 
                 exclusionary_filter[filter.split(':')[-1]] = ex_where_clause
 
@@ -362,8 +354,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
             """ % tmp_cohort_table
             make_cohort_table_str += 'WHERE cs.cohort_id = %s;'
-            params_tuple += (cohort_id,)
-            cursor.execute(make_cohort_table_str, params_tuple)
+            cursor.execute(make_cohort_table_str, (cohort_id,))
 
         # If there are filters, create a temporary table filtered off the base table
         if unfiltered_attr.__len__() > 0 and filters.__len__() > 0:
@@ -373,12 +364,13 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ' % (tmp_filter_table, base_table,)
 
             if filters.__len__() > 0:
-                make_tmp_table_str += "WHERE " if cohort_id is None else "AND "
-                make_tmp_table_str += where_clause['query_str']
+                make_tmp_table_str += 'WHERE %s ' % where_clause['query_str']
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
             cursor.execute(make_tmp_table_str, params_tuple)
+        else:
+            filter_table = base_table
 
         count_query_set = []
 
@@ -409,7 +401,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                         'params': None, })
                     else:
                         subquery = base_table + ((' WHERE ' + exclusionary_filter[col_name]['query_str']) if exclusionary_filter[col_name]['query_str'] else ' ')
-                        print >> sys.stdout, subquery
                         count_query_set.append({'query_str':("""
                             SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS count
                             FROM %s ms
