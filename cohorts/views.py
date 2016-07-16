@@ -318,7 +318,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         unfiltered_attr = []
         exclusionary_filter = {}
         where_clause = None
-        filtered_join = 'metadata_samples ms'
 
         for attr in valid_attrs:
             if attr not in filters:
@@ -328,8 +327,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
         # construct the WHERE clauses needed
         if filters.__len__() > 0:
-            if cohort_id is not None:
-                filtered_join = 'cohorts_samples cs JOIN metadata_samples ms ON cs.sample_id = ms.SampleBarcode'
             filter_copy = copy.deepcopy(filters)
             where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
             for filter in filters:
@@ -350,24 +347,30 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
                 exclusionary_filter[filter.split(':')[-1]] = ex_where_clause
 
-        query_table_name = None
-        tmp_table_name = None
+        base_table = 'metadata_samples'
+        filter_table = 'metadata_samples'
+        tmp_cohort_table = None
+        tmp_filter_table = None
 
-        # Only create the temporary table if there's something to actually filter down the
-        # source table - otherwise, it's just a waste of time and memory
-        if unfiltered_attr.__len__() > 0 and (filters.__len__() > 0 or cohort_id is not None):
+        # If there is a cohort, make a temporary table based on it and make it the base table
+        if cohort_id is not None:
+            tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
+            base_table = tmp_cohort_table
+            make_cohort_table_str = """
+                CREATE TEMPORARY TABLE %s AS SELECT *
+                FROM cohorts_samples cs
+                JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
+            """ % tmp_cohort_table
+            make_cohort_table_str += 'WHERE cs.cohort_id = %s;'
+            params_tuple += (cohort_id,)
+            cursor.execute(make_cohort_table_str, params_tuple)
+
+        # If there are filters, create a temporary table filtered off the base table
+        if unfiltered_attr.__len__() > 0 and filters.__len__() > 0:
             # TODO: This should take into account variable tables; may require a UNION statement or similar
-            tmp_table_name = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
-            query_table_name = tmp_table_name
-            make_tmp_table_str = "CREATE TEMPORARY TABLE " + tmp_table_name + " AS SELECT * "
-
-            if cohort_id is not None:
-                make_tmp_table_str += "FROM cohorts_samples cs "
-                make_tmp_table_str += "JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id "
-                make_tmp_table_str += "WHERE cs.cohort_id = %s "
-                params_tuple += (cohort_id,)
-            else:
-                make_tmp_table_str += "FROM metadata_samples ms "
+            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            filter_table = tmp_filter_table
+            make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ' % (tmp_filter_table, base_table,)
 
             if filters.__len__() > 0:
                 make_tmp_table_str += "WHERE " if cohort_id is None else "AND "
@@ -376,8 +379,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
             make_tmp_table_str += ";"
             cursor.execute(make_tmp_table_str, params_tuple)
-        else:
-            query_table_name = 'metadata_samples'
 
         count_query_set = []
 
@@ -400,20 +401,18 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 if should_be_queried:
                     if col_name in unfiltered_attr:
                         count_query_set.append({'query_str':("""
-                            SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS
-                            count
+                            SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS count
                             FROM %s ms
                             LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
                             ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
-                          """) % (col_name, col_name, col_name, 'metadata_samples', col_name, query_table_name, col_name, col_name, col_name, col_name, col_name),
+                          """) % (col_name, col_name, col_name, 'metadata_samples', col_name, filter_table, col_name, col_name, col_name, col_name, col_name),
                         'params': None, })
                     else:
-                        subquery = filtered_join + ((' WHERE ' + exclusionary_filter[col_name]['query_str']) if exclusionary_filter[col_name]['query_str'] else ' ')
+                        subquery = base_table + ((' WHERE ' + exclusionary_filter[col_name]['query_str']) if exclusionary_filter[col_name]['query_str'] else ' ')
                         print >> sys.stdout, subquery
                         count_query_set.append({'query_str':("""
-                            SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS
-                            count
-                            FROM %s AS ms
+                            SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS count
+                            FROM %s ms
                             LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
                             ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
                           """) % (col_name, col_name, col_name, 'metadata_samples', col_name, subquery, col_name, col_name, col_name, col_name, col_name),
@@ -437,9 +436,9 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 counts[col_headers[0]]['counts'][row[0]] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
 
-        # Drop the temporary table, if we made one
-        if tmp_table_name is not None:
-            cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_table_name)
+        # Drop the temporary tables
+        if tmp_cohort_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_cohort_table)
+        if tmp_filter_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_filter_table)
 
         sample_and_participant_counts = get_participant_and_sample_count(filters, cohort_id);
 
