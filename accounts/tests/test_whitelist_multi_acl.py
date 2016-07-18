@@ -165,24 +165,24 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.auth_dataset_123 = AuthorizedDataset(name="dataset1", whitelist_id='phs000123', acl_google_group='test_acl')
         self.auth_dataset_123.save()
 
-        self.project_123 = GoogleProject(user=self.auth_user,
-                                     project_name="project1",
-                                     project_id="123",
-                                     big_query_dataset="bq_dataset1")
+        self.project_123 = GoogleProject(project_name="project1",
+                                         project_id="123",
+                                         big_query_dataset="bq_dataset1")
         self.project_123.save()
+        self.project_123.user.add(self.auth_user)
 
         self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
-                                      authorized_dataset=self.auth_dataset_123)
+                                          authorized_dataset=self.auth_dataset_123)
         self.account_123.save()
 
         self.auth_dataset_456 = AuthorizedDataset(name="dataset1", whitelist_id='phs000456', acl_google_group='test_acl')
         self.auth_dataset_456.save()
 
-        self.project_456 = GoogleProject(user=self.auth_user,
-                                         project_name="project1",
+        self.project_456 = GoogleProject(project_name="project1",
                                          project_id="456",
                                          big_query_dataset="bq_dataset2")
         self.project_456.save()
+        self.project_456.user.add(self.auth_user)
 
         self.account_456 = ServiceAccount(google_project=self.project_456, service_account="abc_456",
                                           authorized_dataset=self.auth_dataset_456)
