@@ -79,11 +79,11 @@ class TestWhitelistMultiACL(TestCase):
         self.auth_dataset = AuthorizedDataset(name="dataset1", whitelist_id='phs000123', acl_google_group='test_acl')
         self.auth_dataset.save()
 
-        self.project = GoogleProject(user=self.auth_user,
-                                project_name="project1",
-                                project_id="123",
-                                big_query_dataset="bq_dataset1")
+        self.project = GoogleProject(project_name="project1",
+                                     project_id="123",
+                                     big_query_dataset="bq_dataset1")
         self.project.save()
+        self.project.user.add(self.auth_user)
 
         self.account = ServiceAccount(google_project=self.project, service_account="abc", authorized_dataset=self.auth_dataset)
         self.account.save()
