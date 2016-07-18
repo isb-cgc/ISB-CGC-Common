@@ -49,7 +49,7 @@ class BucketAdmin(admin.ModelAdmin):
 
 class GoogleProjectAdmin(admin.ModelAdmin):
     list_display = (
-        'user',
+        # 'user',
         'project_name',
         'project_id'
     )

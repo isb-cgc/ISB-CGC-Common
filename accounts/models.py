@@ -48,7 +48,7 @@ class Bucket(models.Model):
 
 
 class GoogleProject(models.Model):
-    user = models.ForeignKey(User, null=False)
+    user = models.ManyToManyField(User)
     project_name = models.CharField(max_length=150)
     project_id = models.CharField(max_length=150)
     big_query_dataset = models.CharField(max_length=150, null=True)
