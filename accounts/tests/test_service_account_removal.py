@@ -49,11 +49,11 @@ class TestUserServiceAccountRemoval(TestCase):
         auth_dataset = AuthorizedDataset(name="dataset1", whitelist_id='phs000000', acl_google_group='test_acl')
         auth_dataset.save()
 
-        project = GoogleProject(user=user,
-                                project_name="project1",
+        project = GoogleProject(project_name="project1",
                                 project_id="123",
                                 big_query_dataset="bq_dataset1")
         project.save()
+        project.user.add(user)
 
         account = ServiceAccount(google_project=project, service_account="abc", authorized_dataset=auth_dataset)
         account.save()
