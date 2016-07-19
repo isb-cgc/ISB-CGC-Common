@@ -399,7 +399,7 @@ def register_sa(request, user_id):
             public_datasets = AuthorizedDataset.objects.filter(public=True)
             directory_service, http_auth = get_directory_resource()
             for dataset in public_datasets | protected_datasets:
-                service_account_obj = ServiceAccount(google_project=user_gcp, service_account=user_sa, authorized_dataset=dataset)
+                service_account_obj = ServiceAccount(google_project=user_gcp, service_account=user_sa, authorized_dataset=dataset, active=True)
                 service_account_obj.save()
 
                 try:

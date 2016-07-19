@@ -71,4 +71,6 @@ class UserAuthorizedDatasets(models.Model):
 class ServiceAccount(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     service_account = models.CharField(max_length=1024, null=False)
+    authorized_date = models.DateTimeField(auto_now=True)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True) # Null means open access only
+    active = models.BooleanField(default=False, null=False)
