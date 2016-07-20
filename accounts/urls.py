@@ -28,6 +28,15 @@ urlpatterns = [
     url(r'^logout', views.extended_logout_view, name='account_logout'),
     url(r'^login/$', google_views.oauth2_login, name='account_login'),
     # url(r'^nih_login/$', views.nih_login, name='nih_login'),
-    url(r'^unlink_accounts/', views.unlink_accounts, name='unlink_accounts')
+    url(r'^unlink_accounts/', views.unlink_accounts, name='unlink_accounts'),
+
+    # Google Cloud Project related
+    url(r'^users/(?P<user_id>\d+)/gcp_list/$', views.user_gcp_list, name='user_gcp_list'),
+    url(r'^users/(?P<user_id>\d+)/gcp_delete/(?P<gcp_id>\d+)/$', views.user_gcp_delete, name='user_gcp_delete'),
+    url(r'^users/(?P<user_id>\d+)/register_gcp/$', views.register_gcp, name='register_gcp'),
+    url(r'^users/(?P<user_id>\d+)/verify_gcp/$', views.verify_gcp, name='verify_gcp'),
+    url(r'^users/(?P<user_id>\d+)/register_sa/$', views.register_sa, name='register_sa'),
+    url(r'^users/(?P<user_id>\d+)/verify_sa/$', views.verify_sa, name='verify_sa'),
+    url(r'^users/(?P<user_id>\d+)/delete_sa/(?P<sa_id>\d+)/$', views.delete_sa, name='delete_sa'),
 ]
 
