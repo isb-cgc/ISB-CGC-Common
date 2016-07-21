@@ -450,7 +450,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
             for value, count in feature['values'].items():
                 if feature['name'].startswith('has_'):
-                    value = 'True' if value else 'False'
+                    value = ('True' if (value and value != 'None') else 'False')
 
                 if feature['name'] in DISPLAY_NAME_DD:
                     value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
