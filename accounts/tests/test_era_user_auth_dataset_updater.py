@@ -67,11 +67,11 @@ class TestUserAuthDatasets(TestCase):
         # Parse whitelist and created populate AuthorizedDataset objects
         self.assertEquals(AuthorizedDataset.objects.count(), 0)
         whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
-        NIHDatasetAdder(whitelist, dataset_acl_mapping).process_whitelist()
+        NIHDatasetAdder(whitelist, 'default', dataset_acl_mapping).process_whitelist()
         self.assertEquals(AuthorizedDataset.objects.count(), 1)
         dataset_phs000123 = AuthorizedDataset.objects.get(whitelist_id='phs000123')
 
-        era_user_auth_updater = ERAUserAuthDatasetUpdater(nih_user, whitelist)
+        era_user_auth_updater = ERAUserAuthDatasetUpdater(nih_user, whitelist, 'default')
         # The class should find no authorized datasets for the user
         current_user_datasets = era_user_auth_updater.get_current_user_authorized_datasets()
         self.assertEquals(current_user_datasets, set([]))

@@ -43,8 +43,7 @@ def build_csv(fields, rows):
     return output.getvalue()
 
 
-def get_database_alias():
-    return 'default'
+DATABASE_ALIAS = 'default'
 
 
 class TestAccessControlActionRunner(TestCase):
@@ -136,7 +135,7 @@ class TestAccessControlActionRunner(TestCase):
         uad_456 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_456)
         uad_456.save()
 
-        dsu = AccessControlUpdater(whitelist)
+        dsu = AccessControlUpdater(whitelist, database_alias='default')
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)
@@ -154,7 +153,7 @@ class TestAccessControlActionRunner(TestCase):
         acl_controller = ACLGroupSimulator(acl_content)
         self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set(['456@institution.org']))
 
-        acl_runner = AccessControlActionRunner(acl_action_list, acl_controller, dataset_acl_mapping)
+        acl_runner = AccessControlActionRunner(acl_action_list, acl_controller, dataset_acl_mapping, DATABASE_ALIAS)
         acl_runner.run_actions()
 
         self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set([]))

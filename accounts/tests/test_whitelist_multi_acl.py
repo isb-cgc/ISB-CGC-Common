@@ -99,7 +99,7 @@ class TestWhitelistMultiACL(TestCase):
         ]
 
         whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
-        dsu = AccessControlUpdater(whitelist)
+        dsu = AccessControlUpdater(whitelist, database_alias='default')
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)
@@ -123,7 +123,7 @@ class TestWhitelistMultiACL(TestCase):
         uad = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset)
         uad.save()
 
-        dsu = AccessControlUpdater(whitelist)
+        dsu = AccessControlUpdater(whitelist, database_alias='default')
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)
@@ -210,7 +210,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         uad_456 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_456)
         uad_456.save()
 
-        dsu = AccessControlUpdater(whitelist)
+        dsu = AccessControlUpdater(whitelist, database_alias='default')
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)

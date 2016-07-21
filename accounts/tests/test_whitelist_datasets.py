@@ -32,6 +32,8 @@ logging.basicConfig(
 )
 
 
+DATABASE_ALIAS = 'default'
+
 class OneDatasetTestCase(TestCase):
     def test_one_line(self):
         test_csv_data = [
@@ -51,7 +53,7 @@ class OneDatasetTestCase(TestCase):
 
         dataset_acl_mapping = DatasetToACLMapping(test_dataset_mapping)
 
-        NIHDatasetAdder(whitelist, dataset_acl_mapping).process_whitelist()
+        NIHDatasetAdder(whitelist, DATABASE_ALIAS, dataset_acl_mapping).process_whitelist()
 
         self.assertEquals(AuthorizedDataset.objects.count(), 1)
 
@@ -78,7 +80,7 @@ class OneDatasetTestCase(TestCase):
 
         AuthorizedDataset(name='', whitelist_id='phs111111', acl_google_group="acl_group").save()
 
-        NIHDatasetAdder(whitelist, dataset_acl_mapping).process_whitelist()
+        NIHDatasetAdder(whitelist, DATABASE_ALIAS, dataset_acl_mapping).process_whitelist()
 
         self.assertEquals(AuthorizedDataset.objects.count(), 2)
 
@@ -109,7 +111,7 @@ class OneDatasetTestCase(TestCase):
 
         dataset_acl_mapping = DatasetToACLMapping(test_dataset_mapping)
 
-        NIHDatasetAdder(whitelist, dataset_acl_mapping).process_whitelist()
+        NIHDatasetAdder(whitelist, DATABASE_ALIAS, dataset_acl_mapping).process_whitelist()
 
         self.assertEquals(AuthorizedDataset.objects.count(), 2)
 
