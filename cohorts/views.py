@@ -59,7 +59,7 @@ from accounts.models import NIH_User
 
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
-from api.metadata import MUTATION_SHORTLIST
+from api.metadata import MOLECULAR_SHORTLIST
 
 # For database values which have display names which are needed by templates but not stored directly in the dsatabase
 DISPLAY_NAME_DD = {
@@ -783,12 +783,12 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'DNA_methylation'
     ]
 
-    mutation_attr = {
-        'cat': [
+    molecular_attr = {
+        'categories': [
             {'name': 'Silent', 'value': 'silent', 'count': 0, 'attrs': {
-                'silent': 1,
+                'Silent': 1,
                 'RNA': 1,
-                'intron': 1,
+                'Intron': 1,
             }},
             {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
                 'Frame_Shift_Ins': 1,
@@ -798,11 +798,11 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
                 'Splice_Site': 1,
             }},
         ],
-        'attr': {}
+        'attrs': []
     }
 
-    for mut_attr in MUTATION_SHORTLIST:
-        mutation_attr[mut_attr] = {'name': DISPLAY_NAME_DD['Somatic_Mutations'][mut_attr], 'value': mut_attr, 'count': 0}
+    for mol_attr in MOLECULAR_SHORTLIST:
+        molecular_attr['attrs'].append({'name': DISPLAY_NAME_DD['Somatic_Mutations'][mol_attr], 'value': mol_attr, 'count': 0})
 
     molec_attr = [
         'somatic_mutation_status',
@@ -911,7 +911,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'molec_attr': molec_attr,
         'base_url': settings.BASE_URL,
         'base_api_url': settings.BASE_API_URL,
-        'mutation_attr': mutation_attr,
+        'molecular_attr': molecular_attr,
     }
 
     if USER_DATA_ON:
