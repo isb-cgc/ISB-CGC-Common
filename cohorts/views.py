@@ -466,7 +466,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
             for value, count in feature['values'].items():
                 if feature['name'].startswith('has_'):
-                    value = 'True' if value else 'False'
+                    value = ('True' if (value and value != 'None') else 'False')
 
                 if feature['name'] in DISPLAY_NAME_DD:
                     value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
@@ -745,10 +745,10 @@ def cohort_create_for_existing_workbook(request, workbook_id, worksheet_id):
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     users = User.objects.filter(is_superuser=0).exclude(id=request.user.id)
+
     cohort = None
     shared_with_users = []
 
-    # service = build('meta', 'v1', discoveryServiceUrl=META_DISCOVERY_URL)
     clin_attr = [
         'Project',
         'Study',
@@ -1046,9 +1046,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             # data_url += '&cohort_id=' + source
             payload['cohort_id'] = source
             parent = Cohort.objects.get(id=source)
-            if deactivate_sources:
-                parent.active = False
-                parent.save()
 
         if filters:
 
@@ -1085,11 +1082,18 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         result = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
         items = json.loads(result.content)
 
-        #it is possible the the filters are creating a cohort with no samples
-        if int(items['count']) == 0 :
-            messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again')
-            redirect_url = reverse('cohort')
-        else :
+        # Do not allow 0 sample cohorts
+        if int(items['count']) == 0:
+            messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
+            if source:
+                redirect_url = reverse('cohort_details', args=[source])
+            else:
+                redirect_url = reverse('cohort')
+        else:
+            if deactivate_sources:
+                parent.active = False
+                parent.save()
+
             items = items['items']
             for item in items:
                 samples.append(item['sample_barcode'])
