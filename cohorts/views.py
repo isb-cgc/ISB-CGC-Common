@@ -449,10 +449,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 feature['values'] = normalize_bmi(feature['values'])
 
             for value, count in feature['values'].items():
+                # Convert all 1/'1' and 0/'0' values to True and False
                 if feature['name'].startswith('has_'):
-                    if value and value != 'None':
+                    if value == 1 or value == '1':
                         value = 'True'
-                    elif not value:
+                    elif value == 0  or value == '0':
                         value = 'False'
 
                 if feature['name'] in DISPLAY_NAME_DD:
