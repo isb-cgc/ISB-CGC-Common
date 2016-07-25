@@ -390,26 +390,32 @@ def register_sa(request, user_id):
             datasets = []
         else:
             datasets = map(int, datasets)
-        logger.info(datasets)
+
         # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
         result = verify_service_account(gcp_id, user_sa, datasets)
         if 'message' in result.keys():
-            logger.info(result)
             messages.error(request, result['message'])
             return redirect('user_gcp_list', user_id=user_id)
+
         elif result['user_dataset_verified']:
-            logger.info('Verified Service Account')
             # Datasets verified, add service accounts to appropriate acl groups
             protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
 
             # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
             public_datasets = AuthorizedDataset.objects.filter(public=True)
             directory_service, http_auth = get_directory_resource()
-            logger.info('Public Datasets: {0}'.format(len(public_datasets)))
-            logger.info('Protected Datasets: {0}'.format(len(protected_datasets)))
             for dataset in public_datasets | protected_datasets:
-                service_account_obj = ServiceAccount(google_project=user_gcp, service_account=user_sa, authorized_dataset=dataset, active=True)
-                service_account_obj.save()
+
+                service_account_obj, created = ServiceAccount.objects.update_or_create(google_project=user_gcp,
+                                                                                       service_account=user_sa,
+                                                                                       authorized_dataset=dataset,
+                                                                                       active=True,
+                                                                                       defaults={
+                                                                                           'google_project': user_gcp,
+                                                                                           'service_account': user_sa,
+                                                                                           'authorized_dataset': dataset,
+                                                                                           'active': True
+                                                                                       })
 
                 try:
                     body = {"email": service_account_obj.service_account, "role": "MEMBER"}
