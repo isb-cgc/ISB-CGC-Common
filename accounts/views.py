@@ -400,8 +400,8 @@ def register_sa(request, user_id):
             # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
             public_datasets = AuthorizedDataset.objects.filter(public=True)
             directory_service, http_auth = get_directory_resource()
-            logger.info('Public Datasets: ' + len(public_datasets))
-            logger.info('Protected Datasets: ' + len(protected_datasets))
+            logger.info('Public Datasets: {0}'.format(len(public_datasets)))
+            logger.info('Protected Datasets: {0}'.format(len(protected_datasets)))
             for dataset in public_datasets | protected_datasets:
                 service_account_obj = ServiceAccount(google_project=user_gcp, service_account=user_sa, authorized_dataset=dataset, active=True)
                 service_account_obj.save()
