@@ -383,9 +383,14 @@ def register_sa(request, user_id):
     elif request.POST.get('gcp_id'):
         gcp_id = request.POST.get('gcp_id')
         user_sa = request.POST.get('user_sa')
-        datasets = request.POST.getlist('datasets')
+        datasets = list(request.POST.get('datasets'))
         user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
+        if len(datasets) == 1 and datasets[0] == '':
+            datasets = []
+        else:
+            datasets = map(int, datasets)
+        logger.info(dataset)
         # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
         result = verify_service_account(gcp_id, user_sa, datasets)
         if 'message' in result.keys():
