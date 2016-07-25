@@ -389,7 +389,7 @@ def register_sa(request, user_id):
         # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
         result = verify_service_account(gcp_id, user_sa, datasets)
         if 'message' in result.keys():
-            messages.error(result['message'])
+            messages.error(request, result['message'])
             return redirect('user_gcp_list', user_id=user_id)
         elif result['user_dataset_verified']:
             # Datasets verified, add service accounts to appropriate acl groups
