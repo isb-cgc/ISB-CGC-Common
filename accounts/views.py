@@ -390,7 +390,7 @@ def register_sa(request, user_id):
             datasets = []
         else:
             datasets = map(int, datasets)
-        logger.info(dataset)
+        logger.info(datasets)
         # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
         result = verify_service_account(gcp_id, user_sa, datasets)
         if 'message' in result.keys():
