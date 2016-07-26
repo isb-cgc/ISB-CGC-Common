@@ -65,6 +65,7 @@ class AuthorizedDataset(models.Model):
     acl_google_group = models.CharField(max_length=256, null=False)
     public = models.BooleanField(default=False)
 
+
 class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
@@ -77,8 +78,8 @@ class ServiceAccount(models.Model):
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True) # Null means open access only
     active = models.BooleanField(default=False, null=False)
 
-    def save(self, *args, **kwargs):
-        if kwargs.get('new_authorized_date', False):
-            self.authorized_date = kwargs.pop('new_authorized_date', datetime.utcnow().replace(tzinfo=pytz.UTC))
-
-        super(ServiceAccount, self).save(*args, **kwargs)
+    # def save(self, *args, **kwargs):
+    #     if kwargs.get('new_authorized_date', False):
+    #         self.authorized_date = kwargs.pop('new_authorized_date', datetime.utcnow().replace(tzinfo=pytz.UTC))
+    #
+    #     super(ServiceAccount, self).save(*args, **kwargs)

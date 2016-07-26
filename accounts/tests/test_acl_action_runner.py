@@ -90,7 +90,8 @@ class TestAccessControlActionRunner(TestCase):
 
         self.account_123 = ServiceAccount(google_project=self.project_123,
                                           service_account="service_account123@developer.gserviceaccount.com",
-                                          authorized_dataset=self.auth_dataset_123)
+                                          authorized_dataset=self.auth_dataset_123,
+                                          active=True)
         self.account_123.save()
 
         self.auth_dataset_456 = AuthorizedDataset(name="dataset456",
@@ -106,7 +107,8 @@ class TestAccessControlActionRunner(TestCase):
 
         self.account_456 = ServiceAccount(google_project=self.project_456,
                                           service_account="service_account456@developer.gserviceaccount.com",
-                                          authorized_dataset=self.auth_dataset_456)
+                                          authorized_dataset=self.auth_dataset_456,
+                                          active=True)
         self.account_456.save()
 
 
@@ -138,21 +140,13 @@ class TestAccessControlActionRunner(TestCase):
         dsu = AccessControlUpdater(whitelist, database_alias='default')
         result = dsu.process()
 
-        print('\nDatasetUpdateResult for test_revoke_one_dataset')
-        print(str(result))
-        '''
-        skipped_era_logins: [],
-        user_auth_dataset_update_result: [<tasks.nih_whitelist_processor.django_utils.ERAUserAuthDatasetUpdateResult object at 0x7f0190c3e450>],
-        service_account_remove_set: set([(u'service_account456@developer.gserviceaccount.com', u'phs000456', u'project-456@acl-groups.org')]),
-        acl_remove_list: []
-        '''
-
         self.assertEquals(len(result.skipped_era_logins), 0)
         self.assertEquals(result.user_auth_dataset_update_result[0].added_dataset_ids, set([]))
         self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set([('phs000456', uad_456.pk)]))
 
         self.assertEquals(len(result.service_account_remove_set), 1)
-        self.assertEquals(list(result.service_account_remove_set)[0], ('service_account456@developer.gserviceaccount.com', 'phs000456', 'project-456@acl-groups.org'))
+        self.assertTrue(('service_account456@developer.gserviceaccount.com', 'phs000456', 'project-456@acl-groups.org')
+                        in result.service_account_remove_set)
 
         self.assertEquals(len(result.acl_remove_list), 0)
 
@@ -167,6 +161,9 @@ class TestAccessControlActionRunner(TestCase):
         acl_runner.run_actions()
 
         self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set([]))
+
+        self.assertFalse(self.account_456.active)
+        self.assertTrue(self.account_123.active)
 
         # The UserAuthorizedDatasets entry for auth_dataset_456 should have been removed
         self.assertEquals(UserAuthorizedDatasets.objects.count(), 1)
@@ -231,3 +228,6 @@ class TestAccessControlActionRunner(TestCase):
     #     # 3. two service accounts. one is expired and one is not.
     #     # the sa_action_list should only have the expired service account
     #     pass
+
+    # def test_service_account_deactivated(self):
+        # deactivated sa is
