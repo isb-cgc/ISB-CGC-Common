@@ -199,18 +199,27 @@ def verify_gcp(request, user_id):
             resource=gcp_id, body={}).execute()
         bindings = iam_policy['bindings']
         roles = {}
+        user = User.objects.get(id=user_id)
+        user_found = False
         for val in bindings:
             role = val['role']
             members = val['members']
             roles[role] = []
+
             for member in members:
                 if member.startswith('user:'):
                     email = member.split(':')[1]
+                    if user.email == email:
+                        user_found = True
                     registered_user = bool(User.objects.filter(email=email).first())
                     roles[role].append({'email': email,
                                        'registered_user': registered_user})
-        return JsonResponse({'roles': roles,
-                            'gcp_id': gcp_id}, status='200')
+
+        if not user_found:
+            return JsonResponse({'message': 'You were not found on the project. You may not register a project you do not belong to.'}, status='403')
+        else:
+            return JsonResponse({'roles': roles,
+                                'gcp_id': gcp_id}, status='200')
     except HttpError:
         return JsonResponse({'message': 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'}, status='403')
 
@@ -295,7 +304,7 @@ def verify_service_account(gcp_id, service_account, datasets):
         if not verified_sa:
             print 'Provided service account does not exist in project.'
             # return error that the service account doesn't exist in this project
-            return JsonResponse({'message': 'The provided service account does not exist in the selected project'}, status='400')
+            return {'message': 'The provided service account does not exist in the selected project'}
 
 
         # 3. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
@@ -333,6 +342,13 @@ def verify_service_account(gcp_id, service_account, datasets):
                         if not member['datasets_valid']:
                             user_dataset_verified = False
 
+                    # IF USER HAS NO ERA COMMONS ID
+                    else:
+                        member['datasets_valid'] = False
+
+                        # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
+                        if datasets:
+                            user_dataset_verified = False
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
                     member['nih_registered'] = False
@@ -364,7 +380,7 @@ def verify_sa(request, user_id):
         status = '200'
         result = verify_service_account(gcp_id, user_sa, datasets)
         if 'message' in result.keys():
-            status='403'
+            status = '400'
 
         result['user_sa'] = user_sa
         result['datasets'] = datasets
