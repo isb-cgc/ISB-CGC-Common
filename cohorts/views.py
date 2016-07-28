@@ -166,6 +166,7 @@ def get_filter_values():
 
 ''' Begin metadata counting methods '''
 
+
 # TODO: needs to be refactored to use other samples tables
 def get_participant_and_sample_count(filter="", cohort_id=None):
 
@@ -449,8 +450,12 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 feature['values'] = normalize_bmi(feature['values'])
 
             for value, count in feature['values'].items():
+                # Convert all 1/'1' and 0/'0' values to True and False
                 if feature['name'].startswith('has_'):
-                    value = ('True' if (value and value != 'None') else 'False')
+                    if value == 1 or value == '1':
+                        value = 'True'
+                    elif value == 0  or value == '0':
+                        value = 'False'
 
                 if feature['name'] in DISPLAY_NAME_DD:
                     value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
@@ -732,7 +737,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     cohort = None
     shared_with_users = []
 
-    # service = build('meta', 'v1', discoveryServiceUrl=META_DISCOVERY_URL)
     clin_attr = [
         'Project',
         'Study',
@@ -757,20 +761,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'icd_o_3_site',
         'icd_o_3_histology'
     ]
-
-    # data_attr = [
-    #     'has_Illumina_DNASeq',
-    #     'has_BCGSC_HiSeq_RNASeq',
-    #     'has_UNC_HiSeq_RNASeq',
-    #     'has_BCGSC_GA_RNASeq',
-    #     'has_UNC_GA_RNASeq',
-    #     'has_HiSeq_miRnaSeq',
-    #     'has_GA_miRNASeq',
-    #     'has_RPPA',
-    #     'has_SNP6',
-    #     'has_27k',
-    #     'has_450k'
-    # ]
 
     data_attr = [
         'DNA_sequencing',
@@ -1022,9 +1012,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             # data_url += '&cohort_id=' + source
             payload['cohort_id'] = source
             parent = Cohort.objects.get(id=source)
-            if deactivate_sources:
-                parent.active = False
-                parent.save()
 
         if filters:
 
@@ -1061,11 +1048,18 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         result = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
         items = json.loads(result.content)
 
-        #it is possible the the filters are creating a cohort with no samples
-        if int(items['count']) == 0 :
-            messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again')
-            redirect_url = reverse('cohort')
-        else :
+        # Do not allow 0 sample cohorts
+        if int(items['count']) == 0:
+            messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
+            if source:
+                redirect_url = reverse('cohort_details', args=[source])
+            else:
+                redirect_url = reverse('cohort')
+        else:
+            if deactivate_sources:
+                parent.active = False
+                parent.save()
+
             items = items['items']
             for item in items:
                 samples.append(item['sample_barcode'])
