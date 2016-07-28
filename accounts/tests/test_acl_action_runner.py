@@ -28,8 +28,9 @@ from django.utils import timezone
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
-from tasks.nih_whitelist_processor.utils import NIHWhitelist, DatasetToACLMapping, ACLGroupSimulator
-from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater, AccessControlActionRunner, ExpiredServiceAccountRemover
+from tasks.nih_whitelist_processor.utils import NIHWhitelist, DatasetToACLMapping, ACLGroupSupportSimulator
+from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater, \
+    AccessControlActionRunner, ExpiredServiceAccountRemover, ServiceAccountDeactivateAction, ServiceAccountRemoveAction
 from tasks.tests.data_generators import create_csv_file_object
 
 logging.basicConfig(
@@ -111,6 +112,20 @@ class TestAccessControlActionRunner(TestCase):
                                           active=True)
         self.account_456.save()
 
+    def do_to_model(self, ModelClass, field_name, func):
+        field = ModelClass._meta.get_field(field_name)
+        func(field)
+
+    def turn_off_auto_now(self, ModelClass, field_name):
+        def auto_now_off(field):
+            field.auto_now = False
+        self.do_to_model(ModelClass, field_name, auto_now_off)
+
+    def turn_on_auto_now(self, ModelClass, field_name):
+        def auto_now_off(field):
+            field.auto_now = True
+        self.do_to_model(ModelClass, field_name, auto_now_off)
+
 
     def test_revoke_one_dataset(self):
         """
@@ -145,25 +160,32 @@ class TestAccessControlActionRunner(TestCase):
         self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set([('phs000456', uad_456.pk)]))
 
         self.assertEquals(len(result.service_account_remove_set), 1)
-        self.assertTrue(('service_account456@developer.gserviceaccount.com', 'phs000456', 'project-456@acl-groups.org')
-                        in result.service_account_remove_set)
+        self.assertIn(('service_account456@developer.gserviceaccount.com', 'phs000456', 'project-456@acl-groups.org'),
+                      result.service_account_remove_set)
 
         self.assertEquals(len(result.acl_remove_list), 0)
 
+        # create ACLGroupSupport simulator
         acl_content = {
-            'project-456@acl-groups.org': ['service_account456@developer.gserviceaccount.com']
+            'project-456@acl-groups.org': ['service_account456@developer.gserviceaccount.com'],
+            'project-123@acl-groups.org': ['service_account123@developer.gserviceaccount.com']
         }
-        acl_controller = ACLGroupSimulator(acl_content)
+        acl_controller = ACLGroupSupportSimulator(acl_content)
         self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set(['service_account456@developer.gserviceaccount.com']))
 
         acl_action_list = result.get_actions()
         acl_runner = AccessControlActionRunner(acl_action_list, acl_controller, self.dataset_acl_mapping, DATABASE_ALIAS)
         acl_runner.run_actions()
 
-        self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set([]))
+        # service account 456 should be deactivated but service account 123 should still be active
+        account_456 = ServiceAccount.objects.using('default').get(pk=self.account_456.pk)
+        account_123 = ServiceAccount.objects.using('default').get(pk=self.account_123.pk)
+        self.assertTrue(account_123.active)
+        self.assertFalse(account_456.active)
 
-        self.assertFalse(self.account_456.active)
-        self.assertTrue(self.account_123.active)
+        # there should be no more members in the project-456 acl group but still one member in project-123 acl group
+        self.assertEquals(acl_controller.get_group_members('project-456@acl-groups.org'), set([]))
+        self.assertEquals(acl_controller.get_group_members('project-123@acl-groups.org'), set(['service_account123@developer.gserviceaccount.com']))
 
         # The UserAuthorizedDatasets entry for auth_dataset_456 should have been removed
         self.assertEquals(UserAuthorizedDatasets.objects.count(), 1)
@@ -171,63 +193,117 @@ class TestAccessControlActionRunner(TestCase):
 
     def test_one_unexpired_service_account(self):
         # 1. one service account that is not expired. run esar and the sa_action_list should be empty
-
-        test_csv_data = [
-            ['Test User', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
-             'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000',
-             ''],
-            ['Test User2', 'USERNAME2', 'eRA', 'PI', 'username2@fake.com', '555-555-5555', 'active', 'phs000456.v1.p1.c1',
-             'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000',
-             '']
-        ]
-        account_123_expired = ServiceAccount(google_project=self.project_123,
-                                             service_account="service_account_expired123@developer.gserviceaccount.com",
-                                             authorized_dataset=self.auth_dataset_123,
-                                             active=True)
-        # eight_days_ago_unaware = datetime.datetime.utcnow() - datetime.timedelta(days=8, minutes=1)
-        # eight_days_ago_aware = eight_days_ago_unaware.replace(tzinfo=pytz.UTC)
-        eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
-        print('\n.is_aware()')
-        print(timezone.is_aware(eight_days_ago))
-
-        account_123_expired.save(new_authorized_date=eight_days_ago)
-
-        # whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
-        #
-        # dsu = AccessControlUpdater(whitelist, database_alias='default')
-        # result = dsu.process()
-        #
-        # print('\nDatasetUpdateResult for test_one_unexpired_service_account')
-        # print(str(result))
-        # '''
-        # skipped_era_logins: ['USERNAME2'],
-        # user_auth_dataset_update_result: [<tasks.nih_whitelist_processor.django_utils.ERAUserAuthDatasetUpdateResult object at 0x7fc0370f04d0>],
-        # service_account_remove_set: set([]), acl_remove_list: []
-        # '''
-        # action_list = result.get_actions()
-        # print('\naction_list')
-        # print(action_list)
-        # '''
-        # [<tasks.nih_whitelist_processor.django_utils.UserAuthorizedDatasetCreateAction object at 0x7f015ad86990>]
-        # '''
+        account_123_unexpired = ServiceAccount(google_project=self.project_123,
+                                               service_account="service_account_unexpired123@developer.gserviceaccount.com",
+                                               authorized_dataset=self.auth_dataset_123,
+                                               active=True)
+        account_123_unexpired.save()
 
         expired_service_account_remover = ExpiredServiceAccountRemover('default')
         # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
-        dataset_update_result = expired_service_account_remover.process('default')
-        # the get_actions function will return a list of ServiceAccountRemoveAction instances
+        dataset_update_result = expired_service_account_remover.process()
+        # the get_actions function will return a list of ServiceAccountRemoveAction and ServiceAccountDeactivateAction instances
         service_account_action_list = dataset_update_result.get_actions()
-        print('\nservice_account_action_list')
-        print(service_account_action_list)
-    #
-    #
-    # def test_one_expired_service_account(self):
-    #     # 2. one service account that *is* expired. run esar and the sa_action_list should have a removal action
-    #     pass
-    #
-    # def test_one_expired_one_unexpired_service_account(self):
-    #     # 3. two service accounts. one is expired and one is not.
-    #     # the sa_action_list should only have the expired service account
-    #     pass
 
-    # def test_service_account_deactivated(self):
-        # deactivated sa is
+        self.assertEqual(len(service_account_action_list), 0)
+
+    def test_one_expired_service_account(self):
+        # 2. one service account that *is* expired. run esar and the sa_action_list should have a removal action
+
+
+        self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+
+        eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
+        account_123_expired = ServiceAccount(google_project=self.project_123,
+                                             service_account="service_account_expired123@developer.gserviceaccount.com",
+                                             authorized_date=eight_days_ago,
+                                             authorized_dataset=self.auth_dataset_123,
+                                             active=True)
+        account_123_expired.save()
+
+        self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+
+        expired_service_account_remover = ExpiredServiceAccountRemover('default')
+        # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
+        dataset_update_result = expired_service_account_remover.process()
+        # the get_actions function will return a list of ServiceAccountRemoveAction and ServiceAccountDeactivateAction instances
+        service_account_action_list = dataset_update_result.get_actions()
+        self.assertIsInstance(service_account_action_list[0], ServiceAccountRemoveAction)
+        self.assertIsInstance(service_account_action_list[1], ServiceAccountDeactivateAction)
+        self.assertEqual(service_account_action_list[0].service_account_name, account_123_expired.service_account)
+        self.assertEqual(service_account_action_list[1].service_account_name, account_123_expired.service_account)
+
+    def test_one_expired_one_unexpired_service_account(self):
+        # 3. two service accounts. one is expired and one is not.
+        # the sa_action_list should only have the expired service account
+
+        account_123_unexpired = ServiceAccount(google_project=self.project_123,
+                                               service_account="service_account_unexpired123@developer.gserviceaccount.com",
+                                               authorized_dataset=self.auth_dataset_123,
+                                               active=True)
+        account_123_unexpired.save()
+
+        self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+
+        eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
+        account_123_expired = ServiceAccount(google_project=self.project_123,
+                                             service_account="service_account_expired123@developer.gserviceaccount.com",
+                                             authorized_date=eight_days_ago,
+                                             authorized_dataset=self.auth_dataset_123,
+                                             active=True)
+        account_123_expired.save()
+
+        self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+
+        expired_service_account_remover = ExpiredServiceAccountRemover('default')
+        # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
+        dataset_update_result = expired_service_account_remover.process()
+        # the get_actions function will return a list of ServiceAccountRemoveAction and ServiceAccountDeactivateAction instances
+        service_account_action_list = dataset_update_result.get_actions()
+        self.assertEqual(len(service_account_action_list), 2)
+        self.assertIsInstance(service_account_action_list[0], ServiceAccountRemoveAction)
+        self.assertIsInstance(service_account_action_list[1], ServiceAccountDeactivateAction)
+        self.assertEqual(service_account_action_list[0].service_account_name, account_123_expired.service_account)
+        self.assertEqual(service_account_action_list[1].service_account_name, account_123_expired.service_account)
+
+    def test_expired_service_account_deactivated_and_removed(self):
+
+        self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+
+        eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
+        account_123_expired = ServiceAccount(google_project=self.project_123,
+                                             service_account="service_account_expired123@developer.gserviceaccount.com",
+                                             authorized_date=eight_days_ago,
+                                             authorized_dataset=self.auth_dataset_123,
+                                             active=True)
+        account_123_expired.save()
+
+        self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+
+        expired_service_account_remover = ExpiredServiceAccountRemover('default')
+        # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
+        dataset_update_result = expired_service_account_remover.process()
+        # the get_actions function will return a list of ServiceAccountRemoveAction and ServiceAccountDeactivateAction instances
+        service_account_action_list = dataset_update_result.get_actions()
+
+        # create ACLGroupSupport simulator
+        acl_content = {
+            'project-123@acl-groups.org': ['service_account_expired123@developer.gserviceaccount.com']
+        }
+        acl_controller = ACLGroupSupportSimulator(acl_content)
+
+        service_account_acl_runner = AccessControlActionRunner(service_account_action_list,
+                                               acl_controller,
+                                               self.dataset_acl_mapping,
+                                               DATABASE_ALIAS)
+        service_account_acl_runner.run_actions()
+
+        # expired service account 123 should be deactivated
+        account_123_expired = ServiceAccount.objects.using('default').get(pk=account_123_expired.pk)
+        self.assertFalse(account_123_expired.active)
+
+        # there should be no members in the project-123 acl group
+        self.assertEquals(acl_controller.get_group_members('project-123@acl-groups.org'), set([]))
+
+
+
