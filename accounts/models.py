@@ -77,9 +77,3 @@ class ServiceAccount(models.Model):
     authorized_date = models.DateTimeField(auto_now=True)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True) # Null means open access only
     active = models.BooleanField(default=False, null=False)
-
-    # def save(self, *args, **kwargs):
-    #     if kwargs.get('new_authorized_date', False):
-    #         self.authorized_date = kwargs.pop('new_authorized_date', datetime.utcnow().replace(tzinfo=pytz.UTC))
-    #
-    #     super(ServiceAccount, self).save(*args, **kwargs)
