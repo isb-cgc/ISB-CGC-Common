@@ -61,7 +61,29 @@ from accounts.models import NIH_User
 
 from api.api_helpers import *
 from api.metadata import METADATA_SHORTLIST
-from api.metadata import MOLECULAR_SHORTLIST
+
+# WebApp list of the items from Somatic_mutation_calls which we want to filter on
+MOLECULAR_SHORTLIST = [
+    'Missense_Mutation',
+    'Frame_Shift_Del',
+    'Frame_Shift_Ins',
+    'Nonsense_Mutation',
+    'In_Frame_Del',
+    'In_Frame_Ins',
+    'Start_Codon_SNP',
+    'Nonstop_Mutation',
+    'De_novo_Start_OutOfFrame',
+    'Start_Codon_Del',
+    'Silent',
+    'RNA',
+    'Intron',
+    'lincRNA',
+    'Splice_Site',
+    "3'UTR",
+    "5'UTR",
+    'IGR',
+    "5'Flank",
+]
 
 # For database values which have display names which are needed by templates but not stored directly in the dsatabase
 DISPLAY_NAME_DD = {
@@ -89,13 +111,24 @@ DISPLAY_NAME_DD = {
     },
     'Somatic_Mutations': {
         'Missense_Mutation': 'Missense Mutation',
-        'Frame_Shift_Ins': 'Frame Shift: Insertion',
-        'Frame_Shift_Del': 'Frame Shift: Deletion',
+        'Frame_Shift_Del': 'Frame Shift - Deletion',
+        'Frame_Shift_Ins': 'Frame Shift - Insertion',
+        'De_novo_Start_OutOfFrame': 'De novo Start Out of Frame',
+        'In_Frame_Del': 'In Frame Deletion',
+        'In_Frame_Ins': 'In Frame Insertion',
         'Nonsense_Mutation': 'Nonsense Mutation',
-        'Splice_Site': 'Splice Site',
+        'Start_Codon_SNP': 'Start Codon - SNP',
+        'Start_Codon_Del': 'Start Codon - Deletion',
+        'Nonstop_Mutation': 'Nonstop Mutation',
         'Silent': 'Silent',
         'RNA': 'RNA',
         'Intron': 'Intron',
+        'lincRNA': 'lincRNA',
+        'Splice_Site': 'Splice Site',
+        "3'UTR": '3\' UTR',
+        "5'UTR": '5\' UTR',
+        'IGR': 'IGR',
+        "5'Flank": '5\' Flank',
     }
 }
 
@@ -414,17 +447,39 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
         if mutation_where_clause:
+            cohort_join_str = ''
+            cohort_where_str = ''
+            bq_cohort_table = ''
+            bq_cohort_dataset = ''
+            cohort = ''
+            query_template = None
 
-            query_template = \
-                ("SELECT Tumor_SampleBarcode "
-                 "FROM [{project_name}:{dataset_name}.{table_name}] " +
-                 "WHERE " + mutation_where_clause['big_query_str'] + " GROUP BY Tumor_SampleBarcode; ")
+            if cohort_id is not None:
+                query_template = \
+                    ("SELECT ct.sample_barcode"
+                     " FROM [{project_name}:{cohort_dataset}.{cohort_table}] ct"
+                     " JOIN (SELECT Tumor_SampleBarcode AS barcode "
+                     " FROM [{project_name}:{dataset_name}.{table_name}]"
+                     " WHERE " + mutation_where_clause['big_query_str'] +
+                     " GROUP BY barcode) mt"
+                     " ON mt.barcode = ct.sample_barcode"
+                     " WHERE ct.cohort_id = {cohort};")
+                bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
+                bq_cohort_dataset = settings.COHORT_DATASET_ID
+                cohort = cohort_id
+            else:
+                query_template = \
+                    ("SELECT Tumor_SampleBarcode"
+                     " FROM [{project_name}:{dataset_name}.{table_name}]"
+                     " WHERE " + mutation_where_clause['big_query_str'] +
+                     " GROUP BY Tumor_SampleBarcode; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
-            query = query_template.format(dataset_name="tcga_201510_alpha", project_name=settings.BIGQUERY_PROJECT_NAME,
+            query = query_template.format(dataset_name=settings.BIGQUERY_DATASET, project_name=settings.BIGQUERY_PROJECT_NAME,
                                           table_name="Somatic_Mutation_calls", hugo_symbol=str(params['gene']),
-                                          var_class=params['var_class'])
+                                          var_class=params['var_class'], cohort_dataset=bq_cohort_dataset,
+                                          cohort_table=bq_cohort_table, cohort=cohort)
 
             bq_service = authorize_credentials_with_Google()
             query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, query)
@@ -929,22 +984,22 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'miRNA_sequencing',
         'Protein',
         'SNP_CN',
-        'DNA_methylation'
+        'DNA_methylation',
     ]
 
     molecular_attr = {
         'categories': [
-            {'name': 'Silent', 'value': 'silent', 'count': 0, 'attrs': {
-                'Silent': 1,
-                'RNA': 1,
-                'Intron': 1,
-            }},
             {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
-                'Frame_Shift_Ins': 1,
-                'Frame_Shift_Del': 1,
                 'Missense_Mutation': 1,
                 'Nonsense_Mutation': 1,
-                'Splice_Site': 1,
+                'Nonstop_Mutation': 1,
+                'Frame_Shift_Del': 1,
+                'Frame_Shift_Ins': 1,
+                'De_novo_Start_OutOfFrame': 1,
+                'In_Frame_Del': 1,
+                'In_Frame_Ins': 1,
+                'Start_Codon_SNP': 1,
+                'Start_Codon_Del': 1,
             }},
         ],
         'attrs': []
@@ -977,7 +1032,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     if USER_DATA_ON:
         # Add in user data
-        user_attr = ['user_project','user_study']
+        user_attr = ['user_project', 'user_study']
         projects = Project.get_user_projects(request.user, True)
         studies = Study.get_user_studies(request.user, True)
         features = User_Feature_Definitions.objects.filter(study__in=studies)
