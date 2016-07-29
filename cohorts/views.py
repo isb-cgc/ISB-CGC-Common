@@ -995,7 +995,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     start = time.time()
     results = metadata_counts_platform_list(None, cohort_id if cohort_id else None, user, None)
-    print >> sys.stdout, results
 
     stop = time.time()
     logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
@@ -1256,8 +1255,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 payload['filters'] = json.dumps(filter_obj)
         result = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
         items = json.loads(result.content)
-
-        print >> sys.stdout, items.__str__()
 
         # Do not allow 0 sample cohorts
         if int(items['count']) == 0:
