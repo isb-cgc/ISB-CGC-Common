@@ -498,12 +498,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
             # for-each result, add to list
 
             if results.__len__() > 0:
-
                 for barcode in results:
                     barcodes.append(str(barcode['f'][0]['v']))
-                print >> sys.stdout, barcodes.__str__()
+
             else:
-                print >> sys.stdout, "Mutation result was empty!"
+                print >> sys.stdout, "Mutation filter result was empty!"
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
@@ -1252,7 +1251,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             parent = Cohort.objects.get(id=source)
 
         if filters:
-
             filter_obj = []
             for filter in filters:
                 tmp = json.loads(filter)
@@ -1285,6 +1283,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 payload['filters'] = json.dumps(filter_obj)
         result = urlfetch.fetch(data_url, method=urlfetch.POST, payload=json.dumps(payload), deadline=60, headers={'Content-Type': 'application/json'})
         items = json.loads(result.content)
+
+        print >> sys.stdout, items.__str__()
 
         # Do not allow 0 sample cohorts
         if int(items['count']) == 0:
