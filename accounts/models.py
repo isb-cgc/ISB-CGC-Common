@@ -18,7 +18,6 @@ limitations under the License.
 
 from django.db import models
 from django.contrib.auth.models import User
-from django.contrib import admin
 
 
 class NIH_User(models.Model):
@@ -63,6 +62,7 @@ class AuthorizedDataset(models.Model):
     acl_google_group = models.CharField(max_length=256, null=False)
     public = models.BooleanField(default=False)
 
+
 class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
@@ -72,5 +72,5 @@ class ServiceAccount(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     service_account = models.CharField(max_length=1024, null=False)
     authorized_date = models.DateTimeField(auto_now=True)
-    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True) # Null means open access only
+    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True)
     active = models.BooleanField(default=False, null=False)
