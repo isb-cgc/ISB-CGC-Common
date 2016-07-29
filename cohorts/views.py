@@ -934,7 +934,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'SampleTypeCode',
         'tumor_tissue_site',
         'histological_type',
-        'prior_dx',
+        'other_dx',
         'pathologic_stage',
         'person_neoplasm_cancer_status',
         'new_tumor_event_after_initial_treatment',

@@ -274,7 +274,8 @@ def user_gcp_delete(request, user_id, gcp_id):
 
 
 def verify_service_account(gcp_id, service_account, datasets):
-    dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets)
+    # Only verify for protected datasets
+    dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_ids = dataset_objs.values_list('id', flat=True)
 
     # 1. GET ALL USERS ON THE PROJECT.
@@ -347,13 +348,13 @@ def verify_service_account(gcp_id, service_account, datasets):
                         member['datasets_valid'] = False
 
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
-                        if datasets:
+                        if dataset_objs:
                             user_dataset_verified = False
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
                     member['nih_registered'] = False
                     member['datasets'] = []
-                    if datasets:
+                    if dataset_objs:
                         user_dataset_verified = False
 
                 # 4. VERIFY PI IS ON THE PROJECT
@@ -425,7 +426,6 @@ def register_sa(request, user_id):
                 service_account_obj, created = ServiceAccount.objects.update_or_create(google_project=user_gcp,
                                                                                        service_account=user_sa,
                                                                                        authorized_dataset=dataset,
-                                                                                       active=True,
                                                                                        defaults={
                                                                                            'google_project': user_gcp,
                                                                                            'service_account': user_sa,
