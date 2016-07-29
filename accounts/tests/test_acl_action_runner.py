@@ -163,8 +163,6 @@ class TestAccessControlActionRunner(TestCase):
         self.assertIn(('service_account456@developer.gserviceaccount.com', 'phs000456', 'project-456@acl-groups.org'),
                       result.service_account_remove_set)
 
-        self.assertEquals(len(result.acl_remove_list), 0)
-
         # create ACLGroupSupport simulator
         acl_content = {
             'project-456@acl-groups.org': ['service_account456@developer.gserviceaccount.com'],
