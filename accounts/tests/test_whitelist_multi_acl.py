@@ -107,7 +107,7 @@ class TestWhitelistMultiACL(TestCase):
         self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set([]))
 
         # The service account should not be removed
-        self.assertEquals(len(result.service_account_remove_list), 0)
+        self.assertEquals(result.service_account_remove_set, set([]))
 
     def test_one_user_auth_dataset(self):
         """
@@ -131,7 +131,7 @@ class TestWhitelistMultiACL(TestCase):
         self.assertEquals(result.user_auth_dataset_update_result[0].revoked_dataset_ids, set([]))
 
         # The service account should not be removed
-        self.assertEquals(len(result.service_account_remove_list), 0)
+        self.assertEquals(result.service_account_remove_set, set([]))
 
 
 class TestWhitelistServiceAccountRevoke(TestCase):
