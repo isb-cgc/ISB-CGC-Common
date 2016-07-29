@@ -643,11 +643,61 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
 
         sample_and_participant_counts = get_participant_and_sample_count(filter_table, cursor)
 
+        if cursor: cursor.close()
+
+        data = []
+
+        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+        query_str = """
+            SELECT IF(has_Illumina_DNASeq=1,'Yes', 'None') AS DNAseq_data,
+                IF (has_SNP6=1, 'Genome_Wide_SNP_6', 'None') as cnvrPlatform,
+                CASE
+                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'HiSeq/BCGSC'
+                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=1 THEN 'HiSeq/BCGSC and UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=1 THEN 'GA and HiSeq/UNC V2'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=1 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and GA/BCGSC'
+                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=1 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and BCGSC'
+                    WHEN has_BCGSC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/BCGSC'
+                    WHEN has_UNC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/UNC V2' ELSE 'None'
+                END AS gexpPlatform,
+                CASE
+                    WHEN has_27k=1 and has_450k=0 THEN 'HumanMethylation27'
+                    WHEN has_27k=0 and has_450k=1 THEN 'HumanMethylation450'
+                    WHEN has_27k=1 and has_450k=1 THEN '27k and 450k' ELSE 'None'
+                END AS methPlatform,
+                CASE
+                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=0 THEN 'IlluminaHiSeq_miRNASeq'
+                    WHEN has_HiSeq_miRnaSeq=0 and has_GA_miRNASeq=1 THEN 'IlluminaGA_miRNASeq'
+                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=1 THEN 'GA and HiSeq'	ELSE 'None'
+                END AS mirnPlatform,
+                IF (has_RPPA=1, 'MDA_RPPA_Core', 'None') AS rppaPlatform
+                FROM %s
+        """ % filter_table
+
+        start = time.time()
+        cursor.execute(query_str)
+        stop = time.time()
+        logger.debug("[BENCHMARKING] Time to query platforms in metadata_counts_platform_list for cohort '" +
+                     (cohort_id if cohort_id is not None else 'None') + "': " + (stop - start).__str__())
+        for row in cursor.fetchall():
+            item = {
+                'DNAseq_data': str(row['DNAseq_data']),
+                'cnvrPlatform': str(row['cnvrPlatform']),
+                'gexpPlatform': str(row['gexpPlatform']),
+                'methPlatform': str(row['methPlatform']),
+                'mirnPlatform': str(row['mirnPlatform']),
+                'rppaPlatform': str(row['rppaPlatform']),
+            }
+            data.append(item)
+
         # Drop the temporary tables
         if tmp_cohort_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_cohort_table)
         if tmp_filter_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_filter_table)
         if tmp_mut_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_mut_table)
 
+        counts_and_total['data'] = data
         counts_and_total['participants'] = sample_and_participant_counts['participant_count']
         counts_and_total['total'] = sample_and_participant_counts['sample_count']
         counts_and_total['counts'] = []
@@ -715,89 +765,11 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
         + ": " + (stop - start).__str__()
     )
 
-    data = []
 
-    cursor = None
+    return {'items': counts_and_total['data'], 'count': counts_and_total['counts'],
+            'participants': counts_and_total['participants'],
+            'total': counts_and_total['total']}
 
-    try:
-        db = get_sql_connection()
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
-
-        query_str = """
-            SELECT IF(has_Illumina_DNASeq=1,'Yes', 'None') AS DNAseq_data,
-                IF (has_SNP6=1, 'Genome_Wide_SNP_6', 'None') as cnvrPlatform,
-                CASE
-                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'HiSeq/BCGSC'
-                    WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=1 THEN 'HiSeq/BCGSC and UNC V2'
-                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2'
-                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=1 THEN 'GA and HiSeq/UNC V2'
-                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=1 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and GA/BCGSC'
-                    WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=1 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and BCGSC'
-                    WHEN has_BCGSC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/BCGSC'
-                    WHEN has_UNC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/UNC V2' ELSE 'None'
-                END AS gexpPlatform,
-                CASE
-                    WHEN has_27k=1 and has_450k=0 THEN 'HumanMethylation27'
-                    WHEN has_27k=0 and has_450k=1 THEN 'HumanMethylation450'
-                    WHEN has_27k=1 and has_450k=1 THEN '27k and 450k' ELSE 'None'
-                END AS methPlatform,
-                CASE
-                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=0 THEN 'IlluminaHiSeq_miRNASeq'
-                    WHEN has_HiSeq_miRnaSeq=0 and has_GA_miRNASeq=1 THEN 'IlluminaGA_miRNASeq'
-                    WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=1 THEN 'GA and HiSeq'	ELSE 'None'
-                END AS mirnPlatform,
-                IF (has_RPPA=1, 'MDA_RPPA_Core', 'None') AS rppaPlatform
-        """
-
-        params_tuple = ()
-
-        # TODO: This should take into account variable tables; may require a UNION statement or similar
-        if cohort_id is not None:
-            query_str += """FROM cohorts_samples cs
-                JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
-                WHERE cohort_id = %s """
-            params_tuple += (cohort_id,)
-        else:
-            query_str += "FROM metadata_samples ms "
-
-        if filters.__len__() > 0:
-            filter_copy = copy.deepcopy(filters)
-            where_clause = build_where_clause(filter_copy)
-            query_str += "WHERE " if cohort_id is None else "AND "
-            query_str += where_clause['query_str']
-            params_tuple += where_clause['value_tuple']
-
-        if limit is not None:
-            query_str += " LIMIT %s;"
-            params_tuple += (limit,)
-        else:
-            query_str += ";"
-
-        start = time.time()
-        cursor.execute(query_str, params_tuple)
-        stop = time.time()
-        logger.debug("[BENCHMARKING] Time to query platforms in metadata_counts_platform_list for cohort '" +
-                     (cohort_id if cohort_id is not None else 'None') + "': " + (stop - start).__str__())
-        for row in cursor.fetchall():
-            item = {
-                'DNAseq_data': str(row['DNAseq_data']),
-                'cnvrPlatform': str(row['cnvrPlatform']),
-                'gexpPlatform': str(row['gexpPlatform']),
-                'methPlatform': str(row['methPlatform']),
-                'mirnPlatform': str(row['mirnPlatform']),
-                'rppaPlatform': str(row['rppaPlatform']),
-            }
-            data.append(item)
-
-        return {'items': data, 'count': counts_and_total['counts'],
-                'participants': counts_and_total['participants'],
-                'total': counts_and_total['total']}
-
-    except Exception as e:
-        print traceback.format_exc()
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 ''' End metadata counting methods '''
 
@@ -1023,6 +995,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     start = time.time()
     results = metadata_counts_platform_list(None, cohort_id if cohort_id else None, user, None)
+    print >> sys.stdout, results
 
     stop = time.time()
     logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
