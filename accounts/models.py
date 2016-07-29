@@ -18,9 +18,6 @@ limitations under the License.
 
 from django.db import models
 from django.contrib.auth.models import User
-from datetime import datetime, tzinfo
-import pytz
-from django.contrib import admin
 
 
 class NIH_User(models.Model):
