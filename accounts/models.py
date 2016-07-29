@@ -18,6 +18,8 @@ limitations under the License.
 
 from django.db import models
 from django.contrib.auth.models import User
+from datetime import datetime, tzinfo
+import pytz
 from django.contrib import admin
 
 
@@ -62,6 +64,7 @@ class AuthorizedDataset(models.Model):
     whitelist_id = models.CharField(max_length=256, null=False)
     acl_google_group = models.CharField(max_length=256, null=False)
     public = models.BooleanField(default=False)
+
 
 class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)

@@ -35,7 +35,7 @@ logging.basicConfig(
 class TestUserAuthDatasets(TestCase):
     def test_one_dataset(self):
         test_csv_data = [
-            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123',
+            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
@@ -67,11 +67,11 @@ class TestUserAuthDatasets(TestCase):
         # Parse whitelist and created populate AuthorizedDataset objects
         self.assertEquals(AuthorizedDataset.objects.count(), 0)
         whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
-        NIHDatasetAdder(whitelist, dataset_acl_mapping).process_whitelist()
+        NIHDatasetAdder(whitelist, 'default', dataset_acl_mapping).process_whitelist()
         self.assertEquals(AuthorizedDataset.objects.count(), 1)
         dataset_phs000123 = AuthorizedDataset.objects.get(whitelist_id='phs000123')
 
-        era_user_auth_updater = ERAUserAuthDatasetUpdater(nih_user, whitelist)
+        era_user_auth_updater = ERAUserAuthDatasetUpdater(nih_user, whitelist, 'default')
         # The class should find no authorized datasets for the user
         current_user_datasets = era_user_auth_updater.get_current_user_authorized_datasets()
         self.assertEquals(current_user_datasets, set([]))
@@ -85,11 +85,3 @@ class TestUserAuthDatasets(TestCase):
         revoked_user_datasets = era_user_auth_updater.get_revoked_user_datasets(current_user_datasets,
                                                                                 era_user_auth_updater.get_datasets_from_whitelist())
         self.assertEquals(revoked_user_datasets, set([]))
-
-        era_user_auth_updater.process()
-        # The missing dataset should have been added for nih_user
-        self.assertEquals(UserAuthorizedDatasets.objects.count(), 1)
-        self.assertEquals(UserAuthorizedDatasets.objects.filter(nih_user=nih_user).count(), 1)
-        self.assertEquals(UserAuthorizedDatasets.objects.filter(nih_user=nih_user, authorized_dataset=dataset_phs000123).count(), 1)
-
-
