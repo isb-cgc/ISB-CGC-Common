@@ -547,9 +547,9 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
             """ % tmp_cohort_table
             if tmp_mut_table:
-                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode ' % tmp_mut_table)
+                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_id' % tmp_mut_table)
             # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
-            make_cohort_table_str += 'WHERE cs.cohort_id = %s;'
+            make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
         # If there are filters, create a temporary table filtered off the base table
@@ -731,7 +731,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         return counts_and_total
 
     except (Exception) as e:
-        print traceback.format_exc()
+        logger.error(traceback.format_exc())
+        print >> sys.stderr, traceback.format_exc()
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -978,6 +979,12 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     for mol_attr in MOLECULAR_SHORTLIST:
         molecular_attr['attrs'].append({'name': DISPLAY_NAME_DD['Somatic_Mutations'][mol_attr], 'value': mol_attr, 'count': 0})
+
+    for cat in molecular_attr['categories']:
+        for attr in cat['attrs']:
+            ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
+            if ma:
+                ma['category'] = cat['value']
 
     molec_attr = [
         'somatic_mutation_status',
