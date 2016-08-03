@@ -74,3 +74,10 @@ class ServiceAccount(models.Model):
     authorized_date = models.DateTimeField(auto_now=True)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True)
     active = models.BooleanField(default=False, null=False)
+
+    def __str__(self):
+        return '{service_account} of project {google_project} for dataset id {authorized_dataset}'.format(
+            service_account=self.service_account,
+            google_project=str(self.google_project),
+            authorized_dataset=self.authorized_dataset.whitelist_id
+        )
