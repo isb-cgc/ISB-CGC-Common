@@ -71,9 +71,13 @@ MOLECULAR_SHORTLIST = [
     'In_Frame_Del',
     'In_Frame_Ins',
     'Start_Codon_SNP',
+    'Start_Codon_Del',
+    'Start_Codon_Ins',
+    'Stop_Codon_Del',
+    'Stop_Codon_Ins',
     'Nonstop_Mutation',
     'De_novo_Start_OutOfFrame',
-    'Start_Codon_Del',
+    'De_novo_Start_InFrame',
     'Silent',
     'RNA',
     'Intron',
@@ -114,11 +118,15 @@ DISPLAY_NAME_DD = {
         'Frame_Shift_Del': 'Frame Shift - Deletion',
         'Frame_Shift_Ins': 'Frame Shift - Insertion',
         'De_novo_Start_OutOfFrame': 'De novo Start Out of Frame',
+        'De_novo_Start_InFrame': 'De novo Start In Frame',
         'In_Frame_Del': 'In Frame Deletion',
         'In_Frame_Ins': 'In Frame Insertion',
         'Nonsense_Mutation': 'Nonsense Mutation',
         'Start_Codon_SNP': 'Start Codon - SNP',
         'Start_Codon_Del': 'Start Codon - Deletion',
+        'Start_Codon_Ins': 'Start Codon - Insertion',
+        'Stop_Codon_Del': 'Stop Codon - Deletion',
+        'Stop_Codon_Ins': 'Stop Codon - Insertion',
         'Nonstop_Mutation': 'Nonstop Mutation',
         'Silent': 'Silent',
         'RNA': 'RNA',
@@ -547,9 +555,9 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
                 JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
             """ % tmp_cohort_table
             if tmp_mut_table:
-                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode ' % tmp_mut_table)
+                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_id' % tmp_mut_table)
             # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
-            make_cohort_table_str += 'WHERE cs.cohort_id = %s;'
+            make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
         # If there are filters, create a temporary table filtered off the base table
@@ -731,7 +739,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, filters=None):
         return counts_and_total
 
     except (Exception) as e:
-        print traceback.format_exc()
+        logger.error(traceback.format_exc())
+        print >> sys.stderr, traceback.format_exc()
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -967,10 +976,14 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
                 'Frame_Shift_Del': 1,
                 'Frame_Shift_Ins': 1,
                 'De_novo_Start_OutOfFrame': 1,
+                'De_novo_Start_InFrame': 1,
                 'In_Frame_Del': 1,
                 'In_Frame_Ins': 1,
                 'Start_Codon_SNP': 1,
                 'Start_Codon_Del': 1,
+                'Start_Codon_Ins': 1,
+                'Stop_Codon_Del': 1,
+                'Stop_Codon_Ins': 1,
             }},
         ],
         'attrs': []
@@ -978,6 +991,12 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     for mol_attr in MOLECULAR_SHORTLIST:
         molecular_attr['attrs'].append({'name': DISPLAY_NAME_DD['Somatic_Mutations'][mol_attr], 'value': mol_attr, 'count': 0})
+
+    for cat in molecular_attr['categories']:
+        for attr in cat['attrs']:
+            ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
+            if ma:
+                ma['category'] = cat['value']
 
     molec_attr = [
         'somatic_mutation_status',

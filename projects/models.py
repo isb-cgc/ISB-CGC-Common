@@ -7,6 +7,7 @@ from data_upload.models import UserUpload
 from accounts.models import GoogleProject, Bucket
 from sharing.models import Shared_Resource
 
+
 class ProjectManager(models.Manager):
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
@@ -19,6 +20,7 @@ class ProjectManager(models.Manager):
 
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
+
 
 class Project(models.Model):
     id = models.AutoField(primary_key=True)
@@ -69,10 +71,12 @@ class Project(models.Model):
     def __str__(self):
         return self.name
 
+
 class Project_Last_View(models.Model):
     project = models.ForeignKey(Project, blank=False)
     user = models.ForeignKey(User, null=False, blank=False)
     last_view = models.DateTimeField(auto_now=True)
+
 
 class Study(models.Model):
     name = models.CharField(max_length=255)
@@ -127,6 +131,10 @@ class Study(models.Model):
     def __str__(self):
         return self.name
 
+    class Meta:
+        verbose_name_plural = "studies"
+
+
 class Study_Last_View(models.Model):
     study = models.ForeignKey(Study, blank=False)
     user = models.ForeignKey(User, null=False, blank=False)
@@ -140,10 +148,12 @@ class User_Feature_Definitions(models.Model):
     is_numeric = models.BooleanField(default=False)
     shared_map_id = models.CharField(max_length=128, null=True, blank=True)
 
+
 class User_Feature_Counts(models.Model):
     feature = models.ForeignKey(User_Feature_Definitions, null=False)
     value = models.TextField()
     count = models.IntegerField()
+
 
 class User_Data_Tables(models.Model):
     metadata_data_table = models.CharField(max_length=200)
@@ -154,3 +164,7 @@ class User_Data_Tables(models.Model):
     data_upload = models.ForeignKey(UserUpload, null=True, blank=True)
     google_project = models.ForeignKey(GoogleProject)
     google_bucket = models.ForeignKey(Bucket)
+
+    class Meta:
+        verbose_name = "user data table"
+        verbose_name_plural = "user data tables"
