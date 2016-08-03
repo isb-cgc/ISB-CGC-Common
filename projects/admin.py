@@ -31,6 +31,7 @@ class Project_Admin(admin.ModelAdmin):
     )
     exclude = ('shared',)
 
+
 class Study_Admin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -41,12 +42,14 @@ class Study_Admin(admin.ModelAdmin):
         'extends'
     )
 
+
 class UserDataTable_Admin(admin.ModelAdmin):
     list_display = (
         'study',
         'google_project',
         'google_bucket',
     )
+
 
 admin.site.register(Project, Project_Admin)
 admin.site.register(Study, Study_Admin)
