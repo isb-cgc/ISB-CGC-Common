@@ -173,7 +173,7 @@ def get_sql_connection():
 
         return db
 
-    except:
+    except Exception as e:
         logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
         if db and db.open(): db.close()
 
@@ -449,7 +449,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
                     barcodes.append(str(barcode['f'][0]['v']))
 
             else:
-                logger.warn("Mutation filter result returned no results!")
+                logger.info("Mutation filter result returned no results!")
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
@@ -579,7 +579,7 @@ def get_participant_and_sample_count(base_table, cursor):
         return counts
 
     except Exception as e:
-        print traceback.format_exc()
+        logger.error(traceback.format_exc())
         if cursor: cursor.close()
 
 
@@ -786,7 +786,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     barcodes.append(str(barcode['f'][0]['v']))
 
             else:
-                logger.warn("Mutation filter result was empty!")
+                logger.info("Mutation filter result was empty!")
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
@@ -1033,10 +1033,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
                 filters[key]['values'].append(this_filter['value'])
 
         except Exception, e:
-            print traceback.format_exc()
-            raise Exception(
-                'Filters must be a valid JSON formatted array with objects containing both key and value properties'
-            )
+            logger.error(traceback.format_exc())
+            raise Exception('Filters must be a valid JSON formatted array with objects containing both key and value properties')
 
     start = time.time()
     counts_and_total = count_metadata(user, cohort_id, None, filters)
@@ -1048,7 +1046,6 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
         + (" filters " + filters.__str__() if filters.__len__() > 0 else "")
         + ": " + (stop - start).__str__()
     )
-
 
     return {'items': counts_and_total['data'], 'count': counts_and_total['counts'],
             'participants': counts_and_total['participants'],
