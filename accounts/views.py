@@ -516,15 +516,15 @@ def register_sa(request, user_id):
 
                 try:
                     body = {"email": service_account_obj.service_account, "role": "MEMBER"}
+                    write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
                     directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
-                    write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
                     logger.info("Attempting to insert user {} into group {}. "
                                 "If an error message doesn't follow, they were successfully added."
                                 .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
                 except HttpError, e:
-                    write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
+                    write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
                     logger.info(e)
 
             return redirect('user_gcp_list', user_id=user_id)
