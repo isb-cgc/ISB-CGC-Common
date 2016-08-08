@@ -62,6 +62,9 @@ class AuthorizedDataset(models.Model):
     acl_google_group = models.CharField(max_length=256, null=False)
     public = models.BooleanField(default=False)
 
+    def __str__(self):
+        return self.name
+
 
 class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)

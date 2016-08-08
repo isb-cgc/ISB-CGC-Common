@@ -66,7 +66,12 @@ class ServiceAccountAdmin(admin.ModelAdmin):
 
 @admin.register(AuthorizedDataset)
 class AuthorizedDatasetAdmin(admin.ModelAdmin):
-    pass
+    list_display = (
+        'name',
+        'whitelist_id',
+        'acl_google_group',
+        'public'
+    )
 
 admin.site.register(NIH_User, NIH_UserAdmin)
 admin.site.register(Bucket, BucketAdmin)
