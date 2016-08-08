@@ -142,6 +142,17 @@ DISPLAY_NAME_DD = {
     }
 }
 
+GROUPED_FILTERS = {
+    'has_BCGSC_HiSeq_RNASeq': 'RNASeq',
+    'has_UNC_HiSeq_RNASeq': 'RNASeq',
+    'has_BCGSC_GA_RNASeq': 'RNASeq',
+    'has_UNC_GA_RNASeq': 'RNASeq',
+    'has_HiSeq_miRnaSeq': 'miRNASeq',
+    'has_GA_miRNASeq': 'miRNASeq',
+    'has_27k': 'RPPA',
+    'has_450k': 'RPPA',
+}
+
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
 
@@ -703,8 +714,18 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         where_clause = None
 
         for attr in valid_attrs:
+            attr_parts = attr.split(':')
+            attr_is_filtered = False
             if attr not in filters:
-                unfiltered_attr.append(attr.split(':')[-1])
+                # if this attribute is part of a grouped set, check to make sure none of the set's
+                # other members are filtered - if they are, this isn't an unfiltered attr and it
+                # must be counted as 'filtered'
+                if attr_parts[1] in GROUPED_FILTERS:
+                    filter_group = [filter_name for filter_name, group in GROUPED_FILTERS.items() if group == GROUPED_FILTERS[attr_parts[1]]]
+                    for grouped_filter in filter_group:
+                        if attr_parts[0]+':'+grouped_filter in filters:
+                            attr_is_filtered = True
+                not attr_is_filtered and unfiltered_attr.append(attr.split(':')[-1])
 
         key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
 
@@ -715,12 +736,34 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             for filter_key in filters:
                 filter_copy = copy.deepcopy(filters)
                 del filter_copy[filter_key]
+
+                filter_key_parts = filter_key.split(':')
+                filter_group = []
+
+                if filter_key_parts[1] in GROUPED_FILTERS:
+                    filter_group = [filter_name for filter_name, group in GROUPED_FILTERS.items() if
+                                    group == GROUPED_FILTERS[filter_key_parts[1]]]
+
+                print >> sys.stdout, "Filter group:" + filter_group.__str__()
+
+                # If this is a member of a grouped filter, delete all other members from the filter set copy as well
+                for grouped_filter in filter_group:
+                    if filter_key_parts[0]+':'+grouped_filter in filter_copy:
+                        del filter_copy[filter_key_parts[0]+':'+grouped_filter]
+
                 if filter_copy.__len__() <= 0:
                     ex_where_clause = {'query_str': None, 'value_tuple': None}
                 else:
                     ex_where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
 
-                exclusionary_filter[filter_key.split(':')[-1]] = ex_where_clause
+                exclusionary_filter[filter_key_parts[1]] = ex_where_clause
+
+                # If this is a grouped filter, add the exclusionary clause for the other members of the filter group
+                for grouped_filter in filter_group:
+                    if grouped_filter not in exclusionary_filter:
+                        exclusionary_filter[grouped_filter] = ex_where_clause
+
+        print >> sys.stdout, "Exclusionary set: " + exclusionary_filter.__str__()
 
         base_table = 'metadata_samples'
         filter_table = 'metadata_samples'
