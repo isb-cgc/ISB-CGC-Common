@@ -744,8 +744,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     filter_group = [filter_name for filter_name, group in GROUPED_FILTERS.items() if
                                     group == GROUPED_FILTERS[filter_key_parts[1]]]
 
-                print >> sys.stdout, "Filter group:" + filter_group.__str__()
-
                 # If this is a member of a grouped filter, delete all other members from the filter set copy as well
                 for grouped_filter in filter_group:
                     if filter_key_parts[0]+':'+grouped_filter in filter_copy:
@@ -762,8 +760,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 for grouped_filter in filter_group:
                     if grouped_filter not in exclusionary_filter:
                         exclusionary_filter[grouped_filter] = ex_where_clause
-
-        print >> sys.stdout, "Exclusionary set: " + exclusionary_filter.__str__()
 
         base_table = 'metadata_samples'
         filter_table = 'metadata_samples'
