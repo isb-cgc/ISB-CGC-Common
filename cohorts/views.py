@@ -1026,11 +1026,12 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
     if req_filters is not None:
         try:
-            for this_filter in req_filters:
-                key = this_filter['key']
+            for key in req_filters:
+                this_filter = req_filters[key]
                 if key not in filters:
                     filters[key] = {'values': [], 'tables': []}
-                filters[key]['values'].append(this_filter['value'])
+                for value in this_filter:
+                    filters[key]['values'].append(value)
 
         except Exception, e:
             logger.error(traceback.format_exc())
