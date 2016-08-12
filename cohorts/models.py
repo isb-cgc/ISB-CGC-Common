@@ -184,7 +184,7 @@ class Cohort(models.Model):
                     source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
                     filters = []
                     for source_filter in source_filters:
-                        filters.append(source_filter.name+": "+source_filter.value)
+                        filters.append({'name': source_filter.name, 'value': source_filter.value})
                     filter_history[source.cohort.id] = filters
             else:
                 keep_traversing = False
