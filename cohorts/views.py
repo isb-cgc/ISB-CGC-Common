@@ -1034,7 +1034,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
         except Exception, e:
             logger.error(traceback.format_exc())
-            raise Exception('Filters must be a valid JSON formatted array with objects containing both key and value properties')
+            raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
     start = time.time()
     counts_and_total = count_metadata(user, cohort_id, None, filters)
