@@ -110,28 +110,28 @@ def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
     Throws: ObjectDoesNotExist if no NIH_User object is found with the given user_id
     """
 
-    unlinked_nih_users = []
-    delete_from_acl = []
+    unlinked_nih_user_list = []
+    ACLDeleteAction_list = []
 
     try:
         nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.save()
-        unlinked_nih_users.append((user_id, nih_account_to_unlink.NIH_username))
+        unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
     except MultipleObjectsReturned, e:
         nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
 
-        for user in nih_user_query_set:
-            user.linked = False
-            user.save()
-            unlinked_nih_users.append((user_id, user.NIH_username))
+        for nih_account_to_unlink in nih_user_query_set:
+            nih_account_to_unlink.linked = False
+            nih_account_to_unlink.save()
+            unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
     user_email = User.objects.get(id=user_id).email
 
-    delete_from_acl.append(ACLDeleteAction(acl_group_name, user_email))
+    ACLDeleteAction_list.append(ACLDeleteAction(acl_group_name, user_email))
 
-    return UnlinkAccountsResult(unlinked_nih_users, delete_from_acl)
+    return UnlinkAccountsResult(unlinked_nih_user_list, ACLDeleteAction_list)
 
 
 @login_required
@@ -139,16 +139,19 @@ def unlink_accounts(request):
     user_id = request.user.id
 
     try:
-        result = unlink_accounts_and_get_acl_tasks(user_id, CONTROLLED_ACL_GOOGLE_GROUP)
+        unlink_accounts_result = unlink_accounts_and_get_acl_tasks(user_id, CONTROLLED_ACL_GOOGLE_GROUP)
     except ObjectDoesNotExist as e:
-        logger.error("NIH_User not found for user_id {}".format(user_id))
+        user_email = User.objects.get(id=user_id).email
+        logger.error("NIH_User not found for user_id {}. Error: {}".format(user_id, e))
+        messages.error(request, "No linked NIH users were found for user {}.".format(user_email))
+        return redirect('/users/' + str(user_id))
 
-    num_unlinked = len(result.unlinked_nih_users)
+    num_unlinked = len(unlink_accounts_result.unlinked_nih_users)
     if num_unlinked > 1:
         logger.warn("Error: more than one NIH User account linked to user id %d".format(user_id))
 
     directory_service, http_auth = get_directory_resource()
-    for action in result.acl_delete_actions:
+    for action in unlink_accounts_result.acl_delete_actions:
         user_email = action.user_email
         try:
             directory_service.members().delete(groupKey=action.acl_group_name,
