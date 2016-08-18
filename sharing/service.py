@@ -1,3 +1,5 @@
+import logging
+import requests
 from django.core.mail import send_mail
 from google.appengine.api import mail
 from django.core.validators import validate_email
@@ -8,6 +10,24 @@ from django.template.context import Context
 from django.core.urlresolvers import reverse
 
 from urllib import urlencode
+
+EMAIL_SERVICE_API_URL = settings.EMAIL_SERVICE_API_URL
+EMAIL_SERVICE_API_KEY = settings.EMAIL_SERVICE_API_KEY
+NOTIFICATION_EMAIL_FROM_ADDRESS = settings.NOTIFICATION_EMAIL_FROM_ADDRESS
+
+def send_email_message(message_data):
+    try:
+        logging.info("Sending email alert to '{}'".format(message_data['to']))
+        response = requests.post(
+            EMAIL_SERVICE_API_URL,
+            auth=("api", EMAIL_SERVICE_API_KEY),
+            data=message_data
+        )
+        logging.info("Email API response: {}".format(response.content))
+
+    except Exception as e:
+        logging.exception(e)
+
 
 def create_share(request, item, emails, type, share_user=None):
     if not share_user:
@@ -51,7 +71,7 @@ def create_share(request, item, emails, type, share_user=None):
 
         email_template = get_template(template)
         email_text_template = get_template(template_txt)
-        ctx = Context({
+        ctx = {
             'shared_by': share_user,
             'item': item,
             'type': type,
@@ -59,14 +79,23 @@ def create_share(request, item, emails, type, share_user=None):
                     reverse('sharing_add', kwargs={
                         'sharing_id': sharedResource.id
                     })) + '?' + urlencode({'key':sharedResource.share_key}),
-        })
+        }
 
-        message = mail.EmailMessage()
+        message_data = {
+            'from': NOTIFICATION_EMAIL_FROM_ADDRESS,
+            'to': email,
+            'subject': 'You Were Added on a ' + type,
+            'text': email_text_template.render(ctx),
+            'html': email_template.render(ctx)
+        }
 
-        message.subject = 'You Were Added on a ' + type
-        message.body = email_text_template.render(ctx)
-        message.html = email_template.render(ctx)
-        message.sender = 'noreply@' + settings.PROJECT_NAME + '.appspotmail.com'
-        message.to = email
-
-        message.send()
+        send_email_message(message_data)
+        # message = mail.EmailMessage()
+        #
+        # message.subject = 'You Were Added on a ' + type
+        # message.body = email_text_template.render(ctx)
+        # message.html = email_template.render(ctx)
+        # message.sender = 'noreply@' + settings.PROJECT_NAME + '.appspotmail.com'
+        # message.to = email
+        #
+        # message.send()
