@@ -139,6 +139,13 @@ DISPLAY_NAME_DD = {
         "5'UTR": '5\' UTR',
         'IGR': 'IGR',
         "5'Flank": '5\' Flank',
+    },
+    'bmi': {
+        'underweight': 'Underweight: BMI less that 18.5',
+        'normal weight': 'Normal weight: BMI is 18.5 - 24.9',
+        'overweight': 'Overweight: BMI is 25 - 29.9',
+        'obese': 'Obese: BMI is 30 or more',
+        'None': 'None'
     }
 }
 
