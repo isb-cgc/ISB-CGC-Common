@@ -2134,16 +2134,36 @@ def streaming_csv_view(request, cohort_id=0):
 @login_required
 def unshare_cohort(request, cohort_id=0):
 
-    if request.POST.get('owner'):
-        # The owner of the resource should also be able to remove users they shared with.
-        # Get user_id from post
-        user_id = request.POST.get('user_id')
-        resc = Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
-    else:
-        # This allows users to remove resources shared with them
-        resc = Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=request.user.id)
+    cohort_set = None
 
-    resc.delete()
+    if request.POST.get('cohorts'):
+        cohort_set = json.loads(request.POST.get('cohorts'))
+    else:
+        cohort_set = [cohort_id]
+
+    unshare_with = None
+
+    for cohort in cohort_set:
+        this_cohort = Cohort_Perms.objects.get(cohort=cohort, user=request.user.id)
+        if request.POST.get('user_id') == request.user.id:
+            # Don't try to delete your own permissions as owner
+            if this_cohort.perm != 'Owner':
+                unshare_with = request.user.id
+            else:
+                return JsonResponse({
+                    'status': 'error',
+                    'msg': 'Cannot orphan your own cohort!'
+                })
+        elif this_cohort.perm == 'Owner':
+            unshare_with = request.POST.get('user_id')
+        else:
+            return JsonResponse({
+                'status': 'error',
+                'msg': 'Cannot unshare with another user if you are not the owner'
+            })
+
+        resc = Cohort_Perms.objects.get(cohort_id=cohort, user_id=unshare_with)
+        resc.delete()
 
     return JsonResponse({
         'status': 'success'
