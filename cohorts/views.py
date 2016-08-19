@@ -139,6 +139,13 @@ DISPLAY_NAME_DD = {
         "5'UTR": '5\' UTR',
         'IGR': 'IGR',
         "5'Flank": '5\' Flank',
+    },
+    'bmi': {
+        'underweight': 'Underweight: BMI less that 18.5',
+        'normal weight': 'Normal weight: BMI is 18.5 - 24.9',
+        'overweight': 'Overweight: BMI is 25 - 29.9',
+        'obese': 'Obese: BMI is 30 or more',
+        'None': 'None'
     }
 }
 
@@ -1074,7 +1081,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
         except Exception, e:
             logger.error(traceback.format_exc())
-            raise Exception('Filters must be a valid JSON formatted array with objects containing both key and value properties')
+            raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
     start = time.time()
     counts_and_total = count_metadata(user, cohort_id, None, filters)
