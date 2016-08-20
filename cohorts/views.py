@@ -2139,35 +2139,33 @@ def unshare_cohort(request, cohort_id=0):
     if request.POST.get('cohorts'):
         cohort_set = json.loads(request.POST.get('cohorts'))
     else:
-        cohort_set = [cohort_id]
-
-    unshare_with = None
+        if cohort_id == 0:
+            return JsonResponse({
+                'msg': 'No cohort IDs were provided!'
+            }, status=500)
+        else:
+            cohort_set = [cohort_id]
 
     for cohort in cohort_set:
-        this_cohort = Cohort_Perms.objects.get(cohort=cohort, user=request.user.id)
-        if request.POST.get('user_id') == request.user.id:
-            # Don't try to delete your own permissions as owner
-            if this_cohort.perm != 'Owner':
-                unshare_with = request.user.id
-            else:
-                return JsonResponse({
-                    'status': 'error',
-                    'msg': 'Cannot orphan your own cohort!'
-                })
-        elif this_cohort.perm == 'Owner':
-            unshare_with = request.POST.get('user_id')
-        else:
-            return JsonResponse({
-                'status': 'error',
-                'msg': 'Cannot unshare with another user if you are not the owner'
-            })
+        owner = str(Cohort.objects.get(id=cohort).get_owner().id)
+        req_user = str(request.user.id)
+        unshare_user = str(request.POST.get('user_id'))
 
-        resc = Cohort_Perms.objects.get(cohort_id=cohort, user_id=unshare_with)
-        resc.delete()
+        if req_user != unshare_user and owner != req_user:
+            return JsonResponse({
+                'msg': 'Cannot unshare with another user if you are not the owner'
+            }, status=500)
+
+        cohort_perms = Cohort_Perms.objects.filter(cohort=cohort, user=unshare_user)
+
+        for resc in cohort_perms:
+            # Don't try to delete your own permissions as owner
+            if str(resc.perm) != 'OWNER':
+                resc.delete()
 
     return JsonResponse({
         'status': 'success'
-    })
+    }, status=200)
 
 
 @login_required
