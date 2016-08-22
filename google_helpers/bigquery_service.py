@@ -16,12 +16,15 @@ limitations under the License.
 
 """
 
-from oauth2client.client import GoogleCredentials
+from oauth2client.client import flow_from_clientsecrets, GoogleCredentials
 from googleapiclient import discovery
+from oauth2client.file import Storage
+from oauth2client import tools
 from django.conf import settings
 import httplib2
 
-BIGQUERY_SCOPES = ['https://www.googleapis.com/auth/bigquery']
+BIGQUERY_SCOPES = ['https://www.googleapis.com/auth/bigquery',
+                   'https://www.googleapis.com/auth/bigquery.insertdata']
 
 
 def get_bigquery_service():
