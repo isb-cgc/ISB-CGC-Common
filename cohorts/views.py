@@ -305,6 +305,9 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
     mutation_filters = None
     mutation_where_clause = None
 
+    if inc_filters is None:
+        inc_filters = {}
+
     # Divide our filters into 'mutation' and 'non-mutation' sets
     for key in inc_filters:
         if 'MUT:' in key:
@@ -1540,22 +1543,35 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
     user_id = request.user.id
     parent = None
     filter_obj = None
+    deactivate_sources = False
+    apply_filters = False
+    apply_name = False
 
     if request.POST:
         name = request.POST.get('name')
         source = request.POST.get('source')
-        deactivate_sources = request.POST.get('deactivate_sources')
         filters = request.POST.getlist('filters')
+        apply_filters = request.POST.getlist('apply-filters')
+        apply_name = request.POST.getlist('apply-name')
         projects = request.user.project_set.all()
+        # we only deactivate the source if we are applying filters to a previously-existing
+        # source cohort
+        deactivate_sources = (len(filters) > 0) and source is not None and source != 0
+
+        # If we're only changing the name, just edit the cohort and update it
+        if apply_name and not apply_filters and not deactivate_sources:
+            Cohort.objects.filter(id=source).update(name=name)
+            messages.info(request, 'Changes applied successfully.')
+            return redirect(reverse('cohort_details', args=[source]))
 
         # Given cohort_id is the only source id.
         if source:
             parent = Cohort.objects.get(id=source)
 
-        if filters:
+        if len(filters) > 0:
             filter_obj = {}
-            for filter in filters:
-                tmp = json.loads(filter)
+            for this_filter in filters:
+                tmp = json.loads(this_filter)
                 key = tmp['feature']['name']
                 val = tmp['value']['name']
 
@@ -1626,9 +1642,10 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
 
             # Create filters applied
-            for filter in filter_obj:
-                for val in filter_obj[filter]['values']:
-                    Filters.objects.create(resulting_cohort=cohort, name=filter, value=val).save()
+            if filter_obj:
+                for this_filter in filter_obj:
+                    for val in filter_obj[this_filter]['values']:
+                        Filters.objects.create(resulting_cohort=cohort, name=this_filter, value=val).save()
 
             # Store cohort to BigQuery
             project_id = settings.BQ_PROJECT_ID
@@ -1636,13 +1653,13 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
             bcs.add_cohort_with_sample_barcodes(cohort.id, cohort.samples_set.values_list('sample_id','study_id'))
 
-            # Check if coming from applying filters and redirect accordingly
-            if 'apply-filters' in request.POST:
-                redirect_url = reverse('cohort_details',args=[cohort.id])
-                messages.info(request, 'Changes applied successfully.')
-            else:
+            # Check if this was a new cohort or an edit to an existing one and redirect accordingly
+            if not source:
                 redirect_url = reverse('cohort_list')
                 messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
+            else:
+                redirect_url = reverse('cohort_details', args=[cohort.id])
+                messages.info(request, 'Changes applied successfully.')
 
             if workbook_id and worksheet_id :
                 Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
@@ -1653,7 +1670,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 worksheet_model.add_cohort(cohort)
                 redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
 
-    return redirect(redirect_url) # redirect to search/ with search parameters just saved
+    return redirect(redirect_url)
+
 
 @login_required
 @csrf_protect
