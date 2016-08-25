@@ -146,7 +146,17 @@ DISPLAY_NAME_DD = {
         'overweight': 'Overweight: BMI is 25 - 29.9',
         'obese': 'Obese: BMI is 30 or more',
         'None': 'None'
-    }
+    },
+    'tobacco_smoking_history': {
+        '1': 'Lifelong Non-smoker',
+        '2': 'Current Smoker',
+        '3': 'Current Reformed Smoker for > 15 years',
+        '4': 'Current Reformed Smoker for <= 15 years',
+        '5': 'Current Reformed Smoker, Duration Not Specified',
+        '6': 'Smoker at Diagnosis',
+        '7': 'Smoking History Not Documented',
+        'None': 'NA',
+    },
 }
 
 GROUPED_FILTERS = {
