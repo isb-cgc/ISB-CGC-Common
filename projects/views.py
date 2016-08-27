@@ -13,7 +13,7 @@ from django.core.urlresolvers import reverse
 from data_upload.models import UserUpload, UserUploadedFile
 from projects.models import User_Feature_Definitions, User_Feature_Counts, Project
 from sharing.service import create_share
-from google.appengine.api.mail import send_mail
+from accounts.models import GoogleProject
 
 import json
 import requests
@@ -65,28 +65,13 @@ def project_detail(request, project_id=0):
     }
     return render(request, template, context)
 
-@login_required
-def request_project(request):
-    send_mail(
-            'request@' + settings.PROJECT_NAME + '.appspotmail.com',
-            settings.REQUEST_PROJECT_EMAIL,
-            'User has requested a Google Project',
-            '''
-The user %s has requested a new Google Project be created. Here is their message:
-
-%s
-    ''' % (request.user.email, request.POST['message']))
-
-    template = 'projects/project_request.html'
-    context = {
-        'requested': True
-    }
-    return render(request, template, context)
 
 @login_required
 def project_upload(request):
-    if not hasattr(request.user, 'googleproject'):
-        template = 'projects/project_request.html'
+    # Check for user' GoogleProject
+    google_projects = GoogleProject.objects.filter(user=request.user)
+    if len(google_projects) == 0:
+        template = 'accounts/request_gcp.html'
     else:
         template = 'projects/project_upload.html'
 
