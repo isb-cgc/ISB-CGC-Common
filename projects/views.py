@@ -69,14 +69,14 @@ def project_detail(request, project_id=0):
 @login_required
 def project_upload(request):
     # Check for user' GoogleProject
-
     google_projects = GoogleProject.objects.filter(user=request.user)
+
     if len(google_projects) == 0:
-        template = 'accounts/request_gcp.html'
+        template = 'GenespotRE/register_gcp.html'
     else:
         template = 'projects/project_upload.html'
 
-    projects = request.user.project_set.all().filter(active=True)
+    projects = Project.objects.filter(owner=request.user) | Project.objects.filter(is_public=True,active=True)
 
     context = {
         'requested': False,
