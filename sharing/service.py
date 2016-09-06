@@ -86,7 +86,8 @@ def create_share(request, item, emails, type, share_user=None):
             'to': email,
             'subject': 'You Were Added on a ' + type,
             'text': email_text_template.render(ctx),
-            'html': email_template.render(ctx)
+            'html': email_template.render(ctx),
+            'h:x-mailgun-native-send': 'true'
         }
 
         send_email_message(message_data)
