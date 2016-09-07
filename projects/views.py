@@ -13,7 +13,7 @@ from django.core.urlresolvers import reverse
 from data_upload.models import UserUpload, UserUploadedFile
 from projects.models import User_Feature_Definitions, User_Feature_Counts, Project
 from sharing.service import create_share
-from google.appengine.api.mail import send_mail
+from accounts.models import GoogleProject, Bucket, BqDataset
 
 import json
 import requests
@@ -65,36 +65,23 @@ def project_detail(request, project_id=0):
     }
     return render(request, template, context)
 
-@login_required
-def request_project(request):
-    send_mail(
-            'request@' + settings.PROJECT_NAME + '.appspotmail.com',
-            settings.REQUEST_PROJECT_EMAIL,
-            'User has requested a Google Project',
-            '''
-The user %s has requested a new Google Project be created. Here is their message:
-
-%s
-    ''' % (request.user.email, request.POST['message']))
-
-    template = 'projects/project_request.html'
-    context = {
-        'requested': True
-    }
-    return render(request, template, context)
 
 @login_required
 def project_upload(request):
-    if not hasattr(request.user, 'googleproject'):
-        template = 'projects/project_request.html'
+    # Check for user' GoogleProject
+    google_projects = GoogleProject.objects.filter(user=request.user)
+
+    if len(google_projects) == 0:
+        template = 'GenespotRE/register_gcp.html'
     else:
         template = 'projects/project_upload.html'
 
-    projects = request.user.project_set.all().filter(active=True)
+    projects = Project.objects.filter(owner=request.user) | Project.objects.filter(is_public=True,active=True)
 
     context = {
         'requested': False,
         'projects': projects,
+        'google_projects': google_projects
     }
     return render(request, template, context)
 
@@ -169,13 +156,17 @@ def upload_files(request):
         upload = UserUpload(owner=request.user)
         upload.save()
 
+        bucket = Bucket.objects.get(id=request.POST['bucket'])
+        dataset = BqDataset.objects.get(id=request.POST['dataset'])
+        google_project = bucket.google_project
+
         config = {
             "USER_PROJECT": proj.id,
             "USER_ID": request.user.id,
             "STUDY": study.id,
-            "BUCKET": request.user.bucket_set.all()[0].bucket_name,
-            "GOOGLE_PROJECT": request.user.googleproject.project_name,
-            "BIGQUERY_DATASET": request.user.googleproject.big_query_dataset,
+            "BUCKET": bucket.bucket_name,
+            "GOOGLE_PROJECT": google_project.project_name,
+            "BIGQUERY_DATASET": dataset.dataset_name,
             "FILES": [],
             "USER_METADATA_TABLES": {
                 "METADATA_DATA" : "user_metadata_" + str(request.user.id) + "_" + str(study.id),
@@ -256,10 +247,10 @@ def upload_files(request):
             metadata_data_table=config['USER_METADATA_TABLES']['METADATA_DATA'],
             metadata_samples_table=config['USER_METADATA_TABLES']['METADATA_SAMPLES'],
             data_upload=upload,
-            google_project=request.user.googleproject,
-            google_bucket=request.user.bucket_set.all()[0]
+            google_project=google_project,
+            google_bucket=bucket
         )
-
+        print settings.PROCESSING_ENABLED
         if settings.PROCESSING_ENABLED:
             files = {'config.json': ('config.json', json.dumps(config))}
             post_args = {
@@ -273,6 +264,7 @@ def upload_files(request):
                 'SUCCESS_POST_URL': request.build_absolute_uri( success_url ),
                 'FAILURE_POST_URL': request.build_absolute_uri( failure_url )
             }
+
             r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
                               files=files, params=parameters,
                               auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD))

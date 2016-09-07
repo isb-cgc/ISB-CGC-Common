@@ -257,6 +257,14 @@ def register_gcp(request, user_id):
     return render(request, 'GenespotRE/register_gcp.html', {})
 
 @login_required
+def gcp_detail(request, user_id, gcp_id):
+    context = {}
+    context['gcp'] = GoogleProject.objects.get(id=gcp_id)
+
+    return render(request, 'GenespotRE/gcp_detail.html', context)
+
+
+@login_required
 def user_gcp_delete(request, user_id, gcp_id):
     if request.POST:
         gcp = GoogleProject.objects.get(id=gcp_id)
@@ -471,6 +479,8 @@ def verify_sa(request, user_id):
 
 @login_required
 def register_sa(request, user_id):
+
+    print request.POST
     if request.GET.get('gcp_id'):
         authorized_datasets = AuthorizedDataset.objects.filter(public=False)
 
@@ -560,4 +570,53 @@ def delete_sa(request, user_id, sa_id):
 
         sa.delete()
 
+    return redirect('user_gcp_list', user_id=user_id)
+
+@login_required
+def register_bucket(request, user_id, gcp_id):
+    if request.POST:
+        bucket_name = request.POST.get('bucket_name', None)
+
+        # Check bucketname not null
+
+        # Check that bucket is in project
+
+        gcp = GoogleProject.objects.get(id=gcp_id)
+        bucket = Bucket(google_project=gcp, bucket_name=bucket_name)
+        bucket.save()
+
+    return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+
+
+@login_required
+def delete_bucket(request, user_id, bucket_id):
+    if request.POST:
+        gcp_id = request.POST.get('gcp_id')
+        Bucket.objects.get(id=bucket_id).delete()
+        return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+    return redirect('user_gcp_list', user=iuser_id)
+
+@login_required
+def register_bqdataset(request, user_id, gcp_id):
+    if request.POST:
+        bqdataset_name = request.POST.get('bqdataset_name', None)
+
+        # Check bqdatasetname not null
+
+        # Check that bqdataset is in project
+
+        gcp = GoogleProject.objects.get(id=gcp_id)
+        bqdataset = BqDataset(google_project=gcp, dataset_name=bqdataset_name)
+        bqdataset.save()
+
+    return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+
+
+@login_required
+def delete_bqdataset(request, user_id, bqdataset_id):
+
+    if request.POST:
+        gcp_id = request.POST.get('gcp_id')
+        BqDataset.objects.get(id=bqdataset_id).delete()
+        return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
     return redirect('user_gcp_list', user_id=user_id)

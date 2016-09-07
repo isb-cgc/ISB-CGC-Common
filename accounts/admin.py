@@ -42,7 +42,7 @@ class NIH_UserAdmin(admin.ModelAdmin):
 
 class BucketAdmin(admin.ModelAdmin):
     list_display = (
-        'user',
+        'google_project',
         'bucket_name',
         'bucket_permissions'
     )
