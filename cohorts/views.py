@@ -395,6 +395,13 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         else:
             logger.info("User not authenticated - their data will not be used")
 
+        if 'user_projects' in filters:
+            # Find all the tables associated to these projects.
+            projects = filters['user_projects']['values']
+            user_studies = Study.objects.filter(project_id__in=projects)
+            base_tables = User_Data_Tables.objects.filter(study__in=user_studies)
+            del filters['user_projects']
+
         # Now that we're through the Studies filtering area, delete it so it doesn't get pulled into a query
         if 'user_studies' in filters:
             del filters['user_studies']
@@ -711,6 +718,15 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         else:
             print "User not authenticated with Metadata Endpoint API"
 
+        base_tables = None
+
+        if 'user_projects' in filters:
+            # Find all the tables associated to these projects.
+            projects = filters['user_projects']['values']
+            user_studies = Study.objects.filter(project_id__in=projects)
+            base_tables = User_Data_Tables.objects.filter(study__in=user_studies).values_list('metadata_samples_table', flat=True)
+            del filters['user_projects']
+
         # Now that we're through the Studies filtering area, delete it so it doesn't get pulled into a query
         if 'user_studies' in filters:
             del filters['user_studies']
@@ -896,11 +912,18 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
         # If there are filters, create a temporary table filtered off the base table
-        if unfiltered_attr.__len__() > 0 and filters.__len__() > 0:
+        if unfiltered_attr.__len__() > 0 and (filters.__len__() > 0 or base_tables):
             # TODO: This should take into account variable tables; may require a UNION statement or similar
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
+
+            # This tries to join the metadata_samples table (base_table) with user metadata_samples_tables on samplebarcode
+            # TODO: This does not work if samples are not in both tcga/ccle and the users's table. Need a UNION like statement.
+            # if base_tables and len(base_tables) > 0:
+            #     # Union multiple tables
+            #     for table in base_tables:
+            #         make_tmp_table_str += ' JOIN %s ut on ut.sample_barcode = ms.SampleBarcode' % table
 
             if tmp_mut_table and not cohort_id:
                 make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode' % tmp_mut_table
@@ -920,13 +943,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 FROM %s ms
                 JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode;
             """ % (tmp_filter_table, base_table, tmp_mut_table,)
-
             cursor.execute(make_tmp_table_str)
         else:
             filter_table = base_table
 
         count_query_set = []
-
         for key, feature in valid_attrs.items():
             # TODO: This should be restructured to deal with features and user data
             for table in feature['tables']:
@@ -944,13 +965,14 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     col_name = key_map[key]
 
                 if should_be_queried:
+
                     if col_name in unfiltered_attr:
                         count_query_set.append({'query_str':("""
                             SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS count
                             FROM %s ms
                             LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
                             ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
-                          """) % (col_name, col_name, col_name, 'metadata_samples', col_name, filter_table, col_name, col_name, col_name, col_name, col_name),
+                          """) % (col_name, col_name, col_name, table, col_name, table, col_name, col_name, col_name, col_name, col_name),
                         'params': None, })
                     else:
                         subquery = base_table
@@ -963,7 +985,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                             FROM %s ms
                             LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
                             ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
-                          """) % (col_name, col_name, col_name, 'metadata_samples', col_name, subquery, col_name, col_name, col_name, col_name, col_name),
+                          """) % (col_name, col_name, col_name, table, col_name, subquery, col_name, col_name, col_name, col_name, col_name),
                         'params': exclusionary_filter[col_name]['value_tuple']})
 
         for query in count_query_set:
@@ -1045,31 +1067,33 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         counts_and_total['total'] = sample_and_participant_counts['sample_count']
         counts_and_total['counts'] = []
 
+        counts_keys = counts.keys()
         for key, feature in valid_attrs.items():
-            value_list = []
-            feature['values'] = counts[feature['name']]['counts']
-            feature['total'] = counts[feature['name']]['total']
+            if feature['name'] in counts_keys:
+                value_list = []
+                feature['values'] = counts[feature['name']]['counts']
+                feature['total'] = counts[feature['name']]['total']
 
-            # Special case for age ranges
-            if key == 'CLIN:age_at_initial_pathologic_diagnosis':
-                feature['values'] = normalize_ages(feature['values'])
-            elif key == 'CLIN:bmi':
-                feature['values'] = normalize_bmi(feature['values'])
+                # Special case for age ranges
+                if key == 'CLIN:age_at_initial_pathologic_diagnosis':
+                    feature['values'] = normalize_ages(feature['values'])
+                elif key == 'CLIN:bmi':
+                    feature['values'] = normalize_bmi(feature['values'])
 
-            for value, count in feature['values'].items():
-                # Convert all 1/'1' and 0/'0' values to True and False
-                if feature['name'].startswith('has_'):
-                    if value == 1 or value == '1':
-                        value = 'True'
-                    elif value == 0  or value == '0':
-                        value = 'False'
+                for value, count in feature['values'].items():
+                    # Convert all 1/'1' and 0/'0' values to True and False
+                    if feature['name'].startswith('has_'):
+                        if value == 1 or value == '1':
+                            value = 'True'
+                        elif value == 0  or value == '0':
+                            value = 'False'
 
-                if feature['name'] in DISPLAY_NAME_DD:
-                    value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
-                else:
-                    value_list.append({'value': str(value), 'count': count})
+                    if feature['name'] in DISPLAY_NAME_DD:
+                        value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
+                    else:
+                        value_list.append({'value': str(value), 'count': count})
 
-            counts_and_total['counts'].append({'name': feature['name'], 'values': value_list, 'id': key, 'total': feature['total']})
+                counts_and_total['counts'].append({'name': feature['name'], 'values': value_list, 'id': key, 'total': feature['total']})
 
         return counts_and_total
 
