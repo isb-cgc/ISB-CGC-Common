@@ -847,10 +847,14 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             barcodes = []
             retries = 0
 
+            start = time.time()
             while not job_is_done and retries < BQ_ATTEMPT_MAX:
                 retries += 1
                 sleep(1)
                 job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
+            stop = time.time()
+
+            logger.debug('[BENCHMARKING] Time to query BQ for mutation data: '+(stop - start).__str__())
 
             results = get_bq_job_results(bq_service, query_job['jobReference'])
 
@@ -895,7 +899,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             cursor.execute(insert_tmp_table_str, param_vals)
             db.commit()
 
-
+        start = time.time()
         # If there is a cohort, make a temporary table based on it and make it the base table
         if cohort_id is not None:
             tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
@@ -947,6 +951,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         else:
             filter_table = base_table
 
+        stop = time.time()
+
+        logger.debug('[BENCHMARKING] Time to create temporary filter/cohort tables in count_metadata: '+(stop - start).__str__())
+
         count_query_set = []
         for key, feature in valid_attrs.items():
             # TODO: This should be restructured to deal with features and user data
@@ -988,6 +996,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                           """) % (col_name, col_name, col_name, table, col_name, subquery, col_name, col_name, col_name, col_name, col_name),
                         'params': exclusionary_filter[col_name]['value_tuple']})
 
+        start = time.time()
         for query in count_query_set:
             if 'params' in query and query['params'] is not None:
                 cursor.execute(query['query_str'], query['params'])
@@ -1005,6 +1014,9 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             for row in cursor.fetchall():
                 counts[col_headers[0]]['counts'][row[0]] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
+
+        stop = time.time()
+        logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
 
         sample_and_participant_counts = get_participant_and_sample_count(filter_table, cursor)
 
@@ -1124,7 +1136,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     counts_and_total = count_metadata(user, cohort_id, None, filters)
     stop = time.time()
     logger.debug(
-        "[BENCHMARKING] Time to query metadata_counts"
+        "[BENCHMARKING] Time to call metadata_counts from view metadata_counts_platform_list"
         + (" for cohort " + cohort_id if cohort_id is not None else "")
         + (" and" if cohort_id is not None and filters.__len__() > 0 else "")
         + (" filters " + filters.__str__() if filters.__len__() > 0 else "")
