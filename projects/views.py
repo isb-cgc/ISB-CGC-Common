@@ -250,7 +250,7 @@ def upload_files(request):
             google_project=google_project,
             google_bucket=bucket
         )
-        print settings.PROCESSING_ENABLED
+        # print settings.PROCESSING_ENABLED
         if settings.PROCESSING_ENABLED:
             files = {'config.json': ('config.json', json.dumps(config))}
             post_args = {
