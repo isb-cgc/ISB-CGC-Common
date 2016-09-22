@@ -633,7 +633,7 @@ def get_metadata_value_set():
         for row in cursor.fetchall():
             values[cursor.description[0][0]][str(row[0])] = 0
 
-        while (cursor.nextset()):
+        while (cursor.nextset() and cursor.description is not None):
             values[cursor.description[0][0]] = {}
             for row in cursor.fetchall():
                 values[cursor.description[0][0]][str(row[0])] = 0
@@ -1008,7 +1008,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     if col_name in unfiltered_attr:
                         count_query_set.append({'query_str':("""
                             SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;
-                          """) % (col_name, filter_table, col_name, col_name,),
+                          """) % (col_name, filter_table, col_name,),
                         'params': None, })
                     else:
                         subquery = base_table
@@ -1037,7 +1037,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 counts[col_headers[0]]['counts'] = metadata_values[col_headers[0]]
                 counts[col_headers[0]]['total'] = 0
             for row in cursor.fetchall():
-                counts[col_headers[0]]['counts'][row[0]] = int(row[1])
+                counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
 
         stop = time.time()
@@ -1407,8 +1407,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     stop = time.time()
     logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
-
-    logger.debug('For cohort ' + (cohort_id.__str__() if cohort_id != 0 else 'None') + ', results in cohort_detail/view: '+results['count'].__str__())
 
     totals = results['total']
 
@@ -2260,7 +2258,6 @@ def unshare_cohort(request, cohort_id=0):
 @login_required
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
-    logger.debug('Filters in get_metadata:'+filters.__str__())
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
 
