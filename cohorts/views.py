@@ -621,6 +621,32 @@ def get_participant_and_sample_count(base_table, cursor):
         if cursor: cursor.close()
 
 
+def get_metadata_value_set():
+    values = {}
+    db = get_sql_connection()
+
+    try:
+        cursor = db.cursor()
+        cursor.callproc('get_metadata_values')
+
+        values[cursor.description[0][0]] = {}
+        for row in cursor.fetchall():
+            values[cursor.description[0][0]][str(row[0])] = 0
+
+        while (cursor.nextset() and cursor.description is not None):
+            values[cursor.description[0][0]] = {}
+            for row in cursor.fetchall():
+                values[cursor.description[0][0]][str(row[0])] = 0
+
+        return values
+
+    except Exception as e:
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+
 def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     counts_and_total = {}
     sample_tables = {}
@@ -630,6 +656,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     mutation_filters = None
     mutation_where_clause = None
     filters = {}
+    metadata_values = get_metadata_value_set()
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
     for key in inc_filters:
@@ -915,6 +942,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
+            cursor.execute('SELECT COUNT(*) AS count FROM '+tmp_cohort_table+';');
+            for row in cursor.fetchall():
+                logger.debug('Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
+
         # If there are filters, create a temporary table filtered off the base table
         if unfiltered_attr.__len__() > 0 and (filters.__len__() > 0 or base_tables):
             # TODO: This should take into account variable tables; may require a UNION statement or similar
@@ -976,11 +1007,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
 
                     if col_name in unfiltered_attr:
                         count_query_set.append({'query_str':("""
-                            SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS count
-                            FROM %s ms
-                            LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
-                            ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
-                          """) % (col_name, col_name, col_name, table, col_name, table, col_name, col_name, col_name, col_name, col_name),
+                            SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;
+                          """) % (col_name, filter_table, col_name,),
                         'params': None, })
                     else:
                         subquery = base_table
@@ -989,11 +1017,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                         if exclusionary_filter[col_name]['query_str']:
                             subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
                         count_query_set.append({'query_str':("""
-                            SELECT DISTINCT IF(ms.%s IS NULL,'None',ms.%s) AS %s, IF(counts.count IS NULL,0,counts.count) AS count
-                            FROM %s ms
-                            LEFT JOIN (SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s) AS counts
-                            ON counts.%s = ms.%s OR (counts.%s IS NULL AND ms.%s IS NULL);
-                          """) % (col_name, col_name, col_name, table, col_name, subquery, col_name, col_name, col_name, col_name, col_name),
+                            SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s
+                          """) % (col_name, subquery, col_name,),
                         'params': exclusionary_filter[col_name]['value_tuple']})
 
         start = time.time()
@@ -1009,10 +1034,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 col_headers = [i[0] for i in cursor.description]
             if not col_headers[0] in counts:
                 counts[col_headers[0]] = {}
-                counts[col_headers[0]]['counts'] = {}
+                counts[col_headers[0]]['counts'] = metadata_values[col_headers[0]]
                 counts[col_headers[0]]['total'] = 0
             for row in cursor.fetchall():
-                counts[col_headers[0]]['counts'][row[0]] = int(row[1])
+                counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
 
         stop = time.time()
@@ -1367,22 +1392,18 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             if ma:
                 ma['category'] = cat['value']
 
-    molec_attr = [
-        'somatic_mutation_status',
-        'mRNA_expression',
-        'miRNA_expression',
-        'DNA_methylation',
-        'gene_copy_number',
-        'protein_quantification'
-    ]
-
     clin_attr_dsp = []
     clin_attr_dsp += clin_attr
 
     user = Django_User.objects.get(id=request.user.id)
+    filters = None
+
+    # If this is a new cohort, automatically select some filters for our users
+    if cohort_id == 0:
+        filters = {'SAMP:Project': ['TCGA',], }
 
     start = time.time()
-    results = metadata_counts_platform_list(None, cohort_id if cohort_id else None, user, None)
+    results = metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, None)
 
     stop = time.time()
     logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
@@ -1436,12 +1457,13 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             'values': user_studies
         })
 
-    # Get and sort counts
+    # Group the counts for clustered data type categories
     attr_details = {
         'RNA_sequencing': [],
         'miRNA_sequencing': [],
         'DNA_methylation': []
     }
+
     keys = []
     for item in results['count']:
         key = item['name']
@@ -1471,10 +1493,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'total_samples': int(totals),
         'clin_attr': clin_attr_dsp,
         'data_attr': data_attr,
-        'molec_attr': molec_attr,
         'base_url': settings.BASE_URL,
         'base_api_url': settings.BASE_API_URL,
         'molecular_attr': molecular_attr,
+        'metadata_filters': filters or {}
     }
 
     if USER_DATA_ON:
