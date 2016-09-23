@@ -967,8 +967,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
 
         count_query_set = []
 
-        logger.debug(valid_attrs.items().__str__())
-
         for key, feature in valid_attrs.items():
             # TODO: This should be restructured to deal with features and user data
             for table in feature['tables']:
