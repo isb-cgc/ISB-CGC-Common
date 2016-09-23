@@ -505,7 +505,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
-                JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
+                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_id
             """ % tmp_cohort_table
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_id' % tmp_mut_table)
@@ -677,7 +677,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 if row['attribute'] in METADATA_SHORTLIST:
                     valid_attrs[row['spec'] + ':' + row['attribute']] = {
                         'name': row['attribute'],
-                        'tables': ('metadata_samples_shortlist',),
+                        'tables': ('metadata_samples',),
                         'sample_ids': None
                     }
             cursor.close()
@@ -722,7 +722,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     if sample_ids and feature.study_id in sample_ids:
                         valid_attrs[key]['sample_ids'] = sample_ids[feature.study_id]
         else:
-            print "User not authenticated with Metadata Endpoint API"
+            logger.error("User not authenticated!")
 
         base_tables = None
 
@@ -966,6 +966,9 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         logger.debug('[BENCHMARKING] Time to create temporary filter/cohort tables in count_metadata: '+(stop - start).__str__())
 
         count_query_set = []
+
+        logger.debug(valid_attrs.items().__str__())
+
         for key, feature in valid_attrs.items():
             # TODO: This should be restructured to deal with features and user data
             for table in feature['tables']:
