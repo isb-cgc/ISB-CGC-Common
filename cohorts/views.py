@@ -170,6 +170,11 @@ GROUPED_FILTERS = {
     'has_450k': 'RPPA',
 }
 
+CONTINUOUS_DATA_SHORTLIST = {
+    'bmi': 1,
+    'age_at_initial_pathologic_diagnosis': 1
+}
+
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
 
@@ -628,6 +633,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     mutation_filters = None
     mutation_where_clause = None
     filters = {}
+
+    # Fetch the possible value set of all non-continuous columns in the shortlist
     metadata_values = get_metadata_value_set()
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
@@ -1006,7 +1013,12 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 col_headers = [i[0] for i in cursor.description]
             if not col_headers[0] in counts:
                 counts[col_headers[0]] = {}
-                counts[col_headers[0]]['counts'] = metadata_values[col_headers[0]]
+                # TODO: alter count queries to deal with continuous data which is clustered (eg. bmi) in an appropriate manner
+                # In the mean time, pull down the values and deal with them in our normalization methods
+                if col_headers[0] in CONTINUOUS_DATA_SHORTLIST:
+                    counts[col_headers[0]]['counts'] = {}
+                else:
+                    counts[col_headers[0]]['counts'] = metadata_values[col_headers[0]]
                 counts[col_headers[0]]['total'] = 0
             for row in cursor.fetchall():
                 counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
