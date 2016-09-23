@@ -274,34 +274,6 @@ METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 # This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 
-def get_filter_values():
-    db = get_sql_connection()
-    cursor = None
-
-    filter_values = {}
-
-    get_filter_vals = 'SELECT DISTINCT %s FROM metadata_samples;'
-
-    try:
-        cursor = db.cursor()
-
-        for attr in METADATA_SHORTLIST:
-            # We only want the values of columns which are not numeric ranges and not true/false
-            if not attr.startswith('has_') and not attr == 'bmi' and not attr.startswith('age_'):
-                cursor.execute(get_filter_vals % attr)
-                filter_values[attr] = ()
-                for row in cursor.fetchall():
-                    filter_values[attr] += (row[0] if row[0] is not None else 'None',)
-
-        return filter_values
-
-    except Exception as e:
-        logger.error(traceback.format_exc())
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-
 def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
 
     samples_and_participants = {'items': [], 'participants': [], 'count': 0}
@@ -421,8 +393,8 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
             filter_copy = copy.deepcopy(filters)
             where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
 
-        base_table = 'metadata_samples'
-        filter_table = 'metadata_samples'
+        base_table = 'metadata_samples_shortlist'
+        filter_table = 'metadata_samples_shortlist'
         tmp_mut_table = None
         tmp_cohort_table = None
         tmp_filter_table = None
@@ -590,6 +562,32 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
+
+def get_metadata_value_set():
+    values = {}
+    db = get_sql_connection()
+
+    try:
+        cursor = db.cursor()
+        cursor.callproc('get_metadata_values')
+
+        values[cursor.description[0][0]] = {}
+        for row in cursor.fetchall():
+            values[cursor.description[0][0]][str(row[0])] = 0
+
+        while (cursor.nextset() and cursor.description is not None):
+            values[cursor.description[0][0]] = {}
+            for row in cursor.fetchall():
+                values[cursor.description[0][0]][str(row[0])] = 0
+
+        return values
+
+    except Exception as e:
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
 ''' Begin metadata counting methods '''
 
 
@@ -619,32 +617,6 @@ def get_participant_and_sample_count(base_table, cursor):
     except Exception as e:
         logger.error(traceback.format_exc())
         if cursor: cursor.close()
-
-
-def get_metadata_value_set():
-    values = {}
-    db = get_sql_connection()
-
-    try:
-        cursor = db.cursor()
-        cursor.callproc('get_metadata_values')
-
-        values[cursor.description[0][0]] = {}
-        for row in cursor.fetchall():
-            values[cursor.description[0][0]][str(row[0])] = 0
-
-        while (cursor.nextset() and cursor.description is not None):
-            values[cursor.description[0][0]] = {}
-            for row in cursor.fetchall():
-                values[cursor.description[0][0]][str(row[0])] = 0
-
-        return values
-
-    except Exception as e:
-        logger.error(traceback.format_exc())
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
@@ -698,7 +670,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 if row['attribute'] in METADATA_SHORTLIST:
                     valid_attrs[row['spec'] + ':' + row['attribute']] = {
                         'name': row['attribute'],
-                        'tables': ('metadata_samples',),
+                        'tables': ('metadata_samples_shortlist',),
                         'sample_ids': None
                     }
             cursor.close()
@@ -824,8 +796,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     if grouped_filter not in exclusionary_filter:
                         exclusionary_filter[grouped_filter] = ex_where_clause
 
-        base_table = 'metadata_samples'
-        filter_table = 'metadata_samples'
+        base_table = 'metadata_samples_shortlist'
+        filter_table = 'metadata_samples_shortlist'
         tmp_mut_table = None
         tmp_cohort_table = None
         tmp_filter_table = None
@@ -934,7 +906,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
-                JOIN metadata_samples ms ON ms.SampleBarcode = cs.sample_id
+                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_id
             """ % tmp_cohort_table
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_id' % tmp_mut_table)
