@@ -140,7 +140,7 @@ DISPLAY_NAME_DD = {
         'IGR': 'IGR',
         "5'Flank": '5\' Flank',
     },
-    'bmi': {
+    'BMI': {
         'underweight': 'Underweight: BMI less that 18.5',
         'normal weight': 'Normal weight: BMI is 18.5 - 24.9',
         'overweight': 'Overweight: BMI is 25 - 29.9',
@@ -168,11 +168,6 @@ GROUPED_FILTERS = {
     'has_GA_miRNASeq': 'miRNASeq',
     'has_27k': 'RPPA',
     'has_450k': 'RPPA',
-}
-
-CONTINUOUS_DATA_SHORTLIST = {
-    'bmi': 1,
-    'age_at_initial_pathologic_diagnosis': 1
 }
 
 debug = settings.DEBUG # RO global for this file
@@ -1014,9 +1009,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 col_headers = [i[0] for i in cursor.description]
             if not col_headers[0] in counts:
                 counts[col_headers[0]] = {}
-                # TODO: alter count queries to deal with continuous data which is clustered (eg. bmi) in an appropriate manner
-                # In the mean time, pull down the values and deal with them in our normalization methods
-                if col_headers[0] in CONTINUOUS_DATA_SHORTLIST:
+                if col_headers[0] not in metadata_values:
+                    # TODO: alter count queries to deal with continuous data which is clustered (eg. bmi) in an appropriate manner
+                    # in the mean time, just put in an empty dict for them to fill into and handle them
+                    # in normalization methods
                     counts[col_headers[0]]['counts'] = {}
                 else:
                     counts[col_headers[0]]['counts'] = metadata_values[col_headers[0]]
@@ -1099,7 +1095,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 # Special case for age ranges
                 if key == 'CLIN:age_at_initial_pathologic_diagnosis':
                     feature['values'] = normalize_ages(feature['values'])
-                elif key == 'CLIN:bmi':
+                elif key == 'CLIN:BMI':
                     feature['values'] = normalize_bmi(feature['values'])
 
                 for value, count in feature['values'].items():
@@ -1327,7 +1323,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'person_neoplasm_cancer_status',
         'new_tumor_event_after_initial_treatment',
         'neoplasm_histologic_grade',
-        'bmi',
+        'BMI',
         'hpv_status',
         'residual_tumor',
         # 'targeted_molecular_therapy', TODO: Add to metadata_samples
