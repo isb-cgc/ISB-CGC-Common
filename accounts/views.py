@@ -625,7 +625,7 @@ def delete_bucket(request, user_id, bucket_id):
 @login_required
 def register_bqdataset(request, user_id, gcp_id):
     if request.POST:
-        bqdataset_name = request.POST.get('bqdataset_name', None)
+        bqdataset_name = request.POST.get('bqdataset_name', None).strip()
         gcp = GoogleProject.objects.get(id=gcp_id)
         found_dataset = False
         # Check bqdatasetname not null
