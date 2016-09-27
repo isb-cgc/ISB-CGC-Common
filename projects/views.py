@@ -400,3 +400,46 @@ def study_data_error(request, project_id=0, study_id=0, dataset_id=0):
     return JsonResponse({
         'status': 'success'
     })
+
+def system_data_dict(request):
+
+    # Exclusion attributes: Project, Study, has_, SampleBarcode, ParticipantBarcode
+    # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
+    exclusion_list = ['Project',
+                      'Study',
+                      'SampleBarcode',
+                      'ParticipantBarcode',
+                      'adenocarcinoma_invasion',
+                      'country_of_procurement',
+                      'Disease_Code',
+                      'frozen_specimen_anatomic_site',
+                      'history_of_prior_malignancy',
+                      'mononucleotide_marker_panel_analysis_status',
+                      'preservation_method',
+                      'tissue_type',
+                      'tumor_pathology']
+    cursor = connection.cursor()
+    cursor.execute('SELECT attribute, code from metadata_attr;')
+    results = cursor.fetchall()
+    attr_list = []
+
+    for attr in results:
+        # print attr
+        name = attr[0]
+        type = attr[1]
+        if name not in exclusion_list and not name.startswith('has_'):
+            if type == 'C':
+                # fetch possible values
+                possible_values = ''
+                fetch_str = 'SELECT DISTINCT %s from metadata_samples;'
+                cursor.execute(fetch_str % (name,))
+                for value in cursor.fetchall():
+                    if value[0] is not None:
+                        possible_values = possible_values + str(value[0]) + ', '
+
+                attr_list.append({'name': name, 'type': 'Categorical', 'values': possible_values[:-2]})
+            elif type == 'N':
+                attr_list.append({'name': name, 'type': 'Numerical', 'values': ''})
+
+    cursor.close()
+    return render(request, 'projects/system_data_dict.html', {'attr_list': attr_list})

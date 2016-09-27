@@ -11,6 +11,7 @@ urlpatterns = [
     url(r'^(?P<project_id>\d+)/edit/?$', views.project_edit, name="project_edit"),
     url(r'^(?P<project_id>\d+)/share/?$', views.project_share, name="project_share"),
     url(r'^data/$', views.upload_files, name='project_file_upload'),
+    url(r'^system_data_dict/$', views.system_data_dict, name='system_data_dict'),
     # url(r'^request/$', views.request_project, name="project_request_result"),
     url(r'^(?P<project_id>\d+)/study/(?P<study_id>\d+)/delete/?$', views.study_delete, name="study_delete"),
     url(r'^(?P<project_id>\d+)/study/(?P<study_id>\d+)/edit/?$', views.study_edit, name="study_edit"),
