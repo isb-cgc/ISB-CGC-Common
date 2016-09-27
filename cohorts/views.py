@@ -60,9 +60,11 @@ from uuid import uuid4
 from accounts.models import NIH_User
 
 from api.api_helpers import *
-from api.metadata import METADATA_SHORTLIST
+from metadata_helpers import *
 
 BQ_ATTEMPT_MAX = 10
+
+METADATA_SHORTLIST = fetch_metadata_shortlist()
 
 # WebApp list of the items from Somatic_mutation_calls which we want to filter on
 MOLECULAR_SHORTLIST = [
@@ -178,83 +180,6 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
-
-# Get a set of random characters of 'length'
-def make_id(length):
-    return ''.join(random.sample(string.ascii_lowercase, length))
-
-# Database connection - does not check for AppEngine
-def get_sql_connection():
-    database = settings.DATABASES['default']
-    try:
-        connect_options = {
-            'host': database['HOST'],
-            'db': database['NAME'],
-            'user': database['USER'],
-            'passwd': database['PASSWORD']
-        }
-
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
-            connect_options['ssl'] = database['OPTIONS']['ssl']
-
-        db = MySQLdb.connect(**connect_options)
-
-        return db
-
-    except Exception as e:
-        logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
-        if db and db.open(): db.close()
-
-
-def submit_bigquery_job(bq_service, project_id, query_body, batch=False):
-
-    job_data = {
-        'jobReference': {
-            'projectId': project_id,
-            'job_id': str(uuid4())
-        },
-        'configuration': {
-            'query': {
-                'query': query_body,
-                'priority': 'BATCH' if batch else 'INTERACTIVE'
-            }
-        }
-    }
-
-    return bq_service.jobs().insert(
-        projectId=project_id,
-        body=job_data).execute(num_retries=5)
-
-
-def is_bigquery_job_finished(bq_service, project_id, job_id):
-
-    job = bq_service.jobs().get(projectId=project_id,
-                             jobId=job_id).execute()
-
-    return job['status']['state'] == 'DONE'
-
-
-def get_bq_job_results(bq_service, job_reference):
-
-    result = []
-    page_token = None
-
-    while True:
-        page = bq_service.jobs().getQueryResults(
-            pageToken=page_token,
-            **job_reference).execute(num_retries=2)
-
-        if int(page['totalRows']) == 0:
-            break
-
-        rows = page['rows']
-        result.extend(rows)
-
-        page_token = page.get('pageToken')
-        if not page_token:
-            break
-
-    return result
 
 
 def convert(data):
@@ -562,32 +487,6 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-
-def get_metadata_value_set():
-    values = {}
-    db = get_sql_connection()
-
-    try:
-        cursor = db.cursor()
-        cursor.callproc('get_metadata_values')
-
-        values[cursor.description[0][0]] = {}
-        for row in cursor.fetchall():
-            values[cursor.description[0][0]][str(row[0])] = 0
-
-        while (cursor.nextset() and cursor.description is not None):
-            values[cursor.description[0][0]] = {}
-            for row in cursor.fetchall():
-                values[cursor.description[0][0]][str(row[0])] = 0
-
-        return values
-
-    except Exception as e:
-        logger.error(traceback.format_exc())
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
 ''' Begin metadata counting methods '''
 
 
@@ -597,9 +496,6 @@ def get_participant_and_sample_count(base_table, cursor):
     counts = {}
 
     try:
-
-        param_tuple = ()
-
         query_str_lead = 'SELECT COUNT(DISTINCT %s) AS %s FROM %s;'
 
         cursor.execute(query_str_lead % ('ParticipantBarcode', 'participant_count', base_table))
@@ -1157,63 +1053,6 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 ''' End metadata counting methods '''
 
 
-def data_availability_sort(key, value, data_attr, attr_details):
-    if key == 'has_Illumina_DNASeq':
-        attr_details['DNA_sequencing'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
-    if key == 'has_SNP6':
-        attr_details['SNP_CN'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
-    if key == 'has_RPPA':
-        attr_details['Protein'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
-
-    if key == 'has_27k':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['DNA_methylation'].append({
-            'value': '27k',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_450k':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['DNA_methylation'].append({
-            'value': '450k',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_HiSeq_miRnaSeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['miRNA_sequencing'].append({
-            'value': 'Illumina HiSeq',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_GA_miRNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['miRNA_sequencing'].append({
-            'value': 'Illumina GA',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_UNC_HiSeq_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'UNC Illumina HiSeq',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_UNC_GA_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'UNC Illumina GA',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_BCGSC_HiSeq_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'BCGSC Illumina HiSeq',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_BCGSC_GA_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'BCGSC Illumina GA',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
@@ -1451,7 +1290,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         values = item['values']
 
         if key.startswith('has_'):
-            data_availability_sort(key, values, data_attr, attr_details)
+            data_availability_sort(key, values, attr_details)
         else:
             keys.append(item['name'])
             item['values'] = sorted(values, key=lambda k: int(k['count']), reverse=True)
@@ -2250,15 +2089,6 @@ def get_metadata(request):
         results = {}
     else:
 
-        data_attr = [
-            'DNA_sequencing',
-            'RNA_sequencing',
-            'miRNA_sequencing',
-            'Protein',
-            'SNP_CN',
-            'DNA_methylation',
-        ]
-
         attr_details = {
             'RNA_sequencing': [],
             'miRNA_sequencing': [],
@@ -2270,7 +2100,7 @@ def get_metadata(request):
             values = item['values']
 
             if key.startswith('has_'):
-                data_availability_sort(key, values, data_attr, attr_details)
+                data_availability_sort(key, values, attr_details)
 
         for key, value in attr_details.items():
             results['count'].append({
