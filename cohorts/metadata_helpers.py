@@ -116,12 +116,16 @@ def fetch_metadata_shortlist():
         db = get_sql_connection()
         if not METADATA_SHORTLIST['list'] or len(METADATA_SHORTLIST['list']) <= 0:
             cursor = db.cursor()
-            cursor.execute("SELECT attribute FROM metadata_shortlist;")
-
-            METADATA_SHORTLIST['list'] = []
-
-            for row in cursor.fetchall():
-                METADATA_SHORTLIST['list'].append(row[0])
+            cursor.execute("SELECT COUNT(TABLE_NAME) FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'metadata_shortlist';")
+            # Only try to fetch the values if the view exists
+            if cursor.fetchall()[0][0] > 0:
+                cursor.execute("SELECT attribute FROM metadata_shortlist;")
+                METADATA_SHORTLIST['list'] = []
+                for row in cursor.fetchall():
+                    METADATA_SHORTLIST['list'].append(row[0])
+            else:
+                # Otherwise just warn
+                logger.warn("[WARNING] View metadata_shortlist was not found!")
 
         return METADATA_SHORTLIST['list']
     except Exception as e:
