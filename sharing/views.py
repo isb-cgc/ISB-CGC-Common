@@ -73,9 +73,7 @@ def sharing_remove(request, sharing_id=0):
         # This allows users to remove resources shared with them
         resc = request.user.shared_resource_set.get(id=sharing_id)
 
-
-    resc.active = False
-    resc.save()
+    resc.delete()
 
     return JsonResponse({
         'status': 'success'
