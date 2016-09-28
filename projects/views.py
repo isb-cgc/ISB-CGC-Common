@@ -288,9 +288,16 @@ def upload_files(request):
 
 @login_required
 def project_delete(request, project_id=0):
-    proj = request.user.project_set.get(id=project_id)
-    proj.active = False
-    proj.save()
+    project = Project.objects.get(id=project_id)
+    if project.owner == request.user:
+        # Deactivate if the user is the owner
+        project.active = False
+        project.save()
+    else:
+        # Unshare
+        shared_resource = project.shared.filter(matched_user_id=request.user.id)
+        shared_resource.delete()
+
 
     return JsonResponse({
         'status': 'success'
