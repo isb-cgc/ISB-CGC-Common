@@ -76,7 +76,7 @@ def project_upload(request):
     else:
         template = 'projects/project_upload.html'
 
-    projects = Project.objects.filter(owner=request.user) | Project.objects.filter(is_public=True,active=True)
+    projects = Project.objects.filter(owner=request.user, active=True) | Project.objects.filter(is_public=True,active=True)
 
     context = {
         'requested': False,
