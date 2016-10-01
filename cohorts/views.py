@@ -1230,9 +1230,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     totals = results['total']
 
+    user_data = []
+
     if USER_DATA_ON:
         # Add in user data
-        user_attr = ['user_project', 'user_study']
         projects = Project.get_user_projects(request.user, True)
         studies = Study.get_user_studies(request.user, True)
         features = User_Feature_Definitions.objects.filter(study__in=studies)
@@ -1254,28 +1255,33 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
                 project_counts[study.project_id] = 0
             project_counts[study.project_id] += count
 
-            user_studies += ({
+            user_studies.append({
                 'count': str(count),
                 'value': study.name,
-                'id'   : study.id
-            },)
+                'id'   : study.id,
+            })
 
         user_projects = []
         for project in projects:
-            user_projects += ({
+            user_projects.append({
                 'count': str(project_counts[project.id]) if project.id in project_counts else 0,
                 'value': project.name,
-                'id'   : project.id
-            },)
+                'id'   : project.id,
+            }),
 
-        results['count'].append({
-            'name': 'user_projects',
-            'values': user_projects
-        })
-        results['count'].append({
-            'name': 'user_studies',
-            'values': user_studies
-        })
+        if len(user_projects) <= 0 or len(user_studies) <= 0:
+            user_data = []
+        else:
+            user_data.append({
+                'id': 'user_projects',
+                'name': 'User Projects',
+                'values': user_projects,
+            })
+            user_data.append({
+                'id': 'user_studies',
+                'name': 'User Studies',
+                'values': user_studies,
+            })
 
     # Group the counts for clustered data type categories
     attr_details = {
@@ -1316,11 +1322,11 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'base_url': settings.BASE_URL,
         'base_api_url': settings.BASE_API_URL,
         'molecular_attr': molecular_attr,
-        'metadata_filters': filters or {}
+        'metadata_filters': filters or {},
+        'user_data': user_data
     }
 
-    if USER_DATA_ON:
-        template_values['user_attr'] = user_attr
+    logger.debug("User data: "+user_data.__str__())
 
     if workbook_id and worksheet_id :
         template_values['workbook']  = Workbook.objects.get(id=workbook_id)
