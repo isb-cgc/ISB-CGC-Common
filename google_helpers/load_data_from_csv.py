@@ -136,6 +136,26 @@ def run(project_id, dataset_id, table_name, schema_file, data_path,
 # [END run]
 
 
+def run_with_schema_object(project_id, dataset_id, table_name, schema, data_path,
+                           source_format='NEWLINE_DELIMITED_JSON', write_disposition='WRITE_EMPTY', num_retries=5):
+
+    bigquery_service = get_bigquery_service()
+
+    job = load_table(
+        bigquery_service,
+        project_id,
+        dataset_id,
+        table_name,
+        schema,
+        data_path,
+        source_format,
+        num_retries,
+        write_disposition
+    )
+
+    poll_job(bigquery_service, job)
+
+
 # [START main]
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
