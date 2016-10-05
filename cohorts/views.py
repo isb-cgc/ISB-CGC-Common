@@ -210,6 +210,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
     filters = {}
     table_key_map = {}
     mutation_filters = None
+    user_data_filters = None
     mutation_where_clause = None
 
     if inc_filters is None:
@@ -221,8 +222,69 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
+        elif 'user_' in key:
+            if not user_data_filters:
+                user_data_filters = {}
+            user_data_filters[key] = inc_filters[key]
         else:
             filters[key] = inc_filters[key]
+
+    # User data filters trump all other filters; if there are any which came along
+    # with the rest, only those count
+    if user_data_filters:
+        if user:
+
+            db = get_sql_connection()
+            cursor = None
+            filtered_projects = None
+            filtered_studies = None
+
+            try:
+                cursor = db.cursor()
+                study_table_set = []
+                if 'user_project' in user_data_filters:
+                    for project_id in user_data_filters['user_project']['values']:
+                        if filtered_projects is None:
+                            filtered_projects = {}
+                        filtered_projects[project_id] = 1
+
+                if 'user_study' in user_data_filters:
+                    for study_id in user_data_filters['user_study']['values']:
+                        if filtered_studies is None:
+                            filtered_studies = {}
+                            filtered_studies[study_id] = 1
+
+                for study in Study.get_user_studies(user):
+                    if (filtered_projects is None or study.project.id in filtered_projects) and (filtered_studies is None or study.id in filtered_studies):
+                        for tables in User_Data_Tables.objects.filter(study_id=study.id):
+                            study_table_set.append(tables.metadata_samples_table)
+
+                if len(study_table_set) > 0:
+                    for study_table in study_table_set:
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode', study_table,))
+                        for row in cursor.fetchall():
+                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': None})
+
+                        samples_and_participants['count'] = len(samples_and_participants['items'])
+
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('participant_barcode', study_table,))
+
+                        for row in cursor.fetchall():
+                            if row[0] is not None:
+                                samples_and_participants['participants'].append(row[0])
+                else:
+                    logger.warn('[WARNING] No valid study tables were found!')
+
+            except Exception as e:
+                logger.error(traceback.format_exc())
+            finally:
+                if cursor: cursor.close()
+                if db and db.open: db.close()
+        else:
+            logger.error("[ERROR] User not authenticated; can't create a user data cohort!")
+
+        return samples_and_participants
+
 
     if mutation_filters:
         mutation_where_clause = build_where_clause(mutation_filters)
@@ -233,85 +295,8 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
     cursor = None
 
     try:
-        # Add TCGA attributes to the list of available attributes
-        if 'user_studies' not in filters or 'tcga' in filters['user_studies']['values']:
-            sample_tables['metadata_samples'] = {'sample_ids': None}
-            if sample_ids and None in sample_ids:
-                sample_tables['metadata_samples']['sample_ids'] = sample_ids[None]
-
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.execute('SELECT attribute, spec FROM metadata_attr')
-            for row in cursor.fetchall():
-                if row['attribute'] in METADATA_SHORTLIST:
-                    valid_attrs[row['spec'] + ':' + row['attribute']] = {
-                        'name': row['attribute'],
-                        'tables': ('metadata_samples',),
-                        'sample_ids': None
-                    }
-            cursor.close()
-
-        # If we have a user, get a list of valid studies
-        if user:
-            for study in Study.get_user_studies(user):
-                if 'user_studies' not in filters or study.id in filters['user_studies']['values']:
-                    study_ids += (study.id,)
-
-                    for tables in User_Data_Tables.objects.filter(study=study):
-                        sample_tables[tables.metadata_samples_table] = {'sample_ids': None}
-                        if sample_ids and study.id in sample_ids:
-                            sample_tables[tables.metadata_samples_table]['sample_ids'] = sample_ids[study.id]
-
-            features = User_Feature_Definitions.objects.filter(study__in=study_ids)
-            for feature in features:
-                if ' ' in feature.feature_name:
-                    # It is not a column name and comes from molecular data, ignore it
-                    continue
-
-                name = feature.feature_name
-                key = 'study:' + str(feature.study_id) + ':' + name
-
-                if feature.shared_map_id:
-                    key = feature.shared_map_id
-                    name = feature.shared_map_id.split(':')[-1]
-
-                if key not in valid_attrs:
-                    valid_attrs[key] = {'name': name, 'tables': (), 'sample_ids': None}
-
-                for tables in User_Data_Tables.objects.filter(study_id=feature.study_id):
-                    valid_attrs[key]['tables'] += (tables.metadata_samples_table,)
-
-                    if tables.metadata_samples_table not in table_key_map:
-                        table_key_map[tables.metadata_samples_table] = {}
-                    table_key_map[tables.metadata_samples_table][key] = feature.feature_name
-
-                    if key in filters:
-                        filters[key]['tables'] += (tables.metadata_samples_table,)
-
-                    if sample_ids and feature.study_id in sample_ids:
-                        valid_attrs[key]['sample_ids'] = sample_ids[feature.study_id]
-        else:
-            logger.info("User not authenticated - their data will not be used")
-
-        if 'user_projects' in filters:
-            # Find all the tables associated to these projects.
-            projects = filters['user_projects']['values']
-            user_studies = Study.objects.filter(project_id__in=projects)
-            base_tables = User_Data_Tables.objects.filter(study__in=user_studies)
-            del filters['user_projects']
-
-        # Now that we're through the Studies filtering area, delete it so it doesn't get pulled into a query
-        if 'user_studies' in filters:
-            del filters['user_studies']
-
-        # For filters with no tables at this point, assume its the TCGA metadata_samples table
-        for key, obj in filters.items():
-            if not obj['tables']:
-                filters[key]['tables'].append('metadata_samples')
-
         cursor = db.cursor()
-
         where_clause = None
-        key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
 
         # construct the WHERE clauses needed
         if filters.__len__() > 0:
@@ -515,13 +500,67 @@ def get_participant_and_sample_count(base_table, cursor):
         if cursor: cursor.close()
 
 
+def count_user_metadata(user, inc_filters=None):
+
+    db = get_sql_connection()
+    cursor = None
+
+    user_data_counts = {
+        'project': {'id': 'user_project', 'displ_name': 'User Project', 'name': 'user_project', 'values': [], },
+        'study': {'id': 'user_study', 'name': 'user_study', 'displ_name': 'User Study', 'values': [], },
+    }
+    # To simplify project counting
+    project_counts = {}
+
+    for project in Project.get_user_projects(user):
+        user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'name': project.name, 'count': 0, })
+        project_counts[project.id] = 0
+
+    for study in Study.get_user_studies(user):
+        study_obj = {'id': study.id, 'value': study.id, 'name': study.name, 'count': 0, 'metadata_samples': None, 'project': study.project.id, }
+        for tables in User_Data_Tables.objects.filter(study_id=study.id):
+            study_obj['metadata_samples'] = tables.metadata_samples_table
+        user_data_counts['study']['values'].append(study_obj)
+
+    study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
+
+    try:
+        cursor = db.cursor()
+
+        # Study counts
+        for study in user_data_counts['study']['values']:
+            if inc_filters is None or 'user_project' not in inc_filters or study['project'] in inc_filters['user_project']['values']:
+                cursor.execute(study_count_query_str % study['metadata_samples'])
+                study['count'] = int(cursor.fetchall()[0][0])
+            if inc_filters is None or 'user_study' not in inc_filters or study['id'] in inc_filters['user_study']['values']:
+                project_counts[study['project']] += study['count']
+
+        # Project counts
+        for project in user_data_counts['project']['values']:
+            project['count'] = project_counts[project['id']]
+
+        # TODO: Feature counts, this will probably require creation of where clauses and tmp tables
+
+        return user_data_counts
+
+    except (Exception) as e:
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+
 def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
-    counts_and_total = {}
+
+    counts_and_total = {
+        'counts': [],
+    }
     sample_tables = {}
     valid_attrs = {}
     study_ids = ()
     table_key_map = {}
     mutation_filters = None
+    user_data_filters = None
     mutation_where_clause = None
     filters = {}
 
@@ -534,6 +573,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
+        elif key == 'user_project' or key == 'user_study':
+            if user_data_filters is None:
+                user_data_filters = {}
+            user_data_filters[key] = inc_filters[key]
         else:
             filters[key] = inc_filters[key]
 
@@ -543,95 +586,49 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     if sample_ids is None:
         sample_ids = {}
 
-    for key in sample_ids:
-        samples_by_study = sample_ids[key]
-        sample_ids[key] = {
-            'SampleBarcode': build_where_clause({'SampleBarcode': samples_by_study}),
-            'sample_barcode': build_where_clause({'sample_barcode': samples_by_study}),
-        }
-
     db = get_sql_connection()
     django.setup()
 
     cursor = None
 
     try:
-        # Add TCGA attributes to the list of available attributes
-        if 'user_studies' not in filters or 'tcga' in filters['user_studies']['values']:
-            sample_tables['metadata_samples'] = {'sample_ids': None}
-            if sample_ids and None in sample_ids:
-                sample_tables['metadata_samples']['sample_ids'] = sample_ids[None]
 
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.execute('SELECT attribute, spec FROM metadata_attr')
-            for row in cursor.fetchall():
-                if row['attribute'] in METADATA_SHORTLIST:
-                    valid_attrs[row['spec'] + ':' + row['attribute']] = {
-                        'name': row['attribute'],
-                        'tables': ('metadata_samples',),
-                        'sample_ids': None
-                    }
-            cursor.close()
+        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+        cursor.execute('SELECT attribute, spec FROM metadata_attr;')
+        for row in cursor.fetchall():
+            if row['attribute'] in METADATA_SHORTLIST:
+                valid_attrs[row['spec'] + ':' + row['attribute']] = {
+                    'name': row['attribute'],
+                    'col_name': row['attribute'],
+                    'tables': ('metadata_samples',),
+                    'sample_ids': None,
+                }
+        cursor.close()
+
+        user_base_tables = None
+        counts_and_total['user_data'] = None
 
         # If we have a user, get a list of valid studies
-        if user:
-            for study in Study.get_user_studies(user):
-                if 'user_studies' not in filters or study.id in filters['user_studies']['values']:
-                    study_ids += (study.id,)
+        if USER_DATA_ON:
+            if user:
+                if len(Study.get_user_studies(user)) > 0:
+                    user_data_result = count_user_metadata(user, user_data_filters)
 
-                    for tables in User_Data_Tables.objects.filter(study=study):
-                        sample_tables[tables.metadata_samples_table] = {'sample_ids': None}
-                        if sample_ids and study.id in sample_ids:
-                            sample_tables[tables.metadata_samples_table]['sample_ids'] = sample_ids[study.id]
+                    counts_and_total['user_data'] = []
 
-            features = User_Feature_Definitions.objects.filter(study__in=study_ids)
-            for feature in features:
-                if ' ' in feature.feature_name:
-                    # It is not a column name and comes from molecular data, ignore it
-                    continue
+                    for key in user_data_result:
+                        counts_and_total['user_data'].append(user_data_result[key])
+                        counts_and_total['counts'].append(user_data_result[key])
 
-                name = feature.feature_name
-                key = 'study:' + str(feature.study_id) + ':' + name
+                    # TODO: If we allow users to filter their data on our filters, we would create the user_base_table here
+                    # Proposition: a separate method would be passed the current db connection and any filters to make the tmp table
+                    # It would pass back the name of the table for use by count_metadata in a UNION statement
 
-                if feature.shared_map_id:
-                    key = feature.shared_map_id
-                    name = feature.shared_map_id.split(':')[-1]
+                else:
+                    logger.info('[STATUS] No studies were found for this user!')
 
-                if key not in valid_attrs:
-                    valid_attrs[key] = {'name': name, 'tables': (), 'sample_ids': None}
-
-                for tables in User_Data_Tables.objects.filter(study_id=feature.study_id):
-                    valid_attrs[key]['tables'] += (tables.metadata_samples_table,)
-
-                    if tables.metadata_samples_table not in table_key_map:
-                        table_key_map[tables.metadata_samples_table] = {}
-                    table_key_map[tables.metadata_samples_table][key] = feature.feature_name
-
-                    if key in filters:
-                        filters[key]['tables'] += (tables.metadata_samples_table,)
-
-                    if sample_ids and feature.study_id in sample_ids:
-                        valid_attrs[key]['sample_ids'] = sample_ids[feature.study_id]
-        else:
-            logger.error("User not authenticated!")
-
-        base_tables = None
-
-        if 'user_projects' in filters:
-            # Find all the tables associated to these projects.
-            projects = filters['user_projects']['values']
-            user_studies = Study.objects.filter(project_id__in=projects)
-            base_tables = User_Data_Tables.objects.filter(study__in=user_studies).values_list('metadata_samples_table', flat=True)
-            del filters['user_projects']
-
-        # Now that we're through the Studies filtering area, delete it so it doesn't get pulled into a query
-        if 'user_studies' in filters:
-            del filters['user_studies']
-
-        # For filters with no tables at this point, assume its the TCGA metadata_samples table
-        for key, obj in filters.items():
-            if not obj['tables']:
-                filters[key]['tables'].append('metadata_samples')
+            else:
+                logger.info("[STATUS] User not authenticated; no user data will be available.")
 
         params_tuple = ()
         counts = {}
@@ -806,29 +803,21 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 FROM cohorts_samples cs
                 JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_id
             """ % tmp_cohort_table
+            # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_id' % tmp_mut_table)
-            # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
             cursor.execute('SELECT COUNT(*) AS count FROM '+tmp_cohort_table+';');
             for row in cursor.fetchall():
-                logger.debug('Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
+                logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
 
         # If there are filters, create a temporary table filtered off the base table
-        if unfiltered_attr.__len__() > 0 and (filters.__len__() > 0 or base_tables):
-            # TODO: This should take into account variable tables; may require a UNION statement or similar
+        if unfiltered_attr.__len__() > 0 and (filters.__len__() > 0 or user_base_tables):
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
-
-            # This tries to join the metadata_samples table (base_table) with user metadata_samples_tables on samplebarcode
-            # TODO: This does not work if samples are not in both tcga/ccle and the users's table. Need a UNION like statement.
-            # if base_tables and len(base_tables) > 0:
-            #     # Union multiple tables
-            #     for table in base_tables:
-            #         make_tmp_table_str += ' JOIN %s ut on ut.sample_barcode = ms.SampleBarcode' % table
 
             if tmp_mut_table and not cohort_id:
                 make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode' % tmp_mut_table
@@ -836,6 +825,13 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             if filters.__len__() > 0:
                 make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
                 params_tuple += where_clause['value_tuple']
+
+            # TODO: If we allow users to filter their samples via our filters, we will need to handle that here
+            # Current proposition: Extend this query to UNION a filtered set of their samples
+            # if user_base_tables and len(user_base_tables) > 0:
+            #     # Union multiple tables
+            #     for table in user_base_tables:
+            #         make_tmp_table_str += ' UNION
 
             make_tmp_table_str += ";"
             cursor.execute(make_tmp_table_str, params_tuple)
@@ -858,39 +854,23 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
 
         count_query_set = []
 
-        for key, feature in valid_attrs.items():
-            # TODO: This should be restructured to deal with features and user data
-            for table in feature['tables']:
-                # Check if the filters make this table 0 anyway
-                # We do this to avoid SQL errors for columns that don't exist
-                should_be_queried = True
-
-                for key, filter in filters.items():
-                    if table not in filter['tables']:
-                        should_be_queried = False
-                        break
-
-                col_name = feature['name']
-                if key_map and key in key_map:
-                    col_name = key_map[key]
-
-                if should_be_queried:
-
-                    if col_name in unfiltered_attr:
-                        count_query_set.append({'query_str':("""
-                            SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;
-                          """) % (col_name, filter_table, col_name,),
-                        'params': None, })
-                    else:
-                        subquery = base_table
-                        if tmp_mut_table:
-                            subquery += ' JOIN %s ON %s = SampleBarcode ' % (tmp_mut_table, 'tumor_sample_id', )
-                        if exclusionary_filter[col_name]['query_str']:
-                            subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
-                        count_query_set.append({'query_str':("""
-                            SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s
-                          """) % (col_name, subquery, col_name,),
-                        'params': exclusionary_filter[col_name]['value_tuple']})
+        for attr in valid_attrs:
+            col_name = valid_attrs[attr]['col_name']
+            if col_name in unfiltered_attr:
+                count_query_set.append({'query_str':("""
+                    SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;
+                  """) % (col_name, filter_table, col_name,),
+                'params': None, })
+            else:
+                subquery = base_table
+                if tmp_mut_table:
+                    subquery += ' JOIN %s ON %s = SampleBarcode ' % (tmp_mut_table, 'tumor_sample_id', )
+                if exclusionary_filter[col_name]['query_str']:
+                    subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
+                count_query_set.append({'query_str':("""
+                    SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s
+                  """) % (col_name, subquery, col_name,),
+                'params': exclusionary_filter[col_name]['value_tuple']})
 
         start = time.time()
         for query in count_query_set:
@@ -979,7 +959,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         counts_and_total['data'] = data
         counts_and_total['participants'] = sample_and_participant_counts['participant_count']
         counts_and_total['total'] = sample_and_participant_counts['sample_count']
-        counts_and_total['counts'] = []
 
         counts_keys = counts.keys()
         for key, feature in valid_attrs.items():
@@ -1026,7 +1005,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             for key in req_filters:
                 this_filter = req_filters[key]
                 if key not in filters:
-                    filters[key] = {'values': [], 'tables': []}
+                    filters[key] = {'values': []}
                 for value in this_filter:
                     filters[key]['values'].append(value)
 
@@ -1036,6 +1015,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
     start = time.time()
     counts_and_total = count_metadata(user, cohort_id, None, filters)
+
     stop = time.time()
     logger.debug(
         "[BENCHMARKING] Time to call metadata_counts from view metadata_counts_platform_list"
@@ -1046,7 +1026,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     )
 
     return {'items': counts_and_total['data'], 'count': counts_and_total['counts'],
-            'participants': counts_and_total['participants'],
+            'participants': counts_and_total['participants'], 'user_data': counts_and_total['user_data'],
             'total': counts_and_total['total']}
 
 
@@ -1230,59 +1210,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     totals = results['total']
 
-    user_data = []
-
-    if USER_DATA_ON:
-        # Add in user data
-        projects = Project.get_user_projects(request.user, True)
-        studies = Study.get_user_studies(request.user, True)
-        features = User_Feature_Definitions.objects.filter(study__in=studies)
-        study_counts = {}
-        project_counts = {}
-
-        for count in results['count']:
-            if 'id' in count and count['id'].startswith('study:'):
-                split = count['id'].split(':')
-                study_id = split[1]
-                feature_name = split[2]
-                study_counts[study_id] = count['total']
-
-        user_studies = []
-        for study in studies:
-            count = study_counts[study.id] if study.id in study_counts else 0
-
-            if not study.project_id in project_counts:
-                project_counts[study.project_id] = 0
-            project_counts[study.project_id] += count
-
-            user_studies.append({
-                'count': str(count),
-                'value': study.name,
-                'id'   : study.id,
-            })
-
-        user_projects = []
-        for project in projects:
-            user_projects.append({
-                'count': str(project_counts[project.id]) if project.id in project_counts else 0,
-                'value': project.name,
-                'id'   : project.id,
-            }),
-
-        if len(user_projects) <= 0 or len(user_studies) <= 0:
-            user_data = []
-        else:
-            user_data.append({
-                'id': 'user_projects',
-                'name': 'User Projects',
-                'values': user_projects,
-            })
-            user_data.append({
-                'id': 'user_studies',
-                'name': 'User Studies',
-                'values': user_studies,
-            })
-
     # Group the counts for clustered data type categories
     attr_details = {
         'RNA_sequencing': [],
@@ -1297,7 +1224,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
         if key.startswith('has_'):
             data_availability_sort(key, values, attr_details)
-        else:
+        elif 'user_' not in key:
             keys.append(item['name'])
             item['values'] = sorted(values, key=lambda k: int(k['count']), reverse=True)
 
@@ -1323,10 +1250,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'base_api_url': settings.BASE_API_URL,
         'molecular_attr': molecular_attr,
         'metadata_filters': filters or {},
-        'user_data': user_data
+        'user_data': results['user_data']
     }
-
-    logger.debug("User data: "+user_data.__str__())
 
     if workbook_id and worksheet_id :
         template_values['workbook']  = Workbook.objects.get(id=workbook_id)
