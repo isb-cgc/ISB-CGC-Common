@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import connection
 from django.core.urlresolvers import reverse
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Project
+from projects.models import User_Feature_Definitions, User_Feature_Counts, Project, Study_BQ_Tables
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
 
@@ -175,7 +175,8 @@ def upload_files(request):
             }
         }
         all_columns = []
-
+        bq_table_names = []
+        seen_user_columns = []
         for formfield in request.FILES:
             file = request.FILES[formfield]
             file_upload = UserUploadedFile(upload=upload, file=file, bucket=config['BUCKET'])
@@ -195,12 +196,16 @@ def upload_files(request):
 
             descriptor = json.loads(request.POST[formfield + '_desc'])
             datatype = request.POST[formfield + '_type']
+            bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(proj.id) + "_" + str(study.id)
+
+            if bq_table_name not in bq_table_names:
+                bq_table_names.append(bq_table_name)
+
             fileJSON = {
                 "FILENAME": file_upload.file.name,
                 "PLATFORM": descriptor['platform'],
                 "PIPELINE": descriptor['pipeline'],
-                "BIGQUERY_TABLE_NAME": "cgc_" + ("user" if datatype == 'user_gen' else datatype) +
-                                       "_" + str(proj.id) + "_" + str(study.id),
+                "BIGQUERY_TABLE_NAME": bq_table_name,
                 "DATATYPE": datatype,
                 "COLUMNS": []
             }
@@ -232,10 +237,12 @@ def upload_files(request):
                         "SHARED_ID" : shared_id
                     })
 
-                    all_columns.append({
-                        "name": column['name'],
-                        "type": type
-                    })
+                    if column['name'] not in seen_user_columns:
+                        seen_user_columns.append(column['name'])
+                        all_columns.append({
+                            "name": column['name'],
+                            "type": type
+                        })
 
             config['FILES'].append(fileJSON)
 
@@ -248,8 +255,15 @@ def upload_files(request):
             metadata_samples_table=config['USER_METADATA_TABLES']['METADATA_SAMPLES'],
             data_upload=upload,
             google_project=google_project,
-            google_bucket=bucket
+            google_bucket=bucket,
+            google_bq_dataset=dataset
         )
+
+        bq_table_items = []
+        for bq_table in bq_table_names:
+            bq_table_items.append(Study_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
+        Study_BQ_Tables.objects.bulk_create(bq_table_items)
+
         # print settings.PROCESSING_ENABLED
         if settings.PROCESSING_ENABLED:
             files = {'config.json': ('config.json', json.dumps(config))}
