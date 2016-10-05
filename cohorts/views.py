@@ -208,7 +208,6 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
     valid_attrs = {}
     study_ids = ()
     filters = {}
-    table_key_map = {}
     mutation_filters = None
     user_data_filters = None
     mutation_where_clause = None
@@ -257,17 +256,17 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
                 for study in Study.get_user_studies(user):
                     if (filtered_projects is None or study.project.id in filtered_projects) and (filtered_studies is None or study.id in filtered_studies):
                         for tables in User_Data_Tables.objects.filter(study_id=study.id):
-                            study_table_set.append(tables.metadata_samples_table)
+                            study_table_set.append({'study': study.id, 'table': tables.metadata_samples_table})
 
                 if len(study_table_set) > 0:
                     for study_table in study_table_set:
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode', study_table,))
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode', study_table['table'],))
                         for row in cursor.fetchall():
-                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': None})
+                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': study_table['id']})
 
                         samples_and_participants['count'] = len(samples_and_participants['items'])
 
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('participant_barcode', study_table,))
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('participant_barcode', study_table['table'],))
 
                         for row in cursor.fetchall():
                             if row[0] is not None:
@@ -301,7 +300,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         # construct the WHERE clauses needed
         if filters.__len__() > 0:
             filter_copy = copy.deepcopy(filters)
-            where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
+            where_clause = build_where_clause(filter_copy)
 
         base_table = 'metadata_samples_shortlist'
         filter_table = 'metadata_samples_shortlist'
@@ -558,7 +557,6 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     sample_tables = {}
     valid_attrs = {}
     study_ids = ()
-    table_key_map = {}
     mutation_filters = None
     user_data_filters = None
     mutation_where_clause = None
@@ -657,12 +655,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                             attr_is_filtered = True
                 not attr_is_filtered and unfiltered_attr.append(attr.split(':')[-1])
 
-        key_map = table_key_map['metadata_samples'] if 'metadata_samples' in table_key_map else False
-
         # construct the WHERE clauses needed
         if filters.__len__() > 0:
             filter_copy = copy.deepcopy(filters)
-            where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
+            where_clause = build_where_clause(filter_copy)
             for filter_key in filters:
                 filter_copy = copy.deepcopy(filters)
                 del filter_copy[filter_key]
@@ -682,7 +678,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 if filter_copy.__len__() <= 0:
                     ex_where_clause = {'query_str': None, 'value_tuple': None}
                 else:
-                    ex_where_clause = build_where_clause(filter_copy, alt_key_map=key_map)
+                    ex_where_clause = build_where_clause(filter_copy)
 
                 exclusionary_filter[filter_key_parts[1]] = ex_where_clause
 
