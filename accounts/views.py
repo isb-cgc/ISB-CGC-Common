@@ -34,6 +34,7 @@ from google_helpers.logging_service import get_logging_resource
 from google_helpers.storage_service import get_storage_resource
 from googleapiclient.errors import HttpError
 from models import *
+from projects.models import User_Data_Tables
 
 logger = logging.getLogger(__name__)
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
@@ -618,7 +619,14 @@ def register_bucket(request, user_id, gcp_id):
 def delete_bucket(request, user_id, bucket_id):
     if request.POST:
         gcp_id = request.POST.get('gcp_id')
-        Bucket.objects.get(id=bucket_id).delete()
+        bucket = Bucket.objects.get(id=bucket_id)
+
+        # Check to make sure it's not being used by user data
+        user_data_tables = User_Data_Tables.objects.filter(google_bucket_id=bucket_id, study__active=True)
+        if len(user_data_tables):
+            messages.error(request, 'The bucket, {0}, is being used for uploaded project data. Please delete the project before deleting this bucket.'.format(bucket.bucket_name))
+        else:
+            bucket.delete()
         return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
     return redirect('user_gcp_list', user=user_id)
 
@@ -669,6 +677,15 @@ def delete_bqdataset(request, user_id, bqdataset_id):
 
     if request.POST:
         gcp_id = request.POST.get('gcp_id')
-        BqDataset.objects.get(id=bqdataset_id).delete()
+        bqdataset = BqDataset.objects.get(id=bqdataset_id)
+
+        # Check to make sure it's not being used by user data
+        user_data_tables = User_Data_Tables.objects.filter(google_bq_dataset_id=bqdataset_id, study__active=True)
+        if len(user_data_tables):
+            messages.error(request,
+                           'The dataset, {0}, is being used for uploaded project data. Please delete the project before unregistering this dataset.'.format(
+                               bqdataset.dataset_name))
+        else:
+            bqdataset.delete()
         return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
     return redirect('user_gcp_list', user_id=user_id)
