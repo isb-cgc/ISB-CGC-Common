@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import connection
 from django.core.urlresolvers import reverse
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Project, Study_BQ_Tables
+from projects.models import User_Feature_Definitions, User_Feature_Counts, Project, Study, Study_BQ_Tables
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
 
@@ -306,6 +306,12 @@ def project_delete(request, project_id=0):
     if project.owner == request.user:
         # Deactivate if the user is the owner
         project.active = False
+
+        # Find all associated studies and deactivate those too
+        studies = Study.objects.filter(project=project)
+        for study in studies:
+            study.active = False
+            study.save()
         project.save()
     else:
         # Unshare
