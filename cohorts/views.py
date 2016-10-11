@@ -256,13 +256,18 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
                 for study in Study.get_user_studies(user):
                     if (filtered_projects is None or study.project.id in filtered_projects) and (filtered_studies is None or study.id in filtered_studies):
                         for tables in User_Data_Tables.objects.filter(study_id=study.id):
-                            study_table_set.append({'study': study.id, 'table': tables.metadata_samples_table})
+                            if tables.metadata_samples_table:
+                                study_table_set.append({'study': study.id, 'table': tables.metadata_samples_table})
+                            else:
+                                logger.warn('[WARNING] No samples table found for study '
+                                    + (study.name if study.name is not None else '[Name not supplied]')
+                                    + ', ID#'+study.id.__str__())
 
                 if len(study_table_set) > 0:
                     for study_table in study_table_set:
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode', study_table['table'],))
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, participant_barcode', study_table['table'],))
                         for row in cursor.fetchall():
-                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': study_table['id']})
+                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': study_table['study'], 'participant_barcode': row[1]})
 
                         samples_and_participants['count'] = len(samples_and_participants['items'])
 
