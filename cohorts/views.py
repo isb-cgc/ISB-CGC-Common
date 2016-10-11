@@ -260,9 +260,9 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
 
                 if len(study_table_set) > 0:
                     for study_table in study_table_set:
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode', study_table['table'],))
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, participant_barcode', study_table['table'],))
                         for row in cursor.fetchall():
-                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': study_table['study']})
+                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': study_table['study'], 'participant_barcode': row[1]})
 
                         samples_and_participants['count'] = len(samples_and_participants['items'])
 
