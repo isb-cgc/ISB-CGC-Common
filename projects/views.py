@@ -135,7 +135,7 @@ def upload_files(request):
         proj = request.user.project_set.create(name=request.POST['project-name'], description=request.POST['project-description'])
         proj.save()
     else:
-        proj = request.user.project_set.all().filter(id=request.POST['project-id'])[0]
+        proj = Project.objects.get(id=request.POST['project-id'])
 
     if proj is None:
         status = 'error'
@@ -149,7 +149,7 @@ def upload_files(request):
 
         if request.POST['data-type'] == 'extend':
             # TODO Does this need a share check??
-            study.extends_id = request.POST['extend-study-id']
+            study.extends_id = request.POST['extend-studNy-id']
 
         study.save()
 
@@ -275,8 +275,8 @@ def upload_files(request):
             success_url = reverse('study_data_success', kwargs=post_args) + '?key=' + upload.key
             failure_url = reverse('study_data_error', kwargs=post_args) + '?key=' + upload.key
             parameters = {
-                'SUCCESS_POST_URL': request.build_absolute_uri( success_url ),
-                'FAILURE_POST_URL': request.build_absolute_uri( failure_url )
+                'SUCCESS_POST_URL': request.build_absolute_uri( success_url ).replace('http', 'https'),
+                'FAILURE_POST_URL': request.build_absolute_uri( failure_url ).replace('http', 'https')
             }
 
             r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
