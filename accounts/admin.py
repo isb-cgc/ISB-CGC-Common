@@ -20,6 +20,11 @@ from django.contrib import admin
 from django.contrib.auth.models import User
 
 from accounts.models import NIH_User, Bucket, GoogleProject, ServiceAccount, AuthorizedDataset
+from allauth.socialaccount.models import SocialToken
+
+# Required import otherwise SocialToken is not registered before unregistering
+from allauth.socialaccount.admin import SocialTokenAdmin
+
 
 
 class NIH_UserAdmin(admin.ModelAdmin):
@@ -76,3 +81,6 @@ class AuthorizedDatasetAdmin(admin.ModelAdmin):
 admin.site.register(NIH_User, NIH_UserAdmin)
 admin.site.register(Bucket, BucketAdmin)
 admin.site.register(GoogleProject, GoogleProjectAdmin)
+
+# Hides the SocialToken model from the admin pages
+admin.site.unregister(SocialToken)
