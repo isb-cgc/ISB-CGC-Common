@@ -504,7 +504,7 @@ def get_participant_and_sample_count(base_table, cursor):
         if cursor: cursor.close()
 
 
-def count_user_metadata(user, inc_filters=None):
+def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
     db = get_sql_connection()
     cursor = None
@@ -611,11 +611,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         user_base_tables = None
         counts_and_total['user_data'] = None
 
-        # If we have a user, get a list of valid studies
+        # If we have a user, get counts for any user data
         if USER_DATA_ON:
             if user:
                 if len(Study.get_user_studies(user)) > 0:
-                    user_data_result = count_user_metadata(user, user_data_filters)
+                    user_data_result = count_user_metadata(user, user_data_filters, cohort_id)
 
                     counts_and_total['user_data'] = []
 
