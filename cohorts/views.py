@@ -663,8 +663,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
 
         user_base_tables = None
         counts_and_total['user_data'] = None
-        counts_and_total['user_data_total'] = "NA"
-        counts_and_total['user_data_participants'] = "NA"
+        counts_and_total['user_data_total'] = None
+        counts_and_total['user_data_participants'] = None
 
         # If we have a user, get counts for any user data
         if USER_DATA_ON:
