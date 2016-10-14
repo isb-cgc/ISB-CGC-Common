@@ -521,10 +521,24 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         project_counts[project.id] = 0
 
     for study in Study.get_user_studies(user):
+
+        include_study = True
         study_obj = {'id': study.id, 'value': study.id, 'name': study.name, 'count': 0, 'metadata_samples': None, 'project': study.project.id, }
         for tables in User_Data_Tables.objects.filter(study_id=study.id):
             study_obj['metadata_samples'] = tables.metadata_samples_table
-        user_data_counts['study']['values'].append(study_obj)
+
+            # Do not include studies that are low level data
+            datatype_query = "SELECT data_type from {0} where study_id={1}".format(tables.metadata_data_table, study.id)
+            cursor = db.cursor()
+            cursor.execute(datatype_query)
+            results = cursor.fetchall()
+            if len(results):
+                for row in results:
+                    if row[0] == 'low_level':
+                        include_study = False
+
+        if include_study:
+            user_data_counts['study']['values'].append(study_obj)
 
     study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
 

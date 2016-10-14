@@ -1,44 +1,59 @@
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseRedirect, JsonResponse
 from django.core.urlresolvers import reverse
 from sharing.models import Shared_Resource
+from django.contrib import messages
 
 def sharing_add(request, sharing_id=0):
     template = 'sharing/sharing_detail.html'
-    shared = Shared_Resource.objects.get(id=sharing_id, share_key=request.GET['key'])
+
+    try:
+        shared = Shared_Resource.objects.get(id=sharing_id, share_key=request.GET['key'])
+    except Shared_Resource.DoesNotExist:
+        shared = None
+
     message = ""
 
-    if request.user.is_authenticated():
-        if shared.redeemed and shared.matched_user_id != request.user.id:
-            message = 'this invitation has already been redeemed by a different user'
-        else :
-            shared.redeemed = True
-            shared.matched_user = request.user
-            shared.save()
+    if shared:
+        if request.user.is_authenticated():
+            if shared.redeemed and shared.matched_user_id != request.user.id:
+                message = 'this invitation has already been redeemed by a different user'
+            else :
+                shared.redeemed = True
+                shared.matched_user = request.user
+                shared.save()
 
 
-    type = None
-    resource = None
-    redirect_page = ''
-    redirect_id_key = ''
-    title = ''
+        type = None
+        resource = None
+        redirect_page = ''
+        redirect_id_key = ''
+        title = ''
 
-    if shared.project_set.count() > 0:
-        type = 'projects'
-        title = 'Project'
-        redirect_page = 'project_detail'
-        redirect_id_key = 'project_id'
-        resource = shared.project_set.all().first()
-    elif shared.workbook_set.count() > 0:
-        type = 'workbooks'
-        title = 'Workbook'
-        redirect_page = 'workbook_detail'
-        redirect_id_key = 'workbook_id'
-        resource = shared.workbook_set.all().first()
+        if shared.project_set.count() > 0:
+            type = 'projects'
+            title = 'Project'
+            redirect_page = 'project_detail'
+            redirect_id_key = 'project_id'
+            resource = shared.project_set.all().first()
+        elif shared.workbook_set.count() > 0:
+            type = 'workbooks'
+            title = 'Workbook'
+            redirect_page = 'workbook_detail'
+            redirect_id_key = 'workbook_id'
+            resource = shared.workbook_set.all().first()
 
-    if not resource:
-        message = 'we were not able to find the resource'
+        if not resource:
+            message = 'we were not able to find the resource'
+
+    else:
+        messages.error(request, "This shared resource has already been removed")
+        if request.user.is_authenticated():
+            redirect_page = 'dashboard'
+        else:
+            redirect_page = 'landing_page'
+        return redirect(redirect_page)
 
     if message != "" :
         context = {
