@@ -663,6 +663,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
 
         user_base_tables = None
         counts_and_total['user_data'] = None
+        counts_and_total['user_data_total'] = "NA"
+        counts_and_total['user_data_participants'] = "NA"
 
         # If we have a user, get counts for any user data
         if USER_DATA_ON:
@@ -686,8 +688,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     # It would pass back the name of the table for use by count_metadata in a UNION statement
 
                 else:
-                    logger.info('[STATUS] No studies were found for this user!')
-
+                    logger.info('[STATUS] No studies were found for this user.')
             else:
                 logger.info("[STATUS] User not authenticated; no user data will be available.")
 
