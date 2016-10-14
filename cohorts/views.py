@@ -512,6 +512,8 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     user_data_counts = {
         'project': {'id': 'user_project', 'displ_name': 'User Project', 'name': 'user_project', 'values': [], },
         'study': {'id': 'user_study', 'name': 'user_study', 'displ_name': 'User Study', 'values': [], },
+        'total': 0,
+        'participants': 0,
     }
     # To simplify project counting
     project_counts = {}
@@ -540,18 +542,55 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if include_study:
             user_data_counts['study']['values'].append(study_obj)
 
-    study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
+        study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
+        participant_count_query_str = "SELECT COUNT(DISTINCT participant_barcode) AS count FROM %s"
+
+        # If there's a cohort_id, the count is actually done against a filtered cohort_samples set instead of the study table
+        if cohort_id is not None:
+            study_count_query_str = "SELECT COUNT(DISTINCT sample_id) FROM cohorts_samples WHERE cohort_id = %s AND study_id = %s"
+            participant_count_query_str = "SELECT COUNT(DISTINCT st.participant_barcode) FROM %s"
+            participant_count_query_str_join = " st JOIN (SELECT sample_id FROM cohorts_samples WHERE cohort_id = %s AND study_id = %s) cs ON cs.sample_id = st.sample_barcode;"
 
     try:
         cursor = db.cursor()
 
         # Study counts
         for study in user_data_counts['study']['values']:
+            study_incl = False
+            proj_incl = False
+
             if inc_filters is None or 'user_project' not in inc_filters or study['project'] in inc_filters['user_project']['values']:
-                cursor.execute(study_count_query_str % study['metadata_samples'])
-                study['count'] = int(cursor.fetchall()[0][0])
+                study_incl = True
+                if cohort_id is not None:
+                    query_params = (cohort_id,study['id'],)
+                    cursor.execute(study_count_query_str, query_params)
+                else:
+                    query_params = None
+                    cursor.execute(study_count_query_str % study['metadata_samples'])
+
+                result = cursor.fetchall()[0][0]
+                if result is None:
+                    study['count'] = 0
+                else:
+                    study['count'] = int(result)
+
             if inc_filters is None or 'user_study' not in inc_filters or study['id'] in inc_filters['user_study']['values']:
                 project_counts[study['project']] += study['count']
+                proj_incl = True
+
+            if study_incl and proj_incl:
+                user_data_counts['total'] += study['count']
+
+                if query_params is None:
+                    cursor.execute(participant_count_query_str % study['metadata_samples'])
+                else:
+                    cursor.execute((participant_count_query_str % study['metadata_samples']) + participant_count_query_str_join, query_params)
+
+                result = cursor.fetchall()[0][0]
+                if result is None:
+                    user_data_counts['participants'] += 0
+                else:
+                    user_data_counts['participants'] += int(result)
 
         # Project counts
         for project in user_data_counts['project']['values']:
@@ -634,8 +673,13 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     counts_and_total['user_data'] = []
 
                     for key in user_data_result:
-                        counts_and_total['user_data'].append(user_data_result[key])
-                        counts_and_total['counts'].append(user_data_result[key])
+                        if 'total' in key:
+                            counts_and_total['user_data_total'] = user_data_result[key]
+                        elif 'participants' in key:
+                            counts_and_total['user_data_participants'] = user_data_result[key]
+                        else:
+                            counts_and_total['user_data'].append(user_data_result[key])
+                            counts_and_total['counts'].append(user_data_result[key])
 
                     # TODO: If we allow users to filter their data on our filters, we would create the user_base_table here
                     # Proposition: a separate method would be passed the current db connection and any filters to make the tmp table
@@ -1042,7 +1086,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
 
     return {'items': counts_and_total['data'], 'count': counts_and_total['counts'],
             'participants': counts_and_total['participants'], 'user_data': counts_and_total['user_data'],
-            'total': counts_and_total['total']}
+            'total': counts_and_total['total'], 'user_data_total': counts_and_total['user_data_total'],
+            'user_data_participants': counts_and_total['user_data_participants']}
 
 
 ''' End metadata counting methods '''
@@ -1265,7 +1310,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'base_api_url': settings.BASE_API_URL,
         'molecular_attr': molecular_attr,
         'metadata_filters': filters or {},
-        'user_data': results['user_data']
+        'user_data': results['user_data'],
     }
 
     if workbook_id and worksheet_id :
