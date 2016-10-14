@@ -11,9 +11,9 @@ from django.conf import settings
 from django.db import connection
 from django.core.urlresolvers import reverse
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Project
+from projects.models import User_Feature_Definitions, User_Feature_Counts, Project, Study, Study_BQ_Tables
 from sharing.service import create_share
-from google.appengine.api.mail import send_mail
+from accounts.models import GoogleProject, Bucket, BqDataset
 
 import json
 import requests
@@ -65,36 +65,23 @@ def project_detail(request, project_id=0):
     }
     return render(request, template, context)
 
-@login_required
-def request_project(request):
-    send_mail(
-            'request@' + settings.PROJECT_NAME + '.appspotmail.com',
-            settings.REQUEST_PROJECT_EMAIL,
-            'User has requested a Google Project',
-            '''
-The user %s has requested a new Google Project be created. Here is their message:
-
-%s
-    ''' % (request.user.email, request.POST['message']))
-
-    template = 'projects/project_request.html'
-    context = {
-        'requested': True
-    }
-    return render(request, template, context)
 
 @login_required
 def project_upload(request):
-    if not hasattr(request.user, 'googleproject'):
-        template = 'projects/project_request.html'
+    # Check for user' GoogleProject
+    google_projects = GoogleProject.objects.filter(user=request.user)
+
+    if len(google_projects) == 0:
+        template = 'GenespotRE/register_gcp.html'
     else:
         template = 'projects/project_upload.html'
 
-    projects = request.user.project_set.all().filter(active=True)
+    projects = Project.objects.filter(owner=request.user, active=True) | Project.objects.filter(is_public=True,active=True)
 
     context = {
         'requested': False,
         'projects': projects,
+        'google_projects': google_projects
     }
     return render(request, template, context)
 
@@ -148,7 +135,7 @@ def upload_files(request):
         proj = request.user.project_set.create(name=request.POST['project-name'], description=request.POST['project-description'])
         proj.save()
     else:
-        proj = request.user.project_set.all().filter(id=request.POST['project-id'])[0]
+        proj = Project.objects.get(id=request.POST['project-id'])
 
     if proj is None:
         status = 'error'
@@ -162,20 +149,24 @@ def upload_files(request):
 
         if request.POST['data-type'] == 'extend':
             # TODO Does this need a share check??
-            study.extends_id = request.POST['extend-study-id']
+            study.extends_id = request.POST['extend-studNy-id']
 
         study.save()
 
         upload = UserUpload(owner=request.user)
         upload.save()
 
+        bucket = Bucket.objects.get(id=request.POST['bucket'])
+        dataset = BqDataset.objects.get(id=request.POST['dataset'])
+        google_project = bucket.google_project
+
         config = {
             "USER_PROJECT": proj.id,
             "USER_ID": request.user.id,
             "STUDY": study.id,
-            "BUCKET": request.user.bucket_set.all()[0].bucket_name,
-            "GOOGLE_PROJECT": request.user.googleproject.project_name,
-            "BIGQUERY_DATASET": request.user.googleproject.big_query_dataset,
+            "BUCKET": bucket.bucket_name,
+            "GOOGLE_PROJECT": google_project.project_name,
+            "BIGQUERY_DATASET": dataset.dataset_name,
             "FILES": [],
             "USER_METADATA_TABLES": {
                 "METADATA_DATA" : "user_metadata_" + str(request.user.id) + "_" + str(study.id),
@@ -184,7 +175,8 @@ def upload_files(request):
             }
         }
         all_columns = []
-
+        bq_table_names = []
+        seen_user_columns = []
         for formfield in request.FILES:
             file = request.FILES[formfield]
             file_upload = UserUploadedFile(upload=upload, file=file, bucket=config['BUCKET'])
@@ -204,12 +196,16 @@ def upload_files(request):
 
             descriptor = json.loads(request.POST[formfield + '_desc'])
             datatype = request.POST[formfield + '_type']
+            bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(proj.id) + "_" + str(study.id)
+
+            if bq_table_name not in bq_table_names:
+                bq_table_names.append(bq_table_name)
+
             fileJSON = {
                 "FILENAME": file_upload.file.name,
                 "PLATFORM": descriptor['platform'],
                 "PIPELINE": descriptor['pipeline'],
-                "BIGQUERY_TABLE_NAME": "cgc_" + ("user" if datatype == 'user_gen' else datatype) +
-                                       "_" + str(proj.id) + "_" + str(study.id),
+                "BIGQUERY_TABLE_NAME": bq_table_name,
                 "DATATYPE": datatype,
                 "COLUMNS": []
             }
@@ -241,10 +237,12 @@ def upload_files(request):
                         "SHARED_ID" : shared_id
                     })
 
-                    all_columns.append({
-                        "name": column['name'],
-                        "type": type
-                    })
+                    if column['name'] not in seen_user_columns:
+                        seen_user_columns.append(column['name'])
+                        all_columns.append({
+                            "name": column['name'],
+                            "type": type
+                        })
 
             config['FILES'].append(fileJSON)
 
@@ -256,10 +254,17 @@ def upload_files(request):
             metadata_data_table=config['USER_METADATA_TABLES']['METADATA_DATA'],
             metadata_samples_table=config['USER_METADATA_TABLES']['METADATA_SAMPLES'],
             data_upload=upload,
-            google_project=request.user.googleproject,
-            google_bucket=request.user.bucket_set.all()[0]
+            google_project=google_project,
+            google_bucket=bucket,
+            google_bq_dataset=dataset
         )
 
+        bq_table_items = []
+        for bq_table in bq_table_names:
+            bq_table_items.append(Study_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
+        Study_BQ_Tables.objects.bulk_create(bq_table_items)
+
+        # print settings.PROCESSING_ENABLED
         if settings.PROCESSING_ENABLED:
             files = {'config.json': ('config.json', json.dumps(config))}
             post_args = {
@@ -270,9 +275,10 @@ def upload_files(request):
             success_url = reverse('study_data_success', kwargs=post_args) + '?key=' + upload.key
             failure_url = reverse('study_data_error', kwargs=post_args) + '?key=' + upload.key
             parameters = {
-                'SUCCESS_POST_URL': request.build_absolute_uri( success_url ),
-                'FAILURE_POST_URL': request.build_absolute_uri( failure_url )
+                'SUCCESS_POST_URL': request.build_absolute_uri( success_url ).replace('http', 'https'),
+                'FAILURE_POST_URL': request.build_absolute_uri( failure_url ).replace('http', 'https')
             }
+
             r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
                               files=files, params=parameters,
                               auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD))
@@ -296,9 +302,22 @@ def upload_files(request):
 
 @login_required
 def project_delete(request, project_id=0):
-    proj = request.user.project_set.get(id=project_id)
-    proj.active = False
-    proj.save()
+    project = Project.objects.get(id=project_id)
+    if project.owner == request.user:
+        # Deactivate if the user is the owner
+        project.active = False
+
+        # Find all associated studies and deactivate those too
+        studies = Study.objects.filter(project=project)
+        for study in studies:
+            study.active = False
+            study.save()
+        project.save()
+    else:
+        # Unshare
+        shared_resource = project.shared.filter(matched_user_id=request.user.id)
+        shared_resource.delete()
+
 
     return JsonResponse({
         'status': 'success'
@@ -408,3 +427,46 @@ def study_data_error(request, project_id=0, study_id=0, dataset_id=0):
     return JsonResponse({
         'status': 'success'
     })
+
+def system_data_dict(request):
+
+    # Exclusion attributes: Project, Study, has_, SampleBarcode, ParticipantBarcode
+    # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
+    exclusion_list = ['Project',
+                      'Study',
+                      'SampleBarcode',
+                      'ParticipantBarcode',
+                      'adenocarcinoma_invasion',
+                      'country_of_procurement',
+                      'Disease_Code',
+                      'frozen_specimen_anatomic_site',
+                      'history_of_prior_malignancy',
+                      'mononucleotide_marker_panel_analysis_status',
+                      'preservation_method',
+                      'tissue_type',
+                      'tumor_pathology']
+    cursor = connection.cursor()
+    cursor.execute('SELECT attribute, code from metadata_attr;')
+    results = cursor.fetchall()
+    attr_list = []
+
+    for attr in results:
+        # print attr
+        name = attr[0]
+        type = attr[1]
+        if name not in exclusion_list and not name.startswith('has_'):
+            if type == 'C':
+                # fetch possible values
+                possible_values = ''
+                fetch_str = 'SELECT DISTINCT %s from metadata_samples;'
+                cursor.execute(fetch_str % (name,))
+                for value in cursor.fetchall():
+                    if value[0] is not None:
+                        possible_values = possible_values + str(value[0]) + ', '
+
+                attr_list.append({'name': name, 'type': 'Categorical', 'values': possible_values[:-2]})
+            elif type == 'N':
+                attr_list.append({'name': name, 'type': 'Numerical', 'values': ''})
+
+    cursor.close()
+    return render(request, 'projects/system_data_dict.html', {'attr_list': attr_list})

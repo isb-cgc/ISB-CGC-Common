@@ -27,11 +27,14 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
+from google_helpers.bigquery_service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.logging_service import get_logging_resource
+from google_helpers.storage_service import get_storage_resource
 from googleapiclient.errors import HttpError
 from models import *
+from projects.models import User_Data_Tables
 
 logger = logging.getLogger(__name__)
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
@@ -257,6 +260,14 @@ def register_gcp(request, user_id):
     return render(request, 'GenespotRE/register_gcp.html', {})
 
 @login_required
+def gcp_detail(request, user_id, gcp_id):
+    context = {}
+    context['gcp'] = GoogleProject.objects.get(id=gcp_id)
+
+    return render(request, 'GenespotRE/gcp_detail.html', context)
+
+
+@login_required
 def user_gcp_delete(request, user_id, gcp_id):
     if request.POST:
         gcp = GoogleProject.objects.get(id=gcp_id)
@@ -471,6 +482,8 @@ def verify_sa(request, user_id):
 
 @login_required
 def register_sa(request, user_id):
+
+    print request.POST
     if request.GET.get('gcp_id'):
         authorized_datasets = AuthorizedDataset.objects.filter(public=False)
 
@@ -560,4 +573,119 @@ def delete_sa(request, user_id, sa_id):
 
         sa.delete()
 
+    return redirect('user_gcp_list', user_id=user_id)
+
+@login_required
+def register_bucket(request, user_id, gcp_id):
+    if request.POST:
+        bucket_name = request.POST.get('bucket_name', None)
+        gcp = GoogleProject.objects.get(id=gcp_id)
+        found_bucket = False
+
+        # Check bucketname not null
+        if not bucket_name:
+            messages.error(request, 'There was no bucket name provided.')
+
+        # Check that bucket is in project
+        try:
+            storage_service = get_storage_resource()
+            buckets = storage_service.buckets().list(project=gcp.project_id).execute()
+
+            if 'items' in buckets.keys():
+                bucket_list = buckets['items']
+
+                for bucket in bucket_list:
+                    if bucket['name'] == bucket_name:
+                        found_bucket = True
+
+                if found_bucket:
+                    bucket = Bucket(google_project=gcp, bucket_name=bucket_name)
+                    bucket.save()
+                else:
+                    messages.error(request, 'The bucket, {0}, was not found in the Google Cloud Project, {1}.'.format(
+                        bucket_name, gcp.project_id))
+
+        except HttpError, e:
+            messages.error(request, 'There was an unknown error processing this request.')
+            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': '{0}: There was an error accessing the Google Cloud Project bucket list.'.format(
+                    str(gcp.project_id))})
+            logger.info(e)
+
+    return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+
+
+@login_required
+def delete_bucket(request, user_id, bucket_id):
+    if request.POST:
+        gcp_id = request.POST.get('gcp_id')
+        bucket = Bucket.objects.get(id=bucket_id)
+
+        # Check to make sure it's not being used by user data
+        user_data_tables = User_Data_Tables.objects.filter(google_bucket_id=bucket_id, study__active=True)
+        if len(user_data_tables):
+            messages.error(request, 'The bucket, {0}, is being used for uploaded project data. Please delete the project(s) before deleting this bucket. This includes any projects uploaded by other users to ths same bucket.'.format(bucket.bucket_name))
+        else:
+            bucket.delete()
+        return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+    return redirect('user_gcp_list', user=user_id)
+
+@login_required
+def register_bqdataset(request, user_id, gcp_id):
+    if request.POST:
+        bqdataset_name = request.POST.get('bqdataset_name', None)
+        gcp = GoogleProject.objects.get(id=gcp_id)
+        found_dataset = False
+
+        # Check bqdatasetname not null
+        if not bqdataset_name:
+            messages.error(request, 'There was no dataset name provided.')
+        else:
+            bqdataset_name = bqdataset_name.strip()
+
+        # Check that bqdataset is in project
+        try:
+            bq_service = get_bigquery_service()
+            datasets = bq_service.datasets().list(projectId=gcp.project_id).execute()
+
+            if 'datasets' in datasets.keys():
+                dataset_list = datasets['datasets']
+
+                for dataset in dataset_list:
+                    if dataset['datasetReference']['datasetId'] == bqdataset_name:
+                        found_dataset = True
+
+            if found_dataset:
+                bqdataset = BqDataset(google_project=gcp, dataset_name=bqdataset_name)
+                bqdataset.save()
+            else:
+                messages.error(request, 'The dataset, {0}, was not found in the Google Cloud Project, {1}.'.format(
+                    bqdataset_name, gcp.project_id))
+
+        except HttpError, e:
+            messages.error(request, 'There was an unknown error processing this request.')
+            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': '{0}: There was an error accessing the Google Cloud Project dataset list.'.format(
+                    str(gcp.project_id))})
+            logger.info(e)
+
+    return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+
+
+@login_required
+def delete_bqdataset(request, user_id, bqdataset_id):
+
+    if request.POST:
+        gcp_id = request.POST.get('gcp_id')
+        bqdataset = BqDataset.objects.get(id=bqdataset_id)
+
+        # Check to make sure it's not being used by user data
+        user_data_tables = User_Data_Tables.objects.filter(google_bq_dataset_id=bqdataset_id, study__active=True)
+        if len(user_data_tables):
+            messages.error(request,
+                           'The dataset, {0}, is being used for uploaded project data. Please delete the project(s) before unregistering this dataset. This includes any projects uploaded by other users to ths same dataset.'.format(
+                               bqdataset.dataset_name))
+        else:
+            bqdataset.delete()
+        return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
     return redirect('user_gcp_list', user_id=user_id)

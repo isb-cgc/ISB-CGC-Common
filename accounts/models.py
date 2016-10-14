@@ -37,15 +37,6 @@ class NIH_User(models.Model):
         return User.objects.get(pk=self.user_id).email
 
 
-class Bucket(models.Model):
-    user = models.ForeignKey(User, null=False)
-    bucket_name = models.CharField(null=True,max_length=155)
-    bucket_permissions = models.TextField(null=True)
-
-    def __str__(self):
-        return self.bucket_name
-
-
 class GoogleProject(models.Model):
     user = models.ManyToManyField(User)
     project_name = models.CharField(max_length=150)
@@ -55,6 +46,18 @@ class GoogleProject(models.Model):
     def __str__(self):
         return self.project_name
 
+
+class Bucket(models.Model):
+    google_project = models.ForeignKey(GoogleProject, null=False)
+    bucket_name = models.CharField(null=True,max_length=155)
+    bucket_permissions = models.TextField(null=True)
+
+    def __str__(self):
+        return self.bucket_name
+
+class BqDataset(models.Model):
+    google_project = models.ForeignKey(GoogleProject, null=False)
+    dataset_name = models.CharField(null=False, max_length=155)
 
 class AuthorizedDataset(models.Model):
     name = models.CharField(max_length=256, null=False)

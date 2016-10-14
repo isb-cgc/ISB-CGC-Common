@@ -4,7 +4,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
 from data_upload.models import UserUpload
-from accounts.models import GoogleProject, Bucket
+from accounts.models import GoogleProject, Bucket, BqDataset
 from sharing.models import Shared_Resource
 
 
@@ -128,6 +128,16 @@ class Study(models.Model):
                 count += datatable.data_upload.useruploadedfile_set.count()
         return count
 
+    def get_bq_tables(self):
+        result = []
+        for datatable in self.user_data_tables_set.all():
+            project_name = datatable.google_project.project_name
+            dataset_name = datatable.google_bq_dataset.dataset_name
+            bq_tables = datatable.study_bq_tables_set.all()
+            for bq_table in bq_tables:
+                result.append('{0}:{1}.{2}'.format(project_name, dataset_name, bq_table.bq_table_name))
+        return result
+
     def __str__(self):
         return self.name
 
@@ -164,7 +174,15 @@ class User_Data_Tables(models.Model):
     data_upload = models.ForeignKey(UserUpload, null=True, blank=True)
     google_project = models.ForeignKey(GoogleProject)
     google_bucket = models.ForeignKey(Bucket)
+    google_bq_dataset = models.ForeignKey(BqDataset)
 
     class Meta:
         verbose_name = "user data table"
         verbose_name_plural = "user data tables"
+
+class Study_BQ_Tables(models.Model):
+    user_data_table = models.ForeignKey(User_Data_Tables)
+    bq_table_name = models.CharField(max_length=400)
+
+    def __str__(self):
+        return self.bq_table_name
