@@ -23,6 +23,7 @@ from django.test import TestCase
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
+from tasks.project_membership_check.gcp_project_api_utils import GoogleProjectAPISupportFactory
 from tasks.nih_whitelist_processor.gcp_utils import GoogleProjectMembershipChecker
 
 logging.basicConfig(
@@ -72,20 +73,6 @@ class TestPublicDatasetServiceAccount(TestCase):
                                           authorized_dataset=self.auth_dataset_123)
         self.account_123.save()
 
-    def test_one_user_auth_dataset(self):
-        uad_123 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_123)
-        uad_123.save()
-
-        gmc = GoogleProjectMembershipChecker(self.dataset_acl_mapping, 'default')
-        result = gmc.process()
-
-        # The service account should have been skipped, as it is linked to a public dataset
-        self.assertEquals(len(result.skipped_service_accounts), 1)
-
-        # No project-specific actions should have been generated
-        # todo: AttributeError: 'GoogleProjectMembershipCheckResult' object has no attribute 'projects'
-        # self.assertDictEqual(result.projects, {})
-
 
 class TestUnauthorizedUser(TestCase):
     def setUp(self):
@@ -132,18 +119,4 @@ class TestUnauthorizedUser(TestCase):
         self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
                                           authorized_dataset=self.auth_dataset_123)
         self.account_123.save()
-
-    def test_one_user_auth_dataset(self):
-        uad_123 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_123)
-        uad_123.save()
-
-        gmc = GoogleProjectMembershipChecker(self.dataset_acl_mapping, 'default')
-        result = gmc.process()
-
-        # The service account should not have been skipped, as it is linked to a protected dataset
-        self.assertEquals(len(result.skipped_service_accounts), 0)
-
-        # todo: AttributeError: 'GoogleProjectMembershipCheckResult' object has no attribute 'projects'
-        # self.assertEquals(result.projects[self.project_123.pk].acl_remove_list[0], ('acl-phs000123', 'abc_123'))
-
 
