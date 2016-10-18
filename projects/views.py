@@ -149,7 +149,7 @@ def upload_files(request):
 
         if request.POST['data-type'] == 'extend':
             # TODO Does this need a share check??
-            study.extends_id = request.POST['extend-studNy-id']
+            study.extends_id = request.POST['extend-study-id']
 
         study.save()
 
