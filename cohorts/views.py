@@ -255,13 +255,25 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
 
                 for study in Study.get_user_studies(user):
                     if (filtered_projects is None or study.project.id in filtered_projects) and (filtered_studies is None or study.id in filtered_studies):
+                        study_ms_table = None
                         for tables in User_Data_Tables.objects.filter(study_id=study.id):
-                            if tables.metadata_samples_table:
-                                study_table_set.append({'study': study.id, 'table': tables.metadata_samples_table})
+                            if 'user_' not in tables.metadata_samples_table:
+                                logger.warn('[WARNING] User study mtadata_samples table may have a malformed name: '
+                                    + (tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
+                                    + ' for study ' + str(study.id) + '; skipping')
                             else:
-                                logger.warn('[WARNING] No samples table found for study '
-                                    + (study.name if study.name is not None else '[Name not supplied]')
-                                    + ', ID#'+study.id.__str__())
+                                study_ms_table = tables.metadata_samples_table
+                                # Do not include studies that are low level data
+                                datatype_query = (
+                                                 "SELECT data_type from %s where study_id=" % tables.metadata_data_table) + '%s'
+                                cursor = db.cursor()
+                                cursor.execute(datatype_query, (study.id,))
+                                for row in cursor.fetchall():
+                                    if row[0] == 'low_level':
+                                        study_ms_table = None
+
+                        if study_ms_table is not None:
+                            study_table_set.append({'study': study.id, 'table': study_ms_table})
 
                 if len(study_table_set) > 0:
                     for study_table in study_table_set:
@@ -524,26 +536,26 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
     for study in Study.get_user_studies(user):
 
-        include_study = True
+        study_ms_table = None
 
         for tables in User_Data_Tables.objects.filter(study_id=study.id):
             if 'user_' not in tables.metadata_samples_table:
                 logger.warn('[WARNING] User study mtadata_samples table may have a malformed name: '
                     +(tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
                     + ' for study '+str(study.id)+'; skipping')
-                include_study = False
             else:
+                study_ms_table = tables.metadata_samples_table
                 # Do not include studies that are low level data
                 datatype_query = ("SELECT data_type from %s where study_id=" % tables.metadata_data_table) + '%s'
                 cursor = db.cursor()
                 cursor.execute(datatype_query, (study.id,))
                 for row in cursor.fetchall():
                     if row[0] == 'low_level':
-                        include_study = False
+                        study_ms_table = None
 
-        if include_study:
+        if study_ms_table is not None:
             user_data_counts['study']['values'].append({'id': study.id, 'value': study.id, 'name': study.name,
-                'count': 0, 'metadata_samples': tables.metadata_samples_table, 'project': study.project.id,})
+                'count': 0, 'metadata_samples': study_ms_table, 'project': study.project.id,})
 
         study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
         participant_count_query_str = "SELECT COUNT(DISTINCT participant_barcode) AS count FROM %s"
@@ -1509,13 +1521,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
             # TODO This would be a nice to have if we have a mapped ParticipantBarcode value
             # TODO Also this gets weird with mixed mapped and unmapped ParticipantBarcode columns in cohorts
-            # If there are patient ids
-            # If we are *not* using user data, get participant barcodes from metadata_data
-            if not USER_DATA_ON:
-                participant_list = []
-                for item in results['participants']:
-                    participant_list.append(Patients(cohort=cohort, patient_id=item))
-                Patients.objects.bulk_create(participant_list)
+            # TODO Since we don't currently allow mixed ISB-CGC and User Data cohorts, the participant set will always be in one place, results['participants']
+            print >> sys.stdout, results['participants'].__str__()
+            participant_list = []
+            for item in results['participants']:
+                participant_list.append(Patients(cohort=cohort, patient_id=item))
+            (len(participant_list) > 0) and Patients.objects.bulk_create(participant_list)
 
             # Set permission for user to be owner
             perm = Cohort_Perms(cohort=cohort, user=request.user,perm=Cohort_Perms.OWNER)
