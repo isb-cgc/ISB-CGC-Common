@@ -300,7 +300,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
             logger.error("[ERROR] User not authenticated; can't create a user data cohort!")
 
         return samples_and_participants
-
+        # end user_data
 
     if mutation_filters:
         mutation_where_clause = build_where_clause(mutation_filters)
@@ -531,7 +531,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     project_counts = {}
 
     for project in Project.get_user_projects(user):
-        user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'name': project.name, 'count': 0, })
+        user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'displ_name': project.name, 'name': project.name, 'count': 0, })
         project_counts[project.id] = 0
 
     for study in Study.get_user_studies(user):
@@ -555,7 +555,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
         if study_ms_table is not None:
             user_data_counts['study']['values'].append({'id': study.id, 'value': study.id, 'name': study.name,
-                'count': 0, 'metadata_samples': study_ms_table, 'project': study.project.id,})
+                'count': 0, 'metadata_samples': study_ms_table, 'project': study.project.id, 'displ_name': study.name,})
 
         study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
         participant_count_query_str = "SELECT COUNT(DISTINCT participant_barcode) AS count FROM %s"
@@ -1478,15 +1478,9 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     val = tmp['value']['id']
 
                 if key not in filter_obj:
-                    filter_obj[key] = {'values': [], 'tables': []}
+                    filter_obj[key] = {'values': [],}
 
-                if key == 'user_projects':
-                    proj = projects.get(id=val)
-                    studies = proj.study_set.all()
-                    for study in studies:
-                        filter_obj[key]['values'].append(str(study.id))
-                else:
-                    filter_obj[key]['values'].append(val)
+                filter_obj[key]['values'].append(val)
 
         results = get_sample_participant_list(request.user, filter_obj, source)
 
@@ -1522,7 +1516,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             # TODO This would be a nice to have if we have a mapped ParticipantBarcode value
             # TODO Also this gets weird with mixed mapped and unmapped ParticipantBarcode columns in cohorts
             # TODO Since we don't currently allow mixed ISB-CGC and User Data cohorts, the participant set will always be in one place, results['participants']
-            print >> sys.stdout, results['participants'].__str__()
             participant_list = []
             for item in results['participants']:
                 participant_list.append(Patients(cohort=cohort, patient_id=item))
