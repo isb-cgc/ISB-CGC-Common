@@ -524,26 +524,26 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
     for study in Study.get_user_studies(user):
 
-        include_study = True
+        study_ms_table = None
 
         for tables in User_Data_Tables.objects.filter(study_id=study.id):
             if 'user_' not in tables.metadata_samples_table:
                 logger.warn('[WARNING] User study mtadata_samples table may have a malformed name: '
                     +(tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
                     + ' for study '+str(study.id)+'; skipping')
-                include_study = False
             else:
+                study_ms_table = tables.metadata_samples_table
                 # Do not include studies that are low level data
                 datatype_query = ("SELECT data_type from %s where study_id=" % tables.metadata_data_table) + '%s'
                 cursor = db.cursor()
                 cursor.execute(datatype_query, (study.id,))
                 for row in cursor.fetchall():
                     if row[0] == 'low_level':
-                        include_study = False
+                        study_ms_table = None
 
-        if include_study:
+        if study_ms_table is not None:
             user_data_counts['study']['values'].append({'id': study.id, 'value': study.id, 'name': study.name,
-                'count': 0, 'metadata_samples': tables.metadata_samples_table, 'project': study.project.id,})
+                'count': 0, 'metadata_samples': study_ms_table, 'project': study.project.id,})
 
         study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
         participant_count_query_str = "SELECT COUNT(DISTINCT participant_barcode) AS count FROM %s"
