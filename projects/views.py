@@ -237,7 +237,7 @@ def upload_files(request):
                         resp = {
                             'status': "error",
                             'error': "bad_file",
-                            'message': "Could not properly verify column type for {0}. Please ensure all columns contain some data.".format(column['name'])
+                            'message': "Could not properly verify column type for {0}. Please ensure all columns contain some data and a type is selected.".format(column['name'])
                         }
                         return JsonResponse(resp)
 
