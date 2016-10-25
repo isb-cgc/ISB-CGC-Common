@@ -195,8 +195,9 @@ def upload_files(request):
                 file_upload.save()
             except Exception :
                 study.delete()
-                proj.delete()
                 upload.delete()
+                if request.POST['project-type'] == 'new':
+                    proj.delete()
 
                 resp = {
                     'status': "error",
