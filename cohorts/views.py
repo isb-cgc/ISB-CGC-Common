@@ -1301,6 +1301,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         if key.startswith('has_'):
             data_availability_sort(key, values, attr_details)
         elif 'user_' not in key:
+            print key
             keys.append(item['name'])
             item['values'] = sorted(values, key=lambda k: int(k['count']), reverse=True)
 
