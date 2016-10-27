@@ -1904,9 +1904,7 @@ def cohort_filelist(request, cohort_id=0):
     # Check if cohort contains user data samples - return info message if it does.
     # Get user accessed studies
     user_studies = Study.get_user_studies(request.user)
-    print '[TESTING] User Studies: ', user_studies
     cohort_sample_list = Samples.objects.filter(cohort=cohort, study__in=user_studies)
-    print '[TESTING] :', cohort_sample_list
     if len(cohort_sample_list):
         messages.info(request, "File listing is not available for cohort samples that come from a user uploaded study. This functionality is currently being worked on and will become available in a future release.")
 
