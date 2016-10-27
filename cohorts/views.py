@@ -1900,6 +1900,14 @@ def cohort_filelist(request, cohort_id=0):
     has_access = False
     if len(nih_user) > 0:
         has_access = True
+
+    # Check if cohort contains user data samples - return info message if it does.
+    # Get user accessed studies
+    user_studies = Study.get_user_studies(request.user)
+    cohort_sample_list = Samples.objects.filter(cohort=cohort, study__in=user_studies)
+    if len(cohort_sample_list):
+        messages.info(request, "File listing is not available for cohort samples that come from a user uploaded study. This functionality is currently being worked on and will become available in a future release.")
+
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,
                                                             'base_url': settings.BASE_URL,
