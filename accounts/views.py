@@ -233,7 +233,7 @@ def verify_gcp(request, user_id):
             return JsonResponse({'roles': roles,
                                 'gcp_id': gcp_id}, status='200')
     except HttpError:
-        print 'Error:', HttpError
+        print 'Error:', HttpError.content
         return JsonResponse({'message': 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'}, status='403')
 
 @login_required
