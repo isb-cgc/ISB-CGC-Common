@@ -205,10 +205,10 @@ def verify_gcp(request, user_id):
     try:
         gcp_id = request.GET.get('gcp-id', None)
         crm_service = get_special_crm_resource()
-        print 'CRM Service: ', crm_service
+        print >> sys.stderr, 'CRM Service: ', crm_service
         iam_policy = crm_service.projects().getIamPolicy(
             resource=gcp_id, body={}).execute()
-        print 'IAM policy: ', iam_policy
+        print >> sys.stderr, 'IAM policy: ', iam_policy
         bindings = iam_policy['bindings']
         roles = {}
         user = User.objects.get(id=user_id)
@@ -233,7 +233,7 @@ def verify_gcp(request, user_id):
             return JsonResponse({'roles': roles,
                                 'gcp_id': gcp_id}, status='200')
     except HttpError as e:
-        print 'Error:', e
+        print >> sys.stderr, 'Error:', e
         return JsonResponse({'message': 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'}, status='403')
 
 @login_required
