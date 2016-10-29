@@ -467,10 +467,12 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
         # and participants
 
-        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('SampleBarcode', filter_table,))
+        cursor.execute("SELECT DISTINCT ms.SampleBarcode, ps.id FROM %s ms JOIN (SELECT id,name FROM projects_study WHERE owner_id = 1) ps ON ps.name = ms.Study;" % (filter_table,))
 
         for row in cursor.fetchall():
-            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': None})
+            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': row[1]})
+
+        # Fetch the study IDs for these samples
 
         samples_and_participants['count'] = len(samples_and_participants['items'])
 
@@ -1678,40 +1680,81 @@ def set_operation(request):
             cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
             request.user.cohort_perms_set.all()
             if len(cohorts):
+                sample_study_map = {}
+
+                cohort_samples = Samples.objects.filter(cohort=cohorts[0])
+                cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id',flat=True))
                 cohort_patients = set(Patients.objects.filter(cohort=cohorts[0]).values_list('patient_id', flat=True))
-                cohort_samples = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id', 'study_id'))
+
+                # Samples from older cohorts made from ISB-CGC data may have null for their study IDs; we should treat
+                # these as 'matching' studies
+
+                for sample in cohort_samples:
+                    if sample.sample_id not in sample_study_map:
+                        sample_study_map[sample.sample_id] = []
+                    if sample.study is None:
+                        if -1 not in sample_study_map[sample.sample_id]:
+                            sample_study_map[sample.sample_id].append(-1);
+                    elif sample.study.id not in sample_study_map[sample.sample_id]:
+                            sample_study_map[sample.sample_id].append(sample.study.id)
 
                 notes = 'Intersection of ' + cohorts[0].name
 
-                # print "Start of intersection with %s has %d" % (cohorts[0].name, len(cohort_samples))
                 for i in range(1, len(cohorts)):
                     cohort = cohorts[i]
                     notes += ', ' + cohort.name
 
-                    cohort_patients = cohort_patients.intersection(Patients.objects.filter(cohort=cohort).values_list('patient_id', flat=True))
-                    cohort_samples = cohort_samples.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id', 'study_id'))
+                    cohort_samples = Samples.objects.filter(cohort=cohort)
 
-                    # se1 = set(x[0] for x in s1)
-                    # se2 = set(x[0] for x in s2)
-                    # TODO: work this out with user data when activated
-                    # cohort_samples = cohort_samples.extra(
-                    #         tables=[Samples._meta.db_table+"` AS `t"+str(1)], # TODO This is ugly :(
-                    #         where=[
-                    #             't'+str(i)+'.sample_id = ' + Samples._meta.db_table + '.sample_id',
-                    #             't'+str(i)+'.study_id = ' + Samples._meta.db_table + '.study_id',
-                    #             't'+str(i)+'.cohort_id = ' + Samples._meta.db_table + '.cohort_id',
-                    #         ]
-                    # )
-                    # cohort_patients = cohort_patients.extra(
-                    #         tables=[Patients._meta.db_table+"` AS `t"+str(1)], # TODO This is ugly :(
-                    #         where=[
-                    #             't'+str(i)+'.patient_id = ' + Patients._meta.db_table + '.patient_id',
-                    #             't'+str(i)+'.cohort_id = ' + Patients._meta.db_table + '.cohort_id',
-                    #         ]
-                    # )
+                    for sample in cohort_samples:
+                        if sample.sample_id in sample_study_map:
+                            if sample.study is None:
+                                if -1 not in sample_study_map[sample.sample_id]:
+                                    sample_study_map[sample.sample_id].append(-1);
+                            elif sample.study.id not in sample_study_map[sample.sample_id]:
+                                sample_study_map[sample.sample_id].append(sample.study.id)
+
+                    cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id',flat=True))
+                    cohort_patients = cohort_patients.intersection(Patients.objects.filter(cohort=cohort).values_list('patient_id', flat=True))
+
+                cohort_sample_list = []
+
+                print >> sys.stdout, 'unique ID set: '+cohort_samples_ids.__str__()
+
+                for sample in cohort_samples_ids:
+                    if len(sample_study_map[sample]) > 1:
+                        print >> sys.stdout, "Studies: "+sample_study_map[sample].__str__()
+                        studies = Study.objects.filter(id__in=sample_study_map[sample])
+                        print >> sys.stdout, "Study objs: "+studies.__str__()
+                        no_match = False
+                        root = -1
+                        max_depth = -1
+                        deepest_study = -1
+                        for study in studies:
+                            study_rd = study.get_my_root_and_depth()
+
+                            if root < 0:
+                                root = study_rd['root']
+                                max_depth = study_rd['depth']
+                                deepest_study = study.id
+                            else:
+                                if root != study_rd['root']:
+                                    no_match = True
+                                else:
+                                    if max_depth < 0 or study_rd['depth'] > max_depth:
+                                        max_depth = study_rd['depth']
+                                        deepest_study = study.id
+
+                        if not no_match:
+                            cohort_sample_list.append({'id':sample, 'study':deepest_study, })
+
+                    else:
+                        # If a study's ID is <= 0 it's a null study ID, so just record None
+                        study = (None if sample_study_map[sample][0] <=0 else sample_study_map[sample][0])
+                        cohort_sample_list.append({'id': sample, 'study':study})
 
                 patients = list(cohort_patients)
-                samples = list(cohort_samples)
+                samples = cohort_sample_list
 
         elif op == 'complement':
             base_id = request.POST.get('base-id')
@@ -1748,7 +1791,10 @@ def set_operation(request):
             project_id = settings.BQ_PROJECT_ID
             cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
             bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            bcs.add_cohort_with_sample_barcodes(new_cohort.id, samples)
+            if op == 'intersect':
+                bcs.add_cohort_with_sample_barcodes(new_cohort.id, [v['id'] for v in samples])
+            else:
+                bcs.add_cohort_with_sample_barcodes(new_cohort.id, samples)
 
             # Store cohort to CloudSQL
             patient_list = []
@@ -1757,8 +1803,12 @@ def set_operation(request):
             Patients.objects.bulk_create(patient_list)
 
             sample_list = []
+            print >> sys.stdout, "Samples in intersection: "+samples.__str__()
             for sample in samples:
-                sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
+                if op == 'intersect':
+                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample['id'], study_id=sample['study']))
+                else:
+                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
             Samples.objects.bulk_create(sample_list)
 
             # Create Sources
