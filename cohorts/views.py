@@ -1686,11 +1686,17 @@ def set_operation(request):
                 cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id',flat=True))
                 cohort_patients = set(Patients.objects.filter(cohort=cohorts[0]).values_list('patient_id', flat=True))
 
+                # Samples from older cohorts made from ISB-CGC data may have null for their study IDs; we should treat
+                # these as 'matching' studies
+
                 for sample in cohort_samples:
                     if sample.sample_id not in sample_study_map:
                         sample_study_map[sample.sample_id] = []
-                    if sample.study.id not in sample_study_map[sample.sample_id]:
-                        sample_study_map[sample.sample_id].append(sample.study.id)
+                    if sample.study is None:
+                        if -1 not in sample_study_map[sample.sample_id]:
+                            sample_study_map[sample.sample_id].append(-1);
+                    elif sample.study.id not in sample_study_map[sample.sample_id]:
+                            sample_study_map[sample.sample_id].append(sample.study.id)
 
                 notes = 'Intersection of ' + cohorts[0].name
 
@@ -1701,8 +1707,12 @@ def set_operation(request):
                     cohort_samples = Samples.objects.filter(cohort=cohort)
 
                     for sample in cohort_samples:
-                        if sample.sample_id in sample_study_map and sample.study.id not in sample_study_map[sample.sample_id]:
-                            sample_study_map[sample.sample_id].append(sample.study.id)
+                        if sample.sample_id in sample_study_map:
+                            if sample.study is None:
+                                if -1 not in sample_study_map[sample.sample_id]:
+                                    sample_study_map[sample.sample_id].append(-1);
+                            elif sample.study.id not in sample_study_map[sample.sample_id]:
+                                sample_study_map[sample.sample_id].append(sample.study.id)
 
                     cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id',flat=True))
                     cohort_patients = cohort_patients.intersection(Patients.objects.filter(cohort=cohort).values_list('patient_id', flat=True))
@@ -1738,10 +1748,10 @@ def set_operation(request):
                         if not no_match:
                             cohort_sample_list.append({'id':sample, 'study':deepest_study, })
 
-                        # get the roots and depths of these studies per sample
-                        # iterate through; any non-match is an automatic toss
                     else:
-                        cohort_sample_list.append({'id': sample, 'study':sample_study_map[sample][0]})
+                        # If a study's ID is <= 0 it's a null study ID, so just record None
+                        study = (None if sample_study_map[sample][0] <=0 else sample_study_map[sample][0])
+                        cohort_sample_list.append({'id': sample, 'study':study})
 
                 patients = list(cohort_patients)
                 samples = cohort_sample_list
