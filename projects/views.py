@@ -2,8 +2,10 @@ from copy import deepcopy
 import re
 import sys
 from django.shortcuts import render
+from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
+from django.contrib import messages
 from django.conf import settings
 from django.db.models import Q
 from django.http import JsonResponse, HttpResponseNotFound
@@ -135,7 +137,16 @@ def upload_files(request):
         proj = request.user.project_set.create(name=request.POST['project-name'], description=request.POST['project-description'])
         proj.save()
     else:
-        proj = Project.objects.get(id=request.POST['project-id'])
+        try:
+            proj = Project.objects.get(id=request.POST['project-id'])
+        except ObjectDoesNotExist:
+            resp = {
+                'status': "error",
+                'error': "bad_file",
+                'message': "The project you wish to upload to does not exist."
+            }
+            return JsonResponse(resp)
+
 
     if proj is None:
         status = 'error'
@@ -184,8 +195,9 @@ def upload_files(request):
                 file_upload.save()
             except Exception :
                 study.delete()
-                proj.delete()
                 upload.delete()
+                if request.POST['project-type'] == 'new':
+                    proj.delete()
 
                 resp = {
                     'status': "error",
@@ -212,11 +224,25 @@ def upload_files(request):
 
             if datatype == "user_gen":
                 for column in descriptor['columns']:
+                    print column
                     if column['ignored']:
                         continue
 
+                    # Check column type not null
                     type = column['type']
-                    if type == 'string' or type == 'url' or type == 'file':
+                    if not type:
+                        study.delete()
+                        proj.delete()
+                        upload.delete()
+
+                        resp = {
+                            'status': "error",
+                            'error': "bad_file",
+                            'message': "Could not properly verify column type for {0}. Please ensure all columns contain some data and a type is selected.".format(column['name'])
+                        }
+                        return JsonResponse(resp)
+
+                    elif type == 'string' or type == 'url' or type == 'file':
                         type = 'VARCHAR(200)'
                     else:
                         type = filter_column_name(type)
