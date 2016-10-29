@@ -1689,7 +1689,8 @@ def set_operation(request):
                 for sample in cohort_samples:
                     if sample.sample_id not in sample_study_map:
                         sample_study_map[sample.sample_id] = []
-                    sample_study_map[sample.sample_id].append(sample.study.id)
+                    if sample.study.id not in sample_study_map[sample.sample_id]:
+                        sample_study_map[sample.sample_id].append(sample.study.id)
 
                 notes = 'Intersection of ' + cohorts[0].name
 
@@ -1700,15 +1701,15 @@ def set_operation(request):
                     cohort_samples = Samples.objects.filter(cohort=cohort)
 
                     for sample in cohort_samples:
-                        if sample.sample_id in sample_study_map:
+                        if sample.sample_id in sample_study_map and sample.study.id not in sample_study_map[sample.sample_id]:
                             sample_study_map[sample.sample_id].append(sample.study.id)
 
-                    cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id',flat=True))
+                    cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id',flat=True))
                     cohort_patients = cohort_patients.intersection(Patients.objects.filter(cohort=cohort).values_list('patient_id', flat=True))
 
                 cohort_sample_list = []
 
-                print >> sys.stdout, cohort_samples_ids.__str__()
+                print >> sys.stdout, 'unique ID set: '+cohort_samples_ids.__str__()
 
                 for sample in cohort_samples_ids:
                     if len(sample_study_map[sample]) > 1:
