@@ -264,8 +264,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
                             else:
                                 study_ms_table = tables.metadata_samples_table
                                 # Do not include studies that are low level data
-                                datatype_query = (
-                                                 "SELECT data_type from %s where study_id=" % tables.metadata_data_table) + '%s'
+                                datatype_query = ("SELECT data_type from %s where study_id=" % tables.metadata_data_table) + '%s'
                                 cursor = db.cursor()
                                 cursor.execute(datatype_query, (study.id,))
                                 for row in cursor.fetchall():
@@ -1729,7 +1728,9 @@ def set_operation(request):
                 else:
                     notes += ', ' + cohort.name
                 ids += (cohort.id,)
+
             samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'study_id')
+
         elif op == 'intersect':
             cohort_ids = request.POST.getlist('selected-ids')
             cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
@@ -1806,15 +1807,11 @@ def set_operation(request):
                         study = (None if sample_study_map[sample][0] <=0 else sample_study_map[sample][0])
                         cohort_sample_list.append({'id': sample, 'study':study})
 
-
                 samples = cohort_sample_list
 
         elif op == 'complement':
             base_id = request.POST.get('base-id')
             subtract_ids = request.POST.getlist('subtract-ids')
-
-            base_patients = Patients.objects.filter(cohort_id=base_id)
-            subtract_patients = Patients.objects.filter(cohort_id__in=subtract_ids).distinct()
 
             base_samples = Samples.objects.filter(cohort_id=base_id)
             subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
