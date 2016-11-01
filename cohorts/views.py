@@ -506,17 +506,16 @@ def get_participants_by_cohort(cohort_id):
         cursor = db.cursor()
 
         cursor.execute("""
-            SELECT DISTINCT cs.study_id,udt.metadata_samples_table,au.name,au.is_superuser
+            SELECT DISTINCT cs.study_id,udt.metadata_samples_table,au.username,au.is_superuser
             FROM cohorts_samples cs
                     LEFT JOIN projects_user_data_tables udt
                     ON udt.study_id = cs.study_id
                     JOIN auth_user au
-                    au.id = udt.user_id
+                    ON au.id = udt.user_id
             WHERE cohort_id = %s;
         """,(cohort_id,))
 
         for row in cursor.fetchall():
-            print >> sys.stdout, studies.__str__()
             studies[row[1]] = row[2] + (":su" if row[3] == 1 else ":user")
 
         participant_fetch = """
@@ -530,7 +529,7 @@ def get_participants_by_cohort(cohort_id):
             participant_col = 'participant_barcode'
             sample_col = 'sample_barcode'
 
-            # If the owner of this project_study entry is 1, this is the super user, and it's a
+            # If the owner of this project_study entry is ISB-CGC, use the ISB-CGC column identifiers
             if studies[study_table] == 'isb:su':
                 participant_col = 'ParticipantBarcode'
                 sample_col = 'SampleBarcode'
