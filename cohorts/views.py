@@ -506,15 +506,18 @@ def get_participants_by_cohort(cohort_id):
         cursor = db.cursor()
 
         cursor.execute("""
-            SELECT DISTINCT cs.study_id,udt.metadata_samples_table,udt.user_id
+            SELECT DISTINCT cs.study_id,udt.metadata_samples_table,au.name,au.is_staff
             FROM cohorts_samples cs
                     LEFT JOIN projects_user_data_tables udt
                     ON udt.study_id = cs.study_id
+                    JOIN auth_user au
+                    au.id = udt.user_id
             WHERE cohort_id = %s;
         """,(cohort_id,))
 
         for row in cursor.fetchall():
-            studies[row[1]] = row[2]
+            print >> sys.stdout, studies.__str__()
+            studies[row[1]] = row[2] + (":su" if row[3] == 1 else ":user")
 
         participant_fetch = """
             SELECT ms.%s
@@ -527,7 +530,8 @@ def get_participants_by_cohort(cohort_id):
             participant_col = 'participant_barcode'
             sample_col = 'sample_barcode'
 
-            if studies[study_table] == 1:
+            # If the owner of this project_study entry is 1, this is the super user, and it's a
+            if studies[study_table] == 'isb:su':
                 participant_col = 'ParticipantBarcode'
                 sample_col = 'SampleBarcode'
 
