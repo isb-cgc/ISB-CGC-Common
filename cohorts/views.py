@@ -506,7 +506,7 @@ def get_participants_by_cohort(cohort_id):
         cursor = db.cursor()
 
         cursor.execute("""
-            SELECT DISTINCT cs.study_id,udt.metadata_samples_table,au.name,au.is_staff
+            SELECT DISTINCT cs.study_id,udt.metadata_samples_table,au.name,au.is_superuser
             FROM cohorts_samples cs
                     LEFT JOIN projects_user_data_tables udt
                     ON udt.study_id = cs.study_id
