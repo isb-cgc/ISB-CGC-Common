@@ -1557,8 +1557,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 parent.save()
 
             items = results['items']
-            for item in items:
-                samples.append(item['sample_barcode'])
 
             # Create new cohort
             cohort = Cohort.objects.create(name=name)
@@ -1599,7 +1597,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             project_id = settings.BQ_PROJECT_ID
             cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
             bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            bcs.add_cohort_with_sample_barcodes(cohort.id, cohort.samples_set.values_list('sample_id','study_id'))
+            bcs.add_cohort_to_bq(cohort.id,items)
 
             # Check if this was a new cohort or an edit to an existing one and redirect accordingly
             if not source:
@@ -1838,15 +1836,6 @@ def set_operation(request):
             perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
             perm.save()
 
-            # Store cohort to BigQuery
-            project_id = settings.BQ_PROJECT_ID
-            cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-            bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            if op == 'intersect':
-                bcs.add_cohort_with_sample_barcodes(new_cohort.id, [v['id'] for v in samples])
-            else:
-                bcs.add_cohort_with_sample_barcodes(new_cohort.id, samples)
-
             # Store cohort samples and patients to CloudSQL
             sample_list = []
             for sample in samples:
@@ -1856,9 +1845,18 @@ def set_operation(request):
                     sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
             Samples.objects.bulk_create(sample_list)
 
+            # get the full resulting sample and patient ID set
+            samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
+
+            # Store cohort to BigQuery
+            project_id = settings.BQ_PROJECT_ID
+            cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+            bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+            bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
+
             # Fetch the list of cases based on the sample IDs
             patient_list = []
-            for patient in get_participants_by_cohort(new_cohort.id):
+            for patient in [v['participant_barcode'] for v in samples_and_participants['items']]:
                 patient_list.append(Patients(cohort=new_cohort, patient_id=patient))
             Patients.objects.bulk_create(patient_list)
 
