@@ -6,6 +6,7 @@ urlpatterns = [
     url(r'^$', views.project_list, name='projects'),
     url(r'^public/$', views.public_project_list, name='public_projects'),
     url(r'^upload/$', views.project_upload, name="project_upload"),
+    url(r'^upload/existing$', views.project_upload_existing, name="project_upload_existing"),
     url(r'^(?P<project_id>\d+)/$', views.project_detail, name='project_detail'),
     url(r'^(?P<project_id>\d+)/delete/?$', views.project_delete, name="project_delete"),
     url(r'^(?P<project_id>\d+)/edit/?$', views.project_edit, name="project_edit"),
