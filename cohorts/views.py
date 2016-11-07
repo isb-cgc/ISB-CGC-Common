@@ -466,10 +466,10 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
         # and participants
 
-        cursor.execute("SELECT DISTINCT ms.SampleBarcode, ps.id FROM %s ms JOIN (SELECT id,name FROM projects_study WHERE owner_id = 1) ps ON ps.name = ms.Study;" % (filter_table,))
+        cursor.execute("SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id FROM %s ms JOIN (SELECT id,name FROM projects_study WHERE owner_id = 1) ps ON ps.name = ms.Study;" % (filter_table,))
 
         for row in cursor.fetchall():
-            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': row[1]})
+            samples_and_participants['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'study_id': row[2]})
 
         # Fetch the study IDs for these samples
 
@@ -1860,7 +1860,8 @@ def set_operation(request):
 
             # Fetch the list of cases based on the sample IDs
             patient_list = []
-            for patient in [v['participant_barcode'] for v in samples_and_participants['items']]:
+            patient_set = set([v['participant_barcode'] for v in samples_and_participants['items']])
+            for patient in patient_set:
                 patient_list.append(Patients(cohort=new_cohort, patient_id=patient))
             Patients.objects.bulk_create(patient_list)
 
@@ -1967,11 +1968,13 @@ def save_cohort_from_plot(request):
             patient_list.append(Patients(cohort=cohort, patient_id=patient))
         Patients.objects.bulk_create(patient_list)
 
+        samples_and_participants = get_sample_participant_list(request.user,None,cohort.id)
+
         # Store cohort to BigQuery
         project_id = settings.BQ_PROJECT_ID
         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
         bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-        bcs.add_cohort_with_sample_barcodes(cohort.id, cohort.samples_set.all().values_list('sample_id', 'study_id'))
+        bcs.add_cohort_to_bq(cohort.id, samples_and_participants['items'])
 
         workbook_id  = source_plot.worksheet.workbook_id
         worksheet_id = source_plot.worksheet_id
