@@ -1571,8 +1571,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 sample_list.append(Samples(cohort=cohort, sample_id=item['sample_barcode'], study_id=study))
             Samples.objects.bulk_create(sample_list)
 
-            # TODO This would be a nice to have if we have a mapped ParticipantBarcode value
-            # TODO Also this gets weird with mixed mapped and unmapped ParticipantBarcode columns in cohorts
             # TODO Since we don't currently allow mixed ISB-CGC and User Data cohorts, the participant set will always be in one place, results['participants']
             participant_list = []
             for item in results['participants']:
