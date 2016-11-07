@@ -1692,11 +1692,15 @@ def clone_cohort(request, cohort_id):
     perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
     perm.save()
 
+    # BQ needs an explicit patient-per-sample dataset; get that now
+
+    samples_and_participants = get_sample_participant_list(request.user,None,cohort.id)
+
     # Store cohort to BigQuery
     project_id = settings.BQ_PROJECT_ID
     cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
     bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    bcs.add_cohort_with_sample_barcodes(cohort.id, samples)
+    bcs.add_cohort_to_bq(cohort.id, samples_and_participants['items'])
 
     return redirect(reverse(redirect_url,args=[cohort.id]))
 
