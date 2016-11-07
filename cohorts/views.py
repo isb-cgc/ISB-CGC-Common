@@ -1860,8 +1860,7 @@ def set_operation(request):
 
             # Fetch the list of cases based on the sample IDs
             patient_list = []
-            patient_set = set([v['participant_barcode'] for v in samples_and_participants['items']])
-            for patient in patient_set:
+            for patient in samples_and_participants['participants']:
                 patient_list.append(Patients(cohort=new_cohort, patient_id=patient))
             Patients.objects.bulk_create(patient_list)
 
