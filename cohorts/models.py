@@ -245,7 +245,7 @@ class Cohort(models.Model):
 class Samples(models.Model):
     cohort = models.ForeignKey(Cohort, null=False, blank=False)
     sample_id = models.TextField(null=False)
-    study = models.ForeignKey(Study, null=True, blank=True) # Null here means TCGA
+    study = models.ForeignKey(Study, null=True, blank=True)
 
 class Patients(models.Model):
     cohort = models.ForeignKey(Cohort, null=False, blank=False)
