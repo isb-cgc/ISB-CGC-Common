@@ -80,7 +80,11 @@ logger = logging.getLogger(__name__)
 warnings.filterwarnings("ignore", "No data - zero rows fetched, selected, or processed")
 
 METADATA_SHORTLIST = {
-    'list': []
+    'list': [],
+}
+
+ISB_CGC_STUDIES = {
+    'list': [],
 }
 
 # Get a set of random characters of 'length'
@@ -128,6 +132,31 @@ def fetch_metadata_shortlist():
                 logger.warn("[WARNING] View metadata_shortlist was not found!")
 
         return METADATA_SHORTLIST['list']
+    except Exception as e:
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+
+def fetch_isbcgc_study_set():
+    try:
+        cursor = None
+        db = get_sql_connection()
+        if not ISB_CGC_STUDIES['list'] or len(ISB_CGC_STUDIES['list']) <= 0:
+            cursor = db.cursor()
+            cursor.execute("SELECT COUNT(SPECIFIC_NAME) FROM INFORMATION_SCHEMA.ROUTINES WHERE SPECIFIC_NAME = 'get_isbcgc_study_set';")
+            # Only try to fetch the study set if the sproc exists
+            if cursor.fetchall()[0][0] > 0:
+                cursor.execute("CALL get_isbcgc_study_set();")
+                ISB_CGC_STUDIES['list'] = []
+                for row in cursor.fetchall():
+                    ISB_CGC_STUDIES['list'].append(row[0])
+            else:
+                # Otherwise just warn
+                logger.warn("[WARNING] Stored procedure get_isbcgc_study_set was not found!")
+
+        return ISB_CGC_STUDIES['list']
     except Exception as e:
         logger.error(traceback.format_exc())
     finally:
