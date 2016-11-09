@@ -65,6 +65,7 @@ from metadata_helpers import *
 BQ_ATTEMPT_MAX = 10
 
 METADATA_SHORTLIST = fetch_metadata_shortlist()
+TCGA_STUDY_SET = fetch_isbcgc_study_set()
 
 # WebApp list of the items from Somatic_mutation_calls which we want to filter on
 MOLECULAR_SHORTLIST = [
