@@ -38,8 +38,6 @@ BQ_ATTEMPT_MAX = 10
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
 
-MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
-MAX_SEL_FILES = settings.MAX_FILES_IGV
 BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
