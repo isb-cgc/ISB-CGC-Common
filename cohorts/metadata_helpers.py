@@ -33,12 +33,8 @@ from google.appengine.api import urlfetch
 from uuid import uuid4
 from api.api_helpers import *
 
-BQ_ATTEMPT_MAX = 10
-
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
-
-BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
 
