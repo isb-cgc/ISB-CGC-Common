@@ -31,12 +31,12 @@ def sharing_add(request, sharing_id=0):
         redirect_id_key = ''
         title = ''
 
-        if shared.project_set.count() > 0:
-            type = 'projects'
-            title = 'Project'
-            redirect_page = 'project_detail'
-            redirect_id_key = 'project_id'
-            resource = shared.project_set.all().first()
+        if shared.program_set.count() > 0:
+            type = 'programs'
+            title = 'Program'
+            redirect_page = 'program_detail'
+            redirect_id_key = 'program_id'
+            resource = shared.program_set.all().first()
         elif shared.workbook_set.count() > 0:
             type = 'workbooks'
             title = 'Workbook'

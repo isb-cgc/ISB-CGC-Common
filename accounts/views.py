@@ -624,7 +624,7 @@ def delete_bucket(request, user_id, bucket_id):
         # Check to make sure it's not being used by user data
         user_data_tables = User_Data_Tables.objects.filter(google_bucket_id=bucket_id, study__active=True)
         if len(user_data_tables):
-            messages.error(request, 'The bucket, {0}, is being used for uploaded project data. Please delete the project(s) before deleting this bucket. This includes any projects uploaded by other users to ths same bucket.'.format(bucket.bucket_name))
+            messages.error(request, 'The bucket, {0}, is being used for uploaded program data. Please delete the program(s) before deleting this bucket. This includes any programs uploaded by other users to ths same bucket.'.format(bucket.bucket_name))
         else:
             bucket.delete()
         return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
@@ -683,7 +683,7 @@ def delete_bqdataset(request, user_id, bqdataset_id):
         user_data_tables = User_Data_Tables.objects.filter(google_bq_dataset_id=bqdataset_id, study__active=True)
         if len(user_data_tables):
             messages.error(request,
-                           'The dataset, {0}, is being used for uploaded project data. Please delete the project(s) before unregistering this dataset. This includes any projects uploaded by other users to ths same dataset.'.format(
+                           'The dataset, {0}, is being used for uploaded program data. Please delete the program(s) before unregistering this dataset. This includes any programs uploaded by other users to ths same dataset.'.format(
                                bqdataset.dataset_name))
         else:
             bqdataset.delete()

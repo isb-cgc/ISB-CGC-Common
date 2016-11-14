@@ -53,16 +53,16 @@ def program_detail(request, program_id=0):
     programs = ownedPrograms | sharedPrograms | publicPrograms
     programs = programs.distinct()
 
-    proj = programs.get(id=program_id)
+    program = programs.get(id=program_id)
 
     shared = None
-    if proj.owner.id != request.user.id and not proj.is_public:
+    if program.owner.id != request.user.id and not program.is_public:
         shared = request.user.shared_resource_set.get(program__id=program_id)
 
-    proj.mark_viewed(request)
+    program.mark_viewed(request)
     context = {
-        'program': proj,
-        'studies': proj.study_set.all().filter(active=True),
+        'program': program,
+        'studies': program.study_set.all().filter(active=True),
         'shared': shared
     }
     return render(request, template, context)
@@ -137,17 +137,17 @@ def create_metadata_tables(user, study, columns, skipSamples=False):
 def upload_files(request):
     status = 'success'
     message = None
-    proj = None
+    program = None
     study = None
 
     # TODO: Validation
 
     if request.POST['program-type'] == 'new':
-        proj = request.user.program_set.create(name=request.POST['program-name'], description=request.POST['program-description'])
-        proj.save()
+        program = request.user.program_set.create(name=request.POST['program-name'], description=request.POST['program-description'])
+        program.save()
     else:
         try:
-            proj = Program.objects.get(id=request.POST['program-id'])
+            program = Program.objects.get(id=request.POST['program-id'])
         except ObjectDoesNotExist:
             resp = {
                 'status': "error",
@@ -157,11 +157,11 @@ def upload_files(request):
             return JsonResponse(resp)
 
 
-    if proj is None:
+    if program is None:
         status = 'error'
         message = 'Unable to create program'
     else:
-        study = proj.study_set.create(
+        study = program.study_set.create(
             name=request.POST['study-name'],
             description=request.POST['study-description'],
             owner=request.user
@@ -180,8 +180,9 @@ def upload_files(request):
         dataset = BqDataset.objects.get(id=request.POST['dataset'])
         google_project = bucket.google_project
 
+        # TODO: This has to be done at the same time as the user data processor
         config = {
-            "USER_PROJECT": proj.id,
+            "USER_PROJECT": program.id,
             "USER_ID": request.user.id,
             "STUDY": study.id,
             "BUCKET": bucket.bucket_name,
@@ -206,7 +207,7 @@ def upload_files(request):
                 study.delete()
                 upload.delete()
                 if request.POST['program-type'] == 'new':
-                    proj.delete()
+                    program.delete()
 
                 resp = {
                     'status': "error",
@@ -217,7 +218,7 @@ def upload_files(request):
 
             descriptor = json.loads(request.POST[formfield + '_desc'])
             datatype = request.POST[formfield + '_type']
-            bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(proj.id) + "_" + str(study.id)
+            bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(program.id) + "_" + str(study.id)
 
             if bq_table_name not in bq_table_names:
                 bq_table_names.append(bq_table_name)
@@ -241,7 +242,7 @@ def upload_files(request):
                     type = column['type']
                     if not type:
                         study.delete()
-                        proj.delete()
+                        program.delete()
                         upload.delete()
 
                         resp = {
@@ -303,7 +304,7 @@ def upload_files(request):
         if settings.PROCESSING_ENABLED:
             files = {'config.json': ('config.json', json.dumps(config))}
             post_args = {
-                'program_id':proj.id,
+                'program_id':program.id,
                 'study_id':study.id,
                 'dataset_id':dataset.id
             }
@@ -331,7 +332,7 @@ def upload_files(request):
         'message': message
     }
     if status is "success":
-        resp['redirect_url'] = '/programs/' + str(proj.id) + '/'
+        resp['redirect_url'] = '/programs/' + str(program.id) + '/'
 
     return JsonResponse(resp)
 
@@ -366,10 +367,10 @@ def program_edit(request, program_id=0):
     if not name:
         raise Exception("Programs cannot have an empty name")
 
-    proj = request.user.program_set.get(id=program_id)
-    proj.name = name
-    proj.description = description
-    proj.save()
+    program = request.user.program_set.get(id=program_id)
+    program.name = name
+    program.description = description
+    program.save()
 
     return JsonResponse({
         'status': 'success'
@@ -377,10 +378,10 @@ def program_edit(request, program_id=0):
 
 @login_required
 def program_share(request, program_id=0):
-    proj = request.user.program_set.get(id=program_id)
+    program = request.user.program_set.get(id=program_id)
     emails = re.split('\s*,\s*', request.POST['share_users'].strip())
 
-    create_share(request, proj, emails, 'program')
+    create_share(request, program, emails, 'program')
 
     return JsonResponse({
         'status': 'success'
@@ -388,8 +389,8 @@ def program_share(request, program_id=0):
 
 @login_required
 def study_delete(request, program_id=0, study_id=0):
-    proj = request.user.program_set.get(id=program_id)
-    study = proj.study_set.get(id=study_id)
+    program = request.user.program_set.get(id=program_id)
+    study = program.study_set.get(id=study_id)
     study.active = False
     study.save()
 
@@ -405,8 +406,8 @@ def study_edit(request, program_id=0, study_id=0):
     if not name:
         raise Exception("Programs cannot have an empty name")
 
-    proj = request.user.program_set.get(id=program_id)
-    study = proj.study_set.get(id=study_id)
+    program = request.user.program_set.get(id=program_id)
+    study = program.study_set.get(id=study_id)
     study.name = name
     study.description = description
     study.save()
@@ -416,8 +417,8 @@ def study_edit(request, program_id=0, study_id=0):
     })
 
 def study_data_success(request, program_id=0, study_id=0, dataset_id=0):
-    proj = Program.objects.get(id=program_id)
-    study = proj.study_set.get(id=study_id)
+    program = Program.objects.get(id=program_id)
+    study = program.study_set.get(id=study_id)
     datatables = study.user_data_tables_set.get(id=dataset_id)
 
     if not datatables.data_upload.key == request.GET.get('key'):
@@ -449,8 +450,8 @@ def study_data_success(request, program_id=0, study_id=0, dataset_id=0):
     })
 
 def study_data_error(request, program_id=0, study_id=0, dataset_id=0):
-    proj = Program.objects.get(id=program_id)
-    study = proj.study_set.get(id=study_id)
+    program = Program.objects.get(id=program_id)
+    study = program.study_set.get(id=study_id)
     datatables = study.user_data_tables_set.get(id=dataset_id)
 
     if not datatables.data_upload.key == request.GET.get('key'):

@@ -1593,9 +1593,9 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                         Filters.objects.create(resulting_cohort=cohort, name=this_filter, value=val).save()
 
             # Store cohort to BigQuery
-            project_id = settings.BQ_PROJECT_ID
+            bq_project_id = settings.BQ_PROJECT_ID
             cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-            bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+            bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
             bcs.add_cohort_to_bq(cohort.id,items)
 
             # Check if this was a new cohort or an edit to an existing one and redirect accordingly
@@ -1696,9 +1696,9 @@ def clone_cohort(request, cohort_id):
     samples_and_participants = get_sample_participant_list(request.user,None,cohort.id)
 
     # Store cohort to BigQuery
-    project_id = settings.BQ_PROJECT_ID
+    bq_project_id = settings.BQ_PROJECT_ID
     cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-    bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+    bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
     bcs.add_cohort_to_bq(cohort.id, samples_and_participants['items'])
 
     return redirect(reverse(redirect_url,args=[cohort.id]))
@@ -1852,9 +1852,9 @@ def set_operation(request):
             samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
 
             # Store cohort to BigQuery
-            project_id = settings.BQ_PROJECT_ID
+            bq_project_id = settings.BQ_PROJECT_ID
             cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-            bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+            bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
             bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
 
             # Fetch the list of cases based on the sample IDs
@@ -1969,9 +1969,9 @@ def save_cohort_from_plot(request):
         samples_and_participants = get_sample_participant_list(request.user,None,cohort.id)
 
         # Store cohort to BigQuery
-        project_id = settings.BQ_PROJECT_ID
+        bq_project_id = settings.BQ_PROJECT_ID
         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-        bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+        bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_participants['items'])
 
         workbook_id  = source_plot.worksheet.workbook_id

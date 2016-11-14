@@ -90,12 +90,3 @@ def create_share(request, item, emails, type, share_user=None):
         }
 
         send_email_message(message_data)
-        # message = mail.EmailMessage()
-        #
-        # message.subject = 'You Were Added on a ' + type
-        # message.body = email_text_template.render(ctx)
-        # message.html = email_template.render(ctx)
-        # message.sender = 'noreply@' + settings.PROJECT_NAME + '.appspotmail.com'
-        # message.to = email
-        #
-        # message.send()

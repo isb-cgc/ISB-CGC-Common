@@ -13,6 +13,6 @@ def user_program_count(context):
 
     userPrograms = user.program_set.all().filter(active=True)
     sharedPrograms = Program.objects.filter(shared__matched_user=user, shared__active=True, active=True)
-    projects = userPrograms | sharedPrograms
+    programs = userPrograms | sharedPrograms
 
-    return projects.distinct().count()
+    return programs.distinct().count()
