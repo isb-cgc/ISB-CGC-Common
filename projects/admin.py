@@ -18,10 +18,10 @@ limitations under the License.
 
 from django.contrib import admin
 
-from projects.models import Study, Project, User_Data_Tables, User_Feature_Definitions
+from projects.models import Study, Program, User_Data_Tables, User_Feature_Definitions
 
 
-class Project_Admin(admin.ModelAdmin):
+class Program_Admin(admin.ModelAdmin):
     list_display = (
         'name',
         'active',
@@ -38,7 +38,7 @@ class Study_Admin(admin.ModelAdmin):
         'active',
         'last_date_saved',
         'owner',
-        'project',
+        'program',
         'extends'
     )
 
@@ -51,6 +51,6 @@ class UserDataTable_Admin(admin.ModelAdmin):
     )
 
 
-admin.site.register(Project, Project_Admin)
+admin.site.register(Program, Program_Admin)
 admin.site.register(Study, Study_Admin)
 admin.site.register(User_Data_Tables, UserDataTable_Admin)

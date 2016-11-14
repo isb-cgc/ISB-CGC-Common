@@ -13,7 +13,7 @@ from django.conf import settings
 from django.db import connection
 from django.core.urlresolvers import reverse
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Project, Study, Study_BQ_Tables
+from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Study, Study_BQ_Tables
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
 
@@ -21,78 +21,78 @@ import json
 import requests
 
 @login_required
-def public_project_list(request):
-    return project_list(request, is_public=True)
+def public_program_list(request):
+    return program_list(request, is_public=True)
 
 @login_required
-def project_list(request, is_public=False):
-    template = 'projects/project_list.html'
+def program_list(request, is_public=False):
+    template = 'projects/program_list.html'
 
-    ownedProjects = request.user.project_set.all().filter(active=True)
-    sharedProjects = Project.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
+    ownedPrograms = request.user.program_set.all().filter(active=True)
+    sharedPrograms = Program.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
 
-    projects = ownedProjects | sharedProjects
-    projects = projects.distinct()
+    programs = ownedPrograms | sharedPrograms
+    programs = programs.distinct()
 
     context = {
-        'projects': projects,
-        'public_projects': Project.objects.all().filter(is_public=True,active=True),
+        'programs': programs,
+        'public_programs': Program.objects.all().filter(is_public=True, active=True),
         'is_public': is_public
     }
     return render(request, template, context)
 
 @login_required
-def project_detail(request, project_id=0):
+def program_detail(request, program_id=0):
     # """ if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name """
-    template = 'projects/project_detail.html'
+    template = 'projects/program_detail.html'
 
-    ownedProjects = request.user.project_set.all().filter(active=True)
-    sharedProjects = Project.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
-    publicProjects = Project.objects.all().filter(is_public=True,active=True)
+    ownedPrograms = request.user.program_set.all().filter(active=True)
+    sharedPrograms = Program.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
+    publicPrograms = Program.objects.all().filter(is_public=True, active=True)
 
-    projects = ownedProjects | sharedProjects | publicProjects
-    projects = projects.distinct()
+    programs = ownedPrograms | sharedPrograms | publicPrograms
+    programs = programs.distinct()
 
-    proj = projects.get(id=project_id)
+    proj = programs.get(id=program_id)
 
     shared = None
     if proj.owner.id != request.user.id and not proj.is_public:
-        shared = request.user.shared_resource_set.get(project__id=project_id)
+        shared = request.user.shared_resource_set.get(program__id=program_id)
 
     proj.mark_viewed(request)
     context = {
-        'project': proj,
+        'program': proj,
         'studies': proj.study_set.all().filter(active=True),
         'shared': shared
     }
     return render(request, template, context)
 
 @login_required
-def project_upload_existing(request):
-    return project_upload(request, existing_proj=True)
+def program_upload_existing(request):
+    return program_upload(request, existing_proj=True)
 
 
 @login_required
-def project_upload(request, existing_proj=False):
+def program_upload(request, existing_proj=False):
     # Check for user' GoogleProject
     google_projects = GoogleProject.objects.filter(user=request.user)
 
     if len(google_projects) == 0:
         template = 'GenespotRE/register_gcp.html'
     else:
-        template = 'projects/project_upload.html'
+        template = 'projects/program_upload.html'
 
-    projects = Project.objects.filter(owner=request.user, active=True) | Project.objects.filter(is_public=True,active=True)
+    programs = Program.objects.filter(owner=request.user, active=True) | Program.objects.filter(is_public=True, active=True)
 
 
     context = {
         'requested': False,
-        'projects': projects,
+        'programs': programs,
         'google_projects': google_projects,
         'existing_proj': existing_proj
     }
-    if request.GET.get('project_id'):
-        context['project_id'] = request.GET.get('project_id')
+    if request.GET.get('program_id'):
+        context['program_id'] = request.GET.get('program_id')
 
     return render(request, template, context)
 
@@ -142,24 +142,24 @@ def upload_files(request):
 
     # TODO: Validation
 
-    if request.POST['project-type'] == 'new':
-        proj = request.user.project_set.create(name=request.POST['project-name'], description=request.POST['project-description'])
+    if request.POST['program-type'] == 'new':
+        proj = request.user.program_set.create(name=request.POST['program-name'], description=request.POST['program-description'])
         proj.save()
     else:
         try:
-            proj = Project.objects.get(id=request.POST['project-id'])
+            proj = Program.objects.get(id=request.POST['program-id'])
         except ObjectDoesNotExist:
             resp = {
                 'status': "error",
                 'error': "bad_file",
-                'message': "The project you wish to upload to does not exist."
+                'message': "The program you wish to upload to does not exist."
             }
             return JsonResponse(resp)
 
 
     if proj is None:
         status = 'error'
-        message = 'Unable to create project'
+        message = 'Unable to create program'
     else:
         study = proj.study_set.create(
             name=request.POST['study-name'],
@@ -205,7 +205,7 @@ def upload_files(request):
             except Exception :
                 study.delete()
                 upload.delete()
-                if request.POST['project-type'] == 'new':
+                if request.POST['program-type'] == 'new':
                     proj.delete()
 
                 resp = {
@@ -303,7 +303,7 @@ def upload_files(request):
         if settings.PROCESSING_ENABLED:
             files = {'config.json': ('config.json', json.dumps(config))}
             post_args = {
-                'project_id':proj.id,
+                'program_id':proj.id,
                 'study_id':study.id,
                 'dataset_id':dataset.id
             }
@@ -331,26 +331,26 @@ def upload_files(request):
         'message': message
     }
     if status is "success":
-        resp['redirect_url'] = '/projects/' + str(proj.id) + '/'
+        resp['redirect_url'] = '/programs/' + str(proj.id) + '/'
 
     return JsonResponse(resp)
 
 @login_required
-def project_delete(request, project_id=0):
-    project = Project.objects.get(id=project_id)
-    if project.owner == request.user:
+def program_delete(request, program_id=0):
+    program = Program.objects.get(id=program_id)
+    if program.owner == request.user:
         # Deactivate if the user is the owner
-        project.active = False
+        program.active = False
 
         # Find all associated studies and deactivate those too
-        studies = Study.objects.filter(project=project)
+        studies = Study.objects.filter(program=program)
         for study in studies:
             study.active = False
             study.save()
-        project.save()
+        program.save()
     else:
         # Unshare
-        shared_resource = project.shared.filter(matched_user_id=request.user.id)
+        shared_resource = program.shared.filter(matched_user_id=request.user.id)
         shared_resource.delete()
 
 
@@ -359,14 +359,14 @@ def project_delete(request, project_id=0):
     })
 
 @login_required
-def project_edit(request, project_id=0):
+def program_edit(request, program_id=0):
     name = request.POST['name']
     description = request.POST['description']
 
     if not name:
-        raise Exception("Projects cannot have an empty name")
+        raise Exception("Programs cannot have an empty name")
 
-    proj = request.user.project_set.get(id=project_id)
+    proj = request.user.program_set.get(id=program_id)
     proj.name = name
     proj.description = description
     proj.save()
@@ -376,19 +376,19 @@ def project_edit(request, project_id=0):
     })
 
 @login_required
-def project_share(request, project_id=0):
-    proj = request.user.project_set.get(id=project_id)
+def program_share(request, program_id=0):
+    proj = request.user.program_set.get(id=program_id)
     emails = re.split('\s*,\s*', request.POST['share_users'].strip())
 
-    create_share(request, proj, emails, 'Project')
+    create_share(request, proj, emails, 'program')
 
     return JsonResponse({
         'status': 'success'
     })
 
 @login_required
-def study_delete(request, project_id=0, study_id=0):
-    proj = request.user.project_set.get(id=project_id)
+def study_delete(request, program_id=0, study_id=0):
+    proj = request.user.program_set.get(id=program_id)
     study = proj.study_set.get(id=study_id)
     study.active = False
     study.save()
@@ -398,14 +398,14 @@ def study_delete(request, project_id=0, study_id=0):
     })
 
 @login_required
-def study_edit(request, project_id=0, study_id=0):
+def study_edit(request, program_id=0, study_id=0):
     name = request.POST['name']
     description = request.POST['description']
 
     if not name:
-        raise Exception("Projects cannot have an empty name")
+        raise Exception("Programs cannot have an empty name")
 
-    proj = request.user.project_set.get(id=project_id)
+    proj = request.user.program_set.get(id=program_id)
     study = proj.study_set.get(id=study_id)
     study.name = name
     study.description = description
@@ -415,8 +415,8 @@ def study_edit(request, project_id=0, study_id=0):
         'status': 'success'
     })
 
-def study_data_success(request, project_id=0, study_id=0, dataset_id=0):
-    proj = Project.objects.get(id=project_id)
+def study_data_success(request, program_id=0, study_id=0, dataset_id=0):
+    proj = Program.objects.get(id=program_id)
     study = proj.study_set.get(id=study_id)
     datatables = study.user_data_tables_set.get(id=dataset_id)
 
@@ -448,8 +448,8 @@ def study_data_success(request, project_id=0, study_id=0, dataset_id=0):
         'status': 'success'
     })
 
-def study_data_error(request, project_id=0, study_id=0, dataset_id=0):
-    proj = Project.objects.get(id=project_id)
+def study_data_error(request, program_id=0, study_id=0, dataset_id=0):
+    proj = Program.objects.get(id=program_id)
     study = proj.study_set.get(id=study_id)
     datatables = study.user_data_tables_set.get(id=dataset_id)
 
@@ -465,7 +465,7 @@ def study_data_error(request, project_id=0, study_id=0, dataset_id=0):
 
 def system_data_dict(request):
 
-    # Exclusion attributes: Project, Study, has_, SampleBarcode, ParticipantBarcode
+    # Exclusion attributes: Program, Study, has_, SampleBarcode, ParticipantBarcode
     # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
     exclusion_list = ['Project',
                       'Study',

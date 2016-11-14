@@ -53,7 +53,7 @@ from django.contrib.auth.models import User as Django_User
 
 from models import Cohort, Patients, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
-from projects.models import Project, Study, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
+from projects.models import Program, Study, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
 from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
 from uuid import uuid4
@@ -591,7 +591,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     # To simplify project counting
     project_counts = {}
 
-    for project in Project.get_user_projects(user):
+    for project in Program.get_user_programs(user):
         user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'displ_name': project.name, 'name': project.name, 'count': 0, })
         project_counts[project.id] = 0
 

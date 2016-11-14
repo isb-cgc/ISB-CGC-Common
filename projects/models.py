@@ -8,7 +8,7 @@ from accounts.models import GoogleProject, Bucket, BqDataset
 from sharing.models import Shared_Resource
 
 
-class ProjectManager(models.Manager):
+class ProgramManager(models.Manager):
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -22,13 +22,13 @@ class ProjectManager(models.Manager):
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
 
-class Project(models.Model):
+class Program(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=255,null=True)
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
     last_date_saved = models.DateTimeField(auto_now_add=True)
-    objects = ProjectManager()
+    objects = ProgramManager()
     owner = models.ForeignKey(User)
     is_public = models.BooleanField(default=False)
     shared = models.ManyToManyField(Shared_Resource)
@@ -36,13 +36,13 @@ class Project(models.Model):
     '''
     Sets the last viewed time for a cohort
     '''
-    def mark_viewed (self, request, user=None):
+    def mark_viewed(self, request, user=None):
         if user is None:
             user = request.user
 
-        last_view = self.project_last_view_set.filter(user=user)
+        last_view = self.program_last_view_set.filter(user=user)
         if last_view is None or len(last_view) is 0:
-            last_view = self.project_last_view_set.create(user=user)
+            last_view = self.program_last_view_set.create(user=user)
         else:
             last_view = last_view[0]
 
@@ -51,29 +51,29 @@ class Project(models.Model):
         return last_view
 
     @classmethod
-    def get_user_projects(cls, user, includeShared=True, includePublic=False):
-        projects = user.project_set.all().filter(active=True)
+    def get_user_programs(cls, user, includeShared=True, includePublic=False):
+        programs = user.program_set.all().filter(active=True)
         if includeShared:
-            sharedProjects = cls.objects.filter(shared__matched_user=user, shared__active=True, active=True)
-            projects = projects | sharedProjects
+            sharedPrograms = cls.objects.filter(shared__matched_user=user, shared__active=True, active=True)
+            programs = programs | sharedPrograms
         if includePublic:
-            publicProjects = cls.objects.filter(is_public=True, active=True)
-            projects = projects | publicProjects
+            publicPrograms = cls.objects.filter(is_public=True, active=True)
+            programs = programs | publicPrograms
 
-        projects = projects.distinct()
+        programs = programs.distinct()
 
-        return projects
+        return programs
 
     @classmethod
-    def get_public_projects(cls):
+    def get_public_programs(cls):
         return cls.objects.filter(is_public=True, active=True)
 
     def __str__(self):
         return self.name
 
 
-class Project_Last_View(models.Model):
-    project = models.ForeignKey(Project, blank=False)
+class Program_Last_View(models.Model):
+    program = models.ForeignKey(Program, blank=False)
     user = models.ForeignKey(User, null=False, blank=False)
     last_view = models.DateTimeField(auto_now=True)
 
@@ -85,18 +85,18 @@ class Study(models.Model):
     active = models.BooleanField(default=True)
     last_date_saved = models.DateTimeField(auto_now_add=True)
     owner = models.ForeignKey(User)
-    project = models.ForeignKey(Project)
+    program = models.ForeignKey(Program)
     extends = models.ForeignKey("self", null=True, blank=True)
 
     @classmethod
     def get_user_studies(cls, user, includeShared=True):
-        projects = user.project_set.all().filter(active=True)
+        programs = user.program_set.all().filter(active=True)
         if includeShared:
-            sharedProjects = Project.objects.filter(shared__matched_user=user, shared__active=True, active=True)
-            projects = projects | sharedProjects
-            projects = projects.distinct()
+            sharedPrograms = Program.objects.filter(shared__matched_user=user, shared__active=True, active=True)
+            programs = programs | sharedPrograms
+            programs = programs.distinct()
 
-        return cls.objects.filter(active=True, project__in=projects)
+        return cls.objects.filter(active=True, program__in=programs)
 
     '''
     Sets the last viewed time for a cohort
