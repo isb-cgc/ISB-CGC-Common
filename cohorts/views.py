@@ -467,7 +467,15 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
         # and participants
 
-        cursor.execute("SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id FROM %s ms JOIN (SELECT id,name FROM projects_study WHERE owner_id = 1) ps ON ps.name = ms.Study;" % (filter_table,))
+        cursor.execute("""
+            SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id
+            FROM %s ms JOIN (
+                SELECT ps.id AS id,ps.name AS name
+                FROM projects_study ps
+                  JOIN auth_user au ON au.id = ps.owner_id
+                WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND ps.active = 1
+            ) ps ON ps.name = ms.Study;
+        """ % (filter_table,))
 
         for row in cursor.fetchall():
             samples_and_participants['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'study_id': row[2]})
