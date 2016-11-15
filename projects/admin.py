@@ -18,7 +18,7 @@ limitations under the License.
 
 from django.contrib import admin
 
-from projects.models import Study, Program, User_Data_Tables, User_Feature_Definitions
+from projects.models import Project, Program, User_Data_Tables, User_Feature_Definitions
 
 
 class Program_Admin(admin.ModelAdmin):
@@ -32,7 +32,7 @@ class Program_Admin(admin.ModelAdmin):
     exclude = ('shared',)
 
 
-class Study_Admin(admin.ModelAdmin):
+class Project_Admin(admin.ModelAdmin):
     list_display = (
         'name',
         'active',
@@ -45,12 +45,12 @@ class Study_Admin(admin.ModelAdmin):
 
 class UserDataTable_Admin(admin.ModelAdmin):
     list_display = (
-        'study',
+        'project',
         'google_project',
         'google_bucket',
     )
 
 
 admin.site.register(Program, Program_Admin)
-admin.site.register(Study, Study_Admin)
+admin.site.register(Project, Project_Admin)
 admin.site.register(User_Data_Tables, UserDataTable_Admin)

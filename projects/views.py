@@ -13,7 +13,7 @@ from django.conf import settings
 from django.db import connection
 from django.core.urlresolvers import reverse
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Study, Study_BQ_Tables
+from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project, Project_BQ_Tables
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
 
@@ -62,7 +62,7 @@ def program_detail(request, program_id=0):
     program.mark_viewed(request)
     context = {
         'program': program,
-        'studies': program.study_set.all().filter(active=True),
+        'projects': program.project_set.all().filter(active=True),
         'shared': shared
     }
     return render(request, template, context)
@@ -99,12 +99,12 @@ def program_upload(request, existing_proj=False):
 def filter_column_name(original):
     return re.sub(r"[^a-zA-Z0-9]+", "_", original.lower())
 
-def create_metadata_tables(user, study, columns, skipSamples=False):
+def create_metadata_tables(user, project, columns, skipSamples=False):
     with connection.cursor() as cursor:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS user_metadata_%s_%s (
               id INTEGER UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-              study_id INTEGER UNSIGNED,
+              project_id INTEGER UNSIGNED,
               sample_barcode VARCHAR(200),
               file_path VARCHAR(200),
               file_name VARCHAR(200),
@@ -112,7 +112,7 @@ def create_metadata_tables(user, study, columns, skipSamples=False):
               pipeline VARCHAR(200),
               platform VARCHAR(200)
             )
-        """, [user.id, study.id])
+        """, [user.id, project.id])
 
         if not skipSamples:
             feature_table_sql = """
@@ -125,7 +125,7 @@ def create_metadata_tables(user, study, columns, skipSamples=False):
                   has_protein BOOLEAN,
                   has_meth BOOLEAN
             """
-            feature_table_args = [user.id, study.id]
+            feature_table_args = [user.id, project.id]
 
             for column in columns:
                 feature_table_sql += ", " + filter_column_name(column['name']) + " " + column['type']
@@ -138,7 +138,7 @@ def upload_files(request):
     status = 'success'
     message = None
     program = None
-    study = None
+    project = None
 
     # TODO: Validation
 
@@ -161,17 +161,17 @@ def upload_files(request):
         status = 'error'
         message = 'Unable to create program'
     else:
-        study = program.study_set.create(
-            name=request.POST['study-name'],
-            description=request.POST['study-description'],
+        project = program.project_set.create(
+            name=request.POST['project-name'],
+            description=request.POST['project-description'],
             owner=request.user
         )
 
         if request.POST['data-type'] == 'extend':
             # TODO Does this need a share check??
-            study.extends_id = request.POST['extend-study-id']
+            project.extends_id = request.POST['extend-project-id']
 
-        study.save()
+        project.save()
 
         upload = UserUpload(owner=request.user)
         upload.save()
@@ -184,14 +184,14 @@ def upload_files(request):
         config = {
             "USER_PROJECT": program.id,
             "USER_ID": request.user.id,
-            "STUDY": study.id,
+            "STUDY": project.id,
             "BUCKET": bucket.bucket_name,
             "GOOGLE_PROJECT": google_project.project_name,
             "BIGQUERY_DATASET": dataset.dataset_name,
             "FILES": [],
             "USER_METADATA_TABLES": {
-                "METADATA_DATA" : "user_metadata_" + str(request.user.id) + "_" + str(study.id),
-                "METADATA_SAMPLES" : "user_metadata_samples_" + str(request.user.id) + "_" + str(study.id),
+                "METADATA_DATA" : "user_metadata_" + str(request.user.id) + "_" + str(project.id),
+                "METADATA_SAMPLES" : "user_metadata_samples_" + str(request.user.id) + "_" + str(project.id),
                 "FEATURE_DEFS": User_Feature_Definitions._meta.db_table
             }
         }
@@ -204,7 +204,7 @@ def upload_files(request):
             try :
                 file_upload.save()
             except Exception :
-                study.delete()
+                project.delete()
                 upload.delete()
                 if request.POST['program-type'] == 'new':
                     program.delete()
@@ -218,7 +218,7 @@ def upload_files(request):
 
             descriptor = json.loads(request.POST[formfield + '_desc'])
             datatype = request.POST[formfield + '_type']
-            bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(program.id) + "_" + str(study.id)
+            bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(program.id) + "_" + str(project.id)
 
             if bq_table_name not in bq_table_names:
                 bq_table_names.append(bq_table_name)
@@ -241,7 +241,7 @@ def upload_files(request):
                     # Check column type not null
                     type = column['type']
                     if not type:
-                        study.delete()
+                        project.delete()
                         program.delete()
                         upload.delete()
 
@@ -283,10 +283,10 @@ def upload_files(request):
             config['FILES'].append(fileJSON)
 
         # Skip *_samples table for low level data
-        create_metadata_tables(request.user, study, all_columns, request.POST['data-type'] == 'low')
+        create_metadata_tables(request.user, project, all_columns, request.POST['data-type'] == 'low')
 
         dataset = request.user.user_data_tables_set.create(
-            study=study,
+            project=project,
             metadata_data_table=config['USER_METADATA_TABLES']['METADATA_DATA'],
             metadata_samples_table=config['USER_METADATA_TABLES']['METADATA_SAMPLES'],
             data_upload=upload,
@@ -297,19 +297,19 @@ def upload_files(request):
 
         bq_table_items = []
         for bq_table in bq_table_names:
-            bq_table_items.append(Study_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
-        Study_BQ_Tables.objects.bulk_create(bq_table_items)
+            bq_table_items.append(Project_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
+        Project_BQ_Tables.objects.bulk_create(bq_table_items)
 
         # print settings.PROCESSING_ENABLED
         if settings.PROCESSING_ENABLED:
             files = {'config.json': ('config.json', json.dumps(config))}
             post_args = {
                 'program_id':program.id,
-                'study_id':study.id,
+                'project_id':project.id,
                 'dataset_id':dataset.id
             }
-            success_url = reverse('study_data_success', kwargs=post_args) + '?key=' + upload.key
-            failure_url = reverse('study_data_error', kwargs=post_args) + '?key=' + upload.key
+            success_url = reverse('project_data_success', kwargs=post_args) + '?key=' + upload.key
+            failure_url = reverse('project_data_error', kwargs=post_args) + '?key=' + upload.key
             parameters = {
                 'SUCCESS_POST_URL': request.build_absolute_uri( success_url ).replace('http', 'https'),
                 'FAILURE_POST_URL': request.build_absolute_uri( failure_url ).replace('http', 'https')
@@ -343,11 +343,11 @@ def program_delete(request, program_id=0):
         # Deactivate if the user is the owner
         program.active = False
 
-        # Find all associated studies and deactivate those too
-        studies = Study.objects.filter(program=program)
-        for study in studies:
-            study.active = False
-            study.save()
+        # Find all associated project and deactivate those too
+        projects = Project.objects.filter(program=program)
+        for project in projects:
+            project.active = False
+            project.save()
         program.save()
     else:
         # Unshare
@@ -388,18 +388,18 @@ def program_share(request, program_id=0):
     })
 
 @login_required
-def study_delete(request, program_id=0, study_id=0):
+def project_delete(request, program_id=0, project_id=0):
     program = request.user.program_set.get(id=program_id)
-    study = program.study_set.get(id=study_id)
-    study.active = False
-    study.save()
+    project = program.project_set.get(id=project_id)
+    project.active = False
+    project.save()
 
     return JsonResponse({
         'status': 'success'
     })
 
 @login_required
-def study_edit(request, program_id=0, study_id=0):
+def project_edit(request, program_id=0, project_id=0):
     name = request.POST['name']
     description = request.POST['description']
 
@@ -407,24 +407,24 @@ def study_edit(request, program_id=0, study_id=0):
         raise Exception("Programs cannot have an empty name")
 
     program = request.user.program_set.get(id=program_id)
-    study = program.study_set.get(id=study_id)
-    study.name = name
-    study.description = description
-    study.save()
+    project = program.project_set.get(id=project_id)
+    project.name = name
+    project.description = description
+    project.save()
 
     return JsonResponse({
         'status': 'success'
     })
 
-def study_data_success(request, program_id=0, study_id=0, dataset_id=0):
+def project_data_success(request, program_id=0, project_id=0, dataset_id=0):
     program = Program.objects.get(id=program_id)
-    study = program.study_set.get(id=study_id)
-    datatables = study.user_data_tables_set.get(id=dataset_id)
+    project = program.project_set.get(id=project_id)
+    datatables = project.user_data_tables_set.get(id=dataset_id)
 
     if not datatables.data_upload.key == request.GET.get('key'):
         raise Exception("Invalid data key when marking data success")
 
-    ufds = User_Feature_Definitions.objects.filter(study_id=study.id)
+    ufds = User_Feature_Definitions.objects.filter(project_id=project.id)
     cursor = connection.cursor()
 
     for user_feature in ufds:
@@ -449,10 +449,10 @@ def study_data_success(request, program_id=0, study_id=0, dataset_id=0):
         'status': 'success'
     })
 
-def study_data_error(request, program_id=0, study_id=0, dataset_id=0):
+def project_data_error(request, program_id=0, project_id=0, dataset_id=0):
     program = Program.objects.get(id=program_id)
-    study = program.study_set.get(id=study_id)
-    datatables = study.user_data_tables_set.get(id=dataset_id)
+    project = program.project_set.get(id=project_id)
+    datatables = project.user_data_tables_set.get(id=dataset_id)
 
     if not datatables.data_upload.key == request.GET.get('key'):
         raise Exception("Invalid data key when marking data success")
@@ -466,7 +466,7 @@ def study_data_error(request, program_id=0, study_id=0, dataset_id=0):
 
 def system_data_dict(request):
 
-    # Exclusion attributes: Program, Study, has_, SampleBarcode, ParticipantBarcode
+    # Exclusion attributes: Program, project, has_, SampleBarcode, ParticipantBarcode
     # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
     exclusion_list = ['Project',
                       'Study',

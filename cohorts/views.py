@@ -53,7 +53,7 @@ from django.contrib.auth.models import User as Django_User
 
 from models import Cohort, Patients, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
-from projects.models import Program, Study, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
+from projects.models import Program, Project, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
 from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
 from uuid import uuid4
@@ -65,7 +65,7 @@ from metadata_helpers import *
 BQ_ATTEMPT_MAX = 10
 
 METADATA_SHORTLIST = fetch_metadata_shortlist()
-TCGA_STUDY_SET = fetch_isbcgc_study_set()
+TCGA_PROJECT_SET = fetch_isbcgc_study_set()
 
 # WebApp list of the items from Somatic_mutation_calls which we want to filter on
 MOLECULAR_SHORTLIST = [
@@ -207,7 +207,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
     sample_ids = {}
     sample_tables = {}
     valid_attrs = {}
-    study_ids = ()
+    project_ids = ()
     filters = {}
     mutation_filters = None
     user_data_filters = None
@@ -236,60 +236,60 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
 
             db = get_sql_connection()
             cursor = None
+            filtered_programs = None
             filtered_projects = None
-            filtered_studies = None
 
             try:
                 cursor = db.cursor()
-                study_table_set = []
+                project_table_set = []
+                if 'user_program' in user_data_filters:
+                    for project_id in user_data_filters['user_program']['values']:
+                        if filtered_programs is None:
+                            filtered_programs = {}
+                        filtered_programs[project_id] = 1
+
                 if 'user_project' in user_data_filters:
                     for project_id in user_data_filters['user_project']['values']:
                         if filtered_projects is None:
                             filtered_projects = {}
-                        filtered_projects[project_id] = 1
+                            filtered_projects[project_id] = 1
 
-                if 'user_study' in user_data_filters:
-                    for study_id in user_data_filters['user_study']['values']:
-                        if filtered_studies is None:
-                            filtered_studies = {}
-                            filtered_studies[study_id] = 1
-
-                for study in Study.get_user_studies(user):
-                    if (filtered_projects is None or study.project.id in filtered_projects) and (filtered_studies is None or study.id in filtered_studies):
-                        study_ms_table = None
-                        for tables in User_Data_Tables.objects.filter(study_id=study.id):
+                for project in Project.get_user_projects(user):
+                    if (filtered_programs is None or project.program.id in filtered_programs) and (filtered_projects is None or project.id in filtered_projects):
+                        project_ms_table = None
+                        for tables in User_Data_Tables.objects.filter(project_id=project.id):
                             if 'user_' not in tables.metadata_samples_table:
-                                logger.warn('[WARNING] User study mtadata_samples table may have a malformed name: '
+                                logger.warn('[WARNING] User project metadata_samples table may have a malformed name: '
                                     + (tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
-                                    + ' for study ' + str(study.id) + '; skipping')
+                                    + ' for project ' + str(project.id) + '; skipping')
                             else:
-                                study_ms_table = tables.metadata_samples_table
-                                # Do not include studies that are low level data
-                                datatype_query = ("SELECT data_type from %s where study_id=" % tables.metadata_data_table) + '%s'
+                                project_ms_table = tables.metadata_samples_table
+                                # Do not include projects that are low level data
+                                datatype_query = ("SELECT data_type from %s where project_id=" % tables.metadata_data_table) + '%s'
                                 cursor = db.cursor()
-                                cursor.execute(datatype_query, (study.id,))
+                                cursor.execute(datatype_query, (project.id,))
                                 for row in cursor.fetchall():
                                     if row[0] == 'low_level':
-                                        study_ms_table = None
+                                        project_ms_table = None
 
-                        if study_ms_table is not None:
-                            study_table_set.append({'study': study.id, 'table': study_ms_table})
+                        if project_ms_table is not None:
+                            project_table_set.append({'project': project.id, 'table': project_ms_table})
 
-                if len(study_table_set) > 0:
-                    for study_table in study_table_set:
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, participant_barcode', study_table['table'],))
+                if len(project_table_set) > 0:
+                    for project_table in project_table_set:
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, participant_barcode', project_table['table'],))
                         for row in cursor.fetchall():
-                            samples_and_participants['items'].append({'sample_barcode': row[0], 'study_id': study_table['study'], 'participant_barcode': row[1]})
+                            samples_and_participants['items'].append({'sample_barcode': row[0], 'project_id': project_table['project'], 'participant_barcode': row[1]})
 
                         samples_and_participants['count'] = len(samples_and_participants['items'])
 
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('participant_barcode', study_table['table'],))
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('participant_barcode', project_table['table'],))
 
                         for row in cursor.fetchall():
                             if row[0] is not None:
                                 samples_and_participants['participants'].append(row[0])
                 else:
-                    logger.warn('[WARNING] No valid study tables were found!')
+                    logger.warn('[WARNING] No valid project tables were found!')
 
             except Exception as e:
                 logger.error(traceback.format_exc())
@@ -436,7 +436,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
 
         # If there are filters, create a temporary table filtered off the base table
         if filters.__len__() > 0:
-            # TODO: This should take into account user study tables; may require a UNION statement or similar
+            # TODO: This should take into account user project tables; may require a UNION statement or similar
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
@@ -467,12 +467,12 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
         # and participants
 
-        cursor.execute("SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id FROM %s ms JOIN (SELECT id,name FROM projects_study WHERE owner_id = 1) ps ON ps.name = ms.Study;" % (filter_table,))
+        cursor.execute("SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id FROM %s ms JOIN (SELECT id,name FROM projects_project WHERE owner_id = 1) ps ON ps.name = ms.Study;" % (filter_table,))
 
         for row in cursor.fetchall():
-            samples_and_participants['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'study_id': row[2]})
+            samples_and_participants['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'project_id': row[2]})
 
-        # Fetch the study IDs for these samples
+        # Fetch the project IDs for these samples
 
         samples_and_participants['count'] = len(samples_and_participants['items'])
 
@@ -502,22 +502,22 @@ def get_participants_by_cohort(cohort_id):
     cursor = None
 
     try:
-        studies = {}
+        projects = {}
 
         cursor = db.cursor()
 
         cursor.execute("""
-            SELECT DISTINCT cs.study_id,udt.metadata_samples_table,au.username,au.is_superuser
+            SELECT DISTINCT cs.project_id,udt.metadata_samples_table,au.username,au.is_superuser
             FROM cohorts_samples cs
                     LEFT JOIN projects_user_data_tables udt
-                    ON udt.study_id = cs.study_id
+                    ON udt.project_id = cs.project_id
                     JOIN auth_user au
                     ON au.id = udt.user_id
             WHERE cohort_id = %s;
         """,(cohort_id,))
 
         for row in cursor.fetchall():
-            studies[row[1]] = row[2] + (":su" if row[3] == 1 else ":user")
+            projects[row[1]] = row[2] + (":su" if row[3] == 1 else ":user")
 
         participant_fetch = """
             SELECT ms.%s
@@ -526,16 +526,16 @@ def get_participants_by_cohort(cohort_id):
             ON cs.sample_id = ms.%s
         """
 
-        for study_table in studies:
+        for project_table in projects:
             participant_col = 'participant_barcode'
             sample_col = 'sample_barcode'
 
-            # If the owner of this project_study entry is ISB-CGC, use the ISB-CGC column identifiers
-            if studies[study_table] == 'isb:su':
+            # If the owner of this projects_project entry is ISB-CGC, use the ISB-CGC column identifiers
+            if projects[project_table] == 'isb:su':
                 participant_col = 'ParticipantBarcode'
                 sample_col = 'SampleBarcode'
 
-            query_str = participant_fetch % (participant_col,study_table,sample_col,)
+            query_str = participant_fetch % (participant_col,project_table,sample_col,)
             query_str += ' WHERE cs.cohort_id = %s;'
 
             cursor.execute(query_str,(cohort_id,))
@@ -583,8 +583,8 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     cursor = None
 
     user_data_counts = {
-        'project': {'id': 'user_project', 'displ_name': 'User Project', 'name': 'user_project', 'values': [], },
-        'study': {'id': 'user_study', 'name': 'user_study', 'displ_name': 'User Study', 'values': [], },
+        'program': {'id': 'user_program', 'displ_name': 'User Program', 'name': 'user_program', 'values': [], },
+        'project': {'id': 'user_project', 'name': 'user_project', 'displ_name': 'User Project', 'values': [], },
         'total': 0,
         'participants': 0,
     }
@@ -595,72 +595,72 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'displ_name': project.name, 'name': project.name, 'count': 0, })
         project_counts[project.id] = 0
 
-    for study in Study.get_user_studies(user):
+    for project in Project.get_user_projects(user):
 
-        study_ms_table = None
+        project_ms_table = None
 
-        for tables in User_Data_Tables.objects.filter(study_id=study.id):
+        for tables in User_Data_Tables.objects.filter(project_id=project.id):
             if 'user_' not in tables.metadata_samples_table:
-                logger.warn('[WARNING] User study mtadata_samples table may have a malformed name: '
+                logger.warn('[WARNING] User project metadata_samples table may have a malformed name: '
                     +(tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
-                    + ' for study '+str(study.id)+'; skipping')
+                    + ' for project '+str(project.id)+'; skipping')
             else:
-                study_ms_table = tables.metadata_samples_table
-                # Do not include studies that are low level data
-                datatype_query = ("SELECT data_type from %s where study_id=" % tables.metadata_data_table) + '%s'
+                project_ms_table = tables.metadata_samples_table
+                # Do not include projects that are low level data
+                datatype_query = ("SELECT data_type from %s where project_id=" % tables.metadata_data_table) + '%s'
                 cursor = db.cursor()
-                cursor.execute(datatype_query, (study.id,))
+                cursor.execute(datatype_query, (project.id,))
                 for row in cursor.fetchall():
                     if row[0] == 'low_level':
-                        study_ms_table = None
+                        project_ms_table = None
 
-        if study_ms_table is not None:
-            user_data_counts['study']['values'].append({'id': study.id, 'value': study.id, 'name': study.name,
-                'count': 0, 'metadata_samples': study_ms_table, 'project': study.project.id, 'displ_name': study.name,})
+        if project_ms_table is not None:
+            user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'name': project.name,
+                'count': 0, 'metadata_samples': project_ms_table, 'project': project.project.id, 'displ_name': project.name,})
 
-        study_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
+        project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
         participant_count_query_str = "SELECT COUNT(DISTINCT participant_barcode) AS count FROM %s"
 
-        # If there's a cohort_id, the count is actually done against a filtered cohort_samples set instead of the study table
+        # If there's a cohort_id, the count is actually done against a filtered cohort_samples set instead of the project table
         if cohort_id is not None:
-            study_count_query_str = "SELECT COUNT(DISTINCT sample_id) FROM cohorts_samples WHERE cohort_id = %s AND study_id = %s"
+            project_count_query_str = "SELECT COUNT(DISTINCT sample_id) FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s"
             participant_count_query_str = "SELECT COUNT(DISTINCT st.participant_barcode) FROM %s"
-            participant_count_query_str_join = " st JOIN (SELECT sample_id FROM cohorts_samples WHERE cohort_id = %s AND study_id = %s) cs ON cs.sample_id = st.sample_barcode;"
+            participant_count_query_str_join = " st JOIN (SELECT sample_id FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s) cs ON cs.sample_id = st.sample_barcode;"
 
     try:
         cursor = db.cursor()
 
-        # Study counts
-        for study in user_data_counts['study']['values']:
-            study_incl = False
-            proj_incl = False
+        # Project counts
+        for project in user_data_counts['project']['values']:
+            project_incl = False
+            program_incl = False
 
-            if inc_filters is None or 'user_project' not in inc_filters or study['project'] in inc_filters['user_project']['values']:
-                study_incl = True
+            if inc_filters is None or 'user_project' not in inc_filters or project['program'] in inc_filters['user_project']['values']:
+                project_incl = True
                 if cohort_id is not None:
-                    query_params = (cohort_id,study['id'],)
-                    cursor.execute(study_count_query_str, query_params)
+                    query_params = (cohort_id,project['id'],)
+                    cursor.execute(project_count_query_str, query_params)
                 else:
                     query_params = None
-                    cursor.execute(study_count_query_str % study['metadata_samples'])
+                    cursor.execute(project_count_query_str % project['metadata_samples'])
 
                 result = cursor.fetchall()[0][0]
                 if result is None:
-                    study['count'] = 0
+                    project['count'] = 0
                 else:
-                    study['count'] = int(result)
+                    project['count'] = int(result)
 
-            if inc_filters is None or 'user_study' not in inc_filters or study['id'] in inc_filters['user_study']['values']:
-                project_counts[study['project']] += study['count']
-                proj_incl = True
+            if inc_filters is None or 'user_project' not in inc_filters or project['id'] in inc_filters['user_project']['values']:
+                project_counts[project['program']] += project['count']
+                program_incl = True
 
-            if study_incl and proj_incl:
-                user_data_counts['total'] += study['count']
+            if project_incl and program_incl:
+                user_data_counts['total'] += project['count']
 
                 if query_params is None:
-                    cursor.execute(participant_count_query_str % study['metadata_samples'])
+                    cursor.execute(participant_count_query_str % project['metadata_samples'])
                 else:
-                    cursor.execute((participant_count_query_str % study['metadata_samples']) + participant_count_query_str_join, query_params)
+                    cursor.execute((participant_count_query_str % project['metadata_samples']) + participant_count_query_str_join, query_params)
 
                 result = cursor.fetchall()[0][0]
                 if result is None:
@@ -690,7 +690,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     }
     sample_tables = {}
     valid_attrs = {}
-    study_ids = ()
+    project_ids = ()
     mutation_filters = None
     user_data_filters = None
     mutation_where_clause = None
@@ -705,7 +705,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
-        elif key == 'user_project' or key == 'user_study':
+        elif key == 'user_project' or key == 'user_project':
             if user_data_filters is None:
                 user_data_filters = {}
             user_data_filters[key] = inc_filters[key]
@@ -745,7 +745,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         # If we have a user, get counts for any user data
         if USER_DATA_ON:
             if user:
-                if len(Study.get_user_studies(user)) > 0:
+                if len(Project.get_user_projects(user)) > 0:
                     user_data_result = count_user_metadata(user, user_data_filters, cohort_id)
 
                     counts_and_total['user_data'] = []
@@ -764,7 +764,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     # It would pass back the name of the table for use by count_metadata in a UNION statement
 
                 else:
-                    logger.info('[STATUS] No studies were found for this user.')
+                    logger.info('[STATUS] No projects were found for this user.')
             else:
                 logger.info("[STATUS] User not authenticated; no user data will be available.")
 
@@ -1566,10 +1566,10 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             # If there are sample ids
             sample_list = []
             for item in items:
-                study = None
-                if 'study_id' in item:
-                    study = item['study_id']
-                sample_list.append(Samples(cohort=cohort, sample_id=item['sample_barcode'], study_id=study))
+                project = None
+                if 'project_id' in item:
+                    project = item['project_id']
+                sample_list.append(Samples(cohort=cohort, sample_id=item['sample_barcode'], project_id=project))
             Samples.objects.bulk_create(sample_list)
 
             # TODO Since we don't currently allow mixed ISB-CGC and User Data cohorts, the participant set will always be in one place, results['participants']
@@ -1660,10 +1660,10 @@ def clone_cohort(request, cohort_id):
     cohort.save()
 
     # If there are sample ids
-    samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_id', 'study_id')
+    samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_id', 'project_id')
     sample_list = []
     for sample in samples:
-        sample_list.append(Samples(cohort=cohort, sample_id=sample[0], study_id=sample[1]))
+        sample_list.append(Samples(cohort=cohort, sample_id=sample[0], project_id=sample[1]))
     Samples.objects.bulk_create(sample_list)
 
     # TODO Some cohorts won't have them at the moment. That isn't a big deal in this function
@@ -1733,29 +1733,29 @@ def set_operation(request):
                     notes += ', ' + cohort.name
                 ids += (cohort.id,)
 
-            samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'study_id')
+            samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'project_id')
 
         elif op == 'intersect':
             cohort_ids = request.POST.getlist('selected-ids')
             cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
             request.user.cohort_perms_set.all()
             if len(cohorts):
-                sample_study_map = {}
+                sample_project_map = {}
 
                 cohort_samples = Samples.objects.filter(cohort=cohorts[0])
                 cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id',flat=True))
 
-                # Samples from older cohorts made from ISB-CGC data may have null for their study IDs; we should treat
-                # these as 'matching' studies
+                # Samples from older cohorts made from ISB-CGC data may have null for their project IDs; we should treat
+                # these as 'matching' projects
 
                 for sample in cohort_samples:
-                    if sample.sample_id not in sample_study_map:
-                        sample_study_map[sample.sample_id] = []
-                    if sample.study is None:
-                        if -1 not in sample_study_map[sample.sample_id]:
-                            sample_study_map[sample.sample_id].append(-1);
-                    elif sample.study.id not in sample_study_map[sample.sample_id]:
-                            sample_study_map[sample.sample_id].append(sample.study.id)
+                    if sample.sample_id not in sample_project_map:
+                        sample_project_map[sample.sample_id] = []
+                    if sample.project is None:
+                        if -1 not in sample_project_map[sample.sample_id]:
+                            sample_project_map[sample.sample_id].append(-1);
+                    elif sample.project.id not in sample_project_map[sample.sample_id]:
+                            sample_project_map[sample.sample_id].append(sample.project.id)
 
                 notes = 'Intersection of ' + cohorts[0].name
 
@@ -1766,12 +1766,12 @@ def set_operation(request):
                     cohort_samples = Samples.objects.filter(cohort=cohort)
 
                     for sample in cohort_samples:
-                        if sample.sample_id in sample_study_map:
-                            if sample.study is None:
-                                if -1 not in sample_study_map[sample.sample_id]:
-                                    sample_study_map[sample.sample_id].append(-1);
-                            elif sample.study.id not in sample_study_map[sample.sample_id]:
-                                sample_study_map[sample.sample_id].append(sample.study.id)
+                        if sample.sample_id in sample_project_map:
+                            if sample.project is None:
+                                if -1 not in sample_project_map[sample.sample_id]:
+                                    sample_project_map[sample.sample_id].append(-1);
+                            elif sample.project.id not in sample_project_map[sample.sample_id]:
+                                sample_project_map[sample.sample_id].append(sample.project.id)
 
                     cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id',flat=True))
 
@@ -1780,36 +1780,36 @@ def set_operation(request):
                 print >> sys.stdout, 'unique ID set: '+cohort_samples_ids.__str__()
 
                 for sample in cohort_samples_ids:
-                    if len(sample_study_map[sample]) > 1:
-                        print >> sys.stdout, "Studies: "+sample_study_map[sample].__str__()
-                        studies = Study.objects.filter(id__in=sample_study_map[sample])
-                        print >> sys.stdout, "Study objs: "+studies.__str__()
+                    if len(sample_project_map[sample]) > 1:
+                        print >> sys.stdout, "Projects: "+sample_project_map[sample].__str__()
+                        projects = Project.objects.filter(id__in=sample_project_map[sample])
+                        print >> sys.stdout, "Project objs: "+projects.__str__()
                         no_match = False
                         root = -1
                         max_depth = -1
-                        deepest_study = -1
-                        for study in studies:
-                            study_rd = study.get_my_root_and_depth()
+                        deepest_project = -1
+                        for project in projects:
+                            project_rd = project.get_my_root_and_depth()
 
                             if root < 0:
-                                root = study_rd['root']
-                                max_depth = study_rd['depth']
-                                deepest_study = study.id
+                                root = project_rd['root']
+                                max_depth = project_rd['depth']
+                                deepest_project = project.id
                             else:
-                                if root != study_rd['root']:
+                                if root != project_rd['root']:
                                     no_match = True
                                 else:
-                                    if max_depth < 0 or study_rd['depth'] > max_depth:
-                                        max_depth = study_rd['depth']
-                                        deepest_study = study.id
+                                    if max_depth < 0 or project_rd['depth'] > max_depth:
+                                        max_depth = project_rd['depth']
+                                        deepest_project = project.id
 
                         if not no_match:
-                            cohort_sample_list.append({'id':sample, 'study':deepest_study, })
+                            cohort_sample_list.append({'id':sample, 'project':deepest_project, })
 
                     else:
-                        # If a study's ID is <= 0 it's a null study ID, so just record None
-                        study = (None if sample_study_map[sample][0] <=0 else sample_study_map[sample][0])
-                        cohort_sample_list.append({'id': sample, 'study':study})
+                        # If a project's ID is <= 0 it's a null project ID, so just record None
+                        project = (None if sample_project_map[sample][0] <=0 else sample_project_map[sample][0])
+                        cohort_sample_list.append({'id': sample, 'project':project})
 
                 samples = cohort_sample_list
 
@@ -1820,7 +1820,7 @@ def set_operation(request):
             base_samples = Samples.objects.filter(cohort_id=base_id)
             subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
             cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-            samples = cohort_samples.values_list('sample_id', 'study_id')
+            samples = cohort_samples.values_list('sample_id', 'project_id')
 
             notes = 'Subtracted '
             base_cohort = Cohort.objects.get(id=base_id)
@@ -1843,9 +1843,9 @@ def set_operation(request):
             sample_list = []
             for sample in samples:
                 if op == 'intersect':
-                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample['id'], study_id=sample['study']))
+                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample['id'], project_id=sample['project']))
                 else:
-                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
+                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], project_id=sample[1]))
             Samples.objects.bulk_create(sample_list)
 
             # get the full resulting sample and patient ID set
@@ -2005,12 +2005,12 @@ def cohort_filelist(request, cohort_id=0):
         has_access = True
 
     # Check if cohort contains user data samples - return info message if it does.
-    # Get user accessed studies
-    user_studies = Study.get_user_studies(request.user)
-    cohort_sample_list = Samples.objects.filter(cohort=cohort, study__in=user_studies)
+    # Get user accessed projects
+    user_projects = Project.get_user_projects(request.user)
+    cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
     if len(cohort_sample_list):
         messages.info(request,
-                      "File listing is not available for cohort samples that come from a user uploaded study. This functionality is currently being worked on and will become available in a future release.")
+                      "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
 
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,

@@ -21,7 +21,7 @@ import sys
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
-from projects.models import Study, User_Feature_Definitions
+from projects.models import Project, User_Feature_Definitions
 
 
 class CohortManager(models.Manager):
@@ -245,12 +245,12 @@ class Cohort(models.Model):
 class Samples(models.Model):
     cohort = models.ForeignKey(Cohort, null=False, blank=False)
     sample_id = models.TextField(null=False)
-    study = models.ForeignKey(Study, null=True, blank=True)
+    project = models.ForeignKey(Project, null=True, blank=True)
 
+# TODO: Remove and add patient barcodes to samples
 class Patients(models.Model):
     cohort = models.ForeignKey(Cohort, null=False, blank=False)
     patient_id = models.TextField(null=False)
-    # TODO this will need a study column eventually too, but is currently not supported in other areas
 
 class Source(models.Model):
     FILTERS = 'FILTERS'
