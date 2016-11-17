@@ -79,6 +79,7 @@ class Project_Last_View(models.Model):
 
 
 class Study(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
@@ -113,6 +114,23 @@ class Study(models.Model):
         last_view.save(False, True)
 
         return last_view
+
+    '''
+    Get the root/parent study of this study's extension hierarchy, and its depth
+    '''
+    def get_my_root_and_depth(self):
+        root = self.id
+        depth = 1
+        ancestor = self.extends
+
+        while ancestor is not None:
+            ancStudy = Study.objects.filter(id=ancestor)
+            ancestor = ancStudy.extends
+            depth += 1
+            root = ancStudy.id
+
+        return {'root': root, 'depth': depth}
+
 
     def get_status (self):
         status = 'Complete'

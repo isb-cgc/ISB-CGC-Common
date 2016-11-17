@@ -20,67 +20,32 @@ limitations under the License.
 Helper methods for fetching, curating, and managing cohort metadata
 """
 
-import json
-import collections
-import csv
 import sys
 import random
 import string
-import time
-from time import sleep
 import logging
-import json
 import traceback
-import copy
-import urllib
-import re
 import MySQLdb
 import warnings
 
-from django.utils import formats
-from django.shortcuts import render, redirect
-from django.http import HttpResponse, JsonResponse
-from django.core.urlresolvers import reverse
-from django.core.exceptions import ObjectDoesNotExist
-from django.views.decorators.csrf import csrf_protect
-from django.contrib import messages
-from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
 from django.conf import settings
-from django.db.models import Count, Sum
-import django
-
-from django.http import StreamingHttpResponse
-from django.core import serializers
 from google.appengine.api import urlfetch
-from allauth.socialaccount.models import SocialToken, SocialAccount
-from django.contrib.auth.models import User as Django_User
-
-from models import Cohort, Patients, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
-from workbooks.models import Workbook, Worksheet, Worksheet_plot
-from projects.models import Project, Study, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
-from visualizations.models import Plot_Cohorts, Plot
-from bq_data_access.cohort_bigquery import BigQueryCohortSupport
 from uuid import uuid4
-from accounts.models import NIH_User
-
 from api.api_helpers import *
-
-BQ_ATTEMPT_MAX = 10
 
 debug = settings.DEBUG # RO global for this file
 urlfetch.set_default_fetch_deadline(60)
-
-MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
-MAX_SEL_FILES = settings.MAX_FILES_IGV
-BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", "No data - zero rows fetched, selected, or processed")
 
 METADATA_SHORTLIST = {
-    'list': []
+    'list': [],
+}
+
+ISB_CGC_STUDIES = {
+    'list': [],
 }
 
 # Get a set of random characters of 'length'
@@ -109,7 +74,7 @@ def get_sql_connection():
         logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
         if db and db.open: db.close()
 
-
+# Generate the METADATA_SHORTLIST['list'] list of values based on the contents of the metadata_shortlist view
 def fetch_metadata_shortlist():
     try:
         cursor = None
@@ -134,7 +99,32 @@ def fetch_metadata_shortlist():
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+# Generate the ISB_CGC_STUDIES['list'] value set based on the get_isbcgc_study_set sproc
+def fetch_isbcgc_study_set():
+    try:
+        cursor = None
+        db = get_sql_connection()
+        if not ISB_CGC_STUDIES['list'] or len(ISB_CGC_STUDIES['list']) <= 0:
+            cursor = db.cursor()
+            cursor.execute("SELECT COUNT(SPECIFIC_NAME) FROM INFORMATION_SCHEMA.ROUTINES WHERE SPECIFIC_NAME = 'get_isbcgc_study_set';")
+            # Only try to fetch the study set if the sproc exists
+            if cursor.fetchall()[0][0] > 0:
+                cursor.execute("CALL get_isbcgc_study_set();")
+                ISB_CGC_STUDIES['list'] = []
+                for row in cursor.fetchall():
+                    ISB_CGC_STUDIES['list'].append(row[0])
+            else:
+                # Otherwise just warn
+                logger.warn("[WARNING] Stored procedure get_isbcgc_study_set was not found!")
 
+        return ISB_CGC_STUDIES['list']
+    except Exception as e:
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+# Get the list of possible metadata values based on the metadata_shortlist and their in-use values in the metadata_samples table
 def get_metadata_value_set():
     values = {}
     db = get_sql_connection()
@@ -164,7 +154,6 @@ def get_metadata_value_set():
 """
 BigQuery methods
 """
-
 def submit_bigquery_job(bq_service, project_id, query_body, batch=False):
 
     job_data = {
@@ -215,7 +204,9 @@ def get_bq_job_results(bq_service, job_reference):
 
     return result
 
-
+"""
+Display Formatting Methods
+"""
 def data_availability_sort(key, value, attr_details):
     if key == 'has_Illumina_DNASeq':
         attr_details['DNA_sequencing'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
