@@ -121,11 +121,11 @@ class Study(models.Model):
     def get_my_root_and_depth(self):
         root = self.id
         depth = 1
-        ancestor = self.extends
+        ancestor = self.extends.id
 
         while ancestor is not None:
             ancStudy = Study.objects.filter(id=ancestor)
-            ancestor = ancStudy.extends
+            ancestor = ancStudy.extends.id
             depth += 1
             root = ancStudy.id
 
