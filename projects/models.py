@@ -125,7 +125,7 @@ class Study(models.Model):
 
 
         while ancestor is not None:
-            ancStudy = Study.objects.filter(id=ancestor)
+            ancStudy = Study.objects.get(id=ancestor)
             ancestor = ancStudy.extends.id if ancStudy.extends is not None else None
             depth += 1
             root = ancStudy.id
