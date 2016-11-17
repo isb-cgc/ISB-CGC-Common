@@ -1741,7 +1741,10 @@ def set_operation(request):
                     notes += ', ' + cohort.name
                 ids += (cohort.id,)
 
+            start = time.time()
             samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'project_id')
+            stop = time.time()
+            logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
 
         elif op == 'intersect':
 
@@ -1787,13 +1790,9 @@ def set_operation(request):
 
                 cohort_sample_list = []
 
-                print >> sys.stdout, 'unique ID set: '+cohort_samples_ids.__str__()
-
                 for sample in cohort_samples_ids:
                     if len(sample_project_map[sample]) > 1:
-                        print >> sys.stdout, "Projects: "+sample_project_map[sample].__str__()
-                        projects = Project.objects.filter(id__in=sample_project_map[sample])
-                        print >> sys.stdout, "Project objs: "+projects.__str__()
+                        projects = Project.objects.filter(id__in=sample_study_map[sample])
                         no_match = False
                         root = -1
                         max_depth = -1

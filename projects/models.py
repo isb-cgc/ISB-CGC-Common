@@ -121,11 +121,12 @@ class Project(models.Model):
     def get_my_root_and_depth(self):
         root = self.id
         depth = 1
-        ancestor = self.extends
+        ancestor = self.extends.id if self.extends is not None else None
+
 
         while ancestor is not None:
-            ancProject = Project.objects.filter(id=ancestor)
-            ancestor = ancProject.extends
+            ancProject = Study.objects.get(id=ancestor)
+            ancestor = ancProject.extends.id if ancProject.extends is not None else None
             depth += 1
             root = ancProject.id
 
