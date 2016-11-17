@@ -467,7 +467,15 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
         # and participants
 
-        cursor.execute("SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id FROM %s ms JOIN (SELECT id,name FROM projects_project WHERE owner_id = 1) ps ON ps.name = ms.Study;" % (filter_table,))
+        cursor.execute("""
+            SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id
+            FROM %s ms JOIN (
+                SELECT ps.id AS id,ps.name AS name
+                FROM projects_project ps
+                  JOIN auth_user au ON au.id = ps.owner_id
+                WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND ps.active = 1
+            ) ps ON ps.name = ms.Study;
+        """ % (filter_table,))
 
         for row in cursor.fetchall():
             samples_and_participants['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'project_id': row[2]})
@@ -1736,6 +1744,8 @@ def set_operation(request):
             samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'project_id')
 
         elif op == 'intersect':
+
+            start = time.time()
             cohort_ids = request.POST.getlist('selected-ids')
             cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
             request.user.cohort_perms_set.all()
@@ -1813,6 +1823,10 @@ def set_operation(request):
 
                 samples = cohort_sample_list
 
+                stop = time.time()
+
+                logger.debug('[BENCHMARKING] Time to build intersecting sample set: ' + (stop - start).__str__())
+
         elif op == 'complement':
             base_id = request.POST.get('base-id')
             subtract_ids = request.POST.getlist('subtract-ids')
@@ -1835,6 +1849,7 @@ def set_operation(request):
             notes += ' from %s.' % base_cohort.name
 
         if len(samples):
+            start = time.time()
             new_cohort = Cohort.objects.create(name=name)
             perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
             perm.save()
@@ -1849,7 +1864,10 @@ def set_operation(request):
             Samples.objects.bulk_create(sample_list)
 
             # get the full resulting sample and patient ID set
+            startSI = time.time()
             samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
+            stopSI = time.time()
+            logger.debug('[BENCHMARKING] Time to get sample and participant list in set ops: '+(stopSI - startSI).__str__())
 
             # Store cohort to BigQuery
             bq_project_id = settings.BQ_PROJECT_ID
@@ -1874,6 +1892,9 @@ def set_operation(request):
                 for cohort in subtracted_cohorts:
                     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
+
+            stop = time.time()
+            logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
 
         else:
             message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
