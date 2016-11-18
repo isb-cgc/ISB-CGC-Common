@@ -436,8 +436,9 @@ def study_data_success(request, project_id=0, study_id=0, dataset_id=0):
         values = cursor.fetchall()
 
         for value in values:
-            ufc = User_Feature_Counts.objects.create(feature=user_feature, value=value[1], count=value[0])
-            ufc.save()
+            if value[1]:
+                ufc = User_Feature_Counts.objects.create(feature=user_feature, value=value[1], count=value[0])
+                ufc.save()
 
     cursor.close()
 
