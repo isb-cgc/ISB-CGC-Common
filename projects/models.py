@@ -125,7 +125,7 @@ class Project(models.Model):
 
 
         while ancestor is not None:
-            ancProject = Study.objects.get(id=ancestor)
+            ancProject = Project.objects.get(id=ancestor)
             ancestor = ancProject.extends.id if ancProject.extends is not None else None
             depth += 1
             root = ancProject.id
