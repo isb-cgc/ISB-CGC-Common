@@ -1,6 +1,6 @@
 """
 
-Copyright 2015, Institute for Systems Biology
+Copyright 2016, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -49,11 +49,15 @@ class Cohort(models.Model):
     last_date_saved = models.DateTimeField(auto_now=True)
     objects = CohortManager()
 
+    '''
+    Note that neither of these counts is unique; if a sample/case is present in a cohort more than once, it will
+    count as more than one
+    '''
     def sample_size(self):
         return len(self.samples_set.all())
 
-    def patient_size(self):
-        return len(self.patients_set.all())
+    def case_size(self):
+        return len(set(self.samples_set.values_list('case_barcode', flat=True)))
 
     '''
     Sets the last viewed time for a cohort
@@ -242,15 +246,13 @@ class Cohort(models.Model):
     class Meta:
         verbose_name_plural = "Saved Cohorts"
 
+
 class Samples(models.Model):
     cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    sample_id = models.TextField(null=False)
+    sample_barcode = models.CharField(max_length=45, null=False, db_index=True)
+    case_barcode = models.CharField(max_length=45, null=True, blank=False, default=None)
     project = models.ForeignKey(Project, null=True, blank=True)
 
-# TODO: Remove and add patient barcodes to samples
-class Patients(models.Model):
-    cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    patient_id = models.TextField(null=False)
 
 class Source(models.Model):
     FILTERS = 'FILTERS'

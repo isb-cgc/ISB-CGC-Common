@@ -51,7 +51,7 @@ from google.appengine.api import urlfetch
 from allauth.socialaccount.models import SocialToken, SocialAccount
 from django.contrib.auth.models import User as Django_User
 
-from models import Cohort, Patients, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
+from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 from projects.models import Program, Project, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
 from visualizations.models import Plot_Cohorts, Plot
@@ -65,7 +65,7 @@ from metadata_helpers import *
 BQ_ATTEMPT_MAX = 10
 
 METADATA_SHORTLIST = fetch_metadata_shortlist()
-TCGA_PROJECT_SET = fetch_isbcgc_study_set()
+TCGA_PROJECT_SET = fetch_isbcgc_project_set()
 
 # WebApp list of the items from Somatic_mutation_calls which we want to filter on
 MOLECULAR_SHORTLIST = [
@@ -200,9 +200,9 @@ METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 # This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 
-def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
+def get_sample_case_list(user, inc_filters=None, cohort_id=None):
 
-    samples_and_participants = {'items': [], 'participants': [], 'count': 0}
+    samples_and_cases = {'items': [], 'cases': [], 'count': 0}
 
     sample_ids = {}
     sample_tables = {}
@@ -279,15 +279,15 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
                     for project_table in project_table_set:
                         cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, participant_barcode', project_table['table'],))
                         for row in cursor.fetchall():
-                            samples_and_participants['items'].append({'sample_barcode': row[0], 'project_id': project_table['project'], 'participant_barcode': row[1]})
+                            samples_and_cases['items'].append({'sample_barcode': row[0], 'project_id': project_table['project'], 'participant_barcode': row[1]})
 
-                        samples_and_participants['count'] = len(samples_and_participants['items'])
+                        samples_and_cases['count'] = len(samples_and_cases['items'])
 
                         cursor.execute("SELECT DISTINCT %s FROM %s;" % ('participant_barcode', project_table['table'],))
 
                         for row in cursor.fetchall():
                             if row[0] is not None:
-                                samples_and_participants['participants'].append(row[0])
+                                samples_and_cases['cases'].append(row[0])
                 else:
                     logger.warn('[WARNING] No valid project tables were found!')
 
@@ -299,7 +299,7 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         else:
             logger.error("[ERROR] User not authenticated; can't create a user data cohort!")
 
-        return samples_and_participants
+        return samples_and_cases
         # end user_data
 
     if mutation_filters:
@@ -426,10 +426,10 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
-                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_id
+                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_barcode
             """ % tmp_cohort_table
             if tmp_mut_table:
-                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_id' % tmp_mut_table)
+                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
             # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
@@ -478,18 +478,18 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         """ % (filter_table,))
 
         for row in cursor.fetchall():
-            samples_and_participants['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'project_id': row[2]})
+            samples_and_cases['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'project_id': row[2]})
 
         # Fetch the project IDs for these samples
 
-        samples_and_participants['count'] = len(samples_and_participants['items'])
+        samples_and_cases['count'] = len(samples_and_cases['items'])
 
         cursor.execute("SELECT DISTINCT %s FROM %s;" % ('ParticipantBarcode', filter_table,))
 
         for row in cursor.fetchall():
-            samples_and_participants['participants'].append(row[0])
+            samples_and_cases['cases'].append(row[0])
 
-        return samples_and_participants
+        return samples_and_cases
 
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -531,7 +531,7 @@ def get_participants_by_cohort(cohort_id):
             SELECT ms.%s
             FROM cohorts_samples cs
             JOIN %s ms
-            ON cs.sample_id = ms.%s
+            ON cs.sample_barcode = ms.%s
         """
 
         for project_table in projects:
@@ -594,7 +594,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         'program': {'id': 'user_program', 'displ_name': 'User Program', 'name': 'user_program', 'values': [], },
         'project': {'id': 'user_project', 'name': 'user_project', 'displ_name': 'User Project', 'values': [], },
         'total': 0,
-        'participants': 0,
+        'cases': 0,
     }
     # To simplify project counting
     project_counts = {}
@@ -631,9 +631,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
         # If there's a cohort_id, the count is actually done against a filtered cohort_samples set instead of the project table
         if cohort_id is not None:
-            project_count_query_str = "SELECT COUNT(DISTINCT sample_id) FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s"
+            project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s"
             participant_count_query_str = "SELECT COUNT(DISTINCT st.participant_barcode) FROM %s"
-            participant_count_query_str_join = " st JOIN (SELECT sample_id FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s) cs ON cs.sample_id = st.sample_barcode;"
+            participant_count_query_str_join = " st JOIN (SELECT sample_barcode FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s) cs ON cs.sample_barcode = st.sample_barcode;"
 
     try:
         cursor = db.cursor()
@@ -672,9 +672,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
                 result = cursor.fetchall()[0][0]
                 if result is None:
-                    user_data_counts['participants'] += 0
+                    user_data_counts['cases'] += 0
                 else:
-                    user_data_counts['participants'] += int(result)
+                    user_data_counts['cases'] += int(result)
 
         # Project counts
         for project in user_data_counts['project']['values']:
@@ -761,7 +761,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                     for key in user_data_result:
                         if 'total' in key:
                             counts_and_total['user_data_total'] = user_data_result[key]
-                        elif 'participants' in key:
+                        elif 'cases' in key:
                             counts_and_total['user_data_participants'] = user_data_result[key]
                         else:
                             counts_and_total['user_data'].append(user_data_result[key])
@@ -945,11 +945,11 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
-                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_id
+                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_barcode
             """ % tmp_cohort_table
             # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
             if tmp_mut_table:
-                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_id' % tmp_mut_table)
+                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
@@ -1044,7 +1044,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
 
-        sample_and_participant_counts = get_participant_and_sample_count(filter_table, cursor)
+        sample_and_case_counts = get_participant_and_sample_count(filter_table, cursor)
 
         if cursor: cursor.close()
 
@@ -1101,8 +1101,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         if tmp_mut_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_mut_table)
 
         counts_and_total['data'] = data
-        counts_and_total['participants'] = sample_and_participant_counts['participant_count']
-        counts_and_total['total'] = sample_and_participant_counts['sample_count']
+        counts_and_total['cases'] = sample_and_case_counts['participant_count']
+        counts_and_total['total'] = sample_and_case_counts['sample_count']
 
         counts_keys = counts.keys()
         for key, feature in valid_attrs.items():
@@ -1170,7 +1170,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     )
 
     return {'items': counts_and_total['data'], 'count': counts_and_total['counts'],
-            'participants': counts_and_total['participants'], 'user_data': counts_and_total['user_data'],
+            'cases': counts_and_total['cases'], 'user_data': counts_and_total['user_data'],
             'total': counts_and_total['total'], 'user_data_total': counts_and_total['user_data_total'],
             'user_data_participants': counts_and_total['user_data_participants']}
 
@@ -1197,7 +1197,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
 
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved').annotate(num_patients=Count('samples'))
+    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved').annotate(num_cases=Count('samples__case_barcode'))
     cohorts.has_private_cohorts = False
     shared_users = {}
 
@@ -1424,8 +1424,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             shared_with_users = User.objects.filter(id__in=shared_with_ids)
             template = 'cohorts/cohort_details.html'
             template_values['cohort'] = cohort
-            template_values['total_samples'] = len(cohort.samples_set.all())
-            template_values['total_patients'] = len(cohort.patients_set.all())
+            template_values['total_samples'] = cohort.sample_size()
+            template_values['total_cases'] = cohort.case_size()
             template_values['shared_with_users'] = shared_with_users
         except ObjectDoesNotExist:
             # Cohort doesn't exist, return to user landing with error.
@@ -1503,7 +1503,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
     redirect_url = reverse('cohort_list')
 
     samples = []
-    patients = []
     name = ''
     user_id = request.user.id
     parent = None
@@ -1551,7 +1550,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
                 filter_obj[key]['values'].append(val)
 
-        results = get_sample_participant_list(request.user, filter_obj, source)
+        results = get_sample_case_list(request.user, filter_obj, source)
 
         # Do not allow 0 sample cohorts
         if int(results['count']) == 0:
@@ -1577,14 +1576,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 project = None
                 if 'project_id' in item:
                     project = item['project_id']
-                sample_list.append(Samples(cohort=cohort, sample_id=item['sample_barcode'], project_id=project))
+                sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['participant_barcode'], project_id=project))
             Samples.objects.bulk_create(sample_list)
-
-            # TODO Since we don't currently allow mixed ISB-CGC and User Data cohorts, the participant set will always be in one place, results['participants']
-            participant_list = []
-            for item in results['participants']:
-                participant_list.append(Patients(cohort=cohort, patient_id=item))
-            (len(participant_list) > 0) and Patients.objects.bulk_create(participant_list)
 
             # Set permission for user to be owner
             perm = Cohort_Perms(cohort=cohort, user=request.user,perm=Cohort_Perms.OWNER)
@@ -1604,24 +1597,38 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             bq_project_id = settings.BQ_PROJECT_ID
             cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
             bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            bcs.add_cohort_to_bq(cohort.id,items)
+            bq_result = bcs.add_cohort_to_bq(cohort.id,items)
 
-            # Check if this was a new cohort or an edit to an existing one and redirect accordingly
-            if not source:
+            print >> sys.stdout,bq_result.__str__()
+
+            # If BQ insertion fails, we immediately de-activate the cohort and warn the user
+            if 'insertErrors' in bq_result:
+                Cohort.objects.filter(id__in=cohort.id).update(active=False)
                 redirect_url = reverse('cohort_list')
-                messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
-            else:
-                redirect_url = reverse('cohort_details', args=[cohort.id])
-                messages.info(request, 'Changes applied successfully.')
+                err_msg = ''
+                if len(bq_result['insertErrors']) > 1:
+                    err_msg = 'There were '+str(len(bq_result['insertErrors'])) + ' insertion errors '
+                else:
+                    err_msg = 'There was an insertion error '
+                messages.error(request,err_msg+' when creating your cohort in BigQuery. Creation of the cohort has failed.')
 
-            if workbook_id and worksheet_id :
-                Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
-                redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_id, 'worksheet_id' : worksheet_id})
-            elif create_workbook :
-                workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
-                worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
-                worksheet_model.add_cohort(cohort)
-                redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
+            else:
+                # Check if this was a new cohort or an edit to an existing one and redirect accordingly
+                if not source:
+                    redirect_url = reverse('cohort_list')
+                    messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
+                else:
+                    redirect_url = reverse('cohort_details', args=[cohort.id])
+                    messages.info(request, 'Changes applied successfully.')
+
+                if workbook_id and worksheet_id :
+                    Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
+                    redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_id, 'worksheet_id' : worksheet_id})
+                elif create_workbook :
+                    workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
+                    worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
+                    worksheet_model.add_cohort(cohort)
+                    redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
 
     return redirect(redirect_url)
 
@@ -1668,19 +1675,11 @@ def clone_cohort(request, cohort_id):
     cohort.save()
 
     # If there are sample ids
-    samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_id', 'project_id')
+    samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_barcode', 'case_barcode', 'project_id')
     sample_list = []
     for sample in samples:
-        sample_list.append(Samples(cohort=cohort, sample_id=sample[0], project_id=sample[1]))
+        sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
     Samples.objects.bulk_create(sample_list)
-
-    # TODO Some cohorts won't have them at the moment. That isn't a big deal in this function
-    # If there are patient ids
-    patients = Patients.objects.filter(cohort=parent_cohort).values_list('patient_id', flat=True)
-    patient_list = []
-    for patient_code in patients:
-        patient_list.append(Patients(cohort=cohort, patient_id=patient_code))
-    Patients.objects.bulk_create(patient_list)
 
     # Clone the filters
     filters = Filters.objects.filter(resulting_cohort=parent_cohort).values_list('name', 'value')
@@ -1701,13 +1700,13 @@ def clone_cohort(request, cohort_id):
 
     # BQ needs an explicit patient-per-sample dataset; get that now
 
-    samples_and_participants = get_sample_participant_list(request.user,None,cohort.id)
+    samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
     # Store cohort to BigQuery
     bq_project_id = settings.BQ_PROJECT_ID
     cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
     bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    bcs.add_cohort_to_bq(cohort.id, samples_and_participants['items'])
+    bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
 
     return redirect(reverse(redirect_url,args=[cohort.id]))
 
@@ -1717,190 +1716,222 @@ def set_operation(request):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     redirect_url = '/cohorts/'
 
-    if request.POST:
-        name = request.POST.get('name').encode('utf8')
-        cohorts = []
-        base_cohort = None
-        subtract_cohorts = []
-        notes = ''
-        patients = []
-        samples = []
+    db = None
+    cursor = None
 
-        op = request.POST.get('operation')
-        if op == 'union':
-            notes = 'Union of '
-            cohort_ids = request.POST.getlist('selected-ids')
-            cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
-            first = True
-            ids = ()
-            for cohort in cohorts:
-                if first:
-                    notes += cohort.name
-                    first = False
-                else:
-                    notes += ', ' + cohort.name
-                ids += (cohort.id,)
+    try:
 
-            start = time.time()
-            samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'project_id')
-            stop = time.time()
-            logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
+        if request.POST:
+            name = request.POST.get('name').encode('utf8')
+            cohorts = []
+            base_cohort = None
+            subtracted_cohorts = []
+            notes = ''
+            samples = []
 
-        elif op == 'intersect':
+            op = request.POST.get('operation')
+            if op == 'union':
+                notes = 'Union of '
+                cohort_ids = request.POST.getlist('selected-ids')
+                cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
+                first = True
+                ids = ()
+                for cohort in cohorts:
+                    if first:
+                        notes += cohort.name
+                        first = False
+                    else:
+                        notes += ', ' + cohort.name
+                    ids += (cohort.id,)
 
-            start = time.time()
-            cohort_ids = request.POST.getlist('selected-ids')
-            cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
-            request.user.cohort_perms_set.all()
-            if len(cohorts):
-                sample_project_map = {}
+                start = time.time()
+                samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_barcode', 'case_barcode', 'project_id')
+                stop = time.time()
+                logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
 
-                cohort_samples = Samples.objects.filter(cohort=cohorts[0])
-                cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id',flat=True))
+            elif op == 'intersect':
 
-                # Samples from older cohorts made from ISB-CGC data may have null for their project IDs; we should treat
-                # these as 'matching' projects
+                start = time.time()
+                cohort_ids = request.POST.getlist('selected-ids')
+                cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
+                request.user.cohort_perms_set.all()
 
-                for sample in cohort_samples:
-                    if sample.sample_id not in sample_project_map:
-                        sample_project_map[sample.sample_id] = []
-                    if sample.project is None:
-                        if -1 not in sample_project_map[sample.sample_id]:
-                            sample_project_map[sample.sample_id].append(-1);
-                    elif sample.project.id not in sample_project_map[sample.sample_id]:
-                            sample_project_map[sample.sample_id].append(sample.project.id)
+                if len(cohorts):
 
-                notes = 'Intersection of ' + cohorts[0].name
+                    db = get_sql_connection()
+                    cursor = db.cursor()
 
-                for i in range(1, len(cohorts)):
-                    cohort = cohorts[i]
-                    notes += ', ' + cohort.name
+                    project_list = []
+                    cohorts_studies = {}
 
-                    cohort_samples = Samples.objects.filter(cohort=cohort)
+                    cohort_list = tuple(i for i in cohorts.values_list('id',flat=True))
+                    params = ('%s,' * len(cohort_list))[:-1]
+
+                    cursor.execute("""
+                        SELECT DISTINCT project_id
+                        FROM cohorts_samples cs
+                        WHERE cs.cohort_id IN (%s);
+                    """ % params, cohort_list)
+
+                    for row in cursor.fetchall():
+                        project_list.append(row[0])
+
+                    if cursor: cursor.close()
+                    if db and db.open: db.close
+
+                    studies = Project.objects.filter(id__in=project_list)
+
+                    for project in studies:
+                        cohorts_studies[project.id] = project.get_my_root_and_depth()
+
+                    sample_project_map = {}
+
+                    cohort_samples = Samples.objects.filter(cohort=cohorts[0])
+                    cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_barcode', 'case_barcode'))
+
+                    # Samples from older cohorts made from ISB-CGC data may have null for their project IDs; we should treat
+                    # these as 'matching' studies
 
                     for sample in cohort_samples:
-                        if sample.sample_id in sample_project_map:
-                            if sample.project is None:
-                                if -1 not in sample_project_map[sample.sample_id]:
-                                    sample_project_map[sample.sample_id].append(-1);
-                            elif sample.project.id not in sample_project_map[sample.sample_id]:
-                                sample_project_map[sample.sample_id].append(sample.project.id)
+                        if sample.sample_barcode not in sample_project_map:
+                            sample_project_map[sample.sample_barcode] = []
+                        if sample.project is None:
+                            if -1 not in sample_project_map[sample.sample_barcode]:
+                                sample_project_map[sample.sample_barcode].append(-1);
+                        elif sample.project.id not in sample_project_map[sample.sample_barcode]:
+                                sample_project_map[sample.sample_barcode].append(sample.project.id)
 
-                    cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id',flat=True))
+                    notes = 'Intersection of ' + cohorts[0].name
 
-                cohort_sample_list = []
+                    for i in range(1, len(cohorts)):
+                        cohort = cohorts[i]
+                        notes += ', ' + cohort.name
 
-                for sample in cohort_samples_ids:
-                    if len(sample_project_map[sample]) > 1:
-                        projects = Project.objects.filter(id__in=sample_study_map[sample])
-                        no_match = False
-                        root = -1
-                        max_depth = -1
-                        deepest_project = -1
-                        for project in projects:
-                            project_rd = project.get_my_root_and_depth()
+                        cohort_samples = Samples.objects.filter(cohort=cohort)
 
-                            if root < 0:
-                                root = project_rd['root']
-                                max_depth = project_rd['depth']
-                                deepest_project = project.id
-                            else:
-                                if root != project_rd['root']:
-                                    no_match = True
+                        for sample in cohort_samples:
+                            if sample.sample_barcode in sample_project_map:
+                                if sample.project is None:
+                                    if -1 not in sample_project_map[sample.sample_barcode]:
+                                        sample_project_map[sample.sample_barcode].append(-1);
+                                elif sample.project.id not in sample_project_map[sample.sample_barcode]:
+                                    sample_project_map[sample.sample_barcode].append(sample.project.id)
+
+                        cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_barcode','case_barcode'))
+
+                    cohort_sample_list = []
+
+                    for sample in cohort_samples_ids:
+                        # If multiple copies of this sample from different studies were found, we need to examine
+                        # their studies' inheritance chains
+                        if len(sample_project_map[sample[0]]) > 1:
+                            studies = sample_project_map[sample[0]]
+                            no_match = False
+                            root = -1
+                            max_depth = -1
+                            deepest_project = -1
+                            for project in studies:
+                                project_rd = cohorts_studies[project.id]
+
+                                if root < 0:
+                                    root = project_rd['root']
+                                    max_depth = project_rd['depth']
+                                    deepest_project = project.id
                                 else:
-                                    if max_depth < 0 or project_rd['depth'] > max_depth:
-                                        max_depth = project_rd['depth']
-                                        deepest_project = project.id
+                                    if root != project_rd['root']:
+                                        no_match = True
+                                    else:
+                                        if max_depth < 0 or project_rd['depth'] > max_depth:
+                                            max_depth = project_rd['depth']
+                                            deepest_project = project.id
 
-                        if not no_match:
-                            cohort_sample_list.append({'id':sample, 'project':deepest_project, })
+                            if not no_match:
+                                cohort_sample_list.append({'id':sample[0], 'case':sample[1], 'project':deepest_project, })
+                        # If only one project was found, all copies of this sample implicitly match
+                        else:
+                            # If a project's ID is <= 0 it's a null project ID, so just record None
+                            project = (None if sample_project_map[sample[0]][0] <=0 else sample_project_map[sample[0]][0])
+                            cohort_sample_list.append({'id': sample[0], 'case': sample[1], 'project':project})
 
+                    samples = cohort_sample_list
+
+                    stop = time.time()
+
+                    logger.debug('[BENCHMARKING] Time to build intersecting sample set: ' + (stop - start).__str__())
+
+            elif op == 'complement':
+                base_id = request.POST.get('base-id')
+                subtract_ids = request.POST.getlist('subtract-ids')
+
+                base_samples = Samples.objects.filter(cohort_id=base_id)
+                subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
+                cohort_samples = base_samples.exclude(sample_barcode__in=subtract_samples.values_list('sample_barcode', flat=True))
+                samples = cohort_samples.values_list('sample_barcode', 'case_barcode', 'project_id')
+
+                notes = 'Subtracted '
+                base_cohort = Cohort.objects.get(id=base_id)
+                subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
+                first = True
+                for item in subtracted_cohorts:
+                    if first:
+                        notes += item.name
+                        first = False
                     else:
-                        # If a project's ID is <= 0 it's a null project ID, so just record None
-                        project = (None if sample_project_map[sample][0] <=0 else sample_project_map[sample][0])
-                        cohort_sample_list.append({'id': sample, 'project':project})
+                        notes += ', ' + item.name
+                notes += ' from %s.' % base_cohort.name
 
-                samples = cohort_sample_list
+            if len(samples):
+                start = time.time()
+                new_cohort = Cohort.objects.create(name=name)
+                perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
+                perm.save()
+
+                # Store cohort samples to CloudSQL
+                sample_list = []
+                for sample in samples:
+                    if op == 'intersect':
+                        sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
+                    else:
+                        sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
+                Samples.objects.bulk_create(sample_list)
+
+                # get the full resulting sample and patient ID set
+                samples_and_cases = get_sample_case_list(request.user,None,new_cohort.id)
+
+                # Store cohort to BigQuery
+                project_id = settings.BQ_PROJECT_ID
+                cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+                bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+                bcs.add_cohort_to_bq(new_cohort.id, samples_and_cases['items'])
+
+                # Create Sources
+                if op == 'union' or op == 'intersect':
+                    for cohort in cohorts:
+                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                        source.save()
+                elif op == 'complement':
+                    source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                    source.save()
+                    for cohort in subtracted_cohorts:
+                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                        source.save()
 
                 stop = time.time()
+                logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
 
-                logger.debug('[BENCHMARKING] Time to build intersecting sample set: ' + (stop - start).__str__())
+            else:
+                message = 'Operation resulted in empty set of samples. Cohort not created.'
+                messages.warning(request, message)
+                return redirect('cohort_list')
 
-        elif op == 'complement':
-            base_id = request.POST.get('base-id')
-            subtract_ids = request.POST.getlist('subtract-ids')
+        return redirect(redirect_url)
 
-            base_samples = Samples.objects.filter(cohort_id=base_id)
-            subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
-            cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-            samples = cohort_samples.values_list('sample_id', 'project_id')
-
-            notes = 'Subtracted '
-            base_cohort = Cohort.objects.get(id=base_id)
-            subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-            first = True
-            for item in subtracted_cohorts:
-                if first:
-                    notes += item.name
-                    first = False
-                else:
-                    notes += ', ' + item.name
-            notes += ' from %s.' % base_cohort.name
-
-        if len(samples):
-            start = time.time()
-            new_cohort = Cohort.objects.create(name=name)
-            perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
-            perm.save()
-
-            # Store cohort samples and patients to CloudSQL
-            sample_list = []
-            for sample in samples:
-                if op == 'intersect':
-                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample['id'], project_id=sample['project']))
-                else:
-                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], project_id=sample[1]))
-            Samples.objects.bulk_create(sample_list)
-
-            # get the full resulting sample and patient ID set
-            startSI = time.time()
-            samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
-            stopSI = time.time()
-            logger.debug('[BENCHMARKING] Time to get sample and participant list in set ops: '+(stopSI - startSI).__str__())
-
-            # Store cohort to BigQuery
-            bq_project_id = settings.BQ_PROJECT_ID
-            cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-            bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
-
-            # Fetch the list of cases based on the sample IDs
-            patient_list = []
-            for patient in samples_and_participants['participants']:
-                patient_list.append(Patients(cohort=new_cohort, patient_id=patient))
-            Patients.objects.bulk_create(patient_list)
-
-            # Create Sources
-            if op == 'union' or op == 'intersect':
-                for cohort in cohorts:
-                    source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    source.save()
-            elif op == 'complement':
-                source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                source.save()
-                for cohort in subtracted_cohorts:
-                    source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    source.save()
-
-            stop = time.time()
-            logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
-
-        else:
-            message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
-            messages.warning(request, message)
-            return redirect('cohort_list')
-
-    return redirect(redirect_url)
+    except Exception as e:
+        logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
 
 
 @login_required
@@ -1972,31 +2003,17 @@ def save_cohort_from_plot(request):
         if len(samples):
             samples = samples.split(',')
         sample_list = []
-        patient_id_list = []
         for sample in samples:
-            patient_id = sample[:12]
-            if patient_id not in patient_id_list:
-                patient_id_list.append(patient_id)
-            sample_list.append(Samples(cohort=cohort, sample_id=sample))
+            sample_list.append(Samples(cohort=cohort, sample_barcode=sample))
         Samples.objects.bulk_create(sample_list)
 
-        # Create Patients
-        patient_list = []
-        for patient in patient_id_list:
-            patient_list.append(Patients(cohort=cohort, patient_id=patient))
-        Patients.objects.bulk_create(patient_list)
-
-        samples_and_participants = get_sample_participant_list(request.user,None,cohort.id)
+        samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
         # Store cohort to BigQuery
         bq_project_id = settings.BQ_PROJECT_ID
         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-        bcs.add_cohort_to_bq(cohort.id, samples_and_participants['items'])
-
-        workbook_id  = source_plot.worksheet.workbook_id
-        worksheet_id = source_plot.worksheet_id
-
+        bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
 
         result['message'] = "Cohort '" + cohort.name + "' created from the selected sample"
     else :
@@ -2070,7 +2087,7 @@ def cohort_filelist_ajax(request, cohort_id=0):
 
 @login_required
 @csrf_protect
-def cohort_samples_patients(request, cohort_id=0):
+def cohort_samples_cases(request, cohort_id=0):
     if debug: print >> sys.stderr, 'Called '+sys._getframe().f_code.co_name
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
@@ -2079,25 +2096,25 @@ def cohort_samples_patients(request, cohort_id=0):
     cohort_name = Cohort.objects.filter(id=cohort_id).values_list('name', flat=True)[0].__str__()
 
     # Sample IDs
-    samples = Samples.objects.filter(cohort=cohort_id).values_list('sample_id', flat=True)
+    samples = Samples.objects.filter(cohort=cohort_id).values_list('sample_barcode', flat=True)
 
     # Patient IDs, may be empty!
-    patients = Patients.objects.filter(cohort=cohort_id).values_list('patient_id', flat=True)
+    cases = Samples.objects.filter(cohort=cohort_id).values_list('case_barcode', flat=True)
 
-    rows = (["Sample and Patient List for Cohort '"+cohort_name+"'"],)
+    rows = (["Sample and Case List for Cohort '"+cohort_name+"'"],)
     rows += (["ID", "Type"],)
 
     for sample_id in samples:
         rows += ([sample_id, "Sample"],)
 
-    for patient_id in patients:
-        rows += ([patient_id, "Patient"],)
+    for case_id in cases:
+        rows += ([case_id, "Case"],)
 
     pseudo_buffer = Echo()
     writer = csv.writer(pseudo_buffer)
     response = StreamingHttpResponse((writer.writerow(row) for row in rows),
                                      content_type="text/csv")
-    response['Content-Disposition'] = 'attachment; filename="samples_patients_in_cohort.csv"'
+    response['Content-Disposition'] = 'attachment; filename="samples_cases_in_cohort.csv"'
     return response
 
 
