@@ -468,13 +468,13 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
         # and participants
 
         cursor.execute("""
-            SELECT DISTINCT ms.SampleBarcode, ms.ParticipantBarcode, ps.id
+            SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ps.id
             FROM %s ms JOIN (
                 SELECT ps.id AS id,ps.name AS name
                 FROM projects_project ps
                   JOIN auth_user au ON au.id = ps.owner_id
                 WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND ps.active = 1
-            ) ps ON ps.name = ms.Study;
+            ) ps ON ps.name = ms.disease_code;
         """ % (filter_table,))
 
         for row in cursor.fetchall():
@@ -484,7 +484,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
 
         samples_and_cases['count'] = len(samples_and_cases['items'])
 
-        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('ParticipantBarcode', filter_table,))
+        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('case_barcode', filter_table,))
 
         for row in cursor.fetchall():
             samples_and_cases['cases'].append(row[0])
@@ -568,12 +568,12 @@ def get_participant_and_sample_count(base_table, cursor):
     try:
         query_str_lead = 'SELECT COUNT(DISTINCT %s) AS %s FROM %s;'
 
-        cursor.execute(query_str_lead % ('ParticipantBarcode', 'participant_count', base_table))
+        cursor.execute(query_str_lead % ('case_barcode', 'participant_count', base_table))
 
         for row in cursor.fetchall():
             counts['participant_count'] = row[0]
 
-        cursor.execute(query_str_lead % ('SampleBarcode', 'sample_count', base_table))
+        cursor.execute(query_str_lead % ('sample_barcode', 'sample_count', base_table))
 
         for row in cursor.fetchall():
             counts['sample_count'] = row[0]
