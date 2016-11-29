@@ -1147,6 +1147,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     if req_filters is not None:
         try:
             for key in req_filters:
+                if not validate_filter_key(key):
+                    raise Exception('Invalid filter key received: '+ key)
                 this_filter = req_filters[key]
                 if key not in filters:
                     filters[key] = {'values': []}

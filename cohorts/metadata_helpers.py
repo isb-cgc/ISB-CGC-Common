@@ -151,6 +151,11 @@ def get_metadata_value_set():
         if db and db.open: db.close()
 
 
+def validate_filter_key(col):
+    if ':' in col:
+        col = col.split(':')[1]
+    return col in METADATA_SHORTLIST['list']
+
 """
 BigQuery methods
 """
