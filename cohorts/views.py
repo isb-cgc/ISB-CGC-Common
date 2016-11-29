@@ -1747,10 +1747,10 @@ def set_operation(request):
                         notes += ', ' + cohort.name
                     ids += (cohort.id,)
 
-            start = time.time()
-            samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'study_id')
-            stop = time.time()
-            logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
+                start = time.time()
+                samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'study_id')
+                stop = time.time()
+                logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
 
             elif op == 'intersect':
 
