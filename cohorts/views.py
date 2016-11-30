@@ -426,11 +426,11 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
-                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_barcode
+                JOIN metadata_samples_shortlist ms ON ms.sample_barcode = cs.sample_barcode
             """ % tmp_cohort_table
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
-            # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
+            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
@@ -442,7 +442,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
 
             if tmp_mut_table and not cohort_id:
-                make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode' % tmp_mut_table
+                make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table
 
             if filters.__len__() > 0:
                 make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
@@ -457,7 +457,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
                 CREATE TEMPORARY TABLE %s AS
                 SELECT *
                 FROM %s ms
-                JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode;
+                JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode;
             """ % (tmp_filter_table, base_table, tmp_mut_table,)
 
             cursor.execute(make_tmp_table_str)
@@ -541,7 +541,7 @@ def get_participants_by_cohort(cohort_id):
             # If the owner of this projects_project entry is ISB-CGC, use the ISB-CGC column identifiers
             if projects[project_table] == 'isb:su':
                 participant_col = 'ParticipantBarcode'
-                sample_col = 'SampleBarcode'
+                sample_col = 'sample_barcode'
 
             query_str = participant_fetch % (participant_col,project_table,sample_col,)
             query_str += ' WHERE cs.cohort_id = %s;'
@@ -945,9 +945,9 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
-                JOIN metadata_samples_shortlist ms ON ms.SampleBarcode = cs.sample_barcode
+                JOIN metadata_samples_shortlist ms ON ms.sample_barcode = cs.sample_barcode
             """ % tmp_cohort_table
-            # if there is a mutation temp table, JOIN it here to match on those SampleBarcode values
+            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
@@ -964,7 +964,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
 
             if tmp_mut_table and not cohort_id:
-                make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode' % tmp_mut_table
+                make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table
 
             if filters.__len__() > 0:
                 make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
@@ -978,6 +978,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             #         make_tmp_table_str += ' UNION
 
             make_tmp_table_str += ";"
+            print make_tmp_table_str
             cursor.execute(make_tmp_table_str, params_tuple)
         elif tmp_mut_table and not cohort_id:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
@@ -986,7 +987,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                 CREATE TEMPORARY TABLE %s AS
                 SELECT *
                 FROM %s ms
-                JOIN %s sc ON sc.tumor_sample_id = ms.SampleBarcode;
+                JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode;
             """ % (tmp_filter_table, base_table, tmp_mut_table,)
             cursor.execute(make_tmp_table_str)
         else:
@@ -1008,7 +1009,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
             else:
                 subquery = base_table
                 if tmp_mut_table:
-                    subquery += ' JOIN %s ON %s = SampleBarcode ' % (tmp_mut_table, 'tumor_sample_id', )
+                    subquery += ' JOIN %s ON %s = sample_barcode ' % (tmp_mut_table, 'tumor_sample_id', )
                 if exclusionary_filter[col_name]['query_str']:
                     subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
                 count_query_set.append({'query_str':("""
@@ -1273,8 +1274,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     shared_with_users = []
 
     clin_attr = [
-        'Project',
-        'Study',
+        'program_name',
+        'disease_code',
         'vital_status',
         # 'survival_time',
         'gender',
@@ -1345,7 +1346,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     # If this is a new cohort, automatically select some filters for our users
     if cohort_id == 0:
-        filters = {'SAMP:Project': ['TCGA',], }
+        filters = {'SAMP:program_name': ['TCGA',], }
 
     start = time.time()
     results = metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, None)
