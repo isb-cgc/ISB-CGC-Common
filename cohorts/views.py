@@ -178,6 +178,7 @@ urlfetch.set_default_fetch_deadline(60)
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
+WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
@@ -1515,6 +1516,16 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
     if request.POST:
         name = request.POST.get('name')
+        whitelist = re.compile(WHITELIST_RE,re.UNICODE)
+        match = whitelist.search(unicode(name))
+        if(match):
+            # XSS risk, log and fail this cohort save
+            match = whitelist.findall(unicode(name))
+            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
+            messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+            redirect_url = reverse('cohort_list')
+            return redirect(redirect_url)
+
         source = request.POST.get('source')
         filters = request.POST.getlist('filters')
         apply_filters = request.POST.getlist('apply-filters')
