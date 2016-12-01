@@ -178,6 +178,7 @@ urlfetch.set_default_fetch_deadline(60)
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
+WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
@@ -1148,6 +1149,8 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     if req_filters is not None:
         try:
             for key in req_filters:
+                if not validate_filter_key(key):
+                    raise Exception('Invalid filter key received: '+ key)
                 this_filter = req_filters[key]
                 if key not in filters:
                     filters[key] = {'values': []}
@@ -1514,6 +1517,16 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
     if request.POST:
         name = request.POST.get('name')
+        whitelist = re.compile(WHITELIST_RE,re.UNICODE)
+        match = whitelist.search(unicode(name))
+        if(match):
+            # XSS risk, log and fail this cohort save
+            match = whitelist.findall(unicode(name))
+            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
+            messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+            redirect_url = reverse('cohort_list')
+            return redirect(redirect_url)
+
         source = request.POST.get('source')
         filters = request.POST.getlist('filters')
         apply_filters = request.POST.getlist('apply-filters')
@@ -1818,7 +1831,7 @@ def set_operation(request):
                                 elif sample.project.id not in sample_project_map[sample.sample_barcode]:
                                     sample_project_map[sample.sample_barcode].append(sample.project.id)
 
-                        cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_barcode','case_barcode'))
+                        cohort_samples_ids = cohort_samples_ids.intersection(set(Samples.objects.filter(cohort=cohort).values_list('sample_barcode','case_barcode')))
 
                     cohort_sample_list = []
 
@@ -1858,7 +1871,7 @@ def set_operation(request):
 
                     stop = time.time()
 
-                    logger.debug('[BENCHMARKING] Time to build intersecting sample set: ' + (stop - start).__str__())
+                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
 
             elif op == 'complement':
                 base_id = request.POST.get('base-id')
