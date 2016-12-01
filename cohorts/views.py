@@ -1831,7 +1831,7 @@ def set_operation(request):
                                 elif sample.project.id not in sample_project_map[sample.sample_barcode]:
                                     sample_project_map[sample.sample_barcode].append(sample.project.id)
 
-                        cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_barcode','case_barcode'))
+                        cohort_samples_ids = cohort_samples_ids.intersection(set(Samples.objects.filter(cohort=cohort).values_list('sample_barcode','case_barcode')))
 
                     cohort_sample_list = []
 
@@ -1871,7 +1871,7 @@ def set_operation(request):
 
                     stop = time.time()
 
-                    logger.debug('[BENCHMARKING] Time to build intersecting sample set: ' + (stop - start).__str__())
+                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
 
             elif op == 'complement':
                 base_id = request.POST.get('base-id')
