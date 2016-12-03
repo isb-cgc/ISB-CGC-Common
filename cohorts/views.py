@@ -1613,11 +1613,9 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
             bq_result = bcs.add_cohort_to_bq(cohort.id,items)
 
-            print >> sys.stdout,bq_result.__str__()
-
             # If BQ insertion fails, we immediately de-activate the cohort and warn the user
             if 'insertErrors' in bq_result:
-                Cohort.objects.filter(id__in=cohort.id).update(active=False)
+                Cohort.objects.filter(id=cohort.id).update(active=False)
                 redirect_url = reverse('cohort_list')
                 err_msg = ''
                 if len(bq_result['insertErrors']) > 1:
@@ -1999,10 +1997,10 @@ def save_cohort_from_plot(request):
         # Create Samples
         samples = request.POST.get('samples', '')
         if len(samples):
-            samples = samples.split(',')
+            samples = json.loads(samples)
         sample_list = []
         for sample in samples:
-            sample_list.append(Samples(cohort=cohort, sample_barcode=sample))
+            sample_list.append(Samples(cohort=cohort, sample_barcode=sample['sample'], case_barcode=sample['case']))
         Samples.objects.bulk_create(sample_list)
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
