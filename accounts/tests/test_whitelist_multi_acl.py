@@ -18,9 +18,7 @@ limitations under the License.
 
 import csv
 import logging
-import os
 from StringIO import StringIO
-import sys
 
 from django.test import TestCase
 
