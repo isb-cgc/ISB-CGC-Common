@@ -1613,11 +1613,9 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
             bq_result = bcs.add_cohort_to_bq(cohort.id,items)
 
-            print >> sys.stdout,bq_result.__str__()
-
             # If BQ insertion fails, we immediately de-activate the cohort and warn the user
             if 'insertErrors' in bq_result:
-                Cohort.objects.filter(id__in=cohort.id).update(active=False)
+                Cohort.objects.filter(id=cohort.id).update(active=False)
                 redirect_url = reverse('cohort_list')
                 err_msg = ''
                 if len(bq_result['insertErrors']) > 1:
@@ -1776,76 +1774,60 @@ def set_operation(request):
                     cursor = db.cursor()
 
                     project_list = []
-                    cohorts_studies = {}
+                    cohorts_projects = {}
 
-                    cohort_list = tuple(i for i in cohorts.values_list('id',flat=True))
-                    params = ('%s,' * len(cohort_list))[:-1]
+                    cohort_list = tuple(int(i) for i in cohort_ids)
+                    params = ('%s,' * len(cohort_ids))[:-1]
 
-                    cursor.execute("""
-                        SELECT DISTINCT project_id
+                    sample_project_map = {}
+
+                    intersect_and_proj_list_def = """
+                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id, ';')
                         FROM cohorts_samples cs
-                        WHERE cs.cohort_id IN (%s);
-                    """ % params, cohort_list)
+                        WHERE cs.cohort_id IN ({0})
+                        GROUP BY cs.sample_barcode
+                        HAVING COUNT(DISTINCT cs.cohort_id) = %s;
+                    """.format(params)
+
+                    cohort_list += (len(cohorts),)
+
+                    cursor.execute(intersect_and_proj_list_def, cohort_list)
 
                     for row in cursor.fetchall():
-                        project_list.append(row[0])
+                        if row[0] not in sample_project_map:
+                            projs = row[2]
+                            if projs[-1] == ';':
+                                projs = projs[:-1]
+
+                            projs = [ int(x) if len(x) > 0 else -1 for x in projs.split(';') ]
+
+                            project_list += projs
+
+                            sample_project_map[row[0]] = {'case': row[1], 'projects': projs,}
 
                     if cursor: cursor.close()
                     if db and db.open: db.close
 
-                    studies = Project.objects.filter(id__in=project_list)
+                    project_list = list(set(project_list))
+                    project_models = Project.objects.filter(id__in=project_list)
 
-                    for project in studies:
-                        cohorts_studies[project.id] = project.get_my_root_and_depth()
-
-                    sample_project_map = {}
-
-                    cohort_samples = Samples.objects.filter(cohort=cohorts[0])
-                    cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_barcode', 'case_barcode'))
-
-                    # Samples from older cohorts made from ISB-CGC data may have null for their project IDs; we should treat
-                    # these as 'matching' studies
-
-                    for sample in cohort_samples:
-                        if sample.sample_barcode not in sample_project_map:
-                            sample_project_map[sample.sample_barcode] = []
-                        if sample.project is None:
-                            if -1 not in sample_project_map[sample.sample_barcode]:
-                                sample_project_map[sample.sample_barcode].append(-1);
-                        elif sample.project.id not in sample_project_map[sample.sample_barcode]:
-                                sample_project_map[sample.sample_barcode].append(sample.project.id)
-
-                    notes = 'Intersection of ' + cohorts[0].name
-
-                    for i in range(1, len(cohorts)):
-                        cohort = cohorts[i]
-                        notes += ', ' + cohort.name
-
-                        cohort_samples = Samples.objects.filter(cohort=cohort)
-
-                        for sample in cohort_samples:
-                            if sample.sample_barcode in sample_project_map:
-                                if sample.project is None:
-                                    if -1 not in sample_project_map[sample.sample_barcode]:
-                                        sample_project_map[sample.sample_barcode].append(-1);
-                                elif sample.project.id not in sample_project_map[sample.sample_barcode]:
-                                    sample_project_map[sample.sample_barcode].append(sample.project.id)
-
-                        cohort_samples_ids = cohort_samples_ids.intersection(set(Samples.objects.filter(cohort=cohort).values_list('sample_barcode','case_barcode')))
+                    for project in project_models:
+                        cohorts_projects[project.id] = project.get_my_root_and_depth()
 
                     cohort_sample_list = []
 
-                    for sample in cohort_samples_ids:
+                    for sample_id in sample_project_map:
+                        sample = sample_project_map[sample_id]
                         # If multiple copies of this sample from different studies were found, we need to examine
                         # their studies' inheritance chains
-                        if len(sample_project_map[sample[0]]) > 1:
-                            studies = sample_project_map[sample[0]]
+                        if len(sample['projects']) > 1:
+                            projects = sample['projects']
                             no_match = False
                             root = -1
                             max_depth = -1
                             deepest_project = -1
-                            for project in studies:
-                                project_rd = cohorts_studies[project.id]
+                            for project in projects:
+                                project_rd = cohorts_projects[project.id]
 
                                 if root < 0:
                                     root = project_rd['root']
@@ -1860,12 +1842,12 @@ def set_operation(request):
                                             deepest_project = project.id
 
                             if not no_match:
-                                cohort_sample_list.append({'id':sample[0], 'case':sample[1], 'project':deepest_project, })
+                                cohort_sample_list.append({'id':sample_id, 'case':sample['case'], 'project':deepest_project, })
                         # If only one project was found, all copies of this sample implicitly match
                         else:
                             # If a project's ID is <= 0 it's a null project ID, so just record None
-                            project = (None if sample_project_map[sample[0]][0] <=0 else sample_project_map[sample[0]][0])
-                            cohort_sample_list.append({'id': sample[0], 'case': sample[1], 'project':project})
+                            project = (None if sample['projects'][0] <=0 else sample['projects'][0])
+                            cohort_sample_list.append({'id': sample_id, 'case': sample['case'], 'project':project})
 
                     samples = cohort_sample_list
 
@@ -2015,10 +1997,10 @@ def save_cohort_from_plot(request):
         # Create Samples
         samples = request.POST.get('samples', '')
         if len(samples):
-            samples = samples.split(',')
+            samples = json.loads(samples)
         sample_list = []
         for sample in samples:
-            sample_list.append(Samples(cohort=cohort, sample_barcode=sample))
+            sample_list.append(Samples(cohort=cohort, sample_barcode=sample['sample'], case_barcode=sample['case']))
         Samples.objects.bulk_create(sample_list)
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
