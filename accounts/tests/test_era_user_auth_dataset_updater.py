@@ -23,7 +23,8 @@ from django.test import TestCase
 
 from accounts.models import NIH_User, AuthorizedDataset, UserAuthorizedDatasets
 
-from tasks.nih_whitelist_processor.utils import NIHWhitelist, DatasetToACLMapping
+from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
+from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
 from tasks.nih_whitelist_processor.django_utils import ERAUserAuthDatasetUpdater, NIHDatasetAdder
 from tasks.tests.data_generators import create_csv_file_object
 
@@ -66,7 +67,7 @@ class TestUserAuthDatasets(TestCase):
 
         # Parse whitelist and created populate AuthorizedDataset objects
         self.assertEquals(AuthorizedDataset.objects.count(), 0)
-        whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
+        whitelist = NIHDatasetAuthorizationList.from_stream(create_csv_file_object(test_csv_data, include_header=True))
         NIHDatasetAdder(whitelist, 'default', dataset_acl_mapping).process_whitelist()
         self.assertEquals(AuthorizedDataset.objects.count(), 1)
         dataset_phs000123 = AuthorizedDataset.objects.get(whitelist_id='phs000123')
