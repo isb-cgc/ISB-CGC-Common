@@ -600,9 +600,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     # To simplify project counting
     project_counts = {}
 
-    for project in Program.get_user_programs(user):
-        user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'displ_name': project.name, 'name': project.name, 'count': 0, })
-        project_counts[project.id] = 0
+    for program in Program.get_user_programs(user):
+        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'displ_name': program.name, 'name': program.name, 'count': 0, })
+        project_counts[program.id] = 0
 
     for project in Project.get_user_projects(user):
 
@@ -629,7 +629,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                                                           'name': project.name,
                                                           'count': 0,
                                                           'metadata_samples': project_ms_table,
-                                                          'project': project.id, # This was project.project.id -pl
+                                                          'program': program.id,
                                                           'displ_name': project.name,})
 
         project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
@@ -682,9 +682,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                 else:
                     user_data_counts['cases'] += int(result)
 
-        # Project counts
-        for project in user_data_counts['project']['values']:
-            project['count'] = project_counts[project['id']]
+        # Program counts
+        for program in user_data_counts['project']['values']:
+            program['count'] = project_counts[program['id']]
 
         # TODO: Feature counts, this will probably require creation of where clauses and tmp tables
 
