@@ -683,8 +683,8 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                     user_data_counts['cases'] += int(result)
 
         # Program counts
-        for program in user_data_counts['project']['values']:
-            program['count'] = project_counts[program['id']]
+        for program in user_data_counts['program']['values']:
+            program['count'] = project_counts[int(program['id'])]
 
         # TODO: Feature counts, this will probably require creation of where clauses and tmp tables
 
