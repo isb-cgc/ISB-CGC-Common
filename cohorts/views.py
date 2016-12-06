@@ -624,8 +624,13 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                         project_ms_table = None
 
         if project_ms_table is not None:
-            user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'name': project.name,
-                'count': 0, 'metadata_samples': project_ms_table, 'project': project.project.id, 'displ_name': project.name,})
+            user_data_counts['project']['values'].append({'id': project.id,
+                                                          'value': project.id,
+                                                          'name': project.name,
+                                                          'count': 0,
+                                                          'metadata_samples': project_ms_table,
+                                                          'project': project.id, # This was project.project.id -pl
+                                                          'displ_name': project.name,})
 
         project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
         case_count_query_str = "SELECT COUNT(DISTINCT case_barcode) AS count FROM %s"
