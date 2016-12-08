@@ -1519,7 +1519,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         name = request.POST.get('name')
         whitelist = re.compile(WHITELIST_RE,re.UNICODE)
         match = whitelist.search(unicode(name))
-        if(match):
+        if match:
             # XSS risk, log and fail this cohort save
             match = whitelist.findall(unicode(name))
             logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
@@ -1977,6 +1977,16 @@ def save_cohort_from_plot(request):
     result = {}
 
     if cohort_name:
+
+        whitelist = re.compile(WHITELIST_RE,re.UNICODE)
+        match = whitelist.search(unicode(cohort_name))
+        if match:
+            # XSS risk, log and fail this cohort save
+            match = whitelist.findall(unicode(cohort_name))
+            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+cohort_name+', characters: '+match.__str__())
+            result['error'] = "Your cohort's name contains invalid characters; please choose another name."
+            return HttpResponse(json.dumps(result), status=200)
+
         # Create Cohort
         cohort = Cohort.objects.create(name=cohort_name)
         cohort.save()
@@ -2011,9 +2021,9 @@ def save_cohort_from_plot(request):
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
 
-        result['message'] = "Cohort '" + cohort.name + "' created from the selected sample"
+        result['message'] = "Cohort '" + cohort.name + "' created from the selection set."
     else :
-        result['error'] = "parameters were not correct"
+        result['error'] = "No cohort name was supplied - the cohort was not saved."
 
     return HttpResponse(json.dumps(result), status=200)
 
