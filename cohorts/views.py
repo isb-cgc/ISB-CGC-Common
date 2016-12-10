@@ -278,13 +278,13 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
 
                 if len(project_table_set) > 0:
                     for project_table in project_table_set:
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, participant_barcode', project_table['table'],))
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, case_barcode', project_table['table'],))
                         for row in cursor.fetchall():
-                            samples_and_cases['items'].append({'sample_barcode': row[0], 'project_id': project_table['project'], 'participant_barcode': row[1]})
+                            samples_and_cases['items'].append({'sample_barcode': row[0], 'project_id': project_table['project'], 'case_barcode': row[1]})
 
                         samples_and_cases['count'] = len(samples_and_cases['items'])
 
-                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('participant_barcode', project_table['table'],))
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('case_barcode', project_table['table'],))
 
                         for row in cursor.fetchall():
                             if row[0] is not None:
@@ -466,7 +466,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
             filter_table = base_table
 
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
-        # and participants
+        # and cases
 
         cursor.execute("""
             SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ps.id
@@ -479,7 +479,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
         """ % (filter_table,))
 
         for row in cursor.fetchall():
-            samples_and_cases['items'].append({'sample_barcode': row[0], 'participant_barcode': row[1], 'project_id': row[2]})
+            samples_and_cases['items'].append({'sample_barcode': row[0], 'case_barcode': row[1], 'project_id': row[2]})
 
         # Fetch the project IDs for these samples
 
@@ -502,10 +502,10 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
 ''' Begin metadata counting methods '''
 
 
-# Given a cohort ID, fetch out the unique set of participant/case/patient IDs associated with those samples
-def get_participants_by_cohort(cohort_id):
+# Given a cohort ID, fetch out the unique set of case IDs associated with those samples
+def get_cases_by_cohort(cohort_id):
 
-    participants = []
+    cases = []
 
     db = get_sql_connection()
     cursor = None
@@ -528,7 +528,7 @@ def get_participants_by_cohort(cohort_id):
         for row in cursor.fetchall():
             projects[row[1]] = row[2] + (":su" if row[3] == 1 else ":user")
 
-        participant_fetch = """
+        case_fetch = """
             SELECT ms.%s
             FROM cohorts_samples cs
             JOIN %s ms
@@ -536,23 +536,23 @@ def get_participants_by_cohort(cohort_id):
         """
 
         for project_table in projects:
-            participant_col = 'participant_barcode'
+            case_col = 'case_barcode'
             sample_col = 'sample_barcode'
 
             # If the owner of this projects_project entry is ISB-CGC, use the ISB-CGC column identifiers
-            if projects[project_table] == 'isb:su':
-                participant_col = 'ParticipantBarcode'
-                sample_col = 'sample_barcode'
+            # if projects[project_table] == 'isb:su':
+            #     case_col = 'case_col'
+            #     sample_col = 'sample_barcode'
 
-            query_str = participant_fetch % (participant_col,project_table,sample_col,)
+            query_str = case_fetch % (case_col,project_table,sample_col,)
             query_str += ' WHERE cs.cohort_id = %s;'
 
             cursor.execute(query_str,(cohort_id,))
 
             for row in cursor.fetchall():
-                participants.append(row[0])
+                cases.append(row[0])
 
-        return set(participants)
+        return set(cases)
 
     except (Exception) as e:
         logger.error(traceback.format_exc())
@@ -562,17 +562,17 @@ def get_participants_by_cohort(cohort_id):
 
 
 # TODO: needs to be refactored to use other samples tables
-def get_participant_and_sample_count(base_table, cursor):
+def get_case_and_sample_count(base_table, cursor):
 
     counts = {}
 
     try:
         query_str_lead = 'SELECT COUNT(DISTINCT %s) AS %s FROM %s;'
 
-        cursor.execute(query_str_lead % ('case_barcode', 'participant_count', base_table))
+        cursor.execute(query_str_lead % ('case_barcode', 'case_count', base_table))
 
         for row in cursor.fetchall():
-            counts['participant_count'] = row[0]
+            counts['case_count'] = row[0]
 
         cursor.execute(query_str_lead % ('sample_barcode', 'sample_count', base_table))
 
@@ -600,9 +600,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     # To simplify project counting
     project_counts = {}
 
-    for project in Program.get_user_programs(user):
-        user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'displ_name': project.name, 'name': project.name, 'count': 0, })
-        project_counts[project.id] = 0
+    for program in Program.get_user_programs(user):
+        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'displ_name': program.name, 'name': program.name, 'count': 0, })
+        project_counts[program.id] = 0
 
     for project in Project.get_user_projects(user):
 
@@ -624,17 +624,22 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                         project_ms_table = None
 
         if project_ms_table is not None:
-            user_data_counts['project']['values'].append({'id': project.id, 'value': project.id, 'name': project.name,
-                'count': 0, 'metadata_samples': project_ms_table, 'project': project.project.id, 'displ_name': project.name,})
+            user_data_counts['project']['values'].append({'id': project.id,
+                                                          'value': project.id,
+                                                          'name': project.name,
+                                                          'count': 0,
+                                                          'metadata_samples': project_ms_table,
+                                                          'program': program.id,
+                                                          'displ_name': project.name,})
 
         project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
-        participant_count_query_str = "SELECT COUNT(DISTINCT participant_barcode) AS count FROM %s"
+        case_count_query_str = "SELECT COUNT(DISTINCT case_barcode) AS count FROM %s"
 
         # If there's a cohort_id, the count is actually done against a filtered cohort_samples set instead of the project table
         if cohort_id is not None:
             project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s"
-            participant_count_query_str = "SELECT COUNT(DISTINCT st.participant_barcode) FROM %s"
-            participant_count_query_str_join = " st JOIN (SELECT sample_barcode FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s) cs ON cs.sample_barcode = st.sample_barcode;"
+            case_count_query_str = "SELECT COUNT(DISTINCT st.case_barcode) FROM %s"
+            case_count_query_str_join = " st JOIN (SELECT sample_barcode FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s) cs ON cs.sample_barcode = st.sample_barcode;"
 
     try:
         cursor = db.cursor()
@@ -667,9 +672,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                 user_data_counts['total'] += project['count']
 
                 if query_params is None:
-                    cursor.execute(participant_count_query_str % project['metadata_samples'])
+                    cursor.execute(case_count_query_str % project['metadata_samples'])
                 else:
-                    cursor.execute((participant_count_query_str % project['metadata_samples']) + participant_count_query_str_join, query_params)
+                    cursor.execute((case_count_query_str % project['metadata_samples']) + case_count_query_str_join, query_params)
 
                 result = cursor.fetchall()[0][0]
                 if result is None:
@@ -677,9 +682,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                 else:
                     user_data_counts['cases'] += int(result)
 
-        # Project counts
-        for project in user_data_counts['project']['values']:
-            project['count'] = project_counts[project['id']]
+        # Program counts
+        for program in user_data_counts['program']['values']:
+            program['count'] = project_counts[int(program['id'])]
 
         # TODO: Feature counts, this will probably require creation of where clauses and tmp tables
 
@@ -749,7 +754,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         user_base_tables = None
         counts_and_total['user_data'] = None
         counts_and_total['user_data_total'] = None
-        counts_and_total['user_data_participants'] = None
+        counts_and_total['user_data_cases'] = None
 
         # If we have a user, get counts for any user data
         if USER_DATA_ON:
@@ -763,7 +768,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
                         if 'total' in key:
                             counts_and_total['user_data_total'] = user_data_result[key]
                         elif 'cases' in key:
-                            counts_and_total['user_data_participants'] = user_data_result[key]
+                            counts_and_total['user_data_cases'] = user_data_result[key]
                         else:
                             counts_and_total['user_data'].append(user_data_result[key])
                             counts_and_total['counts'].append(user_data_result[key])
@@ -1046,7 +1051,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
 
-        sample_and_case_counts = get_participant_and_sample_count(filter_table, cursor)
+        sample_and_case_counts = get_case_and_sample_count(filter_table, cursor)
 
         if cursor: cursor.close()
 
@@ -1103,7 +1108,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         if tmp_mut_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_mut_table)
 
         counts_and_total['data'] = data
-        counts_and_total['cases'] = sample_and_case_counts['participant_count']
+        counts_and_total['cases'] = sample_and_case_counts['case_count']
         counts_and_total['total'] = sample_and_case_counts['sample_count']
 
         counts_keys = counts.keys()
@@ -1176,7 +1181,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
     return {'items': counts_and_total['data'], 'count': counts_and_total['counts'],
             'cases': counts_and_total['cases'], 'user_data': counts_and_total['user_data'],
             'total': counts_and_total['total'], 'user_data_total': counts_and_total['user_data_total'],
-            'user_data_participants': counts_and_total['user_data_participants']}
+            'user_data_cases': counts_and_total['user_data_cases']}
 
 
 ''' End metadata counting methods '''
@@ -1590,7 +1595,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 project = None
                 if 'project_id' in item:
                     project = item['project_id']
-                sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['participant_barcode'], project_id=project))
+                sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
             Samples.objects.bulk_create(sample_list)
 
             # Set permission for user to be owner
@@ -1710,7 +1715,7 @@ def clone_cohort(request, cohort_id):
     perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    # BQ needs an explicit patient-per-sample dataset; get that now
+    # BQ needs an explicit case-per-sample dataset; get that now
 
     samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
@@ -1891,7 +1896,7 @@ def set_operation(request):
                         sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
                 Samples.objects.bulk_create(sample_list)
 
-                # get the full resulting sample and patient ID set
+                # get the full resulting sample and case ID set
                 samples_and_cases = get_sample_case_list(request.user,None,new_cohort.id)
 
                 # Store cohort to BigQuery
@@ -2104,7 +2109,7 @@ def cohort_samples_cases(request, cohort_id=0):
     # Sample IDs
     samples = Samples.objects.filter(cohort=cohort_id).values_list('sample_barcode', flat=True)
 
-    # Patient IDs, may be empty!
+    # Case IDs, may be empty!
     cases = Samples.objects.filter(cohort=cohort_id).values_list('case_barcode', flat=True)
 
     rows = (["Sample and Case List for Cohort '"+cohort_name+"'"],)

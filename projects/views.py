@@ -118,7 +118,7 @@ def create_metadata_tables(user, project, columns, skipSamples=False):
             feature_table_sql = """
                 CREATE TABLE IF NOT EXISTS user_metadata_samples_%s_%s (
                   id INTEGER UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                  participant_barcode VARCHAR(200),
+                  case_barcode VARCHAR(200),
                   sample_barcode VARCHAR(200) UNIQUE,
                   has_mrna BOOLEAN,
                   has_mirna BOOLEAN,
@@ -470,8 +470,8 @@ def system_data_dict(request):
     # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
     exclusion_list = ['Project',
                       'Study',
-                      'SampleBarcode',
-                      'ParticipantBarcode',
+                      'sample_barcode',
+                      'case_barcode',
                       'adenocarcinoma_invasion',
                       'country_of_procurement',
                       'Disease_Code',
