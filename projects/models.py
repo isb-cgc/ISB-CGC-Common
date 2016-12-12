@@ -205,3 +205,18 @@ class Project_BQ_Tables(models.Model):
 
     def __str__(self):
         return self.bq_table_name
+
+class Public_Data_Tables(models.Model):
+    program = models.ForeignKey(Program, null=False)
+    data_table = models.CharField(max_length=100)
+    samples_table = models.CharField(max_length=100)
+    attr_table = models.CharField(max_length=100)
+    sample_data_availability_table = models.CharField(max_length=100)
+
+    class Meta:
+        verbose_name = "Public Data Table"
+        verbose_name_plural = "Public Data Tables"
+
+    def __str__(self):
+        return self.program__name
+
