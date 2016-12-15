@@ -1783,7 +1783,7 @@ def set_operation(request):
                     cursor = db.cursor()
 
                     intersect_and_study_list_def = """
-                        SELECT cs.sample_id, GROUP_CONCAT(DISTINCT cs.study_id, ';')
+                        SELECT cs.sample_id, GROUP_CONCAT(DISTINCT cs.study_id SEPARATOR ';')
                         FROM cohorts_samples cs
                         WHERE cs.cohort_id IN ({0})
                         GROUP BY cs.sample_id
