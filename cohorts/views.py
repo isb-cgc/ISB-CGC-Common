@@ -1796,7 +1796,7 @@ def set_operation(request):
 
                     for row in cursor.fetchall():
                         if row[0] not in sample_study_map:
-                            studies = row[2]
+                            studies = row[1]
                             if studies[-1] == ';':
                                 studies = studies[:-1]
 
