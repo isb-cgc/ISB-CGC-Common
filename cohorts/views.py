@@ -1783,10 +1783,10 @@ def set_operation(request):
                     cursor = db.cursor()
 
                     intersect_and_study_list_def = """
-                        SELECT cs.SampleBarcode, cs.ParticipantBarcode, GROUP_CONCAT(DISTINCT cs.study_id, ';')
+                        SELECT cs.sample_id, GROUP_CONCAT(DISTINCT cs.study_id, ';')
                         FROM cohorts_samples cs
                         WHERE cs.cohort_id IN ({0})
-                        GROUP BY cs.SampleBarcode
+                        GROUP BY cs.sample_id
                         HAVING COUNT(DISTINCT cs.cohort_id) = %s;
                     """.format(params)
 
@@ -1804,7 +1804,7 @@ def set_operation(request):
 
                             study_list += studies
 
-                            sample_study_map[row[0]] = {'participant': row[1], 'studies': studies,}
+                            sample_study_map[row[0]] = studies
 
                     if cursor: cursor.close()
                     if db and db.open: db.close()
@@ -1818,11 +1818,10 @@ def set_operation(request):
                     cohort_sample_list = []
 
                     for sample_id in sample_study_map:
-                        sample = sample_study_map[sample_id]
+                        studies = sample_study_map[sample_id]
                         # If multiple copies of this sample from different studies were found, we need to examine
                         # their studies' inheritance chains
-                        if len(sample['studies']) > 1:
-                            studies = sample['studies']
+                        if len(studies) > 1:
                             no_match = False
                             root = -1
                             max_depth = -1
@@ -1843,12 +1842,12 @@ def set_operation(request):
                                             deepest_study = study
 
                             if not no_match:
-                                cohort_sample_list.append({'id':sample, 'study':deepest_study, })
+                                cohort_sample_list.append({'id':sample_id, 'study':deepest_study, })
                         # If only one study was found, all copies of this sample implicitly match
                         else:
                             # If a study's ID is <= 0 it's a null study ID, so just record None
-                            study = (None if sample['studies'][0] <=0 else sample['studies'][0])
-                            cohort_sample_list.append({'id': sample, 'study':study})
+                            study = (None if studies[0] <=0 else studies[0])
+                            cohort_sample_list.append({'id': sample_id, 'study':study})
 
                     samples = cohort_sample_list
 
