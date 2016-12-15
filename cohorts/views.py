@@ -1845,19 +1845,19 @@ def set_operation(request):
                             max_depth = -1
                             deepest_study = -1
                             for study in studies:
-                                study_rd = cohorts_studies[study.id]
+                                study_rd = cohorts_studies[study]
 
                                 if root < 0:
                                     root = study_rd['root']
                                     max_depth = study_rd['depth']
-                                    deepest_study = study.id
+                                    deepest_study = study
                                 else:
                                     if root != study_rd['root']:
                                         no_match = True
                                     else:
                                         if max_depth < 0 or study_rd['depth'] > max_depth:
                                             max_depth = study_rd['depth']
-                                            deepest_study = study.id
+                                            deepest_study = study
 
                             if not no_match:
                                 cohort_sample_list.append({'id':sample, 'study':deepest_study, })
