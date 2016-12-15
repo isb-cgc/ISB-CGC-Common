@@ -51,5 +51,7 @@ urlpatterns = [
     url(r'^save_cohort_for_workbook/$',                                            views.save_cohort_for_existing_workbook,    name="save_cohort_for_existing_workbook"),
     url(r'^save_cohort_and_workbook/$',                                            views.save_cohort_for_new_workbook,         name="save_cohort_for_new_workbook"),
 
-    url(r'^get_metadata_ajax/$',                views.get_metadata, name='metadata_count_ajax')
+    url(r'^get_metadata_ajax/$',                                        views.get_metadata, name='metadata_count_ajax'),
+    url(r'^filter_panel/(?P<program_id>\d+)/$',                         views.get_cohort_filter_panel, name='cohort_filter_panel'),
+    url(r'^(?P<cohort_id>\d+)/filter_panel/(?P<program_id>\d+)/$',      views.get_cohort_filter_panel, name='cohort_filter_panel')
 ]

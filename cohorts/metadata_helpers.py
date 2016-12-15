@@ -125,13 +125,14 @@ def fetch_isbcgc_project_set():
         if db and db.open: db.close()
 
 # Get the list of possible metadata values based on the metadata_shortlist and their in-use values in the metadata_samples table
-def get_metadata_value_set():
+# New function now uses program id, and so requires a program id. It defaults to 1==TCGA.
+def get_metadata_value_set(program=1):
     values = {}
     db = get_sql_connection()
 
     try:
         cursor = db.cursor()
-        cursor.callproc('get_metadata_values')
+        cursor.callproc('get_metadata_values', [program])
 
         values[cursor.description[0][0]] = {}
         for row in cursor.fetchall():
