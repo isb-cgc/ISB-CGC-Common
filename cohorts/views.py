@@ -1775,19 +1775,18 @@ def set_operation(request):
 
                 if len(cohorts):
 
-                    db = get_sql_connection()
-                    cursor = db.cursor()
-
                     project_list = []
                     cohorts_projects = {}
+                    sample_project_map = {}
 
                     cohort_list = tuple(int(i) for i in cohort_ids)
                     params = ('%s,' * len(cohort_ids))[:-1]
 
-                    sample_project_map = {}
+                    db = get_sql_connection()
+                    cursor = db.cursor()
 
                     intersect_and_proj_list_def = """
-                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id, ';')
+                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id SEPARATOR ';')
                         FROM cohorts_samples cs
                         WHERE cs.cohort_id IN ({0})
                         GROUP BY cs.sample_barcode
@@ -1811,7 +1810,7 @@ def set_operation(request):
                             sample_project_map[row[0]] = {'case': row[1], 'projects': projs,}
 
                     if cursor: cursor.close()
-                    if db and db.open: db.close
+                    if db and db.open: db.close()
 
                     project_list = list(set(project_list))
                     project_models = Project.objects.filter(id__in=project_list)
@@ -1832,19 +1831,19 @@ def set_operation(request):
                             max_depth = -1
                             deepest_project = -1
                             for project in projects:
-                                project_rd = cohorts_projects[project.id]
+                                project_rd = cohorts_projects[project]
 
                                 if root < 0:
                                     root = project_rd['root']
                                     max_depth = project_rd['depth']
-                                    deepest_project = project.id
+                                    deepest_project = project
                                 else:
                                     if root != project_rd['root']:
                                         no_match = True
                                     else:
                                         if max_depth < 0 or project_rd['depth'] > max_depth:
                                             max_depth = project_rd['depth']
-                                            deepest_project = project.id
+                                            deepest_project = project
 
                             if not no_match:
                                 cohort_sample_list.append({'id':sample_id, 'case':sample['case'], 'project':deepest_project, })
