@@ -27,6 +27,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
+from google_api_utils.stackdriver import StackDriverLogger
 from google_helpers.bigquery_service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
@@ -291,57 +292,6 @@ def user_gcp_delete(request, user_id, gcp_id):
 
     return redirect('user_gcp_list', user_id=request.user.id)
 
-def write_log_entry(log_name, log_message):
-    """ Creates a log entry using the Cloud logging API
-        Writes a struct payload as the log message
-        Also, the API writes the log to bucket and BigQuery
-        Works only with the Compute Service
-        type log_name: str
-        param log_name: The name of the log entry
-        type log_message: json
-        param log_message: The struct/json payload
-    """
-    client, http_auth = None, None
-
-    try:
-        client, http_auth = get_logging_resource()
-    except Exception as e:
-        logging.error("get_logging_resource failed: {}".format(e.message))
-
-    # write using logging API (metadata)
-    entry_metadata = {
-        "timestamp": datetime.datetime.utcnow().isoformat("T") + "Z",
-        "serviceName": "compute.googleapis.com",
-        "severity": "INFO",
-        "labels": {}
-    }
-
-    # Create a POST body for the write log entries request(Payload).
-    body = {
-        "commonLabels": {
-            "compute.googleapis.com/resource_id": log_name,
-            "compute.googleapis.com/resource_type": log_name
-        },
-        "entries": [
-            {
-                "metadata": entry_metadata,
-                "log": log_name,
-                "structPayload": log_message
-            }
-        ]
-    }
-
-    try:
-        resp = client.projects().logs().entries().write(
-            projectsId=settings.BIGQUERY_PROJECT_NAME, logsId=log_name, body=body).execute()
-
-        if resp:
-            logging.error("Unexpected response from logging API: {}".format(resp))
-
-    except Exception as e:
-        logging.error("Exception while calling logging API.")
-        logging.exception(e)
-
 
 def verify_service_account(gcp_id, service_account, datasets):
     # Only verify for protected datasets
@@ -350,11 +300,13 @@ def verify_service_account(gcp_id, service_account, datasets):
     dataset_obj_names = dataset_objs.values_list('name', flat=True)
 
     # log the reports using Cloud logging API
+    st_logger = StackDriverLogger.build_from_django_settings()
+
     log_name = SERVICE_ACCOUNT_LOG_NAME
     resp = {
         'message': '{0}: Begin verification of service account.'.format(service_account)
     }
-    write_log_entry(log_name, resp)
+    st_logger.write_struct_log_entry(log_name, resp)
     # 1. GET ALL USERS ON THE PROJECT.
     try:
         crm_service = get_special_crm_resource()
@@ -382,7 +334,7 @@ def verify_service_account(gcp_id, service_account, datasets):
         if not verified_sa:
             logging.info('Provided service account does not exist in project.')
 
-            write_log_entry(log_name, {'message': '{0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
+            st_logger.write_struct_log_entry(log_name, {'message': '{0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
             return {'message': 'The provided service account does not exist in the selected project'}
 
@@ -415,7 +367,7 @@ def verify_service_account(gcp_id, service_account, datasets):
                         if set(dataset_obj_ids).issubset(user_auth_dataset_ids):
                             member['datasets_valid'] = True
                             if dataset_objs:
-                                write_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                         for item in user_auth_datasets:
                             member['datasets'].append(item.name)
@@ -424,7 +376,7 @@ def verify_service_account(gcp_id, service_account, datasets):
                         if not member['datasets_valid']:
                             user_dataset_verified = False
                             if dataset_objs:
-                                write_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                     # IF USER HAS NO ERA COMMONS ID
                     else:
@@ -433,14 +385,14 @@ def verify_service_account(gcp_id, service_account, datasets):
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
                         if dataset_objs:
                             user_dataset_verified = False
-                            write_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
                     member['nih_registered'] = False
                     member['datasets'] = []
                     if dataset_objs:
-                        write_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
+                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
                         user_dataset_verified = False
 
 
@@ -461,6 +413,8 @@ def verify_service_account(gcp_id, service_account, datasets):
 
 @login_required
 def verify_sa(request, user_id):
+    st_logger = StackDriverLogger.build_from_django_settings()
+
     if request.POST.get('gcp_id'):
         gcp_id = request.POST.get('gcp_id')
         user_sa = request.POST.get('user_sa')
@@ -469,11 +423,11 @@ def verify_sa(request, user_id):
         result = verify_service_account(gcp_id, user_sa, datasets)
         if 'message' in result.keys():
             status = '400'
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
         elif result['user_dataset_verified']:
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
         else:
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
         result['user_sa'] = user_sa
         result['datasets'] = datasets
         return JsonResponse(result, status=status)
@@ -482,6 +436,7 @@ def verify_sa(request, user_id):
 
 @login_required
 def register_sa(request, user_id):
+    st_logger = StackDriverLogger.build_from_django_settings()
 
     print request.POST
     if request.GET.get('gcp_id'):
@@ -505,11 +460,11 @@ def register_sa(request, user_id):
         result = verify_service_account(gcp_id, user_sa, datasets)
         if 'message' in result.keys():
             messages.error(request, result['message'])
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
             return redirect('user_gcp_list', user_id=user_id)
 
         elif result['user_dataset_verified']:
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
                             {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
 
             # Datasets verified, add service accounts to appropriate acl groups
@@ -532,7 +487,7 @@ def register_sa(request, user_id):
 
                 try:
                     body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                    write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
                     directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
                     logger.info("Attempting to insert user {} into group {}. "
@@ -540,13 +495,13 @@ def register_sa(request, user_id):
                                 .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
                 except HttpError, e:
-                    write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
                     logger.info(e)
 
             return redirect('user_gcp_list', user_id=user_id)
         else:
             # Somehow managed to register even though previous verification failed
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
             messages.error(request, 'There was an error in processing your service account. Please try again.')
             return redirect('user_gcp_list', user_id=user_id)
     else:
@@ -555,6 +510,8 @@ def register_sa(request, user_id):
 
 @login_required
 def delete_sa(request, user_id, sa_id):
+    st_logger = StackDriverLogger.build_from_django_settings()
+
     if request.POST:
 
         sa = ServiceAccount.objects.get(id=sa_id)
@@ -562,12 +519,12 @@ def delete_sa(request, user_id, sa_id):
         try:
             directory_service, http_auth = get_directory_resource()
             directory_service.members().delete(groupKey=sa.authorized_dataset.acl_google_group, memberKey=sa.service_account).execute(http=http_auth)
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(sa.service_account, sa.authorized_dataset.acl_google_group)})
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(sa.service_account, sa.authorized_dataset.acl_google_group)})
             logger.info("Attempting to delete user {} from group {}. "
                         "If an error message doesn't follow, they were successfully deleted"
                         .format(sa.service_account, sa.authorized_dataset.acl_google_group))
         except HttpError, e:
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(sa.service_account), sa.authorized_dataset.acl_google_group)})
             logger.info(e)
 
@@ -607,7 +564,7 @@ def register_bucket(request, user_id, gcp_id):
 
         except HttpError, e:
             messages.error(request, 'There was an unknown error processing this request.')
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '{0}: There was an error accessing the Google Cloud Project bucket list.'.format(
                     str(gcp.project_id))})
             logger.info(e)
@@ -664,7 +621,7 @@ def register_bqdataset(request, user_id, gcp_id):
 
         except HttpError, e:
             messages.error(request, 'There was an unknown error processing this request.')
-            write_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '{0}: There was an error accessing the Google Cloud Project dataset list.'.format(
                     str(gcp.project_id))})
             logger.info(e)
