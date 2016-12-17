@@ -1,3 +1,21 @@
+"""
+
+Copyright 2016, Institute for Systems Biology
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+   http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+"""
+
 from copy import deepcopy
 import re
 import sys
@@ -19,6 +37,11 @@ from accounts.models import GoogleProject, Bucket, BqDataset
 
 import json
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
+
+WHITELIST_RE = settings.WHITELIST_RE
 
 @login_required
 def public_project_list(request):
@@ -143,6 +166,38 @@ def upload_files(request):
     # TODO: Validation
 
     if request.POST['project-type'] == 'new':
+        project_name = request.POST['project-name']
+        project_desc = request.POST['project-description']
+        whitelist = re.compile(WHITELIST_RE, re.UNICODE)
+        match_name = whitelist.search(unicode(project_name))
+        match_desc = whitelist.search(unicode(project_desc))
+
+        if match_name or match_desc:
+            # XSS risk, log and fail this cohort save
+            matches = ""
+            fields = ""
+            if match_name:
+                match_name = whitelist.findall(unicode(project_name))
+                logger.error(
+                    '[ERROR] While saving a user project, saw a malformed name: ' + project_name + ', characters: ' + match_name.__str__())
+                matches = "name contains"
+                fields = "name"
+            if match_desc:
+                match_desc = whitelist.findall(unicode(project_desc))
+                logger.error(
+                    '[ERROR] While saving a user project, saw a malformed description: ' + project_desc + ', characters: ' + match_desc.__str__())
+                matches = "name and description contain" if match_name else "description contains"
+                fields += (" and description" if match_name else "description")
+
+            err_msg = "Your project's %s invalid characters; please choose another %s." % (matches, fields,)
+
+            resp = {
+                'status': "error",
+                'error': "bad_input",
+                'message': err_msg
+            }
+            return JsonResponse(resp)
+
         proj = request.user.project_set.create(name=request.POST['project-name'], description=request.POST['project-description'])
         proj.save()
     else:
@@ -156,11 +211,42 @@ def upload_files(request):
             }
             return JsonResponse(resp)
 
-
     if proj is None:
         status = 'error'
         message = 'Unable to create project'
     else:
+        study_name = request.POST['study-name']
+        study_desc = request.POST['study-description']
+        whitelist = re.compile(WHITELIST_RE, re.UNICODE)
+        match_name = whitelist.search(unicode(study_name))
+        match_desc = whitelist.search(unicode(study_desc))
+
+        if match_name or match_desc:
+            # XSS risk, log and fail this cohort save
+            matches = ""
+            fields = ""
+            if match_name:
+                match_name = whitelist.findall(unicode(study_name))
+                logger.error(
+                    '[ERROR] While saving a user study, saw a malformed name: ' + study_name + ', characters: ' + match_name.__str__())
+                matches = "name contains"
+                fields = "name"
+            if match_desc:
+                match_desc = whitelist.findall(unicode(study_desc))
+                logger.error(
+                    '[ERROR] While saving a user study, saw a malformed description: ' + study_desc + ', characters: ' + match_desc.__str__())
+                matches = "name and description contain" if match_name else "description contains"
+                fields += (" and description" if match_name else "description")
+
+            err_msg = "Your study's %s invalid characters; please choose another %s." % (matches, fields,)
+
+            resp = {
+                'status': "error",
+                'error': "bad_input",
+                'message': err_msg
+            }
+            return JsonResponse(resp)
+
         study = proj.study_set.create(
             name=request.POST['study-name'],
             description=request.POST['study-description'],
