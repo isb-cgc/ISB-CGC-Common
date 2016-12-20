@@ -27,11 +27,10 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
-from google_api_utils.stackdriver import StackDriverLogger
+from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery_service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
-from google_helpers.logging_service import get_logging_resource
 from google_helpers.storage_service import get_storage_resource
 from googleapiclient.errors import HttpError
 from models import *
@@ -534,6 +533,8 @@ def delete_sa(request, user_id, sa_id):
 
 @login_required
 def register_bucket(request, user_id, gcp_id):
+    st_logger = StackDriverLogger.build_from_django_settings()
+
     if request.POST:
         bucket_name = request.POST.get('bucket_name', None)
         gcp = GoogleProject.objects.get(id=gcp_id)
