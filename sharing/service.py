@@ -1,12 +1,9 @@
 import logging
 import requests
-from django.core.mail import send_mail
-from google.appengine.api import mail
 from django.core.validators import validate_email
 from django.template.loader import get_template
 from django.contrib.auth.models import User
 from django.conf import settings
-from django.template.context import Context
 from django.core.urlresolvers import reverse
 
 from urllib import urlencode

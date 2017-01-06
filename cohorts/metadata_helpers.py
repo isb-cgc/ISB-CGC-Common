@@ -25,16 +25,12 @@ import random
 import string
 import logging
 import traceback
-import MySQLdb
 import warnings
 
-from django.conf import settings
-from google.appengine.api import urlfetch
 from uuid import uuid4
 from api.api_helpers import *
 
 debug = settings.DEBUG # RO global for this file
-urlfetch.set_default_fetch_deadline(60)
 
 logger = logging.getLogger(__name__)
 
