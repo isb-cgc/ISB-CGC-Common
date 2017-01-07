@@ -27,6 +27,7 @@ import logging
 import traceback
 import MySQLdb
 import warnings
+import copy
 
 from django.conf import settings
 from google.appengine.api import urlfetch
@@ -40,13 +41,25 @@ logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", "No data - zero rows fetched, selected, or processed")
 
-METADATA_SHORTLIST = {
-    'list': [],
-}
+### METADATA_ATTR ###
+# Local storage of the metadata attributes, values, and their display names for a program. This dict takes the form:
+# {
+#   <program id>: {
+#       <attr name>: {
+#           'displ_name': <attr display name>,
+#           'values': {
+#               <metadata_attr_val>: <metadata attr display name>, [...]
+#           }, [...]
+#       }, [...]
+#   }, [...]
+# }
+# The data is stored to prevent excessive retrieval
+METADATA_ATTR = {}
 
 ISB_CGC_PROJECTS = {
     'list': [],
 }
+
 
 # Get a set of random characters of 'length'
 def make_id(length):
@@ -74,26 +87,29 @@ def get_sql_connection():
         logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
         if db and db.open: db.close()
 
-# Generate the METADATA_SHORTLIST['list'] list of values based on the contents of the metadata_shortlist view
-def fetch_metadata_shortlist():
-    try:
-        cursor = None
-        db = get_sql_connection()
-        if not METADATA_SHORTLIST['list'] or len(METADATA_SHORTLIST['list']) <= 0:
-            cursor = db.cursor()
-            cursor.execute("SELECT COUNT(TABLE_NAME) FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_NAME = 'metadata_shortlist';")
-            # Only try to fetch the values if the view exists
-            if cursor.fetchall()[0][0] > 0:
-                cursor.execute("SELECT attribute FROM metadata_shortlist;")
-                METADATA_SHORTLIST['list'] = []
-                for row in cursor.fetchall():
-                    METADATA_SHORTLIST['list'].append(row[0])
-            else:
-                # Otherwise just warn
-                logger.warn("[WARNING] View metadata_shortlist was not found!")
+# Returns the list of attributes for a program, as stored in the METADATA_ATTR[<program>] list
+# If a current list is not found, it is retrieved using the get_metadata_attr sproc.
+def fetch_program_attr(program):
 
-        return METADATA_SHORTLIST['list']
+    db = None
+    cursor = None
+
+    try:
+        if not program:
+            program = get_public_program_id('TCGA')
+        if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
+            METADATA_ATTR[program] = {}
+
+            db = get_sql_connection()
+            cursor = db.cursor()
+            cursor.callproc('get_program_attr', (program,))
+            for row in cursor.fetchall():
+                METADATA_ATTR[program][row[0]] = {'displ_name': None, 'values': {}, 'type': row[1]}
+
+        return METADATA_ATTR[program].keys()
+
     except Exception as e:
+        logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
         logger.error(traceback.format_exc())
     finally:
         if cursor: cursor.close()
@@ -124,26 +140,68 @@ def fetch_isbcgc_project_set():
         if cursor: cursor.close()
         if db and db.open: db.close()
 
-# Get the list of possible metadata values based on the metadata_shortlist and their in-use values in the metadata_samples table
-# New function now uses program id, and so requires a program id. It defaults to 1==TCGA.
-def get_metadata_value_set(program=1):
-    values = {}
+def get_public_program_id(program):
     db = get_sql_connection()
 
     try:
         cursor = db.cursor()
-        cursor.callproc('get_metadata_values', [program])
+        cursor.execute("""
+          SELECT pp.id
+          FROM projects_program pp
+          JOIN auth_user au ON au.id = pp.owner_id
+          WHERE au.is_superuser=1 AND au.is_active=1 AND pp.active=1 AND pp.name = %s AND au.username = 'isb';
+        """, (program,))
 
-        values[cursor.description[0][0]] = {}
-        for row in cursor.fetchall():
-            values[cursor.description[0][0]][str(row[0])] = 0
+        id = cursor.fetchall[0][0]
 
-        while (cursor.nextset() and cursor.description is not None):
-            values[cursor.description[0][0]] = {}
+        return id
+    except Exception as e:
+        logger.error('[ERROR] Excpetion while fetching %s program ID:' % program)
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+
+# Get the list of possible metadata values and their display strings for non-continuous data based on their in-use
+# values in a program's metadata_samples table
+# Program ID defaults to TCGA if one is not provided
+def get_metadata_value_set(program=None):
+
+    db = None
+    cursor = None
+
+    try:
+        if not program:
+            program=get_public_program_id('TCGA')
+
+        if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
+            fetch_program_attr(program)
+
+        if len(METADATA_ATTR[program][METADATA_ATTR[program].keys()[0]]['values']) <= 0:
+            db = get_sql_connection()
+            cursor = db.cursor()
+
+            cursor.callproc('get_metadata_values', (program,))
+
             for row in cursor.fetchall():
-                values[cursor.description[0][0]][str(row[0])] = 0
+                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=None
 
-        return values
+            while (cursor.nextset() and cursor.description is not None):
+                for row in cursor.fetchall():
+                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=None
+
+            cursor.close()
+            cursor = db.cursor(MySQLdb.cursors.DictCursor)
+            cursor.callproc('get_program_display_strings', (program,))
+
+            for row in cursor.fetchall():
+                if row['value_name'] is None:
+                    METADATA_ATTR[program][row['attr_name']]['display_string'] = row['display_string']
+                else:
+                    METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
+
+        return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -152,10 +210,30 @@ def get_metadata_value_set(program=1):
         if db and db.open: db.close()
 
 
-def validate_filter_key(col):
+def validate_filter_key(col,program):
+    if not program in METADATA_ATTR:
+        fetch_program_attr(program)
     if ':' in col:
         col = col.split(':')[1]
-    return col in METADATA_SHORTLIST['list']
+    return col in METADATA_ATTR[program]
+
+
+def format_for_display(item,item_type):
+    if not item_type:
+        item_type = 'attr'
+
+    if item_type == 'attr':
+        formatted_item = item.replace('_',' ')
+        formatted_item = formatted_item.capwords()
+    elif item_type == 'value':
+        if item is None or item == 'null':
+            formatted_item = 'None'
+        else:
+            formatted_item = item.replace('_', ' ')
+    else:
+        formatted_item = item
+
+    return formatted_item
 
 """
 BigQuery methods
