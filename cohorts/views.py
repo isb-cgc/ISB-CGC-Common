@@ -16,51 +16,39 @@ limitations under the License.
 
 """
 
-import json
 import collections
+import copy
 import csv
-import sys
-import random
-import string
+import json
+import re
 import time
 from time import sleep
-import logging
-import json
-import traceback
-import copy
-import urllib
-import re
-import MySQLdb
 
-from django.utils import formats
-from django.shortcuts import render, redirect
-from django.http import HttpResponse, JsonResponse
-from django.core.urlresolvers import reverse
-from django.core.exceptions import ObjectDoesNotExist
-from django.views.decorators.csrf import csrf_protect
+import MySQLdb
+import django
+from api.api_helpers import *
+from bq_data_access.cohort_bigquery import BigQueryCohortSupport
+from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
-from django.conf import settings
-from django.db.models import Count, Sum
-import django
-
-from django.http import StreamingHttpResponse
-from django.core import serializers
-from google.appengine.api import urlfetch
-from allauth.socialaccount.models import SocialToken, SocialAccount
 from django.contrib.auth.models import User as Django_User
-
-from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
+from django.core import serializers
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+from django.core.urlresolvers import reverse
+from django.db.models import Count
+from django.http import HttpResponse, JsonResponse
+from django.http import StreamingHttpResponse
+from django.shortcuts import render, redirect
+from django.utils import formats
+from django.views.decorators.csrf import csrf_protect
+from google.appengine.api import urlfetch
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
-from projects.models import Program, Project, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables, Public_Data_Tables
-from visualizations.models import Plot_Cohorts, Plot
-from bq_data_access.cohort_bigquery import BigQueryCohortSupport
-from uuid import uuid4
-from accounts.models import NIH_User
 
-from api.api_helpers import *
+from accounts.models import NIH_User
 from metadata_helpers import *
+from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
+from projects.models import Program, Project, User_Data_Tables, Public_Data_Tables
 
 BQ_ATTEMPT_MAX = 10
 
@@ -1983,10 +1971,7 @@ def cohort_filelist(request, cohort_id=0):
         messages.error(request, 'Cohort provided does not exist.')
         return redirect('/user_landing')
 
-    token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    data_url = METADATA_API + ('v1/cohort_files?platform_count_only=True&cohort_id=%s&token=%s' % (cohort_id, token))
-    result = urlfetch.fetch(data_url, deadline=120)
-    items = json.loads(result.content)
+    items = cohort_files(request, cohort_id)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
     nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
@@ -2017,7 +2002,6 @@ def cohort_filelist(request, cohort_id=0):
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     if cohort_id == 0:
         response_str = '<div class="row">' \
                     '<div class="col-lg-12">' \
@@ -2027,21 +2011,27 @@ def cohort_filelist_ajax(request, cohort_id=0):
                     '</div></div></div>'
         return HttpResponse(response_str, status=500)
 
-    token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    data_url = METADATA_API + ('v1/cohort_files?cohort_id=%s&token=%s' % (cohort_id, token))
+    params = {}
+    if request.GET.get('page', None) is not None:
+        page = int(request.GET.get('page'))
+        offset = (page - 1) * 20
+        params['page'] = page
+        params['offset'] = offset
+    elif request.GET.get('offset', None) is not None:
+        offset = int(request.GET.get('offset'))
+        params['offset'] = offset
+    if request.GET.get('limit', None) is not None:
+        limit = int(request.GET.get('limit'))
+        params['limit'] = limit
+    result = cohort_files(request=request,
+                          cohort_id=cohort_id, **params)
 
-    for key in request.GET:
-        data_url += '&' + key + '=' + request.GET[key]
-
-    result = urlfetch.fetch(data_url, deadline=120)
-
-    return HttpResponse(result.content, status=200)
+    return JsonResponse(result, status=200)
 
 
 @login_required
 @csrf_protect
 def cohort_samples_cases(request, cohort_id=0):
-    if debug: print >> sys.stderr, 'Called '+sys._getframe().f_code.co_name
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
         return redirect('/user_landing')
@@ -2081,31 +2071,19 @@ class Echo(object):
 
 
 def streaming_csv_view(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     if cohort_id == 0:
-        messages.error('Cohort provided does not exist.')
+        messages.error(request, 'Cohort provided does not exist.')
         return redirect('/user_landing')
 
     total_expected = int(request.GET.get('total'))
     limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
-
-    token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
-    data_url = METADATA_API + ('v1/cohort_files?cohort_id=%s&token=%s&limit=%s' % (cohort_id, token, limit.__str__()))
-
-    if 'params' in request.GET:
-        params = request.GET.get('params').split(',')
-
-        for param in params:
-            data_url += '&' + param + '=True'
 
     keep_fetching = True
     file_list = []
     offset = None
 
     while keep_fetching:
-        result = urlfetch.fetch(data_url+('&offset='+offset.__str__() if offset else ''), deadline=60)
-        items = json.loads(result.content)
-
+        items = cohort_files(request=request, cohort_id=cohort_id, limit=limit)
         if 'file_list' in items:
             file_list += items['file_list']
             # offsets are counted from row 0, so setting the offset to the current number of
@@ -2751,3 +2729,132 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
+
+# Copied over from metadata api
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0):
+
+    GET = request.GET.copy()
+    platform_count_only = GET.pop('platform_count_only', None)
+    is_dbGaP_authorized = False
+    user = request.user
+    user_email = user.email
+    user_id = user.id
+
+    try:
+        cohort_perm = Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
+    except (ObjectDoesNotExist, MultipleObjectsReturned), e:
+        logger.warn(e)
+        logger.error(traceback.format_exc())
+
+        return {'error': "%s does not have permission to view cohort %d." % (user_email, cohort_id)}
+
+
+    sample_query = 'select sample_barcode from cohorts_samples where cohort_id=%s;'
+    sample_list = ()
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+        cursor.execute(sample_query, (cohort_id,))
+        in_clause = ''
+        for row in cursor.fetchall():
+            sample_list += (row['sample_barcode'],)
+            in_clause += '%s,'
+        in_clause = in_clause[:-1]
+
+    except (IndexError, TypeError):
+        logger.error("Error obtaining list of samples in cohort file list")
+        logger.error(traceback.format_exc())
+        return {'error': 'Error obtaining list of samples in cohort file list'}
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    platform_count_query = 'select Platform, count(Platform) as platform_count ' \
+                           'from metadata_data where sample_barcode in ({0}) ' \
+                           '  and DatafileUploaded="true"  group by Platform order by sample_barcode;'.format(in_clause)
+
+    query = 'select sample_barcode, DatafileName, DatafileNameKey, SecurityProtocol, ' \
+            'Pipeline, Platform, DataLevel, Datatype, GG_readgroupset_id, Repository, SecurityProtocol ' \
+            'from metadata_data where sample_barcode in ({0}) and DatafileUploaded="true" '.format(in_clause)
+
+    # Check for incoming platform selectors
+    platform_selector_list = []
+    for key, value in GET.items():
+        if GET.get(key, None) is not None and GET.get(key) == 'True':
+            platform_selector_list.append(key)
+
+    if len(platform_selector_list):
+        query += ' and Platform in ("' + '","'.join(platform_selector_list) + '")'
+
+    query_tuple = sample_list
+
+    if limit > 0:
+        query += ' limit %s'
+        query_tuple += (limit,)
+        # Offset is only valid when there is a limit
+        if offset > 0:
+            query += ' offset %s'
+            query_tuple += (offset,)
+
+    query += ';'
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+        cursor.execute(platform_count_query, sample_list)
+        platform_count_list = []
+        count = 0
+        if cursor.rowcount > 0:
+            for row in cursor.fetchall():
+                if len(platform_selector_list):
+                    if row['Platform'] in platform_selector_list:
+                        count += int(row['platform_count'])
+                else:
+                    count += int(row['platform_count'])
+                platform_count_list.append({'platform': row['Platform'], 'count': int(row['platform_count'])})
+        else:
+            platform_count_list.append({'platform': 'None', 'count': 0})
+
+        file_list = []
+        if not platform_count_only:
+            cursor.execute(query, query_tuple)
+            if cursor.rowcount > 0:
+                for item in cursor.fetchall():
+                    # If there's a datafilenamekey
+                    if 'DatafileNameKey' in item and item['DatafileNameKey'] != '':
+                        # Find protected bucket it should belong to
+                        bucket_name = ''
+                        if item['Repository'] and item['Repository'].lower() == 'dcc':
+                            bucket_name = settings.DCC_CONTROLLED_DATA_BUCKET
+                        elif item['Repository'] and item['Repository'].lower() == 'cghub':
+                            bucket_name = settings.CGHUB_CONTROLLED_DATA_BUCKET
+                        else:
+                            bucket_name = settings.OPEN_DATA_BUCKET
+
+                        item['DatafileNameKey'] = "gs://{}{}".format(bucket_name, item['DatafileNameKey'])
+
+                    file_list.append(
+                        {'sample': item['sample_barcode'],
+                         'cloudstorage_location': item['DatafileNameKey'],
+                         'access': (item['SecurityProtocol'] or 'N/A'),
+                         'filename': item['DatafileName'],
+                         'pipeline': item['Pipeline'],
+                         'platform': item['Platform'],
+                         'datalevel': item['DataLevel'],
+                         'datatype': (item['Datatype'] or " "),
+                         'gg_readgroupset_id': item['GG_readgroupset_id']})
+            else:
+                file_list.append({'sample': 'None', 'filename': '', 'pipeline': '', 'platform': '', 'datalevel': ''})
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+        return {'total_file_count': count, 'page': page, 'platform_count_list': platform_count_list,
+                           'file_list': file_list}
+
+    except Exception as e:
+        logger.error("Error obtaining platform counts")
+        logger.error(traceback.format_exc())
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+        return {'error': 'Error getting counts'}
+
+
