@@ -2735,7 +2735,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0):
 
     GET = request.GET.copy()
     platform_count_only = GET.pop('platform_count_only', None)
-    is_dbGaP_authorized = False
     user = request.user
     user_email = user.email
     user_id = user.id
