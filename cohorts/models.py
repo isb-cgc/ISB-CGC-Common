@@ -22,6 +22,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
 from projects.models import Project, User_Feature_Definitions
+from sharing.models import Shared_Resource
 
 
 class CohortManager(models.Manager):
@@ -48,6 +49,7 @@ class Cohort(models.Model):
     active = models.BooleanField(default=True)
     last_date_saved = models.DateTimeField(auto_now=True)
     objects = CohortManager()
+    shared = models.ManyToManyField(Shared_Resource)
 
     '''
     Note that neither of these counts is unique; if a sample/case is present in a cohort more than once, it will

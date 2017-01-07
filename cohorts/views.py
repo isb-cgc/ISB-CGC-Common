@@ -53,7 +53,7 @@ from django.contrib.auth.models import User as Django_User
 
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
-from projects.models import Program, Project, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables
+from projects.models import Program, Project, User_Feature_Counts, User_Feature_Definitions, User_Data_Tables, Public_Data_Tables
 from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
 from uuid import uuid4
@@ -64,7 +64,6 @@ from metadata_helpers import *
 
 BQ_ATTEMPT_MAX = 10
 
-METADATA_SHORTLIST = fetch_metadata_shortlist()
 TCGA_PROJECT_SET = fetch_isbcgc_project_set()
 
 # WebApp list of the items from Somatic_mutation_calls which we want to filter on
@@ -183,6 +182,11 @@ BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
 
+USER_DATA_ON = settings.USER_DATA_ON
+BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
+COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
+METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
+# This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 def convert(data):
     if isinstance(data, basestring):
@@ -194,14 +198,8 @@ def convert(data):
     else:
         return data
 
-USER_DATA_ON = settings.USER_DATA_ON
-BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
-COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
-METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
-# This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
-
-def get_sample_case_list(user, inc_filters=None, cohort_id=None):
+def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None):
 
     samples_and_cases = {'items': [], 'cases': [], 'count': 0}
 
@@ -325,6 +323,13 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
         tmp_mut_table = None
         tmp_cohort_table = None
         tmp_filter_table = None
+
+        if program_id:
+            program_tables = Public_Data_Tables.objects.filter(program_id=program_id).first()
+            if program_tables:
+                base_table = program_tables.samples_table
+                filter_table = base_table
+
         params_tuple = ()
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
@@ -427,8 +432,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None):
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
-                JOIN metadata_samples_shortlist ms ON ms.sample_barcode = cs.sample_barcode
-            """ % tmp_cohort_table
+                JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
+            """ % (tmp_cohort_table, base_table)
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
             # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
@@ -697,7 +702,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
+def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None, prog_id=None):
 
     counts_and_total = {
         'counts': [],
@@ -710,8 +715,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     mutation_where_clause = None
     filters = {}
 
-    # Fetch the possible value set of all non-continuous columns in the shortlist
-    metadata_values = get_metadata_value_set()
+    metadata_values = get_metadata_value_set(prog_id)
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
     for key in inc_filters:
@@ -738,11 +742,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     cursor = None
 
     try:
-
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
         cursor.execute('SELECT attribute, spec FROM metadata_attr;')
         for row in cursor.fetchall():
-            if row['attribute'] in METADATA_SHORTLIST:
+            if row['attribute'] in metadata_values:
                 valid_attrs[row['spec'] + ':' + row['attribute']] = {
                     'name': row['attribute'],
                     'col_name': row['attribute'],
@@ -1148,13 +1151,13 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         if db and db.open: db.close()
 
 
-def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
+def metadata_counts_platform_list(req_filters, cohort_id, user, program, limit=None):
     filters = {}
 
     if req_filters is not None:
         try:
             for key in req_filters:
-                if not validate_filter_key(key):
+                if not validate_filter_key(key,program):
                     raise Exception('Invalid filter key received: '+ key)
                 this_filter = req_filters[key]
                 if key not in filters:
@@ -1167,7 +1170,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
     start = time.time()
-    counts_and_total = count_metadata(user, cohort_id, None, filters)
+    counts_and_total = count_metadata(user, cohort_id, None, filters, program)
 
     stop = time.time()
     logger.debug(
@@ -1183,6 +1186,40 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             'total': counts_and_total['total'], 'user_data_total': counts_and_total['user_data_total'],
             'user_data_cases': counts_and_total['user_data_cases']}
 
+def public_metadata_counts_platform_list(req_filters, cohort_id, user, program_id, limit=None):
+    filters = {}
+
+    if req_filters is not None:
+        try:
+            for key in req_filters:
+                if not validate_filter_key(key,program_id):
+                    raise Exception('Invalid filter key received: '+ key)
+                this_filter = req_filters[key]
+                if key not in filters:
+                    filters[key] = {'values': []}
+                for value in this_filter:
+                    filters[key]['values'].append(value)
+
+        except Exception, e:
+            logger.error(traceback.format_exc())
+            raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
+
+    start = time.time()
+    counts_and_total = count_public_metadata(user, cohort_id, filters, program_id)
+
+    stop = time.time()
+    logger.debug(
+        "[BENCHMARKING] Time to call metadata_counts from view metadata_counts_platform_list"
+        + (" for cohort " + cohort_id if cohort_id is not None else "")
+        + (" and" if cohort_id is not None and filters.__len__() > 0 else "")
+        + (" filters " + filters.__str__() if filters.__len__() > 0 else "")
+        + ": " + (stop - start).__str__()
+    )
+
+    return {'items': counts_and_total['data'],
+            'count': counts_and_total['counts'],
+            'cases': counts_and_total['cases'],
+            'total': counts_and_total['total'], }
 
 ''' End metadata counting methods '''
 
@@ -1281,30 +1318,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     cohort = None
     shared_with_users = []
 
-    clin_attr = [
-        'program_name',
-        'disease_code',
-        'vital_status',
-        # 'survival_time',
-        'gender',
-        'age_at_initial_pathologic_diagnosis',
-        'SampleTypeCode',
-        'tumor_tissue_site',
-        'histological_type',
-        'other_dx',
-        'pathologic_stage',
-        'person_neoplasm_cancer_status',
-        'new_tumor_event_after_initial_treatment',
-        'neoplasm_histologic_grade',
-        'BMI',
-        'hpv_status',
-        'residual_tumor',
-        # 'targeted_molecular_therapy', TODO: Add to metadata_samples
-        'tobacco_smoking_history',
-        'icd_10',
-        'icd_o_3_site',
-        'icd_o_3_histology'
-    ]
 
     data_attr = [
         'DNA_sequencing',
@@ -1315,96 +1328,19 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         'DNA_methylation',
     ]
 
-    molecular_attr = {
-        'categories': [
-            {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
-                'Missense_Mutation': 1,
-                'Nonsense_Mutation': 1,
-                'Nonstop_Mutation': 1,
-                'Frame_Shift_Del': 1,
-                'Frame_Shift_Ins': 1,
-                'De_novo_Start_OutOfFrame': 1,
-                'De_novo_Start_InFrame': 1,
-                'In_Frame_Del': 1,
-                'In_Frame_Ins': 1,
-                'Start_Codon_SNP': 1,
-                'Start_Codon_Del': 1,
-                'Start_Codon_Ins': 1,
-                'Stop_Codon_Del': 1,
-                'Stop_Codon_Ins': 1,
-            }},
-        ],
-        'attrs': []
-    }
-
-    for mol_attr in MOLECULAR_SHORTLIST:
-        molecular_attr['attrs'].append({'name': DISPLAY_NAME_DD['Somatic_Mutations'][mol_attr], 'value': mol_attr, 'count': 0})
-
-    for cat in molecular_attr['categories']:
-        for attr in cat['attrs']:
-            ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
-            if ma:
-                ma['category'] = cat['value']
-
-    clin_attr_dsp = []
-    clin_attr_dsp += clin_attr
 
     user = Django_User.objects.get(id=request.user.id)
     filters = None
 
-    # If this is a new cohort, automatically select some filters for our users
-    if cohort_id == 0:
-        filters = {'SAMP:program_name': ['TCGA',], }
-
-    start = time.time()
-    results = metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, None)
-
-    stop = time.time()
-    logger.debug("[BENCHMARKING] Time to query metadata_counts_platform_list in cohort_detail: "+(stop-start).__str__())
-
-    totals = results['total']
-
-    # Group the counts for clustered data type categories
-    attr_details = {
-        'RNA_sequencing': [],
-        'miRNA_sequencing': [],
-        'DNA_methylation': []
-    }
-
-    keys = []
-    for item in results['count']:
-        key = item['name']
-        values = item['values']
-
-        if key.startswith('has_'):
-            data_availability_sort(key, values, attr_details)
-        elif 'user_' not in key:
-            keys.append(item['name'])
-            item['values'] = sorted(values, key=lambda k: int(k['count']), reverse=True)
-
-            if item['name'].startswith('user_'):
-                clin_attr_dsp += (item['name'],)
-
-    for key, value in attr_details.items():
-        results['count'].append({
-            'name': key,
-            'values': value,
-            'id': None
-         })
+    isb_user = Django_User.objects.filter(username='isb').first()
+    program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
     template_values = {
         'request': request,
         'users': users,
-        'attr_list': keys,
-        'attr_list_count': results['count'],
-        'total_samples': int(totals),
-        'clin_attr': clin_attr_dsp,
-        'data_attr': data_attr,
         'base_url': settings.BASE_URL,
         'base_api_url': settings.BASE_API_URL,
-        'molecular_attr': molecular_attr,
-        'metadata_filters': filters or {},
-        'user_data': results['user_data'],
+        'programs': program_list
     }
 
     if workbook_id and worksheet_id :
@@ -1415,7 +1351,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     template = 'cohorts/new_cohort.html'
 
-    template_values['metadata_counts'] = results
+    # template_values['metadata_counts'] = results
 
     if cohort_id != 0:
         try:
@@ -1503,7 +1439,7 @@ This save view only works coming from cohort editing or creation views.
 - only ever one source coming in
 - filters optional
 '''
-# TODO: Create new view to save cohorts from visualizations
+# TODO: Create new view to save cohorts from visualizations - This exists below
 @login_required
 @csrf_protect
 def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=False):
@@ -1537,6 +1473,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         apply_filters = request.POST.getlist('apply-filters')
         apply_name = request.POST.getlist('apply-name')
         projects = request.user.project_set.all()
+        program_id = request.POST.get('program_id')
+
         # we only deactivate the source if we are applying filters to a previously-existing
         # source cohort
         deactivate_sources = (len(filters) > 0) and source is not None and source != 0
@@ -1775,19 +1713,18 @@ def set_operation(request):
 
                 if len(cohorts):
 
-                    db = get_sql_connection()
-                    cursor = db.cursor()
-
                     project_list = []
                     cohorts_projects = {}
+                    sample_project_map = {}
 
                     cohort_list = tuple(int(i) for i in cohort_ids)
                     params = ('%s,' * len(cohort_ids))[:-1]
 
-                    sample_project_map = {}
+                    db = get_sql_connection()
+                    cursor = db.cursor()
 
                     intersect_and_proj_list_def = """
-                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id, ';')
+                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id SEPARATOR ';')
                         FROM cohorts_samples cs
                         WHERE cs.cohort_id IN ({0})
                         GROUP BY cs.sample_barcode
@@ -1811,7 +1748,7 @@ def set_operation(request):
                             sample_project_map[row[0]] = {'case': row[1], 'projects': projs,}
 
                     if cursor: cursor.close()
-                    if db and db.open: db.close
+                    if db and db.open: db.close()
 
                     project_list = list(set(project_list))
                     project_models = Project.objects.filter(id__in=project_list)
@@ -1832,19 +1769,19 @@ def set_operation(request):
                             max_depth = -1
                             deepest_project = -1
                             for project in projects:
-                                project_rd = cohorts_projects[project.id]
+                                project_rd = cohorts_projects[project]
 
                                 if root < 0:
                                     root = project_rd['root']
                                     max_depth = project_rd['depth']
-                                    deepest_project = project.id
+                                    deepest_project = project
                                 else:
                                     if root != project_rd['root']:
                                         no_match = True
                                     else:
                                         if max_depth < 0 or project_rd['depth'] > max_depth:
                                             max_depth = project_rd['depth']
-                                            deepest_project = project.id
+                                            deepest_project = project
 
                             if not no_match:
                                 cohort_sample_list.append({'id':sample_id, 'case':sample['case'], 'project':deepest_project, })
@@ -2240,10 +2177,13 @@ def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
+    program_id = request.GET.get('program_id', None)
 
     user = Django_User.objects.get(id=request.user.id)
-
-    results = metadata_counts_platform_list(filters, cohort, user, limit)
+    if program_id:
+        results = public_metadata_counts_platform_list(filters, cohort, user, program_id, limit)
+    else:
+        results = metadata_counts_platform_list(filters, cohort, user, limit)
 
     if not results:
         results = {}
@@ -2270,3 +2210,390 @@ def get_metadata(request):
             })
 
     return JsonResponse(results)
+
+
+@login_required
+def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
+    # Check program ID against public programs
+    public_program = Program.objects.filter(id=program_id).first()
+    user = request.user
+    if public_program:
+        # Public Program
+        template = 'cohorts/isb-cgc-data.html'
+
+        # If this is a new cohort, automatically select some filters for our users
+        filters = None
+
+        clin_attr = fetch_program_attr(program_id)
+
+        molecular_attr = {
+            'categories': [
+                {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
+                    'Missense_Mutation': 1,
+                    'Nonsense_Mutation': 1,
+                    'Nonstop_Mutation': 1,
+                    'Frame_Shift_Del': 1,
+                    'Frame_Shift_Ins': 1,
+                    'De_novo_Start_OutOfFrame': 1,
+                    'De_novo_Start_InFrame': 1,
+                    'In_Frame_Del': 1,
+                    'In_Frame_Ins': 1,
+                    'Start_Codon_SNP': 1,
+                    'Start_Codon_Del': 1,
+                    'Start_Codon_Ins': 1,
+                    'Stop_Codon_Del': 1,
+                    'Stop_Codon_Ins': 1,
+                }},
+            ],
+            'attrs': []
+        }
+
+        for mol_attr in MOLECULAR_SHORTLIST:
+            molecular_attr['attrs'].append(
+                {'name': DISPLAY_NAME_DD['Somatic_Mutations'][mol_attr], 'value': mol_attr, 'count': 0})
+
+        for cat in molecular_attr['categories']:
+            for attr in cat['attrs']:
+                ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
+                if ma:
+                    ma['category'] = cat['value']
+
+        results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, program_id)
+        totals = results['total']
+        template_values = {
+            'request': request,
+            'attr_list_count': results['count'],
+            'total_samples': int(totals),
+            'clin_attr': clin_attr,
+            'molecular_attr': molecular_attr,
+            'metadata_filters': filters or {},
+            'program': public_program
+        }
+
+        return render(request, template, template_values)
+    else:
+        # Requesting User Data filter panel
+        template = 'cohorts/user-data.html'
+
+
+# New Revision of count_metadata for public programs only
+def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None):
+
+    counts_and_total = {
+        'counts': [],
+    }
+
+    mutation_filters = None
+    data_avail_filters = None
+    mutation_where_clause = None
+    filters = {}
+
+    # returns an object or None
+    program_tables = Public_Data_Tables.objects.filter(program_id=program_id).first()
+
+    # Fetch the possible value set of all non-continuous columns
+    # (also fetches the display strings for all attributes and values which have them)
+    metadata_values = get_metadata_value_set(program_id)
+
+    # Divide our filters into 'mutation' and 'non-mutation' sets
+    for key in inc_filters:
+        if 'MUT:' in key:
+            if not mutation_filters:
+                mutation_filters = {}
+            mutation_filters[key] = inc_filters[key]
+        elif 'DATA:' in key:
+            if not data_avail_filters:
+                data_avail_filters = {}
+                data_avail_filters[key.split(':')[-1]] = inc_filters[key]
+        else:
+            filters[key.split(':')[-1]] = inc_filters[key]
+
+    if mutation_filters:
+        mutation_where_clause = build_where_clause(mutation_filters)
+
+    db = get_sql_connection()
+    django.setup()
+
+    cursor = None
+
+    try:
+
+        params_tuple = ()
+        counts = {}
+        cursor = db.cursor()
+
+        # We need to perform 2 sets of queries: one with each filter excluded from the others, against the full
+        # metadata_samples/cohort JOIN, and one where all filters are applied to create a temporary table, and
+        # attributes *outside* that set are counted
+
+        unfiltered_attr = []
+        exclusionary_filter = {}
+        where_clause = None
+
+        for attr in metadata_values:
+            if attr not in filters:
+                unfiltered_attr.append(attr)
+
+        # construct the WHERE clauses needed
+        if filters.__len__() > 0:
+            filter_copy = copy.deepcopy(filters)
+            where_clause = build_where_clause(filter_copy)
+            for filter_key in filters:
+                filter_copy = copy.deepcopy(filters)
+                del filter_copy[filter_key]
+
+                if filter_copy.__len__() <= 0:
+                    ex_where_clause = {'query_str': None, 'value_tuple': None}
+                else:
+                    ex_where_clause = build_where_clause(filter_copy)
+
+                exclusionary_filter[filter_key] = ex_where_clause
+
+        base_table = program_tables.samples_table
+        tmp_mut_table = None
+        tmp_cohort_table = None
+        tmp_filter_table = None
+
+        # TODO: Not handling Mutation filters yet
+        # If there is a mutation filter, make a temporary table from the sample barcodes that this query
+        # returns
+        if mutation_where_clause:
+            cohort_join_str = ''
+            cohort_where_str = ''
+            bq_cohort_table = ''
+            bq_cohort_dataset = ''
+            cohort = ''
+            query_template = None
+
+            if cohort_id is not None:
+                query_template = \
+                    ("SELECT ct.sample_barcode"
+                     " FROM [{project_name}:{cohort_dataset}.{cohort_table}] ct"
+                     " JOIN (SELECT Tumor_SampleBarcode AS barcode "
+                     " FROM [{project_name}:{dataset_name}.{table_name}]"
+                     " WHERE " + mutation_where_clause['big_query_str'] +
+                     " GROUP BY barcode) mt"
+                     " ON mt.barcode = ct.sample_barcode"
+                     " WHERE ct.cohort_id = {cohort};")
+                bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
+                bq_cohort_dataset = settings.COHORT_DATASET_ID
+                cohort = cohort_id
+            else:
+                query_template = \
+                    ("SELECT Tumor_SampleBarcode"
+                     " FROM [{project_name}:{dataset_name}.{table_name}]"
+                     " WHERE " + mutation_where_clause['big_query_str'] +
+                     " GROUP BY Tumor_SampleBarcode; ")
+
+            params = mutation_where_clause['value_tuple'][0]
+
+            query = query_template.format(dataset_name=settings.BIGQUERY_DATASET, project_name=settings.BIGQUERY_PROJECT_NAME,
+                                          table_name="Somatic_Mutation_calls", hugo_symbol=str(params['gene']),
+                                          var_class=params['var_class'], cohort_dataset=bq_cohort_dataset,
+                                          cohort_table=bq_cohort_table, cohort=cohort)
+
+            bq_service = authorize_credentials_with_Google()
+            query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, query)
+            job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
+
+            barcodes = []
+            retries = 0
+
+            start = time.time()
+            while not job_is_done and retries < BQ_ATTEMPT_MAX:
+                retries += 1
+                sleep(1)
+                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
+            stop = time.time()
+
+            logger.debug('[BENCHMARKING] Time to query BQ for mutation data: '+(stop - start).__str__())
+
+            results = get_bq_job_results(bq_service, query_job['jobReference'])
+
+            # for-each result, add to list
+
+            if results.__len__() > 0:
+                for barcode in results:
+                    barcodes.append(str(barcode['f'][0]['v']))
+
+            else:
+                logger.info("Mutation filter result was empty!")
+                # Put in one 'not found' entry to zero out the rest of the queries
+                barcodes = ['NONE_FOUND', ]
+
+            tmp_mut_table = 'bq_res_table_' + user.id.__str__() + "_" + make_id(6)
+
+            make_tmp_mut_table_str = """
+                CREATE TEMPORARY TABLE %s (
+                   tumor_sample_id VARCHAR(100)
+               );
+            """ % tmp_mut_table
+
+            cursor.execute(make_tmp_mut_table_str)
+
+            insert_tmp_table_str = """
+                INSERT INTO %s (tumor_sample_id) VALUES
+            """ % tmp_mut_table
+
+            param_vals = ()
+            first = True
+
+            for barcode in barcodes:
+                param_vals += (barcode,)
+                if first:
+                    insert_tmp_table_str += '(%s)'
+                    first = False
+                else:
+                    insert_tmp_table_str += ',(%s)'
+
+            insert_tmp_table_str += ';'
+
+            cursor.execute(insert_tmp_table_str, param_vals)
+            db.commit()
+
+        start = time.time()
+        # If there is a cohort, make a temporary table based on it and make it the base table
+        if cohort_id is not None:
+            tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
+            base_table = tmp_cohort_table
+            make_cohort_table_str = """
+                CREATE TEMPORARY TABLE %s AS SELECT ms.*
+                FROM cohorts_samples cs
+                JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
+            """ % (tmp_cohort_table, program_tables.samples_table)
+            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
+            if tmp_mut_table:
+                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
+            make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
+            cursor.execute(make_cohort_table_str, (cohort_id,))
+
+            cursor.execute('SELECT COUNT(*) AS count FROM '+tmp_cohort_table+';')
+            for row in cursor.fetchall():
+                logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
+
+        # If there are filters, create a temporary table filtered off the base table
+        if unfiltered_attr.__len__() > 0 and filters.__len__() > 0:
+            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            filter_table = tmp_filter_table
+            make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
+
+            if tmp_mut_table and not cohort_id:
+                make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table
+
+            if filters.__len__() > 0:
+                make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
+                params_tuple += where_clause['value_tuple']
+
+            make_tmp_table_str += ";"
+            print make_tmp_table_str
+            cursor.execute(make_tmp_table_str, params_tuple)
+        elif tmp_mut_table and not cohort_id:
+            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            filter_table = tmp_filter_table
+            make_tmp_table_str = """
+                CREATE TEMPORARY TABLE %s AS
+                SELECT *
+                FROM %s ms
+                JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode;
+            """ % (tmp_filter_table, base_table, tmp_mut_table,)
+            cursor.execute(make_tmp_table_str)
+        else:
+            filter_table = base_table
+
+        stop = time.time()
+
+        logger.debug('[BENCHMARKING] Time to create temporary filter/cohort tables in count_metadata: '+(stop - start).__str__())
+
+        count_query_set = []
+
+        for col_name in metadata_values:
+            if col_name in unfiltered_attr:
+                count_query_set.append({'query_str':("""
+                    SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;
+                  """) % (col_name, filter_table, col_name,),
+                'params': None, })
+            else:
+                subquery = base_table
+                if tmp_mut_table:
+                    subquery += ' JOIN %s ON %s = sample_barcode ' % (tmp_mut_table, 'tumor_sample_id', )
+                if exclusionary_filter[col_name]['query_str']:
+                    subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
+                count_query_set.append({'query_str':("""
+                    SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s
+                  """) % (col_name, subquery, col_name,),
+                'params': exclusionary_filter[col_name]['value_tuple']})
+
+        start = time.time()
+        for query in count_query_set:
+            if 'params' in query and query['params'] is not None:
+                cursor.execute(query['query_str'], query['params'])
+            else:
+                cursor.execute(query['query_str'])
+
+            colset = cursor.description
+            col_headers = []
+            if colset is not None:
+                col_headers = [i[0] for i in cursor.description]
+            if not col_headers[0] in counts:
+                # If this is a categorical attribute, fetch its list of possible values (so we can know what didn't come
+                # back in the query)
+                values = { k: 0 for k in metadata_values[col_headers[0]]['values'].keys() } if metadata_values[col_headers[0]]['type'] == 'C' else {}
+                counts[col_headers[0]] = {
+                    'counts': values,
+                    'total': 0,
+                }
+            for row in cursor.fetchall():
+                counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
+                counts[col_headers[0]]['total'] += int(row[1])
+
+        stop = time.time()
+        logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
+        sample_and_case_counts = get_case_and_sample_count(filter_table, cursor)
+
+        if cursor: cursor.close()
+
+        data = []
+
+        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+        # Drop the temporary tables
+        if tmp_cohort_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_cohort_table)
+        if tmp_filter_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_filter_table)
+        if tmp_mut_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_mut_table)
+
+        counts_and_total['data'] = data
+        counts_and_total['cases'] = sample_and_case_counts['case_count']
+        counts_and_total['total'] = sample_and_case_counts['sample_count']
+
+        for attr in metadata_values:
+            if attr in counts:
+                value_list = []
+                feature = {
+                    'values': counts[attr]['counts'],
+                    'total': counts[attr]['total'],
+                }
+
+                # Special case for age ranges
+                if attr == 'age_at_initial_pathologic_diagnosis':
+                    feature['values'] = normalize_ages(counts[attr]['counts'])
+                elif attr == 'BMI':
+                    feature['values'] = normalize_bmi(counts[attr]['counts'])
+
+                for value, count in feature['values'].items():
+
+                    val_obj = {'value': str(value), 'count': count,}
+
+                    if value in metadata_values[attr]['values'] and metadata_values[attr]['values'][value] is not None and len(metadata_values[attr]['values'][value]) > 0:
+                        val_obj['displ_name'] = metadata_values[attr]['values'][value]
+
+                    value_list.append(val_obj)
+
+                counts_and_total['counts'].append({'name': attr, 'values': value_list, 'id': attr, 'total': feature['total']})
+
+        return counts_and_total
+
+    except Exception as e:
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()

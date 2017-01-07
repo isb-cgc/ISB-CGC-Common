@@ -18,7 +18,7 @@ limitations under the License.
 
 from django.contrib import admin
 
-from projects.models import Project, Program, User_Data_Tables, User_Feature_Definitions
+from projects.models import Project, Program, User_Data_Tables, Public_Data_Tables
 
 
 class Program_Admin(admin.ModelAdmin):
@@ -50,7 +50,16 @@ class UserDataTable_Admin(admin.ModelAdmin):
         'google_bucket',
     )
 
+class PublicDataTable_Admin(admin.ModelAdmin):
+    list_display = (
+        'program',
+        'data_table',
+        'samples_table',
+        'attr_table',
+        'sample_data_availability_table'
+    )
 
 admin.site.register(Program, Program_Admin)
 admin.site.register(Project, Project_Admin)
 admin.site.register(User_Data_Tables, UserDataTable_Admin)
+admin.site.register(Public_Data_Tables, PublicDataTable_Admin)
