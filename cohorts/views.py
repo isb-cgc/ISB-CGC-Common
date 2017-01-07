@@ -52,7 +52,6 @@ from projects.models import Program, Project, User_Data_Tables, Public_Data_Tabl
 
 BQ_ATTEMPT_MAX = 10
 
-METADATA_SHORTLIST = fetch_metadata_shortlist()
 TCGA_PROJECT_SET = fetch_isbcgc_project_set()
 
 # WebApp list of the items from Somatic_mutation_calls which we want to filter on
@@ -171,6 +170,11 @@ BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
 
+USER_DATA_ON = settings.USER_DATA_ON
+BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
+COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
+METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
+# This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 def convert(data):
     if isinstance(data, basestring):
@@ -181,12 +185,6 @@ def convert(data):
         return type(data)(map(convert, data))
     else:
         return data
-
-USER_DATA_ON = settings.USER_DATA_ON
-BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
-COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
-METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
-# This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None):
@@ -692,7 +690,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
+def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None, prog_id=None):
 
     counts_and_total = {
         'counts': [],
@@ -705,8 +703,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     mutation_where_clause = None
     filters = {}
 
-    # Fetch the possible value set of all non-continuous columns in the shortlist
-    metadata_values = get_metadata_value_set()
+    metadata_values = get_metadata_value_set(prog_id)
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
     for key in inc_filters:
@@ -733,11 +730,10 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
     cursor = None
 
     try:
-
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
         cursor.execute('SELECT attribute, spec FROM metadata_attr;')
         for row in cursor.fetchall():
-            if row['attribute'] in METADATA_SHORTLIST:
+            if row['attribute'] in metadata_values:
                 valid_attrs[row['spec'] + ':' + row['attribute']] = {
                     'name': row['attribute'],
                     'col_name': row['attribute'],
@@ -1143,13 +1139,13 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         if db and db.open: db.close()
 
 
-def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
+def metadata_counts_platform_list(req_filters, cohort_id, user, program, limit=None):
     filters = {}
 
     if req_filters is not None:
         try:
             for key in req_filters:
-                if not validate_filter_key(key):
+                if not validate_filter_key(key,program):
                     raise Exception('Invalid filter key received: '+ key)
                 this_filter = req_filters[key]
                 if key not in filters:
@@ -1162,7 +1158,7 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
     start = time.time()
-    counts_and_total = count_metadata(user, cohort_id, None, filters)
+    counts_and_total = count_metadata(user, cohort_id, None, filters, program)
 
     stop = time.time()
     logger.debug(
@@ -1178,13 +1174,13 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, limit):
             'total': counts_and_total['total'], 'user_data_total': counts_and_total['user_data_total'],
             'user_data_cases': counts_and_total['user_data_cases']}
 
-def public_metadata_counts_platform_list(req_filters, cohort_id, user, limit, program_id):
+def public_metadata_counts_platform_list(req_filters, cohort_id, user, program_id, limit=None):
     filters = {}
 
     if req_filters is not None:
         try:
             for key in req_filters:
-                if not validate_filter_key(key):
+                if not validate_filter_key(key,program_id):
                     raise Exception('Invalid filter key received: '+ key)
                 this_filter = req_filters[key]
                 if key not in filters:
@@ -1197,7 +1193,7 @@ def public_metadata_counts_platform_list(req_filters, cohort_id, user, limit, pr
             raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
     start = time.time()
-    counts_and_total = count_public_metadata(user, cohort_id, None, filters, program_id)
+    counts_and_total = count_public_metadata(user, cohort_id, filters, program_id)
 
     stop = time.time()
     logger.debug(
@@ -1705,19 +1701,18 @@ def set_operation(request):
 
                 if len(cohorts):
 
-                    db = get_sql_connection()
-                    cursor = db.cursor()
-
                     project_list = []
                     cohorts_projects = {}
+                    sample_project_map = {}
 
                     cohort_list = tuple(int(i) for i in cohort_ids)
                     params = ('%s,' * len(cohort_ids))[:-1]
 
-                    sample_project_map = {}
+                    db = get_sql_connection()
+                    cursor = db.cursor()
 
                     intersect_and_proj_list_def = """
-                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id, ';')
+                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id SEPARATOR ';')
                         FROM cohorts_samples cs
                         WHERE cs.cohort_id IN ({0})
                         GROUP BY cs.sample_barcode
@@ -1741,7 +1736,7 @@ def set_operation(request):
                             sample_project_map[row[0]] = {'case': row[1], 'projects': projs,}
 
                     if cursor: cursor.close()
-                    if db and db.open: db.close
+                    if db and db.open: db.close()
 
                     project_list = list(set(project_list))
                     project_models = Project.objects.filter(id__in=project_list)
@@ -1762,19 +1757,19 @@ def set_operation(request):
                             max_depth = -1
                             deepest_project = -1
                             for project in projects:
-                                project_rd = cohorts_projects[project.id]
+                                project_rd = cohorts_projects[project]
 
                                 if root < 0:
                                     root = project_rd['root']
                                     max_depth = project_rd['depth']
-                                    deepest_project = project.id
+                                    deepest_project = project
                                 else:
                                     if root != project_rd['root']:
                                         no_match = True
                                     else:
                                         if max_depth < 0 or project_rd['depth'] > max_depth:
                                             max_depth = project_rd['depth']
-                                            deepest_project = project.id
+                                            deepest_project = project
 
                             if not no_match:
                                 cohort_sample_list.append({'id':sample_id, 'case':sample['case'], 'project':deepest_project, })
@@ -2164,7 +2159,7 @@ def get_metadata(request):
 
     user = Django_User.objects.get(id=request.user.id)
     if program_id:
-        results = public_metadata_counts_platform_list(filters, cohort, user, limit, program_id)
+        results = public_metadata_counts_platform_list(filters, cohort, user, program_id, limit)
     else:
         results = metadata_counts_platform_list(filters, cohort, user, limit)
 
@@ -2207,7 +2202,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
         # If this is a new cohort, automatically select some filters for our users
         filters = None
 
-        clin_attr = get_clin_attr(program_id)
+        clin_attr = fetch_program_attr(program_id)
 
         molecular_attr = {
             'categories': [
@@ -2241,7 +2236,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 if ma:
                     ma['category'] = cat['value']
 
-        results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, None, program_id)
+        results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, program_id)
         totals = results['total']
         template_values = {
             'request': request,
@@ -2258,40 +2253,24 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
         # Requesting User Data filter panel
         template = 'cohorts/user-data.html'
 
-# RETURNS THE LIST OF ATTRIBUTES FOR THE GIVEN PROGRAM. IF NO VALID PROGRAM ID IS PROVIDED, RETURN AN EMPTY LIST
-def get_clin_attr(program_id=None):
-    if not program_id:
-        return []
-    db = get_sql_connection()
-    cursor = db.cursor()
-    program = Public_Data_Tables.objects.filter(program_id=program_id).first()
-    result = []
-    if program:
-        attr_query = 'SELECT attribute from {0};'.format(program.attr_table)
-        cursor.execute(attr_query)
-
-        for row in cursor.fetchall():
-            result.append(row[0])
-    return result
 
 # New Revision of count_metadata for public programs only
-def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None, program_id=None):
+def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None):
 
     counts_and_total = {
         'counts': [],
     }
-    sample_tables = {}
-    valid_attrs = {}
-    project_ids = ()
+
     mutation_filters = None
-    user_data_filters = None
+    data_avail_filters = None
     mutation_where_clause = None
     filters = {}
 
     # returns an object or None
     program_tables = Public_Data_Tables.objects.filter(program_id=program_id).first()
 
-    # Fetch the possible value set of all non-continuous columns in the shortlist
+    # Fetch the possible value set of all non-continuous columns
+    # (also fetches the display strings for all attributes and values which have them)
     metadata_values = get_metadata_value_set(program_id)
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
@@ -2300,18 +2279,15 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
-        elif key == 'user_project' or key == 'user_project':
-            if user_data_filters is None:
-                user_data_filters = {}
-            user_data_filters[key] = inc_filters[key]
+        elif 'DATA:' in key:
+            if not data_avail_filters:
+                data_avail_filters = {}
+                data_avail_filters[key.split(':')[-1]] = inc_filters[key]
         else:
-            filters[key] = inc_filters[key]
+            filters[key.split(':')[-1]] = inc_filters[key]
 
     if mutation_filters:
         mutation_where_clause = build_where_clause(mutation_filters)
-
-    if sample_ids is None:
-        sample_ids = {}
 
     db = get_sql_connection()
     django.setup()
@@ -2320,51 +2296,8 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
 
     try:
 
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute('SELECT attribute, spec FROM ' + program_tables.attr_table + ';')
-        for row in cursor.fetchall():
-            valid_attrs[row['spec'] + ':' + row['attribute']] = {
-                'name': row['attribute'],
-                'col_name': row['attribute'],
-                'tables': (program_tables.samples_table,),
-                'sample_ids': None,
-            }
-        cursor.close()
-
-        user_base_tables = None
-        counts_and_total['user_data'] = None
-        counts_and_total['user_data_total'] = None
-        counts_and_total['user_data_cases'] = None
-
-        # If we have a user, get counts for any user data
-        # if USER_DATA_ON:
-        #     if user:
-        #         if len(Project.get_user_projects(user)) > 0:
-        #             user_data_result = count_user_metadata(user, user_data_filters, cohort_id)
-        #
-        #             counts_and_total['user_data'] = []
-        #
-        #             for key in user_data_result:
-        #                 if 'total' in key:
-        #                     counts_and_total['user_data_total'] = user_data_result[key]
-        #                 elif 'cases' in key:
-        #                     counts_and_total['user_data_cases'] = user_data_result[key]
-        #                 else:
-        #                     counts_and_total['user_data'].append(user_data_result[key])
-        #                     counts_and_total['counts'].append(user_data_result[key])
-        #
-        #             # TODO: If we allow users to filter their data on our filters, we would create the user_base_table here
-        #             # Proposition: a separate method would be passed the current db connection and any filters to make the tmp table
-        #             # It would pass back the name of the table for use by count_metadata in a UNION statement
-        #
-        #         else:
-        #             logger.info('[STATUS] No projects were found for this user.')
-        #     else:
-        #         logger.info("[STATUS] User not authenticated; no user data will be available.")
-
         params_tuple = ()
         counts = {}
-
         cursor = db.cursor()
 
         # We need to perform 2 sets of queries: one with each filter excluded from the others, against the full
@@ -2375,20 +2308,9 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
         exclusionary_filter = {}
         where_clause = None
 
-        for attr in valid_attrs:
-            attr_parts = attr.split(':')
-            attr_is_filtered = False
+        for attr in metadata_values:
             if attr not in filters:
-                # if this attribute is part of a grouped set, check to make sure none of the set's
-                # other members are filtered - if they are, this isn't an unfiltered attr and it
-                # must be counted as 'filtered'
-                # TODO: Commenting out data availability filters for now
-                # if attr_parts[1] in GROUPED_FILTERS:
-                #     filter_group = [filter_name for filter_name, group in GROUPED_FILTERS.items() if group == GROUPED_FILTERS[attr_parts[1]]]
-                #     for grouped_filter in filter_group:
-                #         if attr_parts[0]+':'+grouped_filter in filters:
-                #             attr_is_filtered = True
-                not attr_is_filtered and unfiltered_attr.append(attr.split(':')[-1])
+                unfiltered_attr.append(attr)
 
         # construct the WHERE clauses needed
         if filters.__len__() > 0:
@@ -2398,31 +2320,12 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
                 filter_copy = copy.deepcopy(filters)
                 del filter_copy[filter_key]
 
-                filter_key_parts = filter_key.split(':')
-                filter_group = []
-
-                # TODO: Commenting out data availability filters for now
-                # if filter_key_parts[1] in GROUPED_FILTERS:
-                #     filter_group = [filter_name for filter_name, group in GROUPED_FILTERS.items() if
-                #                     group == GROUPED_FILTERS[filter_key_parts[1]]]
-                #
-                # # If this is a member of a grouped filter, delete all other members from the filter set copy as well
-                # for grouped_filter in filter_group:
-                #     if filter_key_parts[0]+':'+grouped_filter in filter_copy:
-                #         del filter_copy[filter_key_parts[0]+':'+grouped_filter]
-
                 if filter_copy.__len__() <= 0:
                     ex_where_clause = {'query_str': None, 'value_tuple': None}
                 else:
                     ex_where_clause = build_where_clause(filter_copy)
 
-                exclusionary_filter[filter_key_parts[1]] = ex_where_clause
-
-                # TODO: Commenting out data availability filters for now
-                # If this is a grouped filter, add the exclusionary clause for the other members of the filter group
-                # for grouped_filter in filter_group:
-                #     if grouped_filter not in exclusionary_filter:
-                #         exclusionary_filter[grouped_filter] = ex_where_clause
+                exclusionary_filter[filter_key] = ex_where_clause
 
         base_table = program_tables.samples_table
         tmp_mut_table = None
@@ -2535,7 +2438,7 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
                 JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
-            """ % (tmp_cohort_table, program_tables.samples_tabl)
+            """ % (tmp_cohort_table, program_tables.samples_table)
             # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
@@ -2547,7 +2450,7 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
                 logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
 
         # If there are filters, create a temporary table filtered off the base table
-        if unfiltered_attr.__len__() > 0 and (filters.__len__() > 0 or user_base_tables):
+        if unfiltered_attr.__len__() > 0 and filters.__len__() > 0:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
@@ -2558,13 +2461,6 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
             if filters.__len__() > 0:
                 make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
                 params_tuple += where_clause['value_tuple']
-
-            # TODO: If we allow users to filter their samples via our filters, we will need to handle that here
-            # Current proposition: Extend this query to UNION a filtered set of their samples
-            # if user_base_tables and len(user_base_tables) > 0:
-            #     # Union multiple tables
-            #     for table in user_base_tables:
-            #         make_tmp_table_str += ' UNION
 
             make_tmp_table_str += ";"
             print make_tmp_table_str
@@ -2588,8 +2484,7 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
 
         count_query_set = []
 
-        for attr in valid_attrs:
-            col_name = valid_attrs[attr]['col_name']
+        for col_name in metadata_values:
             if col_name in unfiltered_attr:
                 count_query_set.append({'query_str':("""
                     SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;
@@ -2618,15 +2513,13 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
             if colset is not None:
                 col_headers = [i[0] for i in cursor.description]
             if not col_headers[0] in counts:
-                counts[col_headers[0]] = {}
-                if col_headers[0] not in metadata_values:
-                    # TODO: alter count queries to deal with continuous data which is clustered (eg. bmi) in an appropriate manner
-                    # in the mean time, just put in an empty dict for them to fill into and handle them
-                    # in normalization methods
-                    counts[col_headers[0]]['counts'] = {}
-                else:
-                    counts[col_headers[0]]['counts'] = metadata_values[col_headers[0]]
-                counts[col_headers[0]]['total'] = 0
+                # If this is a categorical attribute, fetch its list of possible values (so we can know what didn't come
+                # back in the query)
+                values = { k: 0 for k in metadata_values[col_headers[0]]['values'].keys() } if metadata_values[col_headers[0]]['type'] == 'C' else {}
+                counts[col_headers[0]] = {
+                    'counts': values,
+                    'total': 0,
+                }
             for row in cursor.fetchall():
                 counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
@@ -2640,50 +2533,6 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
         data = []
 
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
-        # TODO: Commenting out data availability for now
-        #
-        # query_str = """
-        #     SELECT IF(has_Illumina_DNASeq=1,'Yes', 'None') AS DNAseq_data,
-        #         IF (has_SNP6=1, 'Genome_Wide_SNP_6', 'None') as cnvrPlatform,
-        #         CASE
-        #             WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'HiSeq/BCGSC'
-        #             WHEN has_BCGSC_HiSeq_RNASeq=1 and has_UNC_HiSeq_RNASeq=1 THEN 'HiSeq/BCGSC and UNC V2'
-        #             WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2'
-        #             WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=1 THEN 'GA and HiSeq/UNC V2'
-        #             WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=0 and has_BCGSC_GA_RNASeq=1 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and GA/BCGSC'
-        #             WHEN has_UNC_HiSeq_RNASeq=1 and has_BCGSC_HiSeq_RNASeq=1 and has_BCGSC_GA_RNASeq=0 and has_UNC_GA_RNASeq=0 THEN 'HiSeq/UNC V2 and BCGSC'
-        #             WHEN has_BCGSC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/BCGSC'
-        #             WHEN has_UNC_GA_RNASeq=1 and has_UNC_HiSeq_RNASeq=0 THEN 'GA/UNC V2' ELSE 'None'
-        #         END AS gexpPlatform,
-        #         CASE
-        #             WHEN has_27k=1 and has_450k=0 THEN 'HumanMethylation27'
-        #             WHEN has_27k=0 and has_450k=1 THEN 'HumanMethylation450'
-        #             WHEN has_27k=1 and has_450k=1 THEN '27k and 450k' ELSE 'None'
-        #         END AS methPlatform,
-        #         CASE
-        #             WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=0 THEN 'IlluminaHiSeq_miRNASeq'
-        #             WHEN has_HiSeq_miRnaSeq=0 and has_GA_miRNASeq=1 THEN 'IlluminaGA_miRNASeq'
-        #             WHEN has_HiSeq_miRnaSeq=1 and has_GA_miRNASeq=1 THEN 'GA and HiSeq'	ELSE 'None'
-        #         END AS mirnPlatform,
-        #         IF (has_RPPA=1, 'MDA_RPPA_Core', 'None') AS rppaPlatform
-        #         FROM %s
-        # """ % filter_table
-        #
-        # start = time.time()
-        # cursor.execute(query_str)
-        # stop = time.time()
-        # logger.debug("[BENCHMARKING] Time to query platforms in metadata_counts_platform_list for cohort '" +
-        #              (cohort_id if cohort_id is not None else 'None') + "': " + (stop - start).__str__())
-        # for row in cursor.fetchall():
-        #     item = {
-        #         'DNAseq_data': str(row['DNAseq_data']),
-        #         'cnvrPlatform': str(row['cnvrPlatform']),
-        #         'gexpPlatform': str(row['gexpPlatform']),
-        #         'methPlatform': str(row['methPlatform']),
-        #         'mirnPlatform': str(row['mirnPlatform']),
-        #         'rppaPlatform': str(row['rppaPlatform']),
-        #     }
-        #     data.append(item)
 
         # Drop the temporary tables
         if tmp_cohort_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_cohort_table)
@@ -2694,37 +2543,34 @@ def count_public_metadata(user, cohort_id=None, sample_ids=None, inc_filters=Non
         counts_and_total['cases'] = sample_and_case_counts['case_count']
         counts_and_total['total'] = sample_and_case_counts['sample_count']
 
-        counts_keys = counts.keys()
-        for key, feature in valid_attrs.items():
-            if feature['name'] in counts_keys:
+        for attr in metadata_values:
+            if attr in counts:
                 value_list = []
-                feature['values'] = counts[feature['name']]['counts']
-                feature['total'] = counts[feature['name']]['total']
+                feature = {
+                    'values': counts[attr]['counts'],
+                    'total': counts[attr]['total'],
+                }
 
                 # Special case for age ranges
-                if key == 'CLIN:age_at_initial_pathologic_diagnosis':
-                    feature['values'] = normalize_ages(feature['values'])
-                elif key == 'CLIN:BMI':
-                    feature['values'] = normalize_bmi(feature['values'])
+                if attr == 'age_at_initial_pathologic_diagnosis':
+                    feature['values'] = normalize_ages(counts[attr]['counts'])
+                elif attr == 'BMI':
+                    feature['values'] = normalize_bmi(counts[attr]['counts'])
 
                 for value, count in feature['values'].items():
-                    # Convert all 1/'1' and 0/'0' values to True and False
-                    if feature['name'].startswith('has_'):
-                        if value == 1 or value == '1':
-                            value = 'True'
-                        elif value == 0  or value == '0':
-                            value = 'False'
 
-                    if feature['name'] in DISPLAY_NAME_DD:
-                        value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
-                    else:
-                        value_list.append({'value': str(value), 'count': count})
+                    val_obj = {'value': str(value), 'count': count,}
 
-                counts_and_total['counts'].append({'name': feature['name'], 'values': value_list, 'id': key, 'total': feature['total']})
+                    if value in metadata_values[attr]['values'] and metadata_values[attr]['values'][value] is not None and len(metadata_values[attr]['values'][value]) > 0:
+                        val_obj['displ_name'] = metadata_values[attr]['values'][value]
+
+                    value_list.append(val_obj)
+
+                counts_and_total['counts'].append({'name': attr, 'values': value_list, 'id': attr, 'total': feature['total']})
 
         return counts_and_total
 
-    except (Exception) as e:
+    except Exception as e:
         logger.error(traceback.format_exc())
     finally:
         if cursor: cursor.close()
