@@ -344,3 +344,50 @@ def data_availability_sort(key, value, attr_details):
             'value': 'BCGSC Illumina GA',
             'count': count[0] if count.__len__() > 0 else 0
         })
+
+# TODO: These were copied over from api.api_helpers. Should no longer be needed after new slider widgets created
+def normalize_bmi(bmis):
+    if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
+    bmi_list = {'underweight': 0, 'normal weight': 0, 'overweight': 0, 'obese': 0, 'None': 0}
+    for bmi, count in bmis.items():
+        if type(bmi) != dict:
+            if bmi and bmi != 'None':
+                fl_bmi = float(bmi)
+                if fl_bmi < 18.5:
+                    bmi_list['underweight'] += int(count)
+                elif 18.5 <= fl_bmi <= 24.9:
+                    bmi_list['normal weight'] += int(count)
+                elif 25 <= fl_bmi <= 29.9:
+                    bmi_list['overweight'] += int(count)
+                elif fl_bmi >= 30:
+                    bmi_list['obese'] += int(count)
+            else:
+                bmi_list['None'] += int(count)
+
+    return bmi_list
+
+def normalize_ages(ages):
+    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    new_age_list = {'10 to 39': 0, '40 to 49': 0, '50 to 59': 0, '60 to 69': 0, '70 to 79': 0, 'Over 80': 0, 'None': 0}
+    for age, count in ages.items():
+        if type(age) != dict:
+            if age and age != 'None':
+                int_age = float(age)
+                if int_age < 40:
+                    new_age_list['10 to 39'] += int(count)
+                elif int_age < 50:
+                    new_age_list['40 to 49'] += int(count)
+                elif int_age < 60:
+                    new_age_list['50 to 59'] += int(count)
+                elif int_age < 70:
+                    new_age_list['60 to 69'] += int(count)
+                elif int_age < 80:
+                    new_age_list['70 to 79'] += int(count)
+                else:
+                    new_age_list['Over 80'] += int(count)
+            else:
+                new_age_list['None'] += int(count)
+        else:
+            print age
+
+    return new_age_list
