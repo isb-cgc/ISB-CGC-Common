@@ -17,18 +17,14 @@ limitations under the License.
 """
 
 import collections
-import copy
 import csv
 import json
 import re
 import time
 from time import sleep
 
-import MySQLdb
 import django
-from api.api_helpers import *
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
-from django.conf import settings
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -42,7 +38,6 @@ from django.http import StreamingHttpResponse
 from django.shortcuts import render, redirect
 from django.utils import formats
 from django.views.decorators.csrf import csrf_protect
-from google.appengine.api import urlfetch
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
 from accounts.models import NIH_User
@@ -161,7 +156,6 @@ GROUPED_FILTERS = {
 }
 
 debug = settings.DEBUG # RO global for this file
-urlfetch.set_default_fetch_deadline(60)
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV

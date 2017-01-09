@@ -27,9 +27,10 @@ import logging
 import traceback
 import warnings
 import copy
+import MySQLdb
 
 from uuid import uuid4
-from api.api_helpers import *
+from django.conf import settings
 
 debug = settings.DEBUG # RO global for this file
 
