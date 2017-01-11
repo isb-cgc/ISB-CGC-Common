@@ -28,6 +28,7 @@ import traceback
 import warnings
 import copy
 import MySQLdb
+import string
 
 from uuid import uuid4
 from django.conf import settings
@@ -37,6 +38,10 @@ debug = settings.DEBUG # RO global for this file
 logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", "No data - zero rows fetched, selected, or processed")
+
+PREFORMATTED_VALUES = {}
+
+PREFORMATTED_ATTRIBUTES = {}
 
 ### METADATA_ATTR ###
 # Local storage of the metadata attributes, values, and their display names for a program. This dict takes the form:
@@ -97,13 +102,15 @@ def fetch_program_attr(program):
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
             METADATA_ATTR[program] = {}
 
+            preformatted_attr = get_preformatted_attr(program)
+
             db = get_sql_connection()
             cursor = db.cursor()
             cursor.callproc('get_program_attr', (program,))
             for row in cursor.fetchall():
-                METADATA_ATTR[program][row[0]] = {'displ_name': None, 'values': {}, 'type': row[1]}
+                METADATA_ATTR[program][row[0]] = {'name': row[0], 'displ_name': format_for_display(row[0]) if row[0] not in preformatted_attr else row[0], 'values': {}, 'type': row[1]}
 
-        return METADATA_ATTR[program].keys()
+        return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
@@ -112,7 +119,7 @@ def fetch_program_attr(program):
         if cursor: cursor.close()
         if db and db.open: db.close()
 
-# Generate the ISB_CGC_PORJECTS['list'] value set based on the get_isbcgc_project_set sproc
+# Generate the ISB_CGC_PROJECTS['list'] value set based on the get_isbcgc_project_set sproc
 def fetch_isbcgc_project_set():
     try:
         cursor = None
@@ -175,6 +182,8 @@ def get_metadata_value_set(program=None):
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
             fetch_program_attr(program)
 
+        preformatted_values = get_preformatted_values(program)
+
         if len(METADATA_ATTR[program][METADATA_ATTR[program].keys()[0]]['values']) <= 0:
             db = get_sql_connection()
             cursor = db.cursor()
@@ -182,11 +191,11 @@ def get_metadata_value_set(program=None):
             cursor.callproc('get_metadata_values', (program,))
 
             for row in cursor.fetchall():
-                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=None
+                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=format_for_display(str(row[0]),'value')if cursor.description[0][0] not in preformatted_values else str(row[0])
 
             while (cursor.nextset() and cursor.description is not None):
                 for row in cursor.fetchall():
-                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=None
+                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=format_for_display(str(row[0]),'value')if cursor.description[0][0] not in preformatted_values else str(row[0])
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -207,6 +216,33 @@ def get_metadata_value_set(program=None):
         if db and db.open: db.close()
 
 
+def get_preformatted_attr(program=None):
+    if not program:
+        program = get_public_program_id('TCGA')
+    if len(PREFORMATTED_ATTRIBUTES) <= 0:
+        # Load the attributes via a query or hard code them here
+        PREFORMATTED_ATTRIBUTES[program] = []
+
+    if program not in PREFORMATTED_ATTRIBUTES:
+        return []
+
+    return PREFORMATTED_ATTRIBUTES[program]
+
+
+def get_preformatted_values(program=None):
+    if not program:
+        program=get_public_program_id('TCGA')
+    if len(PREFORMATTED_VALUES) <= 0:
+        # Load the values via a query or hard code them here
+        PREFORMATTED_VALUES[program] = [
+            'disease_code',
+        ]
+
+    if program not in PREFORMATTED_VALUES:
+        return []
+
+    return PREFORMATTED_VALUES[program]
+
 def validate_filter_key(col,program):
     if not program in METADATA_ATTR:
         fetch_program_attr(program)
@@ -215,20 +251,16 @@ def validate_filter_key(col,program):
     return col in METADATA_ATTR[program]
 
 
-def format_for_display(item,item_type):
-    if not item_type:
-        item_type = 'attr'
+def format_for_display(item,preformatted=False):
+    formatted_item = item
 
-    if item_type == 'attr':
-        formatted_item = item.replace('_',' ')
-        formatted_item = formatted_item.capwords()
-    elif item_type == 'value':
-        if item is None or item == 'null':
-            formatted_item = 'None'
-        else:
-            formatted_item = item.replace('_', ' ')
+    if item is None or item == 'null':
+        formatted_item = 'None'
     else:
-        formatted_item = item
+        formatted_item = string.replace(formatted_item, '_', ' ')
+        if not preformatted:
+            formatted_item = string.capwords(formatted_item)
+        formatted_item = string.replace(formatted_item,' To ', ' to ')
 
     return formatted_item
 

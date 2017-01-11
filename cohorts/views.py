@@ -49,112 +49,6 @@ BQ_ATTEMPT_MAX = 10
 
 TCGA_PROJECT_SET = fetch_isbcgc_project_set()
 
-# WebApp list of the items from Somatic_mutation_calls which we want to filter on
-MOLECULAR_SHORTLIST = [
-    'Missense_Mutation',
-    'Frame_Shift_Del',
-    'Frame_Shift_Ins',
-    'Nonsense_Mutation',
-    'In_Frame_Del',
-    'In_Frame_Ins',
-    'Start_Codon_SNP',
-    'Start_Codon_Del',
-    'Start_Codon_Ins',
-    'Stop_Codon_Del',
-    'Stop_Codon_Ins',
-    'Nonstop_Mutation',
-    'De_novo_Start_OutOfFrame',
-    'De_novo_Start_InFrame',
-    'Silent',
-    'RNA',
-    'Intron',
-    'lincRNA',
-    'Splice_Site',
-    "3'UTR",
-    "5'UTR",
-    'IGR',
-    "5'Flank",
-]
-
-# For database values which have display names which are needed by templates but not stored directly in the dsatabase
-DISPLAY_NAME_DD = {
-    'SampleTypeCode': {
-        '01': 'Primary Solid Tumor',
-        '02': 'Recurrent Solid Tumor',
-        '03': 'Primary Blood Derived Cancer - Peripheral Blood',
-        '04': 'Recurrent Blood Derived Cancer - Bone Marrow',
-        '05': 'Additional - New Primary',
-        '06': 'Metastatic',
-        '07': 'Additional Metastatic',
-        '08': 'Human Tumor Original Cells',
-        '09': 'Primary Blood Derived Cancer - Bone Marrow',
-        '10': 'Blood Derived Normal',
-        '11': 'Solid Tissue Normal',
-        '12': 'Buccal Cell Normal',
-        '13': 'EBV Immortalized Normal',
-        '14': 'Bone Marrow Normal',
-        '20': 'Control Analyte',
-        '40': 'Recurrent Blood Derived Cancer - Peripheral Blood',
-        '50': 'Cell Lines',
-        '60': 'Primary Xenograft Tissue',
-        '61': 'Cell Line Derived Xenograft Tissue',
-        'None': 'N/A'
-    },
-    'Somatic_Mutations': {
-        'Missense_Mutation': 'Missense Mutation',
-        'Frame_Shift_Del': 'Frame Shift - Deletion',
-        'Frame_Shift_Ins': 'Frame Shift - Insertion',
-        'De_novo_Start_OutOfFrame': 'De novo Start Out of Frame',
-        'De_novo_Start_InFrame': 'De novo Start In Frame',
-        'In_Frame_Del': 'In Frame Deletion',
-        'In_Frame_Ins': 'In Frame Insertion',
-        'Nonsense_Mutation': 'Nonsense Mutation',
-        'Start_Codon_SNP': 'Start Codon - SNP',
-        'Start_Codon_Del': 'Start Codon - Deletion',
-        'Start_Codon_Ins': 'Start Codon - Insertion',
-        'Stop_Codon_Del': 'Stop Codon - Deletion',
-        'Stop_Codon_Ins': 'Stop Codon - Insertion',
-        'Nonstop_Mutation': 'Nonstop Mutation',
-        'Silent': 'Silent',
-        'RNA': 'RNA',
-        'Intron': 'Intron',
-        'lincRNA': 'lincRNA',
-        'Splice_Site': 'Splice Site',
-        "3'UTR": '3\' UTR',
-        "5'UTR": '5\' UTR',
-        'IGR': 'IGR',
-        "5'Flank": '5\' Flank',
-    },
-    'BMI': {
-        'underweight': 'Underweight: BMI less that 18.5',
-        'normal weight': 'Normal weight: BMI is 18.5 - 24.9',
-        'overweight': 'Overweight: BMI is 25 - 29.9',
-        'obese': 'Obese: BMI is 30 or more',
-        'None': 'None'
-    },
-    'tobacco_smoking_history': {
-        '1': 'Lifelong Non-smoker',
-        '2': 'Current Smoker',
-        '3': 'Current Reformed Smoker for > 15 years',
-        '4': 'Current Reformed Smoker for <= 15 years',
-        '5': 'Current Reformed Smoker, Duration Not Specified',
-        '6': 'Smoker at Diagnosis',
-        '7': 'Smoking History Not Documented',
-        'None': 'NA',
-    },
-}
-
-GROUPED_FILTERS = {
-    'has_BCGSC_HiSeq_RNASeq': 'RNASeq',
-    'has_UNC_HiSeq_RNASeq': 'RNASeq',
-    'has_BCGSC_GA_RNASeq': 'RNASeq',
-    'has_UNC_GA_RNASeq': 'RNASeq',
-    'has_HiSeq_miRnaSeq': 'miRNASeq',
-    'has_GA_miRNASeq': 'miRNASeq',
-    'has_27k': 'RPPA',
-    'has_450k': 'RPPA',
-}
-
 debug = settings.DEBUG # RO global for this file
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -1117,10 +1011,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None, prog
                         elif value == 0  or value == '0':
                             value = 'False'
 
-                    if feature['name'] in DISPLAY_NAME_DD:
-                        value_list.append({'value': str(value), 'count': count, 'displ_name': DISPLAY_NAME_DD[feature['name']][str(value)]})
-                    else:
-                        value_list.append({'value': str(value), 'count': count})
+                    value_list.append({'value': str(value), 'count': count})
 
                 counts_and_total['counts'].append({'name': feature['name'], 'values': value_list, 'id': key, 'total': feature['total']})
 
@@ -2198,6 +2089,8 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
         clin_attr = fetch_program_attr(program_id)
 
+        print >> sys.stdout, clin_attr.__str__()
+
         molecular_attr = {
             'categories': [
                 {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
@@ -2220,10 +2113,6 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             'attrs': []
         }
 
-        for mol_attr in MOLECULAR_SHORTLIST:
-            molecular_attr['attrs'].append(
-                {'name': DISPLAY_NAME_DD['Somatic_Mutations'][mol_attr], 'value': mol_attr, 'count': 0})
-
         for cat in molecular_attr['categories']:
             for attr in cat['attrs']:
                 ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
@@ -2232,6 +2121,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
         results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, program_id)
         totals = results['total']
+
         template_values = {
             'request': request,
             'attr_list_count': results['count'],
