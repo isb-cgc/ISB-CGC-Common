@@ -19,6 +19,7 @@ limitations under the License.
 import collections
 import csv
 import json
+import traceback
 import re
 import time
 from time import sleep
@@ -1059,14 +1060,15 @@ def metadata_counts_platform_list(req_filters, cohort_id, user, program, limit=N
             'total': counts_and_total['total'], 'user_data_total': counts_and_total['user_data_total'],
             'user_data_cases': counts_and_total['user_data_cases']}
 
-def public_metadata_counts_platform_list(req_filters, cohort_id, user, program_id, limit=None):
+
+def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None):
     filters = {}
 
     if req_filters is not None:
         try:
             for key in req_filters:
                 if not validate_filter_key(key,program_id):
-                    raise Exception('Invalid filter key received: '+ key)
+                    raise Exception('Invalid filter key received: ' + key)
                 this_filter = req_filters[key]
                 if key not in filters:
                     filters[key] = {'values': []}
@@ -1093,6 +1095,48 @@ def public_metadata_counts_platform_list(req_filters, cohort_id, user, program_i
             'count': counts_and_total['counts'],
             'cases': counts_and_total['cases'],
             'total': counts_and_total['total'], }
+
+
+def user_metadata_counts(user, user_data_filters, cohort_id):
+    try:
+
+        counts_and_total = {
+            'user_data': [],
+            'counts': [],
+            'user_data_total': 0,
+            'user_data_cases': 0,
+        }
+
+        if user:
+            if len(Project.get_user_projects(user)) > 0:
+                user_data_result = count_user_metadata(user, user_data_filters, cohort_id)
+
+                for key in user_data_result:
+                    if 'total' in key:
+                        counts_and_total['user_data_total'] = user_data_result[key]
+                    elif 'cases' in key:
+                        counts_and_total['user_data_cases'] = user_data_result[key]
+                    else:
+                        counts_and_total['user_data'].append(user_data_result[key])
+                        counts_and_total['counts'].append(user_data_result[key])
+
+                        # TODO: If we allow users to filter their data on our filters, we would create the user_base_table here
+                        # Proposition: a separate method would be passed the current db connection and any filters to make the tmp table
+                        # It would pass back the name of the table for use by count_metadata in a UNION statement
+
+            else:
+                logger.info('[STATUS] No projects were found for this user.')
+        else:
+            logger.info("[STATUS] User not authenticated; no user data will be available.")
+
+        return {'items': counts_and_total['user_data'],
+                'count': counts_and_total['counts'],
+                'cases': counts_and_total['user_data_cases'],
+                'total': counts_and_total['user_data_total'], }
+
+    except Exception, e:
+        logger.error('[ERROR] Exception when counting user metadata: ' + e.message)
+        logger.error(traceback.format_exc())
 
 ''' End metadata counting methods '''
 
@@ -2044,7 +2088,7 @@ def get_metadata(request):
 
     user = Django_User.objects.get(id=request.user.id)
     if program_id:
-        results = public_metadata_counts_platform_list(filters, cohort, user, program_id, limit)
+        results = public_metadata_counts(filters, cohort, user, program_id, limit)
     else:
         results = metadata_counts_platform_list(filters, cohort, user, limit)
 
@@ -2085,6 +2129,8 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
         # Public Program
         template = 'cohorts/isb-cgc-data.html'
 
+        filters = None
+
         # If we want to automatically select some filters for a new cohort, do it here
         if not cohort_id:
             # Currently we do not select anything by default
@@ -2120,7 +2166,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 if ma:
                     ma['category'] = cat['value']
 
-        results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
+        results = public_metadata_counts(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
         totals = results['total']
 
         template_values = {
@@ -2137,17 +2183,22 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
         # Requesting User Data filter panel
         template = 'cohorts/user-data.html'
 
-        results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, program_id)
+        filters = None
+
+        # If we want to automatically select some filters for a new cohort, do it here
+        if not cohort_id:
+            # Currently we do not select anything by default
+            filters = None
+
+        results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
         totals = results['total']
 
         template_values = {
             'request': request,
             'attr_list_count': results['count'],
             'total_samples': int(totals),
-            'clin_attr': clin_attr,
-            'molecular_attr': molecular_attr,
             'metadata_filters': filters or {},
-            'program': public_program
+            'program': -1
         }
 
     return render(request, template, template_values)

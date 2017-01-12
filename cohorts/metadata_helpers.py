@@ -29,9 +29,11 @@ import warnings
 import copy
 import MySQLdb
 import string
+from projects.models import Program
 
 from uuid import uuid4
 from django.conf import settings
+
 
 debug = settings.DEBUG # RO global for this file
 
@@ -175,59 +177,33 @@ def fetch_isbcgc_project_set():
 
 # Fetch a list of all public programs, represented as an object containing their name and ID
 def get_public_programs():
-    db = None
-    cursor = None
-
+    logger.debug('LOL A TEST')
     try:
-        db = get_sql_connection()
-        cursor = db.cursor()
+        progs = Program.objects.filter(is_public=True, active=True)
 
-        public_progs = []
-
-        cursor.execute("""
-          SELECT pp.id, pp.name
-          FROM projects_program pp
-          JOIN auth_user au ON au.id = pp.owner_id
-          WHERE au.is_superuser=1 AND au.is_active=1 AND au.username = 'isb' AND pp.active=1 AND pp.is_public = 1;
-        """)
-
-        for row in cursor.fetchall():
-            public_progs.append({'id': row[0], 'name': row[1]})
+        public_progs = [{'id': x.id, 'name': x.name} for x in progs]
 
         return public_progs
 
     except Exception as e:
         logger.error('[ERROR] Excpetion while fetching public program list:')
         logger.error(traceback.format_exc())
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
 
 
 # Given a public program's shorthand name, retrive its database ID for use in various queries
 def get_public_program_id(program):
-    db = get_sql_connection()
-
     try:
-        cursor = db.cursor()
-        cursor.execute("""
-          SELECT pp.id
-          FROM projects_program pp
-          JOIN auth_user au ON au.id = pp.owner_id
-          WHERE au.is_superuser=1 AND au.is_active=1 AND au.username = 'isb' AND pp.name = %s AND pp.is_public = 1 AND pp.active=1;
-        """, (program,))
+        prog = Program.objects.filter(name=program, active=True, is_public=True)
 
-        pid = cursor.fetchall()[0][0]
+        if len(prog) > 1:
+            print >> sys.stderr, '[WARNING] More than one program found with this short name! Using the first one.'
+            return int(prog[0].id)
 
-        return int(pid)
+        return int(prog.id)
 
     except Exception as e:
         logger.error('[ERROR] Excpetion while fetching %s program ID:' % program)
         logger.error(traceback.format_exc())
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 # Get the list of possible metadata values and their display strings for non-continuous data based on their in-use
