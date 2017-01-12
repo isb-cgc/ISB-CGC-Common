@@ -83,6 +83,7 @@ ISB_CGC_PROJECTS = {
 def make_id(length):
     return ''.join(random.sample(string.ascii_lowercase, length))
 
+
 # Database connection - does not check for AppEngine
 def get_sql_connection():
     database = settings.DATABASES['default']
@@ -105,6 +106,7 @@ def get_sql_connection():
         logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
         if db and db.open: db.close()
 
+
 # Returns the list of attributes for a program, as stored in the METADATA_ATTR[<program>] list
 # If a current list is not found, it is retrieved using the get_metadata_attr sproc.
 def fetch_program_attr(program):
@@ -115,6 +117,7 @@ def fetch_program_attr(program):
     try:
         if not program:
             program = get_public_program_id('TCGA')
+
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
             METADATA_ATTR[program] = {}
 
@@ -143,6 +146,7 @@ def fetch_program_attr(program):
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+
 # Generate the ISB_CGC_PROJECTS['list'] value set based on the get_isbcgc_project_set sproc
 def fetch_isbcgc_project_set():
     try:
@@ -168,6 +172,40 @@ def fetch_isbcgc_project_set():
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+
+# Fetch a list of all public programs, represented as an object containing their name and ID
+def get_public_programs():
+    db = None
+    cursor = None
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        public_progs = []
+
+        cursor.execute("""
+          SELECT pp.id, pp.name
+          FROM projects_program pp
+          JOIN auth_user au ON au.id = pp.owner_id
+          WHERE au.is_superuser=1 AND au.is_active=1 AND au.username = 'isb' AND pp.active=1 AND pp.is_public = 1;
+        """)
+
+        for row in cursor.fetchall():
+            public_progs.append({'id': row[0], 'name': row[1]})
+
+        return public_progs
+
+    except Exception as e:
+        logger.error('[ERROR] Excpetion while fetching public program list:')
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+
+
+# Given a public program's shorthand name, retrive its database ID for use in various queries
 def get_public_program_id(program):
     db = get_sql_connection()
 
@@ -177,12 +215,13 @@ def get_public_program_id(program):
           SELECT pp.id
           FROM projects_program pp
           JOIN auth_user au ON au.id = pp.owner_id
-          WHERE au.is_superuser=1 AND au.is_active=1 AND pp.active=1 AND pp.name = %s AND au.username = 'isb';
+          WHERE au.is_superuser=1 AND au.is_active=1 AND au.username = 'isb' AND pp.name = %s AND pp.is_public = 1 AND pp.active=1;
         """, (program,))
 
-        id = cursor.fetchall[0][0]
+        pid = cursor.fetchall()[0][0]
 
-        return id
+        return int(pid)
+
     except Exception as e:
         logger.error('[ERROR] Excpetion while fetching %s program ID:' % program)
         logger.error(traceback.format_exc())
@@ -194,14 +233,14 @@ def get_public_program_id(program):
 # Get the list of possible metadata values and their display strings for non-continuous data based on their in-use
 # values in a program's metadata_samples table
 # Program ID defaults to TCGA if one is not provided
-def get_metadata_value_set(program=None):
+def fetch_metadata_value_set(program=None):
 
     db = None
     cursor = None
 
     try:
         if not program:
-            program=get_public_program_id('TCGA')
+            program = get_public_program_id('TCGA')
 
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
             fetch_program_attr(program)
@@ -215,17 +254,11 @@ def get_metadata_value_set(program=None):
             cursor.callproc('get_metadata_values', (program,))
 
             for row in cursor.fetchall():
-                if cursor.description[0][0] == 'disease_code':
-                    print >> sys.stdout, (format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]))
-                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
+                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
 
             while (cursor.nextset() and cursor.description is not None):
                 for row in cursor.fetchall():
-                    if cursor.description[0][0] == 'disease_code':
-                        print >> sys.stdout, (
-                        format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(
-                            row[0]))
-                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])]=format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
+                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -250,8 +283,9 @@ def get_preformatted_attr(program=None):
     if not program:
         program = get_public_program_id('TCGA')
     if len(PREFORMATTED_ATTRIBUTES) <= 0:
-        # Load the attributes via a query or hard code them here
-        PREFORMATTED_ATTRIBUTES[program] = []
+        for pubprog in get_public_programs():
+            # Load the attributes via a query or hard code them here
+            PREFORMATTED_ATTRIBUTES[str(pubprog['id'])] = []
 
     if program not in PREFORMATTED_ATTRIBUTES:
         return []
@@ -259,21 +293,31 @@ def get_preformatted_attr(program=None):
     return PREFORMATTED_ATTRIBUTES[program]
 
 
+# Some field values are 'preformatted' which is to say their database entries should be displayed as-is with no
+# alterations made; specify them in the PREFORMATTED_VALUES dict, on a per-program basis (declaration at the top
+# of this file, built in this method at request time)
 def get_preformatted_values(program=None):
     if not program:
-        program=get_public_program_id('TCGA')
+        program = get_public_program_id('TCGA')
+
+    program = str(program)
+
     if len(PREFORMATTED_VALUES) <= 0:
         # Load the values via a query or hard code them here
-        PREFORMATTED_VALUES[program] = [
-            'disease_code',
-            'pathologic_stage',
-        ]
+        for pubprog in get_public_programs():
+            PREFORMATTED_VALUES[str(pubprog['id'])] = [
+                'disease_code',
+                'project_short_name',
+                'pathologic_stage',
+            ]
 
     if program not in PREFORMATTED_VALUES:
         return []
 
     return PREFORMATTED_VALUES[program]
 
+
+# Confirm that a filter key is a valid column in the attribute set
 def validate_filter_key(col,program):
     if not program in METADATA_ATTR:
         fetch_program_attr(program)
@@ -282,6 +326,7 @@ def validate_filter_key(col,program):
     return col in METADATA_ATTR[program]
 
 
+# Make standard adjustments to a string for display: replace _ with ' ', title case (except for 'to')
 def format_for_display(item):
     formatted_item = item
 
@@ -295,9 +340,10 @@ def format_for_display(item):
     return formatted_item
 
 
+# Construct WHERE clauses for BigQuery and CloudSQL based on a set of filters
+# If the names of the columns differ across the 2 platforms, the alt_key_map can be
+# used to map a filter 'key' to a different column name
 def build_where_clause(filters, alt_key_map=False):
-# this one gets called a lot
-#    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     first = True
     query_str = ''
     big_query_str = ''  # todo: make this work for non-string values -- use {}.format

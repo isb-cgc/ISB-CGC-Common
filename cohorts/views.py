@@ -591,7 +591,7 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None, prog
     mutation_where_clause = None
     filters = {}
 
-    metadata_values = get_metadata_value_set(prog_id)
+    metadata_values = fetch_metadata_value_set(prog_id)
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
     for key in inc_filters:
@@ -2080,16 +2080,17 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
     # Check program ID against public programs
     public_program = Program.objects.filter(id=program_id).first()
     user = request.user
+
     if public_program:
         # Public Program
         template = 'cohorts/isb-cgc-data.html'
 
-        # If this is a new cohort, automatically select some filters for our users
-        filters = None
+        # If we want to automatically select some filters for a new cohort, do it here
+        if not cohort_id:
+            # Currently we do not select anything by default
+            filters = None
 
         clin_attr = fetch_program_attr(program_id)
-
-        print >> sys.stdout, clin_attr.__str__()
 
         molecular_attr = {
             'categories': [
@@ -2119,6 +2120,23 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 if ma:
                     ma['category'] = cat['value']
 
+        results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
+        totals = results['total']
+
+        template_values = {
+            'request': request,
+            'attr_list_count': results['count'],
+            'total_samples': int(totals),
+            'clin_attr': clin_attr,
+            'molecular_attr': molecular_attr,
+            'metadata_filters': filters or {},
+            'program': public_program
+        }
+
+    else:
+        # Requesting User Data filter panel
+        template = 'cohorts/user-data.html'
+
         results = public_metadata_counts_platform_list(filters, (cohort_id if cohort_id != 0 else None), user, program_id)
         totals = results['total']
 
@@ -2132,10 +2150,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             'program': public_program
         }
 
-        return render(request, template, template_values)
-    else:
-        # Requesting User Data filter panel
-        template = 'cohorts/user-data.html'
+    return render(request, template, template_values)
 
 
 # New Revision of count_metadata for public programs only
@@ -2155,7 +2170,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
     # Fetch the possible value set of all non-continuous columns
     # (also fetches the display strings for all attributes and values which have them)
-    metadata_values = get_metadata_value_set(program_id)
+    metadata_values = fetch_metadata_value_set(program_id)
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
     for key in inc_filters:
