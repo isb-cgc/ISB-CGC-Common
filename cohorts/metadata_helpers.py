@@ -120,6 +120,8 @@ def fetch_program_attr(program):
         if not program:
             program = get_public_program_id('TCGA')
 
+        print >> sys.stdout, 'Program ID: ' + program.__str__()
+
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
             METADATA_ATTR[program] = {}
 

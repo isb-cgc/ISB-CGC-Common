@@ -1383,35 +1383,17 @@ def get_metadata(request):
     limit = request.GET.get('limit', None)
     program_id = request.GET.get('program_id', None)
 
+    program_id = int(program_id) if program_id is not None else None
+
     user = Django_User.objects.get(id=request.user.id)
-    if program_id:
+
+    if program_id is not None and program_id > 0:
         results = public_metadata_counts(filters, cohort, user, program_id, limit)
     else:
-        results = metadata_counts_platform_list(filters, cohort, user, limit)
+        results = user_metadata_counts(user, filters, cohort)
 
     if not results:
         results = {}
-    else:
-
-        attr_details = {
-            'RNA_sequencing': [],
-            'miRNA_sequencing': [],
-            'DNA_methylation': [],
-        }
-
-        for item in results['count']:
-            key = item['name']
-            values = item['values']
-
-            if key.startswith('has_'):
-                data_availability_sort(key, values, attr_details)
-
-        for key, value in attr_details.items():
-            results['count'].append({
-                'name': key,
-                'values': value,
-                'id': None
-            })
 
     return JsonResponse(results)
 
