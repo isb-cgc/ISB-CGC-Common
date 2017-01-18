@@ -1772,106 +1772,88 @@ def set_operation(request):
 
                 if len(cohorts):
 
+                    study_list = []
+                    cohorts_studies = {}
+                    sample_study_map = {}
+
+                    cohort_list = tuple(int(i) for i in cohort_ids)
+                    params = ('%s,' * len(cohort_ids))[:-1]
+
                     db = get_sql_connection()
                     cursor = db.cursor()
 
-                    study_list = []
-                    cohorts_studies = {}
-
-                    cohort_list = tuple(i for i in cohorts.values_list('id',flat=True))
-                    params = ('%s,' * len(cohort_list))[:-1]
-
-                    cursor.execute("""
-                        SELECT DISTINCT study_id
+                    intersect_and_study_list_def = """
+                        SELECT cs.sample_id, GROUP_CONCAT(DISTINCT cs.study_id SEPARATOR ';')
                         FROM cohorts_samples cs
-                        WHERE cs.cohort_id IN (%s);
-                    """ % params, cohort_list)
+                        WHERE cs.cohort_id IN ({0})
+                        GROUP BY cs.sample_id
+                        HAVING COUNT(DISTINCT cs.cohort_id) = %s;
+                    """.format(params)
+
+                    cohort_list += (len(cohorts),)
+
+                    cursor.execute(intersect_and_study_list_def, cohort_list)
 
                     for row in cursor.fetchall():
-                        study_list.append(row[0])
+                        if row[0] not in sample_study_map:
+                            studies = row[1]
+                            if studies[-1] == ';':
+                                studies = studies[:-1]
+
+                            studies = [ int(x) if len(x) > 0 else -1 for x in studies.split(';') ]
+
+                            study_list += studies
+
+                            sample_study_map[row[0]] = studies
 
                     if cursor: cursor.close()
-                    if db and db.open: db.close
+                    if db and db.open: db.close()
 
-                    studies = Study.objects.filter(id__in=study_list)
+                    study_list = list(set(study_list))
+                    study_models = Study.objects.filter(id__in=study_list)
 
-                    for study in studies:
+                    for study in study_models:
                         cohorts_studies[study.id] = study.get_my_root_and_depth()
-
-                    sample_study_map = {}
-
-                    cohort_samples = Samples.objects.filter(cohort=cohorts[0])
-                    cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id',flat=True))
-
-                    # Samples from older cohorts made from ISB-CGC data may have null for their study IDs; we should treat
-                    # these as 'matching' studies
-
-                    for sample in cohort_samples:
-                        if sample.sample_id not in sample_study_map:
-                            sample_study_map[sample.sample_id] = []
-                        if sample.study is None:
-                            if -1 not in sample_study_map[sample.sample_id]:
-                                sample_study_map[sample.sample_id].append(-1);
-                        elif sample.study.id not in sample_study_map[sample.sample_id]:
-                                sample_study_map[sample.sample_id].append(sample.study.id)
-
-                    notes = 'Intersection of ' + cohorts[0].name
-
-                    for i in range(1, len(cohorts)):
-                        cohort = cohorts[i]
-                        notes += ', ' + cohort.name
-
-                        cohort_samples = Samples.objects.filter(cohort=cohort)
-
-                        for sample in cohort_samples:
-                            if sample.sample_id in sample_study_map:
-                                if sample.study is None:
-                                    if -1 not in sample_study_map[sample.sample_id]:
-                                        sample_study_map[sample.sample_id].append(-1);
-                                elif sample.study.id not in sample_study_map[sample.sample_id]:
-                                    sample_study_map[sample.sample_id].append(sample.study.id)
-
-                        cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id',flat=True))
 
                     cohort_sample_list = []
 
-                    for sample in cohort_samples_ids:
+                    for sample_id in sample_study_map:
+                        studies = sample_study_map[sample_id]
                         # If multiple copies of this sample from different studies were found, we need to examine
                         # their studies' inheritance chains
-                        if len(sample_study_map[sample]) > 1:
-                            studies = sample_study_map[sample]
+                        if len(studies) > 1:
                             no_match = False
                             root = -1
                             max_depth = -1
                             deepest_study = -1
                             for study in studies:
-                                study_rd = cohorts_studies[study.id]
+                                study_rd = cohorts_studies[study]
 
                                 if root < 0:
                                     root = study_rd['root']
                                     max_depth = study_rd['depth']
-                                    deepest_study = study.id
+                                    deepest_study = study
                                 else:
                                     if root != study_rd['root']:
                                         no_match = True
                                     else:
                                         if max_depth < 0 or study_rd['depth'] > max_depth:
                                             max_depth = study_rd['depth']
-                                            deepest_study = study.id
+                                            deepest_study = study
 
                             if not no_match:
-                                cohort_sample_list.append({'id':sample, 'study':deepest_study, })
+                                cohort_sample_list.append({'id':sample_id, 'study':deepest_study, })
                         # If only one study was found, all copies of this sample implicitly match
                         else:
                             # If a study's ID is <= 0 it's a null study ID, so just record None
-                            study = (None if sample_study_map[sample][0] <=0 else sample_study_map[sample][0])
-                            cohort_sample_list.append({'id': sample, 'study':study})
+                            study = (None if studies[0] <=0 else studies[0])
+                            cohort_sample_list.append({'id': sample_id, 'study':study})
 
                     samples = cohort_sample_list
 
                     stop = time.time()
 
-                    logger.debug('[BENCHMARKING] Time to build intersecting sample set: ' + (stop - start).__str__())
+                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
 
             elif op == 'complement':
                 base_id = request.POST.get('base-id')
