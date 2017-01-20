@@ -98,7 +98,7 @@ def get_sql_connection():
             'passwd': database['PASSWORD'],
         }
 
-        if not settings.IS_DEV:
+        if not settings.DEV:
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
@@ -107,10 +107,12 @@ def get_sql_connection():
 
         db = MySQLdb.connect(**connect_options)
 
+        print >> sys.stdout, "[STATUS] get_sql_connection was successful"
+
         return db
 
     except Exception as e:
-        logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
+        logger.error("[ERROR] Exception in get_sql_connection(): " + e.message)
         logger.error(traceback.format_exc())
         if db and db.open: db.close()
 
