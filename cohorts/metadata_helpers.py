@@ -89,6 +89,7 @@ def make_id(length):
 # Database connection - does not check for AppEngine
 def get_sql_connection():
     database = settings.DATABASES['default']
+    db = None
     try:
         connect_options = {
             'host': database['HOST'],
@@ -96,6 +97,8 @@ def get_sql_connection():
             'user': database['USER'],
             'passwd': database['PASSWORD']
         }
+
+        print >> sys.stdout, "In get_sql_connection(): "+connect_options.__str__()
 
         if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
             connect_options['ssl'] = database['OPTIONS']['ssl']
@@ -106,6 +109,8 @@ def get_sql_connection():
 
     except Exception as e:
         logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
+        logger.error(e.message)
+        logger.exception()
         if db and db.open: db.close()
 
 
