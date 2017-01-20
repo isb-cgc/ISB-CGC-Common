@@ -98,8 +98,6 @@ def get_sql_connection():
             'passwd': database['PASSWORD']
         }
 
-        print >> sys.stdout, "In get_sql_connection(): "+connect_options.__str__()
-
         if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
@@ -109,8 +107,7 @@ def get_sql_connection():
 
     except Exception as e:
         logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
-        logger.error(e.message)
-        logger.exception()
+        logger.error(traceback.format_exc())
         if db and db.open: db.close()
 
 
