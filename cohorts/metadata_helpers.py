@@ -95,8 +95,12 @@ def get_sql_connection():
             'host': database['HOST'],
             'db': database['NAME'],
             'user': database['USER'],
-            'passwd': database['PASSWORD']
+            'passwd': database['PASSWORD'],
         }
+
+        if not settings.IS_DEV:
+            connect_options['host'] = 'localhost'
+            connect_options['unix_socket'] = settings.DB_SOCKET
 
         if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
             connect_options['ssl'] = database['OPTIONS']['ssl']
