@@ -102,6 +102,10 @@ def get_sql_connection():
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
+        print >> sys.stdout, "[STATUS] In get_sql_connection(), host is: " + \
+                             connect_options['host'] + \
+                             (connect_options['unix_socket'] if 'unix_socket' in connect_options else "")
+
         if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
