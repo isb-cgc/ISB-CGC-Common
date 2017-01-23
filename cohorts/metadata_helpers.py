@@ -86,7 +86,7 @@ def make_id(length):
     return ''.join(random.sample(string.ascii_lowercase, length))
 
 
-# Database connection - does not check for AppEngine
+# Database connection
 def get_sql_connection():
     database = settings.DATABASES['default']
     db = None
@@ -102,11 +102,7 @@ def get_sql_connection():
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
-        print >> sys.stdout, "[STATUS] In get_sql_connection(), host is: " + connect_options['host'] + ':' + \
-                             (connect_options['unix_socket'] if 'unix_socket' in connect_options and
-                              connect_options['unix_socket'] is not None else "")
-
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and settings.IS_DEV:
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
