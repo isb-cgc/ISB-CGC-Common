@@ -102,12 +102,10 @@ def get_sql_connection():
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and settings.IS_DEV:
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
-
-        print >> sys.stdout, "[STATUS] get_sql_connection was successful"
 
         return db
 
