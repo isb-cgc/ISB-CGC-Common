@@ -126,8 +126,6 @@ def fetch_program_attr(program):
         if not program:
             program = get_public_program_id('TCGA')
 
-        print >> sys.stdout, 'Program ID: ' + program.__str__()
-
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
             METADATA_ATTR[program] = {}
 
@@ -135,7 +133,7 @@ def fetch_program_attr(program):
 
             db = get_sql_connection()
             cursor = db.cursor()
-            cursor.callproc('get_program_attr', (program,))
+            cursor.callproc('get_program_attr', [str(program)])
             for row in cursor.fetchall():
                 METADATA_ATTR[program][row[0]] = {'name': row[0], 'displ_name': format_for_display(row[0]) if row[0] not in preformatted_attr else row[0], 'values': {}, 'type': row[1]}
 
@@ -185,7 +183,6 @@ def fetch_isbcgc_project_set():
 
 # Fetch a list of all public programs, represented as an object containing their name and ID
 def get_public_programs():
-    logger.debug('LOL A TEST')
     try:
         progs = Program.objects.filter(is_public=True, active=True)
 
@@ -235,7 +232,7 @@ def fetch_metadata_value_set(program=None):
             db = get_sql_connection()
             cursor = db.cursor()
 
-            cursor.callproc('get_metadata_values', (program,))
+            cursor.callproc('get_metadata_values', [program])
 
             for row in cursor.fetchall():
                 METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
@@ -246,10 +243,10 @@ def fetch_metadata_value_set(program=None):
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program,))
+            cursor.callproc('get_program_display_strings', [program])
 
             for row in cursor.fetchall():
-                if row['value_name'] is not None:
+                if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program] and row['value_name'] in METADATA_ATTR[program][row['attr_name']]['values']:
                     METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
 
         return copy.deepcopy(METADATA_ATTR[program])
