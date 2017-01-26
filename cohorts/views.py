@@ -77,6 +77,11 @@ def convert(data):
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None):
 
+    if program_id is None and cohort_id is None:
+        # We must always have a program_id or a cohort_id - we cannot have neither, because then
+        # we have no way to know where to source our samples from
+        raise Exception("No Program or Cohort ID was provided when trying to obtain sample and case lists!")
+
     samples_and_cases = {'items': [], 'cases': [], 'count': 0}
 
     sample_ids = {}
@@ -194,8 +199,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             filter_copy = copy.deepcopy(filters)
             where_clause = build_where_clause(filter_copy)
 
-        base_table = 'metadata_samples_shortlist'
-        filter_table = 'metadata_samples_shortlist'
+        base_table = None
+        filter_table = None
         tmp_mut_table = None
         tmp_cohort_table = None
         tmp_filter_table = None
@@ -304,7 +309,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # If there is a cohort, make a temporary table based on it and make it the base table
         if cohort_id is not None:
             tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
-            base_table = tmp_cohort_table
             make_cohort_table_str = """
                 CREATE TEMPORARY TABLE %s AS SELECT ms.*
                 FROM cohorts_samples cs
@@ -315,6 +319,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
+            base_table = tmp_cohort_table
 
         # If there are filters, create a temporary table filtered off the base table
         if filters.__len__() > 0:
@@ -721,7 +726,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
                 filter_obj[key]['values'].append(val)
 
-        results = get_sample_case_list(request.user, filter_obj, source)
+        results = get_sample_case_list(request.user, filter_obj, source, program_id)
 
         # Do not allow 0 sample cohorts
         if int(results['count']) == 0:
