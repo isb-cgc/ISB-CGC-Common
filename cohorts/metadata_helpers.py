@@ -72,6 +72,8 @@ def get_sql_connection():
         if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
+        print >> sys.stdout, "[STATUS] Connection settings: "+ connect_options['host'] + ":" + connect_options['unix_socket']+ ":" + connect_options['db'] + ":" + connect_options['user']
+
         db = MySQLdb.connect(**connect_options)
 
         return db
