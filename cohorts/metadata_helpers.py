@@ -1,6 +1,6 @@
 """
 
-Copyright 2016, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -52,18 +52,24 @@ ISB_CGC_STUDIES = {
 def make_id(length):
     return ''.join(random.sample(string.ascii_lowercase, length))
 
-# Database connection - does not check for AppEngine
+
+# Database connection
 def get_sql_connection():
     database = settings.DATABASES['default']
+    db = None
     try:
         connect_options = {
             'host': database['HOST'],
             'db': database['NAME'],
             'user': database['USER'],
-            'passwd': database['PASSWORD']
+            'passwd': database['PASSWORD'],
         }
 
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS']:
+        if not settings.IS_DEV:
+            connect_options['host'] = 'localhost'
+            connect_options['unix_socket'] = settings.DB_SOCKET
+
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
@@ -71,7 +77,8 @@ def get_sql_connection():
         return db
 
     except Exception as e:
-        logger.error("[ERROR] Exception in get_sql_connection(): " + str(sys.exc_info()[0]))
+        logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
+        logger.error(traceback.format_exc())
         if db and db.open: db.close()
 
 # Generate the METADATA_SHORTLIST['list'] list of values based on the contents of the metadata_shortlist view
