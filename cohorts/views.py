@@ -1,6 +1,6 @@
 """
 
-Copyright 2016, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -327,6 +327,8 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         tmp_cohort_table = None
         tmp_filter_table = None
         params_tuple = ()
+
+        db.autocommit(True)
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
@@ -842,6 +844,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         tmp_mut_table = None
         tmp_cohort_table = None
         tmp_filter_table = None
+
+        db.autocommit(True)
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
