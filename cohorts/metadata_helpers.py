@@ -107,8 +107,6 @@ def get_sql_connection():
 
         db = MySQLdb.connect(**connect_options)
 
-        db.autocommit(True)
-
         return db
 
     except Exception as e:
