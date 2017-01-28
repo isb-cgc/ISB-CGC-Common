@@ -205,11 +205,25 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         tmp_cohort_table = None
         tmp_filter_table = None
 
+        programs = []
+        program_tables = {}
+
+        # if we have a program ID, the base table is that program's samples table;
+        # otherwise the base table is the cohort_samples table
         if program_id:
-            program_tables = Public_Data_Tables.objects.filter(program_id=program_id).first()
+            programs.append(program_id)
+        if cohort_id:
+            cursor.callproc('get_programs_in_cohort', (cohort_id,))
+            for row in cursor.fetchall():
+                programs.append(row[0])
+            base_table = 'cohort_samples'
+
+        for program in programs:
+            program_tables = Public_Data_Tables.objects.filter(program_id=program).first()
             if program_tables:
-                base_table = program_tables.samples_table
-                filter_table = base_table
+                program_tables[program] = {'table': program_tables.samples_table, 'where_clause': where_clause}
+                if program_id == program:
+                    base_table = program_tables.samples_table
 
         params_tuple = ()
 
@@ -310,9 +324,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         if cohort_id is not None:
             tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
             make_cohort_table_str = """
-                CREATE TEMPORARY TABLE %s AS SELECT ms.*
+                CREATE TEMPORARY TABLE %s AS SELECT sample_barcode
                 FROM cohorts_samples cs
-                JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
             """ % (tmp_cohort_table, base_table)
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)

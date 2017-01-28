@@ -73,6 +73,9 @@ def get_case_and_sample_count(base_table, cursor):
 def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
     db = get_sql_connection()
+
+    db.autocommit(True)
+
     cursor = None
 
     user_data_counts = {
@@ -217,6 +220,9 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         mutation_where_clause = build_where_clause(mutation_filters)
 
     db = get_sql_connection()
+
+    db.autocommit(True)
+
     django.setup()
 
     cursor = None
