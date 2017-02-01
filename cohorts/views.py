@@ -47,7 +47,6 @@ import django
 
 from django.http import StreamingHttpResponse
 from django.core import serializers
-from google.appengine.api import urlfetch
 from allauth.socialaccount.models import SocialToken, SocialAccount
 from django.contrib.auth.models import User as Django_User
 
@@ -58,6 +57,8 @@ from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
 from uuid import uuid4
 from accounts.models import NIH_User
+
+import requests
 
 from api.api_helpers import *
 from metadata_helpers import *
@@ -174,7 +175,6 @@ GROUPED_FILTERS = {
 }
 
 debug = settings.DEBUG # RO global for this file
-urlfetch.set_default_fetch_deadline(60)
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
@@ -2052,8 +2052,9 @@ def cohort_filelist(request, cohort_id=0):
 
     token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
     data_url = METADATA_API + ('v1/cohort_files?platform_count_only=True&cohort_id=%s&token=%s' % (cohort_id, token))
-    result = urlfetch.fetch(data_url, deadline=120)
-    items = json.loads(result.content)
+    result = requests.get(data_url, timeout=60)
+    items = result.json()
+    print >> sys.stdout, "[STATUS] result.json: "+result.json().__str__()
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
     nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
@@ -2067,7 +2068,7 @@ def cohort_filelist(request, cohort_id=0):
     cohort_sample_list = Samples.objects.filter(cohort=cohort, study__in=user_studies)
     if len(cohort_sample_list):
         messages.info(request,
-                      "File listing is not available for cohort samples that come from a user uploaded study. This functionality is currently being worked on and will become available in a future release.")
+            "File listing is not available for cohort samples that come from a user uploaded study. This functionality is currently being worked on and will become available in a future release.")
 
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,
@@ -2100,9 +2101,9 @@ def cohort_filelist_ajax(request, cohort_id=0):
     for key in request.GET:
         data_url += '&' + key + '=' + request.GET[key]
 
-    result = urlfetch.fetch(data_url, deadline=120)
+    result = requests.get(data_url, timeout=60)
 
-    return HttpResponse(result.content, status=200)
+    return HttpResponse(result.text, status=200)
 
 
 @login_required
@@ -2170,8 +2171,8 @@ def streaming_csv_view(request, cohort_id=0):
     offset = None
 
     while keep_fetching:
-        result = urlfetch.fetch(data_url+('&offset='+offset.__str__() if offset else ''), deadline=60)
-        items = json.loads(result.content)
+        result = requests.get(data_url+('&offset='+offset.__str__() if offset else ''), timeout=60)
+        items = result.json()
 
         if 'file_list' in items:
             file_list += items['file_list']
