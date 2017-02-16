@@ -1911,7 +1911,7 @@ def set_operation(request):
                 bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
                 stop = time.time()
 
-                logger.debug('[BENCHMARKING] Time to add sample set to BQ: ' + (stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to get sample and case set and add to BQ: ' + (stop - start).__str__())
 
                 # Fetch the list of cases based on the sample IDs
                 patient_list = []
