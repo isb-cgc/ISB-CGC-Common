@@ -1898,10 +1898,9 @@ def set_operation(request):
                 Samples.objects.bulk_create(sample_list)
                 stop = time.time()
 
-                logger.debug('[BENCHMARKING] Time to create complementary sample set: ' + (stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to bulk create sample set: ' + (stop - start).__str__())
 
                 start = time.time()
-
                 # get the full resulting sample and patient ID set
                 samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
 
@@ -1910,6 +1909,9 @@ def set_operation(request):
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
                 bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
+                stop = time.time()
+
+                logger.debug('[BENCHMARKING] Time to add sample set to BQ: ' + (stop - start).__str__())
 
                 # Fetch the list of cases based on the sample IDs
                 patient_list = []
