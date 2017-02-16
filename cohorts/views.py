@@ -1899,6 +1899,11 @@ def set_operation(request):
                     else:
                         sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
                 Samples.objects.bulk_create(sample_list)
+                stop = time.time()
+
+                logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
+
+                start = time.time()
 
                 # get the full resulting sample and patient ID set
                 samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
