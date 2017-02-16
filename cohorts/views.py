@@ -1863,9 +1863,14 @@ def set_operation(request):
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
 
+                start = time.time()
                 base_samples = Samples.objects.filter(cohort_id=base_id)
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
+                stop = time.time()
+
+                print >> sys.stdout, "[STATUS] Time to subtract sample set in set_op.completement: " + str(stop-start)
+
                 samples = cohort_samples.values_list('sample_id', 'study_id')
 
                 notes = 'Subtracted '
