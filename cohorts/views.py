@@ -1863,13 +1863,9 @@ def set_operation(request):
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
 
-                start = time.time()
                 base_samples = Samples.objects.filter(cohort_id=base_id)
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-                stop = time.time()
-
-                print >> sys.stdout, "[STATUS] Time to subtract sample set in set_op.completement: " + str(stop-start)
 
                 samples = cohort_samples.values_list('sample_id', 'study_id')
 
@@ -1886,12 +1882,13 @@ def set_operation(request):
                 notes += ' from %s.' % base_cohort.name
 
             if len(samples):
-                start = time.time()
+
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
 
                 # Store cohort samples and patients to CloudSQL
+                start = time.time()
                 sample_list = []
                 for sample in samples:
                     if op == 'intersect':
@@ -1901,7 +1898,7 @@ def set_operation(request):
                 Samples.objects.bulk_create(sample_list)
                 stop = time.time()
 
-                logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to create complementary sample set: ' + (stop - start).__str__())
 
                 start = time.time()
 
