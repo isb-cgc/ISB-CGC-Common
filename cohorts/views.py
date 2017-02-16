@@ -2054,7 +2054,6 @@ def cohort_filelist(request, cohort_id=0):
     data_url = METADATA_API + ('v1/cohort_files?platform_count_only=True&cohort_id=%s&token=%s' % (cohort_id, token))
     result = requests.get(data_url, timeout=60)
     items = result.json()
-    print >> sys.stdout, "[STATUS] result.json: "+result.json().__str__()
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
     nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
