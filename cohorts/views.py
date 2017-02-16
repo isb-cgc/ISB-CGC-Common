@@ -1863,13 +1863,9 @@ def set_operation(request):
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
 
-                start = time.time()
                 base_samples = Samples.objects.filter(cohort_id=base_id)
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-                stop = time.time()
-
-                print >> sys.stdout, "[STATUS] Time to subtract sample set in set_op.completement: " + str(stop-start)
 
                 samples = cohort_samples.values_list('sample_id', 'study_id')
 
@@ -1886,12 +1882,13 @@ def set_operation(request):
                 notes += ' from %s.' % base_cohort.name
 
             if len(samples):
-                start = time.time()
+
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
 
                 # Store cohort samples and patients to CloudSQL
+                start = time.time()
                 sample_list = []
                 for sample in samples:
                     if op == 'intersect':
@@ -1899,7 +1896,11 @@ def set_operation(request):
                     else:
                         sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
                 Samples.objects.bulk_create(sample_list)
+                stop = time.time()
 
+                logger.debug('[BENCHMARKING] Time to bulk create sample set: ' + (stop - start).__str__())
+
+                start = time.time()
                 # get the full resulting sample and patient ID set
                 samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
 
@@ -1908,6 +1909,9 @@ def set_operation(request):
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
                 bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
+                stop = time.time()
+
+                logger.debug('[BENCHMARKING] Time to get sample and case set and add to BQ: ' + (stop - start).__str__())
 
                 # Fetch the list of cases based on the sample IDs
                 patient_list = []
