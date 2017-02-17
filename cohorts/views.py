@@ -1867,6 +1867,8 @@ def set_operation(request):
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
 
+                print >> sys.stdout, "[STATUS] Created completemented sample ID set."
+
                 samples = cohort_samples.values_list('sample_id', 'study_id')
 
                 notes = 'Subtracted '
@@ -1887,6 +1889,8 @@ def set_operation(request):
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
 
+                print >> sys.stdout, "[STATUS] Starting bulk create"
+
                 # Store cohort samples and patients to CloudSQL
                 start = time.time()
                 sample_list = []
@@ -1903,6 +1907,8 @@ def set_operation(request):
                 start = time.time()
                 # get the full resulting sample and patient ID set
                 samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
+
+                print >> sys.stdout, "[STATUS] Starting BQ create."
 
                 # Store cohort to BigQuery
                 project_id = settings.BQ_PROJECT_ID
