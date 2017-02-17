@@ -1730,7 +1730,7 @@ def clone_cohort(request, cohort_id):
 @login_required
 @csrf_protect
 def set_operation(request):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+    if debug: print >> sys.stdout, 'Called '+sys._getframe().f_code.co_name
     redirect_url = 'cohort_list'
 
     db = None
@@ -1765,7 +1765,7 @@ def set_operation(request):
                 start = time.time()
                 samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'study_id')
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
+                print >> sys.stdout, '[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__()
 
             elif op == 'intersect':
 
@@ -1857,10 +1857,10 @@ def set_operation(request):
 
                     stop = time.time()
 
-                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
+                    print >> sys.stdout, '[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__()
 
             elif op == 'complement':
-                logger.info("[STATUS] Creating completemented sample ID set...")
+                print >> sys.stdout, "[STATUS] Creating completemented sample ID set..."
                 start = time.time()
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
@@ -1868,14 +1868,14 @@ def set_operation(request):
                 base_samples = Samples.objects.filter(cohort_id=base_id)
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-                logger.info("[STATUS] Filtering query in complement:"+ cohort_samples.query.__format__(''))
+                print >> sys.stdout, "[STATUS] Filtering query in complement:"+ cohort_samples.query.__format__('')
                 stop = time.time()
 
-                logger.info("[STATUS] Time to create subtracted set: "+str(stop-start))
+                print >> sys.stdout, "[STATUS] Time to create subtracted set: "+str(stop-start)
 
                 samples = cohort_samples.values_list('sample_id', 'study_id')
 
-                logger.info("[STATUS] Creating notes")
+                print >> sys.stdout, "[STATUS] Creating notes"
 
                 notes = 'Subtracted '
                 base_cohort = Cohort.objects.get(id=base_id)
@@ -1889,17 +1889,17 @@ def set_operation(request):
                         notes += ', ' + item.name
                 notes += ' from %s.' % base_cohort.name
 
-                logger.info("[STATUS] Notes recorded")
+                print >> sys.stdout, "[STATUS] Notes recorded"
 
             if len(samples):
 
-                logger.info("[STATUS] Making cohort and permissions")
+                print >> sys.stdout, "[STATUS] Making cohort and permissions"
 
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
 
-                logger.info("[STATUS] Cohort made, starting bulk create")
+                print >> sys.stdout, "[STATUS] Cohort made, starting bulk create"
 
                 # Store cohort samples and patients to CloudSQL
                 start = time.time()
@@ -1912,13 +1912,13 @@ def set_operation(request):
                 Samples.objects.bulk_create(sample_list)
                 stop = time.time()
 
-                logger.debug('[BENCHMARKING] Time to bulk create sample set: ' + (stop - start).__str__())
+                print >> sys.stdout, '[BENCHMARKING] Time to bulk create sample set: ' + (stop - start).__str__()
 
                 start = time.time()
                 # get the full resulting sample and patient ID set
                 samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
 
-                logger.info("[STATUS] Starting BQ create.")
+                print >> sys.stdout, "[STATUS] Starting BQ create."
 
                 # Store cohort to BigQuery
                 project_id = settings.BQ_PROJECT_ID
@@ -1927,7 +1927,7 @@ def set_operation(request):
                 bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
                 stop = time.time()
 
-                logger.debug('[BENCHMARKING] Time to get sample and case set and add to BQ: ' + (stop - start).__str__())
+                print >> sys.stdout, '[BENCHMARKING] Time to get sample and case set and add to BQ: ' + (stop - start).__str__()
 
                 # Fetch the list of cases based on the sample IDs
                 patient_list = []
@@ -1948,15 +1948,16 @@ def set_operation(request):
                         source.save()
 
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
+                print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__()
 
             else:
+                print >> sys.stdout, "[WARNING] No samples in this set - aborting."
                 message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
                 messages.warning(request, message)
                 return redirect('cohort_list')
 
-        logger.info("[STATUS] Finished set op, returning to")
-        logger.info(str(redirect(redirect_url)))
+        print >> sys.stdout, "[STATUS] Finished set op, returning to"
+        print >> sys.stdout, str(redirect(redirect_url))
 
         return redirect(redirect_url)
 
