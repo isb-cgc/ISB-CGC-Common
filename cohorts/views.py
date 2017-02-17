@@ -1953,11 +1953,9 @@ def set_operation(request):
                 print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__()
 
             else:
-                print >> sys.stdout, "[WARNING] No samples in this set - aborting."
                 message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
+                print >> sys.stdout, "[WARNING] "+message
                 messages.warning(request, message)
-
-        return redirect(redirect_view)
 
     except Exception as e:
         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
@@ -1965,6 +1963,8 @@ def set_operation(request):
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
+
+    return redirect(redirect_view)
 
 
 @login_required
