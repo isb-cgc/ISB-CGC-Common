@@ -1868,6 +1868,7 @@ def set_operation(request):
                 base_samples = Samples.objects.filter(cohort_id=base_id)
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
+                print >> sys.stdout, "[STATUS] Filtering query in complement:"+ cohort_samples.query.__format__('')
                 stop = time.time()
 
                 print >> sys.stdout, "[STATUS] Time to create subtracted set: "+str(stop-start)
