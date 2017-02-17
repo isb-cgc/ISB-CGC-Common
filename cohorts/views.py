@@ -1748,6 +1748,7 @@ def set_operation(request):
             samples = []
 
             op = request.POST.get('operation')
+
             if op == 'union':
                 notes = 'Union of '
                 cohort_ids = request.POST.getlist('selected-ids')
@@ -1877,17 +1878,7 @@ def set_operation(request):
 
                 print >> sys.stdout, "[STATUS] Creating notes"
 
-                notes = 'Subtracted '
-                base_cohort = Cohort.objects.get(id=base_id)
-                subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-                first = True
-                for item in subtracted_cohorts:
-                    if first:
-                        notes += item.name
-                        first = False
-                    else:
-                        notes += ', ' + item.name
-                notes += ' from %s.' % base_cohort.name
+                notes = 'Subtracted ' + (', '.join(Cohort.objects.filter(id__in=subtract_ids).values_list('name', flat=True))) + (' from %s.' % base_cohort.name)
 
                 print >> sys.stdout, "[STATUS] Notes recorded at "+str(time.time())
 
