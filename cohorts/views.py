@@ -1730,7 +1730,7 @@ def clone_cohort(request, cohort_id):
 @login_required
 @csrf_protect
 def set_operation(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     db = None
@@ -1860,7 +1860,7 @@ def set_operation(request):
                     logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
 
             elif op == 'complement':
-                print >> sys.stdout, "[STATUS] Creating completemented sample ID set..."
+                logger.info("[STATUS] Creating completemented sample ID set...")
                 start = time.time()
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
@@ -1868,14 +1868,14 @@ def set_operation(request):
                 base_samples = Samples.objects.filter(cohort_id=base_id)
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-                print >> sys.stdout, "[STATUS] Filtering query in complement:"+ cohort_samples.query.__format__('')
+                logger.info("[STATUS] Filtering query in complement:"+ cohort_samples.query.__format__(''))
                 stop = time.time()
 
-                print >> sys.stdout, "[STATUS] Time to create subtracted set: "+str(stop-start)
+                logger.info("[STATUS] Time to create subtracted set: "+str(stop-start))
 
                 samples = cohort_samples.values_list('sample_id', 'study_id')
 
-                print >> sys.stdout, "[STATUS] Creating notes"
+                logger.info("[STATUS] Creating notes")
 
                 notes = 'Subtracted '
                 base_cohort = Cohort.objects.get(id=base_id)
@@ -1889,17 +1889,17 @@ def set_operation(request):
                         notes += ', ' + item.name
                 notes += ' from %s.' % base_cohort.name
 
-                print >> sys.stdout, "[STATUS] Notes recorded"
+                logger.info("[STATUS] Notes recorded")
 
             if len(samples):
 
-                print >> sys.stdout, "[STATUS] Making cohort and permissions"
+                logger.info("[STATUS] Making cohort and permissions")
 
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
 
-                print >> sys.stdout, "[STATUS] Cohort made, starting bulk create"
+                logger.info("[STATUS] Cohort made, starting bulk create")
 
                 # Store cohort samples and patients to CloudSQL
                 start = time.time()
@@ -1918,7 +1918,7 @@ def set_operation(request):
                 # get the full resulting sample and patient ID set
                 samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
 
-                print >> sys.stdout, "[STATUS] Starting BQ create."
+                logger.info("[STATUS] Starting BQ create.")
 
                 # Store cohort to BigQuery
                 project_id = settings.BQ_PROJECT_ID
