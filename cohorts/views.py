@@ -1951,6 +1951,7 @@ def set_operation(request):
                 logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
 
             else:
+                logger.warn("No samples in this set - aorting.")
                 message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
                 messages.warning(request, message)
                 return redirect('cohort_list')
