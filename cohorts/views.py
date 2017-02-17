@@ -1875,6 +1875,8 @@ def set_operation(request):
 
                 samples = cohort_samples.values_list('sample_id', 'study_id')
 
+                print >> sys.stdout, "[STATUS] Creating notes"
+
                 notes = 'Subtracted '
                 base_cohort = Cohort.objects.get(id=base_id)
                 subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
@@ -1887,13 +1889,17 @@ def set_operation(request):
                         notes += ', ' + item.name
                 notes += ' from %s.' % base_cohort.name
 
+                print >> sys.stdout, "[STATUS] Notes recorded"
+
             if len(samples):
+
+                print >> sys.stdout, "[STATUS] Making cohort and permissions"
 
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
 
-                print >> sys.stdout, "[STATUS] Starting bulk create"
+                print >> sys.stdout, "[STATUS] Cohort made, starting bulk create"
 
                 # Store cohort samples and patients to CloudSQL
                 start = time.time()
