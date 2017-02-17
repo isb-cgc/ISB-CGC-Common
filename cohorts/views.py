@@ -1731,7 +1731,7 @@ def clone_cohort(request, cohort_id):
 @csrf_protect
 def set_operation(request):
     if debug: print >> sys.stdout, 'Called '+sys._getframe().f_code.co_name
-    redirect_url = 'cohort_list'
+    redirect_view = 'cohort_list'
 
     db = None
     cursor = None
@@ -1889,11 +1889,13 @@ def set_operation(request):
                         notes += ', ' + item.name
                 notes += ' from %s.' % base_cohort.name
 
-                print >> sys.stdout, "[STATUS] Notes recorded"
+                print >> sys.stdout, "[STATUS] Notes recorded at "+str(time.time())
+
+                print >> sys.stdout, "[STATUS] Length of samples: "+str(len(samples))
 
             if len(samples):
 
-                print >> sys.stdout, "[STATUS] Making cohort and permissions"
+                print >> sys.stdout, "[STATUS] Making cohort and permissions at "+str(time.time())
 
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -1954,12 +1956,8 @@ def set_operation(request):
                 print >> sys.stdout, "[WARNING] No samples in this set - aborting."
                 message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
                 messages.warning(request, message)
-                return redirect('cohort_list')
 
-        print >> sys.stdout, "[STATUS] Finished set op, returning to"
-        print >> sys.stdout, str(redirect(redirect_url))
-
-        return redirect(redirect_url)
+        return redirect(redirect_view)
 
     except Exception as e:
         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
