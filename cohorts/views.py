@@ -1955,6 +1955,7 @@ def set_operation(request):
                 messages.warning(request, message)
                 return redirect('cohort_list')
 
+        logger.info("[STATUS] Finished set op, returning")
         return redirect(redirect_url)
 
     except Exception as e:
