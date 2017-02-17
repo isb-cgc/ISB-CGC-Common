@@ -1731,7 +1731,7 @@ def clone_cohort(request, cohort_id):
 @csrf_protect
 def set_operation(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-    redirect_url = '/cohorts/'
+    redirect_url = 'cohort_list'
 
     db = None
     cursor = None
@@ -1955,7 +1955,9 @@ def set_operation(request):
                 messages.warning(request, message)
                 return redirect('cohort_list')
 
-        logger.info("[STATUS] Finished set op, returning")
+        logger.info("[STATUS] Finished set op, returning to")
+        logger.info(str(redirect(redirect_url)))
+
         return redirect(redirect_url)
 
     except Exception as e:
