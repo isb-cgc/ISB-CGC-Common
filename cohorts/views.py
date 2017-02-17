@@ -1748,6 +1748,7 @@ def set_operation(request):
             samples = []
 
             op = request.POST.get('operation')
+
             if op == 'union':
                 notes = 'Union of '
                 cohort_ids = request.POST.getlist('selected-ids')
@@ -1877,25 +1878,15 @@ def set_operation(request):
 
                 print >> sys.stdout, "[STATUS] Creating notes"
 
-                notes = 'Subtracted '
-                base_cohort = Cohort.objects.get(id=base_id)
-                subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-                first = True
-                for item in subtracted_cohorts:
-                    if first:
-                        notes += item.name
-                        first = False
-                    else:
-                        notes += ', ' + item.name
-                notes += ' from %s.' % base_cohort.name
+                notes = 'Subtracted ' + (', '.join(Cohort.objects.filter(id__in=subtract_ids).values_list('name', flat=True))) + (' from %s.' % base_cohort.name)
 
-                print >> sys.stdout, "[STATUS] Notes recorded at "+str(time.time())
+                print >> sys.stdout, "[STATUS] Notes recorded, length of samples: "+str(len(samples))
 
-                print >> sys.stdout, "[STATUS] Length of samples: "+str(len(samples))
+            print >> sys.stdout, "[STATUS] POST IF/ELSE"
 
             if len(samples):
 
-                print >> sys.stdout, "[STATUS] Making cohort and permissions at "+str(time.time())
+                print >> sys.stdout, "[STATUS] Making cohort and permissions"
 
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
