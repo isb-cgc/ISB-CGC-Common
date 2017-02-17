@@ -1889,11 +1889,13 @@ def set_operation(request):
                         notes += ', ' + item.name
                 notes += ' from %s.' % base_cohort.name
 
-                print >> sys.stdout, "[STATUS] Notes recorded"
+                print >> sys.stdout, "[STATUS] Notes recorded at "+str(time.time())
+
+                print >> sys.stdout, "[STATUS] Length of samples: "+str(len(samples))
 
             if len(samples):
 
-                print >> sys.stdout, "[STATUS] Making cohort and permissions"
+                print >> sys.stdout, "[STATUS] Making cohort and permissions at "+str(time.time())
 
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
