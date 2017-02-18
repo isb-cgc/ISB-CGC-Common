@@ -1895,7 +1895,7 @@ def set_operation(request):
 
             print >> sys.stdout, "[STATUS] POST IF/ELSE"
 
-            if len(samples):
+            if samples.count():
 
                 print >> sys.stdout, "[STATUS] Making cohort and permissions"
 
