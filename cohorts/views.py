@@ -43,6 +43,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.db.models import Count, Sum
+
 import django
 
 from django.http import StreamingHttpResponse
@@ -1861,7 +1862,6 @@ def set_operation(request):
                     print >> sys.stdout, '[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__()
 
             elif op == 'complement':
-                print >> sys.stdout, "[STATUS] Creating completemented sample ID set..."
                 start = time.time()
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
@@ -1873,10 +1873,7 @@ def set_operation(request):
 
                 print >> sys.stdout, "[STATUS] Time to create subtracted set: "+str(stop-start)
 
-                start = time.time()
                 samples = cohort_samples.values_list('sample_id', 'study_id')
-                stop = time.time()
-                print >> sys.stdout, "[STATUS] Time to get sample/study ID pairs: " + str(stop - start)
 
                 start = time.time()
                 subtracted_cohorts = None
@@ -1895,15 +1892,15 @@ def set_operation(request):
 
             print >> sys.stdout, "[STATUS] POST IF/ELSE"
 
-            if len(samples):
+            if samples.count():
 
-                print >> sys.stdout, "[STATUS] Making cohort and permissions"
-
+                start = time.time()
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
+                stop = time.time()
 
-                print >> sys.stdout, "[STATUS] Cohort made, starting bulk create"
+                print >> sys.stdout, "[STATUS] Time to make cohort and perms: "+str(stop-start)
 
                 # Store cohort samples and patients to CloudSQL
                 start = time.time()
