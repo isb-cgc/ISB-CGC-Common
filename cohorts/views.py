@@ -1878,7 +1878,8 @@ def set_operation(request):
 
                 print >> sys.stdout, "[STATUS] Creating notes"
 
-                notes = 'Subtracted ' + (', '.join(Cohort.objects.filter(id__in=subtract_ids).values_list('name', flat=True))) + (' from ' + Cohort.objects.get(id=base_id).name)
+                # notes = 'Subtracted ' + (', '.join(Cohort.objects.filter(id__in=subtract_ids).values_list('name', flat=True))) + (' from ' + Cohort.objects.get(id=base_id).name)
+                notes = 'SOME NOTES'
 
                 print >> sys.stdout, "[STATUS] Notes recorded, length of samples: "+str(len(samples))
 
