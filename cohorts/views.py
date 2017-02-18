@@ -1875,6 +1875,10 @@ def set_operation(request):
 
                 start = time.time()
                 samples = cohort_samples.values_list('sample_id', 'study_id')
+                stop = time.time()
+                print >> sys.stdout, "[STATUS] Time to get sample/study ID pairs: " + str(stop - start)
+
+                start = time.time()
                 subtracted_cohorts = None
                 notes = ''
 
