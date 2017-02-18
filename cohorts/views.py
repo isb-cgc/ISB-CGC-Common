@@ -1878,6 +1878,11 @@ def set_operation(request):
 
                 print >> sys.stdout, "[STATUS] Creating notes"
 
+                print >> sys.stdout, "[STATUS] Getting base: "
+                print >> sys.stdout, str(Cohort.objects.get(id=base_id))
+                print >> sys.stdout, "[STATUS] Getting subtracted cohorts: "
+                print >> sys.stdout, str(Cohort.objects.filter(id__in=subtract_ids))
+
                 # notes = 'Subtracted ' + (', '.join(Cohort.objects.filter(id__in=subtract_ids).values_list('name', flat=True))) + (' from ' + Cohort.objects.get(id=base_id).name)
                 notes = 'SOME NOTES'
 
@@ -1937,9 +1942,9 @@ def set_operation(request):
                 elif op == 'complement':
                     source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
-                    for cohort in subtracted_cohorts:
-                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                        source.save()
+                    # for cohort in subtracted_cohorts:
+                    #     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                    #     source.save()
 
                 stop = time.time()
                 print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__()
