@@ -43,6 +43,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.db.models import Count, Sum
+
 import django
 
 from django.http import StreamingHttpResponse
@@ -1893,13 +1894,13 @@ def set_operation(request):
 
             if samples.count():
 
-                print >> sys.stdout, "[STATUS] Making cohort and permissions"
-
+                start = time.time()
                 new_cohort = Cohort.objects.create(name=name)
                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
+                stop = time.time()
 
-                print >> sys.stdout, "[STATUS] Cohort made, starting bulk create"
+                print >> sys.stdout, "[STATUS] Time to make cohort and perms: "+str(stop-start)
 
                 # Store cohort samples and patients to CloudSQL
                 start = time.time()
