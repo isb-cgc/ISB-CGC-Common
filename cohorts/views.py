@@ -1869,24 +1869,25 @@ def set_operation(request):
                 base_samples = Samples.objects.filter(cohort_id=base_id)
                 subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
                 cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-                print >> sys.stdout, "[STATUS] Filtering query in complement:"+ cohort_samples.query.__format__('')
                 stop = time.time()
 
                 print >> sys.stdout, "[STATUS] Time to create subtracted set: "+str(stop-start)
 
+                start = time.time()
                 samples = cohort_samples.values_list('sample_id', 'study_id')
+                subtracted_cohorts = None
+                notes = ''
 
-                print >> sys.stdout, "[STATUS] Creating notes"
+                if len(samples):
+                    subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
+                    notes = 'Subtracted ' + (
+                        ', '.join(subtracted_cohorts.values_list('name', flat=True))) + (
+                            ' from ' + Cohort.objects.get(id=base_id).name)
 
-                print >> sys.stdout, "[STATUS] Getting base: "
-                print >> sys.stdout, str(Cohort.objects.get(id=base_id))
-                print >> sys.stdout, "[STATUS] Getting subtracted cohorts: "
-                print >> sys.stdout, str(Cohort.objects.filter(id__in=subtract_ids))
+                    print >> sys.stdout, "[STATUS] Notes recorded"
 
-                # notes = 'Subtracted ' + (', '.join(Cohort.objects.filter(id__in=subtract_ids).values_list('name', flat=True))) + (' from ' + Cohort.objects.get(id=base_id).name)
-                notes = 'SOME NOTES'
-
-                print >> sys.stdout, "[STATUS] Notes recorded, length of samples: "+str(len(samples))
+                stop = time.time()
+                print >> sys.stdout, "[STATUS] Time to create notes: " + str(stop - start)
 
             print >> sys.stdout, "[STATUS] POST IF/ELSE"
 
@@ -1942,9 +1943,9 @@ def set_operation(request):
                 elif op == 'complement':
                     source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
-                    # for cohort in subtracted_cohorts:
-                    #     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    #     source.save()
+                    for cohort in subtracted_cohorts:
+                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                        source.save()
 
                 stop = time.time()
                 print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__()
