@@ -1882,7 +1882,7 @@ def set_operation(request):
                 subtracted_cohorts = None
                 notes = ''
 
-                if len(samples):
+                if samples.count():
                     subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
                     notes = 'Subtracted ' + (
                         ', '.join(subtracted_cohorts.values_list('name', flat=True))) + (
