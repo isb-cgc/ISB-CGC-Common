@@ -1861,7 +1861,6 @@ def set_operation(request):
                     print >> sys.stdout, '[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__()
 
             elif op == 'complement':
-                print >> sys.stdout, "[STATUS] Creating completemented sample ID set..."
                 start = time.time()
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
@@ -1873,10 +1872,7 @@ def set_operation(request):
 
                 print >> sys.stdout, "[STATUS] Time to create subtracted set: "+str(stop-start)
 
-                start = time.time()
                 samples = cohort_samples.values_list('sample_id', 'study_id')
-                stop = time.time()
-                print >> sys.stdout, "[STATUS] Time to get sample/study ID pairs: " + str(stop - start)
 
                 start = time.time()
                 subtracted_cohorts = None
