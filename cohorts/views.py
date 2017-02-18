@@ -1881,14 +1881,14 @@ def set_operation(request):
                 start = time.time()
                 subtracted_cohorts = None
                 notes = ''
-
-                if samples.count():
-                    subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-                    notes = 'Subtracted ' + (
-                        ', '.join(subtracted_cohorts.values_list('name', flat=True))) + (
-                            ' from ' + Cohort.objects.get(id=base_id).name)
-
-                    print >> sys.stdout, "[STATUS] Notes recorded"
+                #
+                # if samples.count():
+                #     subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
+                #     notes = 'Subtracted ' + (
+                #         ', '.join(subtracted_cohorts.values_list('name', flat=True))) + (
+                #             ' from ' + Cohort.objects.get(id=base_id).name)
+                #
+                #     print >> sys.stdout, "[STATUS] Notes recorded"
 
                 stop = time.time()
                 print >> sys.stdout, "[STATUS] Time to create notes: " + str(stop - start)
@@ -1947,9 +1947,9 @@ def set_operation(request):
                 elif op == 'complement':
                     source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
-                    for cohort in subtracted_cohorts:
-                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                        source.save()
+                    # for cohort in subtracted_cohorts:
+                    #     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                    #     source.save()
 
                 stop = time.time()
                 print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__()
