@@ -1866,33 +1866,51 @@ def set_operation(request):
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
 
-                base_samples = Samples.objects.filter(cohort_id=base_id)
-                subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
-                cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
+                db = get_sql_connection()
+                cursor = db.cursor()
+
+                param_vals = (base_id,)
+                param_vals += tuple(int(i) for i in subtract_ids)
+                params = ('%s,' * len(subtract_ids))[:-1]
+
+                cohort_samples_query = """
+                    SELECT cs.sample_id, cs.study_id
+                    FROM cohorts_samples cs
+                    WHERE cs.cohort_id = %s AND cs.sample_id NOT IN (
+                        SELECT sb.sample_id
+                        FROM cohorts_samples sb
+                        WHERE sb.cohort_id IN ({0})
+                    )
+                """.format(params)
+
+                cursor.execute(cohort_samples_query, param_vals)
                 stop = time.time()
 
-                print >> sys.stdout, "[STATUS] Time to create subtracted set: "+str(stop-start)
+                print >> sys.stdout, "[STATUS] Time to query subtracted set: "+str(stop-start)
 
-                samples = cohort_samples.values_list('sample_id', 'study_id')
+                samples = []
+
+                for row in cursor.fetchall():
+                    samples.append((row[0], row[1]),)
 
                 start = time.time()
                 subtracted_cohorts = None
                 notes = ''
-                #
-                # if samples.count():
-                #     subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-                #     notes = 'Subtracted ' + (
-                #         ', '.join(subtracted_cohorts.values_list('name', flat=True))) + (
-                #             ' from ' + Cohort.objects.get(id=base_id).name)
-                #
-                #     print >> sys.stdout, "[STATUS] Notes recorded"
+
+                if len(samples):
+                    subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
+                    notes = 'Subtracted ' + (
+                        ', '.join(subtracted_cohorts.values_list('name', flat=True))) + (
+                            ' from ' + Cohort.objects.get(id=base_id).name)
+
+                    print >> sys.stdout, "[STATUS] Notes recorded"
 
                 stop = time.time()
                 print >> sys.stdout, "[STATUS] Time to create notes: " + str(stop - start)
 
             print >> sys.stdout, "[STATUS] POST IF/ELSE"
 
-            if samples.count():
+            if len(samples):
 
                 start = time.time()
                 new_cohort = Cohort.objects.create(name=name)
@@ -1944,9 +1962,9 @@ def set_operation(request):
                 elif op == 'complement':
                     source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
-                    # for cohort in subtracted_cohorts:
-                    #     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    #     source.save()
+                    for cohort in subtracted_cohorts:
+                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                        source.save()
 
                 stop = time.time()
                 print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__()
