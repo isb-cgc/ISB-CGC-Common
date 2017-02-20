@@ -1202,12 +1202,18 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
 
     # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
 
+    start = time.time()
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
     cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved').annotate(num_patients=Count('samples'))
+    stop = time.time()
+
+    print >> sys.stdout, "[STATUS] Time to get cohort and permissions list: " + str(stop - start)
+
     cohorts.has_private_cohorts = False
     shared_users = {}
 
+    start = time.time()
     for item in cohorts:
         item.perm = item.get_perm(request).get_perm_display()
         item.owner = item.get_owner()
@@ -1219,6 +1225,9 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
             # append the list of shared users to the shared_users array
             if item.shared_with_users:
                 shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
+    stop = time.time()
+
+    print >> sys.stdout, "[STATUS] Time to calculate shared cohort users: "+ str(stop-start)
 
         # print local_zone.localize(item.last_date_saved)
 
@@ -1738,6 +1747,7 @@ def set_operation(request):
     cursor = None
 
     try:
+        fullstart = time.time()
 
         if request.POST:
             name = request.POST.get('name').encode('utf8')
@@ -1935,7 +1945,7 @@ def set_operation(request):
 
                 start = time.time()
                 # get the full resulting sample and patient ID set
-                samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
+                samples_and_participants = get_sample_participant_list(request.user, None, new_cohort.id)
 
                 print >> sys.stdout, "[STATUS] Starting BQ create."
 
@@ -1967,7 +1977,7 @@ def set_operation(request):
                         source.save()
 
                 stop = time.time()
-                print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__()
+                print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - fullstart).__str__()
 
             else:
                 message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
