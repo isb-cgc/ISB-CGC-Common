@@ -1984,8 +1984,9 @@ def set_operation(request):
                         source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                         source.save()
                 elif op == 'complement':
-                    source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    source.save()
+                    print >> sys.stdout, "[STATUS] Skipping source creation for complement for testing"
+                    # source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                    # source.save()
                     # for cohort in subtracted_cohorts:
                     #     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     #     source.save()
