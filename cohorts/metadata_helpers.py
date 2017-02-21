@@ -113,8 +113,9 @@ def fetch_metadata_shortlist():
 
 # Generate the ISB_CGC_STUDIES['list'] value set based on the get_isbcgc_study_set sproc
 def fetch_isbcgc_study_set():
+    cursor = None
+    db = None
     try:
-        cursor = None
         db = get_sql_connection()
         if not ISB_CGC_STUDIES['list'] or len(ISB_CGC_STUDIES['list']) <= 0:
             cursor = db.cursor()
@@ -139,9 +140,10 @@ def fetch_isbcgc_study_set():
 # Get the list of possible metadata values based on the metadata_shortlist and their in-use values in the metadata_samples table
 def get_metadata_value_set():
     values = {}
-    db = get_sql_connection()
-
+    db = None
+    cursor = None
     try:
+        db = get_sql_connection()
         cursor = db.cursor()
         cursor.callproc('get_metadata_values')
 
