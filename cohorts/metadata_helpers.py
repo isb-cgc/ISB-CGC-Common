@@ -57,22 +57,24 @@ def get_sql_connection():
     db = None
     try:
         connect_options = {
-            'host': database['HOST'],
+            'host': '104.198.175.',
+            'port': 3306,
             'db': database['NAME'],
             'user': database['USER'],
             'passwd': database['PASSWORD'],
+            ['ssl']: database['OPTIONS']['ssl']
         }
-
-        if not settings.IS_DEV:
-            connect_options['host'] = 'localhost'
-            connect_options['unix_socket'] = settings.DB_SOCKET
-
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
-            connect_options['ssl'] = database['OPTIONS']['ssl']
+        #
+        # if not settings.IS_DEV:
+        #     connect_options['host'] = 'localhost'
+        #     connect_options['unix_socket'] = settings.DB_SOCKET
+        #
+        # if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
+        #     connect_options['ssl'] = database['OPTIONS']['ssl']
 
         print >> sys.stdout, "[STATUS] Connection settings: "+ connect_options['host'] + ":" + \
                              ((connect_options['unix_socket'] + ":") if 'unix_socket' in connect_options else '') + \
-                             connect_options['db'] + ":" + connect_options['user']
+                             connect_options['db'] + ":" + connect_options['user'] + (':ssl_enabled' if 'ssl' in connect_options else '')
 
         db = MySQLdb.connect(**connect_options)
 
