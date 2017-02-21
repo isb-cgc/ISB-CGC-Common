@@ -21,6 +21,7 @@ Helper methods for fetching, curating, and managing cohort metadata
 """
 
 import sys
+import os
 import random
 import string
 import logging
@@ -62,7 +63,11 @@ def get_sql_connection():
             'db': database['NAME'],
             'user': database['USER'],
             'passwd': database['PASSWORD'],
-            'ssl': database['OPTIONS']['ssl']
+            'ssl': {
+                'ca': os.environ.get('DB_SSL_CA'),
+                'cert': os.environ.get('DB_SSL_CERT'),
+                'key': os.environ.get('DB_SSL_KEY'),
+            }
         }
         #
         # if not settings.IS_DEV:
