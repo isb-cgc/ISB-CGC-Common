@@ -62,7 +62,7 @@ def get_sql_connection():
             'db': database['NAME'],
             'user': database['USER'],
             'passwd': database['PASSWORD'],
-            ['ssl']: database['OPTIONS']['ssl']
+            'ssl': database['OPTIONS']['ssl']
         }
         #
         # if not settings.IS_DEV:
