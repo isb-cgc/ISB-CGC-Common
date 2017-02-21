@@ -57,7 +57,7 @@ def get_sql_connection():
     db = None
     try:
         connect_options = {
-            'host': '104.198.175.192',
+            'host': '104.198.55.148',
             'port': 3306,
             'db': database['NAME'],
             'user': database['USER'],
