@@ -1806,6 +1806,9 @@ def set_operation(request):
                         HAVING COUNT(DISTINCT cs.cohort_id) = %s;
                     """.format(params)
 
+                    stop = time.time()
+                    print >> sys.stdout, '[BENCHMARKING] Time to query intersecting sample set: ' + (stop - start).__str__()
+
                     cohort_list += (len(cohorts),)
 
                     cursor.execute(intersect_and_study_list_def, cohort_list)
@@ -1869,7 +1872,7 @@ def set_operation(request):
 
                     stop = time.time()
 
-                    print >> sys.stdout, '[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__()
+                    print >> sys.stdout, '[BENCHMARKING] Time to create intersecting sample set: ' + (stop - fullstart).__str__()
 
             elif op == 'complement':
                 start = time.time()
