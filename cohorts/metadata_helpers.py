@@ -87,8 +87,9 @@ def get_sql_connection():
 
 # Generate the METADATA_SHORTLIST['list'] list of values based on the contents of the metadata_shortlist view
 def fetch_metadata_shortlist():
+    cursor = None
+    db = None
     try:
-        cursor = None
         db = get_sql_connection()
         if not METADATA_SHORTLIST['list'] or len(METADATA_SHORTLIST['list']) <= 0:
             cursor = db.cursor()
