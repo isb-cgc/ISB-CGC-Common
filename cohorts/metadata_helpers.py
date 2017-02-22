@@ -58,6 +58,7 @@ def get_sql_connection(for_test=False):
     try:
 
         if for_test:
+            print >> sys.stdout, "[STATUS] Connecting via IP..."
             connect_options = {
                 'host': '104.198.55.148',
                 'port': 3306,
@@ -82,6 +83,8 @@ def get_sql_connection(for_test=False):
                 connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
+        if db:
+            print >> sys.stdout, "[STATUS] Connection successful"
 
         return db
 
