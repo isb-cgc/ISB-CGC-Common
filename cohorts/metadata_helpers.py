@@ -59,9 +59,12 @@ def get_sql_connection(for_test=False):
 
         if for_test:
             print >> sys.stdout, "[STATUS] Connecting via IP..."
+
+            print >> sys.stdout, "[STATUS] SSL files: "+ settings.SSL_SETTINGS.__str__()
+
             connect_options = {
-                'host': '104.198.55.148',
-                'port': 3306,
+                'host': settings.DATABASE_HOST_IP,
+                'port': settings.DATABASE_HOST_PORT,
                 'db': database['NAME'],
                 'user': database['USER'],
                 'passwd': database['PASSWORD'],
