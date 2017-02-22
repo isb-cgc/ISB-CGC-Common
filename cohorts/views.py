@@ -1879,8 +1879,7 @@ def set_operation(request):
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
 
-                print >> sys.stdout, "[STATUS] Attempting to use direct IP connection in set_ops:complement"
-                db = get_sql_connection(True)
+                db = get_sql_connection()
                 cursor = db.cursor()
 
                 param_vals = (base_id,)

@@ -98,26 +98,26 @@ def project_upload_existing(request):
 @login_required
 def project_upload(request, existing_proj=False):
     # Check for user' GoogleProject
-    google_projects = GoogleProject.objects.filter(user=request.user)
+    # google_projects = GoogleProject.objects.filter(user=request.user)
+    #
+    # if len(google_projects) == 0:
+    #     template = 'GenespotRE/register_gcp.html'
+    # else:
+    #     template = 'projects/project_upload.html'
+    #
+    # projects = Project.objects.filter(owner=request.user, active=True) | Project.objects.filter(is_public=True,active=True)
+    #
+    #
+    # context = {
+    #     'requested': False,
+    #     'projects': projects,
+    #     'google_projects': google_projects,
+    #     'existing_proj': existing_proj
+    # }
+    # if request.GET.get('project_id'):
+    #     context['project_id'] = request.GET.get('project_id')
 
-    if len(google_projects) == 0:
-        template = 'GenespotRE/register_gcp.html'
-    else:
-        template = 'projects/project_upload.html'
-
-    projects = Project.objects.filter(owner=request.user, active=True) | Project.objects.filter(is_public=True,active=True)
-
-
-    context = {
-        'requested': False,
-        'projects': projects,
-        'google_projects': google_projects,
-        'existing_proj': existing_proj
-    }
-    if request.GET.get('project_id'):
-        context['project_id'] = request.GET.get('project_id')
-
-    return render(request, template, context)
+    return render(request, 'projects/disabled.html', {})
 
 def filter_column_name(original):
     return re.sub(r"[^a-zA-Z0-9]+", "_", original.lower())

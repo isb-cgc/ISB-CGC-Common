@@ -52,38 +52,24 @@ def make_id(length):
 
 
 # Database connection
-def get_sql_connection(for_test=False):
+def get_sql_connection():
     database = settings.DATABASES['default']
     db = None
     try:
 
-        if for_test:
-            print >> sys.stdout, "[STATUS] Connecting via IP..."
+        connect_options = {
+            'host': database['HOST'],
+            'db': database['NAME'],
+            'user': database['USER'],
+            'passwd': database['PASSWORD'],
+        }
 
-            print >> sys.stdout, "[STATUS] SSL files: "+ settings.SSL_SETTINGS.__str__()
+        if not settings.IS_DEV:
+            connect_options['host'] = 'localhost'
+            connect_options['unix_socket'] = settings.DB_SOCKET
 
-            connect_options = {
-                'host': settings.DATABASE_HOST_IP,
-                'port': settings.DATABASE_HOST_PORT,
-                'db': database['NAME'],
-                'user': database['USER'],
-                'passwd': database['PASSWORD'],
-                'ssl': settings.SSL_SETTINGS,
-            }
-        else:
-            connect_options = {
-                'host': database['HOST'],
-                'db': database['NAME'],
-                'user': database['USER'],
-                'passwd': database['PASSWORD'],
-            }
-
-            if not settings.IS_DEV:
-                connect_options['host'] = 'localhost'
-                connect_options['unix_socket'] = settings.DB_SOCKET
-
-            if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
-                connect_options['ssl'] = database['OPTIONS']['ssl']
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
+            connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
         if db:
