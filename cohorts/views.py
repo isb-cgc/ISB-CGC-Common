@@ -1913,7 +1913,7 @@ def set_operation(request):
                 if len(samples):
                     subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
                     base_cohort = Cohort.objects.get(id=base_id)
-                    notes = 'Subtracted % from %s' % (', '.join(subtracted_cohorts.values_list('name', flat=True)), base_cohort.name,)
+                    notes = 'Subtracted %s from %s' % (', '.join(subtracted_cohorts.values_list('name', flat=True)), base_cohort.name,)
 
                 stop = time.time()
                 print >> sys.stdout, "[STATUS] Time to create notes: " + str(stop - start)
