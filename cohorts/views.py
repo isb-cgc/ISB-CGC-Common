@@ -1911,26 +1911,9 @@ def set_operation(request):
                 notes = ''
 
                 if len(samples):
-                    cohort_query = """
-                        SELECT id, name
-                        FROM cohorts_cohort
-                        WHERE id IN ({0})
-                    """.format('%s,' + params)
-
-                    cursor.execute(cohort_query, param_vals)
-                    subtracted_cohorts = []
-                    base_name = ''
-
-                    for row in cursor.fetchall():
-                        if row[0] != base_id:
-                            subtracted_cohorts.append(row[1])
-                        else:
-                            base_name = row[1]
-
-                    # subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-                    notes = 'Subtracted ' + ', '.join(subtracted_cohorts) + ' from ' + base_name
-
-                    print >> sys.stdout, "[STATUS] Notes recorded"
+                    subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
+                    base_cohort = Cohort.objects.get(id=base_id)
+                    notes = 'Subtracted % from %s' % (', '.join(subtracted_cohorts.values_list('name', flat=True)), base_cohort.name,)
 
                 stop = time.time()
                 print >> sys.stdout, "[STATUS] Time to create notes: " + str(stop - start)
@@ -1987,12 +1970,11 @@ def set_operation(request):
                         source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                         source.save()
                 elif op == 'complement':
-                    print >> sys.stdout, "[STATUS] Skipping source creation for complement for testing"
-                    # source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    # source.save()
-                    # for cohort in subtracted_cohorts:
-                    #     source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    #     source.save()
+                    source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                    source.save()
+                    for cohort in subtracted_cohorts:
+                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                        source.save()
 
                 stop = time.time()
                 print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - fullstart).__str__()
