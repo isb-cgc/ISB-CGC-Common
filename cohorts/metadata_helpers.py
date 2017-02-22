@@ -63,7 +63,7 @@ def get_sql_connection(for_test=False):
             print >> sys.stdout, "[STATUS] SSL files: "+ settings.SSL_SETTINGS.__str__()
 
             connect_options = {
-                'host': '104.198.55.148',
+                'host': database['HOST_IP'],
                 'port': 3306,
                 'db': database['NAME'],
                 'user': database['USER'],
