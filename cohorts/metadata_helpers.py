@@ -75,6 +75,8 @@ def get_sql_connection():
         if db:
             print >> sys.stdout, "[STATUS] Connection successful"
 
+            print >> sys.stdout, "[STATUS] Trace:" + traceback.print_stack()
+
         return db
 
     except Exception as e:
