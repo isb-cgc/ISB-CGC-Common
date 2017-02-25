@@ -75,13 +75,11 @@ def get_sql_connection():
         if db:
             print >> sys.stdout, "[STATUS] Connection successful"
 
-            print >> sys.stdout, "[STATUS] Trace:" + traceback.print_stack()
-
         return db
 
     except Exception as e:
         logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
-        logger.error(traceback.format_exc())
+        logger.exception(e)
         if db and db.open: db.close()
 
 # Generate the METADATA_SHORTLIST['list'] list of values based on the contents of the metadata_shortlist view
