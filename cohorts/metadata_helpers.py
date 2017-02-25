@@ -72,8 +72,8 @@ def get_sql_connection():
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
-        if db:
-            print >> sys.stdout, "[STATUS] Connection successful"
+
+        traceback.print_stack(limit=5)
 
         return db
 
@@ -101,6 +101,8 @@ def fetch_metadata_shortlist():
                 # Otherwise just warn
                 logger.warn("[WARNING] View metadata_shortlist was not found!")
 
+        logger.info("[STATUS] metadata_shortlist completed")
+
         return METADATA_SHORTLIST['list']
     except Exception as e:
         logger.error(traceback.format_exc())
@@ -126,6 +128,8 @@ def fetch_isbcgc_study_set():
             else:
                 # Otherwise just warn
                 logger.warn("[WARNING] Stored procedure get_isbcgc_study_set was not found!")
+
+        logger.info("[STATUS] isbcgc_study_set completed")
 
         return ISB_CGC_STUDIES['list']
     except Exception as e:
