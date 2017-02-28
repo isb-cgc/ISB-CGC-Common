@@ -73,12 +73,10 @@ def get_sql_connection():
 
         db = MySQLdb.connect(**connect_options)
 
-        traceback.print_stack(limit=5)
-
         return db
 
     except Exception as e:
-        logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
+        logger.error("[ERROR] Exception in get_sql_connection(): ")
         logger.exception(e)
         if db and db.open: db.close()
 
@@ -101,11 +99,11 @@ def fetch_metadata_shortlist():
                 # Otherwise just warn
                 logger.warn("[WARNING] View metadata_shortlist was not found!")
 
-        logger.info("[STATUS] metadata_shortlist completed")
-
         return METADATA_SHORTLIST['list']
+
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception when fetching the metadata shortlist:')
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -129,11 +127,10 @@ def fetch_isbcgc_study_set():
                 # Otherwise just warn
                 logger.warn("[WARNING] Stored procedure get_isbcgc_study_set was not found!")
 
-        logger.info("[STATUS] isbcgc_study_set completed")
-
         return ISB_CGC_STUDIES['list']
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception when fetching the isb-cgc study set:')
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -160,7 +157,8 @@ def get_metadata_value_set():
         return values
 
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception when fetching the metadata value set:')
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
