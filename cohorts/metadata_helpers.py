@@ -72,14 +72,12 @@ def get_sql_connection():
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
-        if db:
-            print >> sys.stdout, "[STATUS] Connection successful"
 
         return db
 
     except Exception as e:
-        logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
-        logger.error(traceback.format_exc())
+        logger.error("[ERROR] Exception in get_sql_connection(): ")
+        logger.exception(e)
         if db and db.open: db.close()
 
 # Generate the METADATA_SHORTLIST['list'] list of values based on the contents of the metadata_shortlist view
@@ -102,8 +100,10 @@ def fetch_metadata_shortlist():
                 logger.warn("[WARNING] View metadata_shortlist was not found!")
 
         return METADATA_SHORTLIST['list']
+
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception when fetching the metadata shortlist:')
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -129,7 +129,8 @@ def fetch_isbcgc_study_set():
 
         return ISB_CGC_STUDIES['list']
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception when fetching the isb-cgc study set:')
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -156,7 +157,8 @@ def get_metadata_value_set():
         return values
 
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception when fetching the metadata value set:')
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
