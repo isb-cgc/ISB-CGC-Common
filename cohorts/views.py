@@ -206,7 +206,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         tmp_filter_table = None
 
         programs = []
-        program_tables = {}
+        prog_tables = {}
 
         # if we have a program ID, the base table is that program's samples table;
         # otherwise the base table is the cohort_samples table
@@ -221,7 +221,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         for program in programs:
             program_tables = Public_Data_Tables.objects.filter(program_id=program).first()
             if program_tables:
-                program_tables[program] = {'table': program_tables.samples_table, 'where_clause': where_clause}
+                prog_tables[program] = {'table': program_tables.samples_table, 'where_clause': where_clause}
                 if program_id == program:
                     base_table = program_tables.samples_table
 
