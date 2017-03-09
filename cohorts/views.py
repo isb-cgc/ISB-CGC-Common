@@ -1,6 +1,6 @@
 """
 
-Copyright 2016, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -43,11 +43,11 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.db.models import Count, Sum
+
 import django
 
 from django.http import StreamingHttpResponse
 from django.core import serializers
-from google.appengine.api import urlfetch
 from allauth.socialaccount.models import SocialToken, SocialAccount
 from django.contrib.auth.models import User as Django_User
 
@@ -58,6 +58,8 @@ from visualizations.models import Plot_Cohorts, Plot
 from bq_data_access.cohort_bigquery import BigQueryCohortSupport
 from uuid import uuid4
 from accounts.models import NIH_User
+
+import requests
 
 from api.api_helpers import *
 from metadata_helpers import *
@@ -174,10 +176,10 @@ GROUPED_FILTERS = {
 }
 
 debug = settings.DEBUG # RO global for this file
-urlfetch.set_default_fetch_deadline(60)
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
+WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger(__name__)
@@ -326,6 +328,8 @@ def get_sample_participant_list(user, inc_filters=None, cohort_id=None):
         tmp_cohort_table = None
         tmp_filter_table = None
         params_tuple = ()
+
+        db.autocommit(True)
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
@@ -842,6 +846,8 @@ def count_metadata(user, cohort_id=None, sample_ids=None, inc_filters=None):
         tmp_cohort_table = None
         tmp_filter_table = None
 
+        db.autocommit(True)
+
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
         if mutation_where_clause:
@@ -1196,12 +1202,18 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
 
     # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
 
+    start = time.time()
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
     cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved').annotate(num_patients=Count('samples'))
+    stop = time.time()
+
+    print >> sys.stdout, "[STATUS] Time to get cohort and permissions list: " + str(stop - start)
+
     cohorts.has_private_cohorts = False
     shared_users = {}
 
+    start = time.time()
     for item in cohorts:
         item.perm = item.get_perm(request).get_perm_display()
         item.owner = item.get_owner()
@@ -1213,6 +1225,9 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
             # append the list of shared users to the shared_users array
             if item.shared_with_users:
                 shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
+    stop = time.time()
+
+    print >> sys.stdout, "[STATUS] Time to calculate shared cohort users: "+ str(stop-start)
 
         # print local_zone.localize(item.last_date_saved)
 
@@ -1515,6 +1530,16 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
     if request.POST:
         name = request.POST.get('name')
+        whitelist = re.compile(WHITELIST_RE,re.UNICODE)
+        match = whitelist.search(unicode(name))
+        if match:
+            # XSS risk, log and fail this cohort save
+            match = whitelist.findall(unicode(name))
+            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
+            messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+            redirect_url = reverse('cohort_list')
+            return redirect(redirect_url)
+
         source = request.POST.get('source')
         filters = request.POST.getlist('filters')
         apply_filters = request.POST.getlist('apply-filters')
@@ -1715,194 +1740,258 @@ def clone_cohort(request, cohort_id):
 @login_required
 @csrf_protect
 def set_operation(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
-    redirect_url = '/cohorts/'
+    if debug: print >> sys.stdout, 'Called '+sys._getframe().f_code.co_name
+    redirect_view = 'cohort_list'
 
-    if request.POST:
-        name = request.POST.get('name').encode('utf8')
-        cohorts = []
-        base_cohort = None
-        subtract_cohorts = []
-        notes = ''
-        patients = []
-        samples = []
+    db = None
+    cursor = None
 
-        op = request.POST.get('operation')
-        if op == 'union':
-            notes = 'Union of '
-            cohort_ids = request.POST.getlist('selected-ids')
-            cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
-            first = True
-            ids = ()
-            for cohort in cohorts:
-                if first:
-                    notes += cohort.name
-                    first = False
-                else:
-                    notes += ', ' + cohort.name
-                ids += (cohort.id,)
+    try:
+        fullstart = time.time()
 
-            samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'study_id')
+        if request.POST:
+            name = request.POST.get('name').encode('utf8')
+            cohorts = []
+            base_cohort = None
+            subtract_cohorts = []
+            notes = ''
+            patients = []
+            samples = []
 
-        elif op == 'intersect':
+            op = request.POST.get('operation')
 
-            start = time.time()
-            cohort_ids = request.POST.getlist('selected-ids')
-            cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
-            request.user.cohort_perms_set.all()
-            if len(cohorts):
-                sample_study_map = {}
-
-                cohort_samples = Samples.objects.filter(cohort=cohorts[0])
-                cohort_samples_ids = set(Samples.objects.filter(cohort=cohorts[0]).values_list('sample_id',flat=True))
-
-                # Samples from older cohorts made from ISB-CGC data may have null for their study IDs; we should treat
-                # these as 'matching' studies
-
-                for sample in cohort_samples:
-                    if sample.sample_id not in sample_study_map:
-                        sample_study_map[sample.sample_id] = []
-                    if sample.study is None:
-                        if -1 not in sample_study_map[sample.sample_id]:
-                            sample_study_map[sample.sample_id].append(-1);
-                    elif sample.study.id not in sample_study_map[sample.sample_id]:
-                            sample_study_map[sample.sample_id].append(sample.study.id)
-
-                notes = 'Intersection of ' + cohorts[0].name
-
-                for i in range(1, len(cohorts)):
-                    cohort = cohorts[i]
-                    notes += ', ' + cohort.name
-
-                    cohort_samples = Samples.objects.filter(cohort=cohort)
-
-                    for sample in cohort_samples:
-                        if sample.sample_id in sample_study_map:
-                            if sample.study is None:
-                                if -1 not in sample_study_map[sample.sample_id]:
-                                    sample_study_map[sample.sample_id].append(-1);
-                            elif sample.study.id not in sample_study_map[sample.sample_id]:
-                                sample_study_map[sample.sample_id].append(sample.study.id)
-
-                    cohort_samples_ids = cohort_samples_ids.intersection(Samples.objects.filter(cohort=cohort).values_list('sample_id',flat=True))
-
-                cohort_sample_list = []
-
-                print >> sys.stdout, 'unique ID set: '+cohort_samples_ids.__str__()
-
-                for sample in cohort_samples_ids:
-                    if len(sample_study_map[sample]) > 1:
-                        print >> sys.stdout, "Studies: "+sample_study_map[sample].__str__()
-                        studies = Study.objects.filter(id__in=sample_study_map[sample])
-                        print >> sys.stdout, "Study objs: "+studies.__str__()
-                        no_match = False
-                        root = -1
-                        max_depth = -1
-                        deepest_study = -1
-                        for study in studies:
-                            study_rd = study.get_my_root_and_depth()
-
-                            if root < 0:
-                                root = study_rd['root']
-                                max_depth = study_rd['depth']
-                                deepest_study = study.id
-                            else:
-                                if root != study_rd['root']:
-                                    no_match = True
-                                else:
-                                    if max_depth < 0 or study_rd['depth'] > max_depth:
-                                        max_depth = study_rd['depth']
-                                        deepest_study = study.id
-
-                        if not no_match:
-                            cohort_sample_list.append({'id':sample, 'study':deepest_study, })
-
+            if op == 'union':
+                notes = 'Union of '
+                cohort_ids = request.POST.getlist('selected-ids')
+                cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
+                first = True
+                ids = ()
+                for cohort in cohorts:
+                    if first:
+                        notes += cohort.name
+                        first = False
                     else:
-                        # If a study's ID is <= 0 it's a null study ID, so just record None
-                        study = (None if sample_study_map[sample][0] <=0 else sample_study_map[sample][0])
-                        cohort_sample_list.append({'id': sample, 'study':study})
+                        notes += ', ' + cohort.name
+                    ids += (cohort.id,)
 
-                samples = cohort_sample_list
+                start = time.time()
+                samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_id', 'study_id')
+                stop = time.time()
+                print >> sys.stdout, '[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__()
 
+            elif op == 'intersect':
+
+                start = time.time()
+                cohort_ids = request.POST.getlist('selected-ids')
+                cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
+                request.user.cohort_perms_set.all()
+
+                if len(cohorts):
+
+                    study_list = []
+                    cohorts_studies = {}
+                    sample_study_map = {}
+
+                    cohort_list = tuple(int(i) for i in cohort_ids)
+                    params = ('%s,' * len(cohort_ids))[:-1]
+
+                    db = get_sql_connection()
+                    cursor = db.cursor()
+
+                    intersect_and_study_list_def = """
+                        SELECT cs.sample_id, GROUP_CONCAT(DISTINCT cs.study_id SEPARATOR ';')
+                        FROM cohorts_samples cs
+                        WHERE cs.cohort_id IN ({0})
+                        GROUP BY cs.sample_id
+                        HAVING COUNT(DISTINCT cs.cohort_id) = %s;
+                    """.format(params)
+
+                    stop = time.time()
+                    print >> sys.stdout, '[BENCHMARKING] Time to query intersecting sample set: ' + (stop - start).__str__()
+
+                    cohort_list += (len(cohorts),)
+
+                    cursor.execute(intersect_and_study_list_def, cohort_list)
+
+                    for row in cursor.fetchall():
+                        if row[0] not in sample_study_map:
+                            studies = row[1]
+                            if studies[-1] == ';':
+                                studies = studies[:-1]
+
+                            studies = [ int(x) if len(x) > 0 else -1 for x in studies.split(';') ]
+
+                            study_list += studies
+
+                            sample_study_map[row[0]] = studies
+
+                    if cursor: cursor.close()
+                    if db and db.open: db.close()
+
+                    study_list = list(set(study_list))
+                    study_models = Study.objects.filter(id__in=study_list)
+
+                    for study in study_models:
+                        cohorts_studies[study.id] = study.get_my_root_and_depth()
+
+                    cohort_sample_list = []
+
+                    for sample_id in sample_study_map:
+                        studies = sample_study_map[sample_id]
+                        # If multiple copies of this sample from different studies were found, we need to examine
+                        # their studies' inheritance chains
+                        if len(studies) > 1:
+                            no_match = False
+                            root = -1
+                            max_depth = -1
+                            deepest_study = -1
+                            for study in studies:
+                                study_rd = cohorts_studies[study]
+
+                                if root < 0:
+                                    root = study_rd['root']
+                                    max_depth = study_rd['depth']
+                                    deepest_study = study
+                                else:
+                                    if root != study_rd['root']:
+                                        no_match = True
+                                    else:
+                                        if max_depth < 0 or study_rd['depth'] > max_depth:
+                                            max_depth = study_rd['depth']
+                                            deepest_study = study
+
+                            if not no_match:
+                                cohort_sample_list.append({'id':sample_id, 'study':deepest_study, })
+                        # If only one study was found, all copies of this sample implicitly match
+                        else:
+                            # If a study's ID is <= 0 it's a null study ID, so just record None
+                            study = (None if studies[0] <=0 else studies[0])
+                            cohort_sample_list.append({'id': sample_id, 'study':study})
+
+                    samples = cohort_sample_list
+
+                    stop = time.time()
+
+                    print >> sys.stdout, '[BENCHMARKING] Time to create intersecting sample set: ' + (stop - fullstart).__str__()
+
+            elif op == 'complement':
+                start = time.time()
+                base_id = request.POST.get('base-id')
+                subtract_ids = request.POST.getlist('subtract-ids')
+
+                db = get_sql_connection()
+                cursor = db.cursor()
+
+                param_vals = (base_id,)
+                param_vals += tuple(int(i) for i in subtract_ids)
+                params = ('%s,' * len(subtract_ids))[:-1]
+
+                cohort_samples_query = """
+                    SELECT cs.sample_id, cs.study_id
+                    FROM cohorts_samples cs
+                    WHERE cs.cohort_id = %s AND cs.sample_id NOT IN (
+                        SELECT sb.sample_id
+                        FROM cohorts_samples sb
+                        WHERE sb.cohort_id IN ({0})
+                    )
+                """.format(params)
+
+                cursor.execute(cohort_samples_query, param_vals)
                 stop = time.time()
 
-                logger.debug('[BENCHMARKING] Time to build intersecting sample set: ' + (stop - start).__str__())
+                print >> sys.stdout, "[STATUS] Time to query subtracted set: "+str(stop-start)
 
-        elif op == 'complement':
-            base_id = request.POST.get('base-id')
-            subtract_ids = request.POST.getlist('subtract-ids')
+                samples = []
 
-            base_samples = Samples.objects.filter(cohort_id=base_id)
-            subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
-            cohort_samples = base_samples.exclude(sample_id__in=subtract_samples.values_list('sample_id', flat=True))
-            samples = cohort_samples.values_list('sample_id', 'study_id')
+                for row in cursor.fetchall():
+                    samples.append((row[0], row[1]),)
 
-            notes = 'Subtracted '
-            base_cohort = Cohort.objects.get(id=base_id)
-            subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-            first = True
-            for item in subtracted_cohorts:
-                if first:
-                    notes += item.name
-                    first = False
-                else:
-                    notes += ', ' + item.name
-            notes += ' from %s.' % base_cohort.name
+                start = time.time()
+                subtracted_cohorts = None
+                notes = ''
 
-        if len(samples):
-            start = time.time()
-            new_cohort = Cohort.objects.create(name=name)
-            perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
-            perm.save()
+                if len(samples):
+                    subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
+                    base_cohort = Cohort.objects.get(id=base_id)
+                    notes = 'Subtracted %s from %s' % (', '.join(subtracted_cohorts.values_list('name', flat=True)), base_cohort.name,)
 
-            # Store cohort samples and patients to CloudSQL
-            sample_list = []
-            for sample in samples:
-                if op == 'intersect':
-                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample['id'], study_id=sample['study']))
-                else:
-                    sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
-            Samples.objects.bulk_create(sample_list)
+                stop = time.time()
+                print >> sys.stdout, "[STATUS] Time to create notes: " + str(stop - start)
 
-            # get the full resulting sample and patient ID set
-            startSI = time.time()
-            samples_and_participants = get_sample_participant_list(request.user,None,new_cohort.id)
-            stopSI = time.time()
-            logger.debug('[BENCHMARKING] Time to get sample and participant list in set ops: '+(stopSI - startSI).__str__())
+            print >> sys.stdout, "[STATUS] POST IF/ELSE"
 
-            # Store cohort to BigQuery
-            project_id = settings.BQ_PROJECT_ID
-            cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-            bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
+            if len(samples):
 
-            # Fetch the list of cases based on the sample IDs
-            patient_list = []
-            for patient in samples_and_participants['participants']:
-                patient_list.append(Patients(cohort=new_cohort, patient_id=patient))
-            Patients.objects.bulk_create(patient_list)
+                start = time.time()
+                new_cohort = Cohort.objects.create(name=name)
+                perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
+                perm.save()
+                stop = time.time()
 
-            # Create Sources
-            if op == 'union' or op == 'intersect':
-                for cohort in cohorts:
-                    source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                print >> sys.stdout, "[STATUS] Time to make cohort and perms: "+str(stop-start)
+
+                # Store cohort samples and patients to CloudSQL
+                start = time.time()
+                sample_list = []
+                for sample in samples:
+                    if op == 'intersect':
+                        sample_list.append(Samples(cohort=new_cohort, sample_id=sample['id'], study_id=sample['study']))
+                    else:
+                        sample_list.append(Samples(cohort=new_cohort, sample_id=sample[0], study_id=sample[1]))
+                Samples.objects.bulk_create(sample_list)
+                stop = time.time()
+
+                print >> sys.stdout, '[BENCHMARKING] Time to bulk create sample set: ' + (stop - start).__str__()
+
+                start = time.time()
+                # get the full resulting sample and patient ID set
+                samples_and_participants = get_sample_participant_list(request.user, None, new_cohort.id)
+
+                print >> sys.stdout, "[STATUS] Starting BQ create."
+
+                # Store cohort to BigQuery
+                project_id = settings.BQ_PROJECT_ID
+                cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+                bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+                bcs.add_cohort_to_bq(new_cohort.id, samples_and_participants['items'])
+                stop = time.time()
+
+                print >> sys.stdout, '[BENCHMARKING] Time to get sample and case set and add to BQ: ' + (stop - start).__str__()
+
+                # Fetch the list of cases based on the sample IDs
+                patient_list = []
+                for patient in samples_and_participants['participants']:
+                    patient_list.append(Patients(cohort=new_cohort, patient_id=patient))
+                Patients.objects.bulk_create(patient_list)
+
+                # Create Sources
+                if op == 'union' or op == 'intersect':
+                    for cohort in cohorts:
+                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                        source.save()
+                elif op == 'complement':
+                    source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
                     source.save()
-            elif op == 'complement':
-                source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                source.save()
-                for cohort in subtracted_cohorts:
-                    source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    source.save()
+                    for cohort in subtracted_cohorts:
+                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+                        source.save()
 
-            stop = time.time()
-            logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
+                stop = time.time()
+                print >> sys.stdout, '[BENCHMARKING] Time to make cohort in set ops: '+(stop - fullstart).__str__()
 
-        else:
-            message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
-            messages.warning(request, message)
-            return redirect('cohort_list')
+            else:
+                message = 'Operation resulted in empty set of samples and patients. Cohort not created.'
+                print >> sys.stdout, "[WARNING] "+message
+                messages.warning(request, message)
 
-    return redirect(redirect_url)
+    except Exception as e:
+        logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return redirect(redirect_view)
 
 
 @login_required
@@ -2017,8 +2106,8 @@ def cohort_filelist(request, cohort_id=0):
 
     token = SocialToken.objects.filter(account__user=request.user, account__provider='Google')[0].token
     data_url = METADATA_API + ('v1/cohort_files?platform_count_only=True&cohort_id=%s&token=%s' % (cohort_id, token))
-    result = urlfetch.fetch(data_url, deadline=120)
-    items = json.loads(result.content)
+    result = requests.get(data_url, timeout=60)
+    items = result.json()
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
     nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
@@ -2032,7 +2121,7 @@ def cohort_filelist(request, cohort_id=0):
     cohort_sample_list = Samples.objects.filter(cohort=cohort, study__in=user_studies)
     if len(cohort_sample_list):
         messages.info(request,
-                      "File listing is not available for cohort samples that come from a user uploaded study. This functionality is currently being worked on and will become available in a future release.")
+            "File listing is not available for cohort samples that come from a user uploaded study. This functionality is currently being worked on and will become available in a future release.")
 
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,
@@ -2065,9 +2154,9 @@ def cohort_filelist_ajax(request, cohort_id=0):
     for key in request.GET:
         data_url += '&' + key + '=' + request.GET[key]
 
-    result = urlfetch.fetch(data_url, deadline=120)
+    result = requests.get(data_url, timeout=60)
 
-    return HttpResponse(result.content, status=200)
+    return HttpResponse(result.text, status=200)
 
 
 @login_required
@@ -2135,8 +2224,8 @@ def streaming_csv_view(request, cohort_id=0):
     offset = None
 
     while keep_fetching:
-        result = urlfetch.fetch(data_url+('&offset='+offset.__str__() if offset else ''), deadline=60)
-        items = json.loads(result.content)
+        result = requests.get(data_url+('&offset='+offset.__str__() if offset else ''), timeout=60)
+        items = result.json()
 
         if 'file_list' in items:
             file_list += items['file_list']
