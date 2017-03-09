@@ -359,6 +359,16 @@ def verify_service_account(gcp_id, service_account, datasets):
         'message': '{0}: Begin verification of service account.'.format(service_account)
     }
     write_log_entry(log_name, resp)
+
+    # Verify that it is not our service account
+    if service_account == settings.CLIENT_EMAIL:
+        logging.info('Provided service account belongs to deployed instance.')
+
+        write_log_entry(log_name, {
+            'message': '{0}: Provided service account does not belong to project {1}.'.format(service_account, gcp_id)})
+        # return error that the service account doesn't exist in this project
+        return {'message': 'The provided service account is owned by the ISB-CGC.'}
+
     # 1. GET ALL USERS ON THE PROJECT.
     try:
         crm_service = get_special_crm_resource()
