@@ -837,8 +837,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     worksheet_model.add_cohort(cohort)
                     redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
 
-    print >> sys.stdout, "test"
-
     return redirect(redirect_url)
 
 
