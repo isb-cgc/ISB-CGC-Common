@@ -423,8 +423,8 @@ def upload_files(request):
                 abs_failure_url = abs_failure_url.replace('http', 'https')
 
             parameters = {
-                'SUCCESS_POST_URL': request.build_absolute_uri( success_url ).replace('http', 'https'),
-                'FAILURE_POST_URL': request.build_absolute_uri( failure_url ).replace('http', 'https')
+                'SUCCESS_POST_URL': abs_success_url,
+                'FAILURE_POST_URL': abs_failure_url
             }
 
             r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
