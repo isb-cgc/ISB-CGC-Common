@@ -38,7 +38,7 @@ class UserUploadedFile(models.Model):
     id = models.AutoField(primary_key=True)
     upload = models.ForeignKey(UserUpload)
     bucket = models.CharField(max_length=155, null=True)
-    file = models.FileField(storage=storage_system, upload_to=get_user_bucket)
+    file = models.FileField(storage=storage_system, upload_to=get_user_bucket, max_length=255)
 
 class FieldDataType(models.Model):
     id = models.AutoField(primary_key=True)

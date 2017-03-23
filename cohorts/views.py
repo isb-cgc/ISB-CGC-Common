@@ -41,7 +41,7 @@ from accounts.models import NIH_User
 from metadata_helpers import *
 from metadata_counting import *
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project, User_Data_Tables, Public_Data_Tables
+from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 
 BQ_ATTEMPT_MAX = 10
 
@@ -217,7 +217,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             base_table = 'cohort_samples'
 
         for program in programs:
-            program_tables = Public_Data_Tables.objects.filter(program_id=program).first()
+            program_tables = Public_Metadata_Tables.objects.filter(program_id=program).first()
             if program_tables:
                 prog_tables[program] = {'table': program_tables.samples_table, 'where_clause': where_clause}
                 if program_id == program:
@@ -348,6 +348,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
+            db.autocommit(True)
             cursor.execute(make_tmp_table_str, params_tuple)
         elif tmp_mut_table and not cohort_id:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
@@ -373,7 +374,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 FROM projects_project ps
                   JOIN auth_user au ON au.id = ps.owner_id
                 WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND ps.active = 1
-            ) ps ON ps.name = ms.disease_code;
+            ) ps ON ps.name = ms.project_disease_type;
         """ % (filter_table,))
 
         for row in cursor.fetchall():
@@ -391,6 +392,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         return samples_and_cases
 
     except Exception as e:
+        print >> sys.stdout, traceback.format_exc()
         logger.error(traceback.format_exc())
     finally:
         if cursor: cursor.close()
@@ -474,7 +476,8 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
 
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved').annotate(num_cases=Count('samples__case_barcode'))
+    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved')
+
     cohorts.has_private_cohorts = False
     shared_users = {}
 
@@ -770,8 +773,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             cohort.save()
 
             sample_list = []
-
-            print >> sys.stdout, "Program "+str(prog) +" count: "+str(len(results[prog]['items']))
 
             for prog in results:
                 items = results[prog]['items']
@@ -1494,6 +1495,9 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             'metadata_filters': filters or {},
             'program': public_program
         }
+
+        if cohort_id:
+            template_values['cohort'] = Cohort.objects.get(id=cohort_id)
 
     else:
         # Requesting User Data filter panel

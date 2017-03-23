@@ -1,5 +1,4 @@
 """
-
 Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +12,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 """
 
 """
@@ -123,10 +121,12 @@ def fetch_program_attr(program):
     cursor = None
 
     try:
+
         if not program:
             program = get_public_program_id('TCGA')
 
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
+
             METADATA_ATTR[program] = {}
 
             preformatted_attr = get_preformatted_attr(program)
@@ -142,12 +142,13 @@ def fetch_program_attr(program):
             cursor.callproc('get_program_display_strings', (program,))
 
             for row in cursor.fetchall():
-                if row['value_name'] is None:
+                if row['value_name'] is None and row['attr_name'] in METADATA_ATTR[program]:
                     METADATA_ATTR[program][row['attr_name']]['displ_name'] = row['display_string']
 
         return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
+        print >> sys.stdout, traceback.format_exc()
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
         logger.error(traceback.format_exc())
     finally:
@@ -252,6 +253,7 @@ def fetch_metadata_value_set(program=None):
         return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
+        print >> sys.stdout, traceback.format_exc()
         logger.error(traceback.format_exc())
     finally:
         if cursor: cursor.close()
@@ -260,6 +262,7 @@ def fetch_metadata_value_set(program=None):
 
 # Returns the list of a given program's preformatted attributes, i.e. attributes whose database names should
 # not be transformed
+# This can be hard-coded into the list, or made into a call to the database
 def get_preformatted_attr(program=None):
     if not program:
         program = get_public_program_id('TCGA')
@@ -278,24 +281,44 @@ def get_preformatted_attr(program=None):
 # alterations made; specify them in the PREFORMATTED_VALUES dict, on a per-program basis (declaration at the top
 # of this file, built in this method at request time)
 def get_preformatted_values(program=None):
-    if not program:
-        program = get_public_program_id('TCGA')
 
-    program = str(program)
+    db = None
+    cursor = None
 
-    if len(PREFORMATTED_VALUES) <= 0:
-        # Load the values via a query or hard code them here
-        for pubprog in get_public_programs():
-            PREFORMATTED_VALUES[str(pubprog['id'])] = [
-                'disease_code',
-                'project_short_name',
-                'pathologic_stage',
-            ]
+    try:
 
-    if program not in PREFORMATTED_VALUES:
-        return []
+        if not program:
+            program = get_public_program_id('TCGA')
 
-    return PREFORMATTED_VALUES[program]
+        program = str(program)
+
+        if len(PREFORMATTED_VALUES) <= 0:
+
+            db = get_sql_connection()
+
+            public_programs = get_public_programs()
+
+            # Load the values via a query or hard code them here
+            for pubprog in public_programs:
+                cursor = db.cursor()
+                cursor.callproc('get_preformatted_attrs', (pubprog['id'],))
+                for row in cursor.fetchall():
+                    if not str(pubprog['id']) in PREFORMATTED_VALUES:
+                        PREFORMATTED_VALUES[str(pubprog['id'])] = []
+                    PREFORMATTED_VALUES[str(pubprog['id'])].append(row[0])
+                cursor.close()
+
+        if program not in PREFORMATTED_VALUES:
+            return []
+
+        return copy.deepcopy(PREFORMATTED_VALUES[program])
+
+    except Exception as e:
+        print >> sys.stdout, traceback.format_exc()
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
 
 
 # Confirm that a filter key is a valid column in the attribute set

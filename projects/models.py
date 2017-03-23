@@ -187,7 +187,7 @@ class User_Feature_Counts(models.Model):
 class User_Data_Tables(models.Model):
     metadata_data_table = models.CharField(max_length=200)
     metadata_samples_table = models.CharField(max_length=200)
-    feature_definition_table = models.CharField(max_length=200,default=User_Feature_Definitions._meta.db_table)
+    feature_definition_table = models.CharField(max_length=200, default=User_Feature_Definitions._meta.db_table)
     user = models.ForeignKey(User, null=False)
     project = models.ForeignKey(Project, null=False)
     data_upload = models.ForeignKey(UserUpload, null=True, blank=True)
@@ -206,17 +206,48 @@ class Project_BQ_Tables(models.Model):
     def __str__(self):
         return self.bq_table_name
 
+
 class Public_Data_Tables(models.Model):
     program = models.ForeignKey(Program, null=False)
+    build = models.CharField(max_length=25, null=True)
     data_table = models.CharField(max_length=100)
-    samples_table = models.CharField(max_length=100)
-    attr_table = models.CharField(max_length=100)
-    sample_data_availability_table = models.CharField(max_length=100)
+    annot2data_table = models.CharField(max_length=100, null=True)
 
     class Meta:
         verbose_name = "Public Data Table"
         verbose_name_plural = "Public Data Tables"
 
     def __str__(self):
-        return self.program__name
+        return self.program__name + " " + self.build + " Data Tables"
 
+class Public_Annotation_Tables(models.Model):
+    program = models.ForeignKey(Program, null=False)
+    annot_table = models.CharField(max_length=100, null=True)
+    annot2sample_table = models.CharField(max_length=100, null=True)
+    annot2biospec_table = models.CharField(max_length=100, null=True)
+    annot2clin_table = models.CharField(max_length=100, null=True)
+
+    class Meta:
+        verbose_name = "Public Annotation Table"
+        verbose_name_plural = "Public Annotation Tables"
+
+    def __str__(self):
+        return self.program__name + " Annotation Tables"
+
+class Public_Metadata_Tables(models.Model):
+    program = models.ForeignKey(Program, null=False)
+    data_tables = models.ForeignKey(Public_Data_Tables)
+    samples_table = models.CharField(max_length=100)
+    attr_table = models.CharField(max_length=100)
+    clin_table = models.CharField(max_length=100)
+    biospec_table = models.CharField(max_length=100)
+    annot_tables = models.ForeignKey(Public_Annotation_Tables, null=True)
+    sample_data_availability_table = models.CharField(max_length=100)
+    sample_data_type_availability_table = models.CharField(max_length=100)
+
+    class Meta:
+        verbose_name = "Public Metadata Table"
+        verbose_name_plural = "Public Metadata Tables"
+
+    def __str__(self):
+        return self.samples_table
