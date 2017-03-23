@@ -105,10 +105,23 @@ def program_upload(request, existing_proj=False):
     else:
         template = 'projects/program_upload.html'
 
+    have_a_bucket = False
+    for google_project in google_projects:
+        if google_project.bucket_set.all().count() > 0:
+            have_a_bucket = True
+            break
+
+    have_a_dataset = False
+    for google_project in google_projects:
+        if google_project.bqdataset_set.all().count() > 0:
+            have_a_dataset = True
+            break
+
     programs = Program.objects.filter(owner=request.user, active=True) | Program.objects.filter(is_public=True, active=True)
 
-
     context = {
+        'got_bucket' : have_a_bucket,
+        'got_dataset': have_a_dataset,
         'requested': False,
         'programs': programs,
         'google_projects': google_projects,
@@ -403,13 +416,15 @@ def upload_files(request):
 
             r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
                               files=files, params=parameters,
-                              auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD))
+                              auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD), verify=False)
 
             if r.status_code < 400:
                 upload.status = 'Processing'
                 upload.jobURL = r.headers['Location']
             else:
                 upload.status = 'Error Initializing'
+                status = 'error'
+                message = 'Could not connect to data upload server: (code {})'.format(r.status_code)
 
             upload.save()
 
