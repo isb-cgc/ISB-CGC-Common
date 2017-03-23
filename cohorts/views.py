@@ -214,6 +214,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             cursor.callproc('get_programs_in_cohort', (cohort_id,))
             for row in cursor.fetchall():
                 programs.append(row[0])
+            cursor.close()
+            cursor = db.cursor()
             base_table = 'cohort_samples'
 
         for program in programs:
@@ -341,8 +343,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             if tmp_mut_table and not cohort_id:
                 make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table
 
-            print >> sys.stdout, "Filter clause: "+where_clause['query_str']
-
             if filters.__len__() > 0:
                 make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
                 params_tuple += where_clause['value_tuple']
@@ -350,6 +350,9 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             make_tmp_table_str += ";"
             db.autocommit(True)
             cursor.execute(make_tmp_table_str, params_tuple)
+
+            cursor.execute('SELECT COUNT(sample_barcode) FROM {0};'.format(filter_table))
+
         elif tmp_mut_table and not cohort_id:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
@@ -370,12 +373,13 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         cursor.execute("""
             SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ps.id
             FROM %s ms JOIN (
-                SELECT ps.id AS id,ps.name AS name
-                FROM projects_project ps
-                  JOIN auth_user au ON au.id = ps.owner_id
-                WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND ps.active = 1
+                SELECT pp.id AS id, pp.name AS name
+                FROM projects_project pp
+                  JOIN auth_user au ON au.id = pp.owner_id
+                WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND pp.active = 1
+                  AND pp.program_id = %s
             ) ps ON ps.name = ms.project_disease_type;
-        """ % (filter_table,))
+        """ % (filter_table, program_id,))
 
         for row in cursor.fetchall():
             samples_and_cases['items'].append({'sample_barcode': row[0], 'case_barcode': row[1], 'project_id': row[2]})
@@ -836,8 +840,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
                     worksheet_model.add_cohort(cohort)
                     redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
-
-    print >> sys.stdout, "delete"
 
     return redirect(redirect_url)
 
