@@ -409,6 +409,19 @@ def upload_files(request):
             }
             success_url = reverse('project_data_success', kwargs=post_args) + '?key=' + upload.key
             failure_url = reverse('project_data_error', kwargs=post_args) + '?key=' + upload.key
+
+            abs_success_url = request.build_absolute_uri(success_url)
+            abs_failure_url = request.build_absolute_uri(failure_url)
+
+            #
+            # Previous forcing to https did not check if it was already there. Thus: httpss://...
+            #
+            if abs_success_url.find("https") != 0:
+                abs_success_url = abs_success_url.replace('http', 'https')
+
+            if abs_failure_url.find("https") != 0:
+                abs_failure_url = abs_failure_url.replace('http', 'https')
+
             parameters = {
                 'SUCCESS_POST_URL': request.build_absolute_uri( success_url ).replace('http', 'https'),
                 'FAILURE_POST_URL': request.build_absolute_uri( failure_url ).replace('http', 'https')
