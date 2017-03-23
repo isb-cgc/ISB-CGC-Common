@@ -423,6 +423,8 @@ def upload_files(request):
                 upload.jobURL = r.headers['Location']
             else:
                 upload.status = 'Error Initializing'
+                status = 'error'
+                message = 'Could not connect to data upload server: ' + r.status_code
 
             upload.save()
 
