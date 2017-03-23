@@ -424,7 +424,7 @@ def upload_files(request):
             else:
                 upload.status = 'Error Initializing'
                 status = 'error'
-                message = 'Could not connect to data upload server: ' + r.status_code
+                message = 'Could not connect to data upload server: (code {})'.format(r.status_code)
 
             upload.save()
 
