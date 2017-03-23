@@ -1,6 +1,5 @@
 """
-
-Copyright 2016, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +12,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 """
 
 import operator
@@ -21,7 +19,7 @@ import sys
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
-from projects.models import Project, User_Feature_Definitions
+from projects.models import Project, Program, User_Feature_Definitions
 from sharing.models import Shared_Resource
 
 
@@ -289,6 +287,7 @@ class Filters(models.Model):
     resulting_cohort = models.ForeignKey(Cohort, null=True, blank=True)
     name = models.CharField(max_length=256, null=False)
     value = models.CharField(max_length=512, null=False)
+    program = models.ForeignKey(Program, null=True, blank=True)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True)
 
 class Cohort_Comments(models.Model):

@@ -23,7 +23,7 @@ from time import sleep
 
 import django
 from metadata_helpers import *
-from projects.models import Program, Project, User_Data_Tables, Public_Data_Tables
+from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 
 BQ_ATTEMPT_MAX = 10
 
@@ -42,10 +42,8 @@ USER_DATA_ON = settings.USER_DATA_ON
 BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
 COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
 METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
-# This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 '''------------------------------------- Begin metadata counting methods -------------------------------------'''
-# TODO: needs to be refactored to use other samples tables
 def get_case_and_sample_count(base_table, cursor):
 
     counts = {}
@@ -66,6 +64,7 @@ def get_case_and_sample_count(base_table, cursor):
         return counts
 
     except Exception as e:
+        print >> sys.stdout, traceback.format_exc()
         logger.error(traceback.format_exc())
         if cursor: cursor.close()
 
@@ -197,7 +196,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
     filters = {}
 
     # returns an object or None
-    program_tables = Public_Data_Tables.objects.filter(program_id=program_id).first()
+    program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
 
     # Fetch the possible value set of all non-continuous columns
     # (also fetches the display strings for all attributes and values which have them)

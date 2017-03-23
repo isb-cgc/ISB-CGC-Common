@@ -1,5 +1,4 @@
 """
-
 Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,7 +12,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 """
 
 import collections
@@ -43,7 +41,7 @@ from accounts.models import NIH_User
 from metadata_helpers import *
 from metadata_counting import *
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project, User_Data_Tables, Public_Data_Tables
+from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 
 BQ_ATTEMPT_MAX = 10
 
@@ -219,7 +217,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             base_table = 'cohort_samples'
 
         for program in programs:
-            program_tables = Public_Data_Tables.objects.filter(program_id=program).first()
+            program_tables = Public_Metadata_Tables.objects.filter(program_id=program).first()
             if program_tables:
                 prog_tables[program] = {'table': program_tables.samples_table, 'where_clause': where_clause}
                 if program_id == program:
@@ -336,7 +334,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # If there are filters, create a temporary table filtered off the base table
         if filters.__len__() > 0:
-            # TODO: This should take into account user project tables; may require a UNION statement or similar
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
@@ -344,11 +341,14 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             if tmp_mut_table and not cohort_id:
                 make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table
 
+            print >> sys.stdout, "Filter clause: "+where_clause['query_str']
+
             if filters.__len__() > 0:
                 make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
+            db.autocommit(True)
             cursor.execute(make_tmp_table_str, params_tuple)
         elif tmp_mut_table and not cohort_id:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
@@ -374,7 +374,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 FROM projects_project ps
                   JOIN auth_user au ON au.id = ps.owner_id
                 WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND ps.active = 1
-            ) ps ON ps.name = ms.disease_code;
+            ) ps ON ps.name = ms.project_disease_type;
         """ % (filter_table,))
 
         for row in cursor.fetchall():
@@ -392,6 +392,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         return samples_and_cases
 
     except Exception as e:
+        print >> sys.stdout, traceback.format_exc()
         logger.error(traceback.format_exc())
     finally:
         if cursor: cursor.close()
@@ -475,7 +476,8 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
 
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved').annotate(num_cases=Count('samples__case_barcode'))
+    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved')
+
     cohorts.has_private_cohorts = False
     shared_users = {}
 
@@ -705,7 +707,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         apply_filters = request.POST.getlist('apply-filters')
         apply_name = request.POST.getlist('apply-name')
         projects = request.user.project_set.all()
-        program_id = request.POST.get('program_id')
 
         # we only deactivate the source if we are applying filters to a previously-existing
         # source cohort
@@ -721,12 +722,14 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         if source:
             parent = Cohort.objects.get(id=source)
 
+        filter_obj = {}
+
         if len(filters) > 0:
-            filter_obj = {}
             for this_filter in filters:
                 tmp = json.loads(this_filter)
                 key = tmp['feature']['name']
                 val = tmp['value']['name']
+                program_id = tmp['program']['id']
 
                 if 'id' in tmp['feature'] and tmp['feature']['id']:
                     key = tmp['feature']['id']
@@ -734,15 +737,27 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 if 'id' in tmp['value'] and tmp['value']['id']:
                     val = tmp['value']['id']
 
-                if key not in filter_obj:
-                    filter_obj[key] = {'values': [],}
+                if program_id not in filter_obj:
+                    filter_obj[program_id] = {}
 
-                filter_obj[key]['values'].append(val)
+                if key not in filter_obj[program_id]:
+                    filter_obj[program_id][key] = {'values': []}
 
-        results = get_sample_case_list(request.user, filter_obj, source, program_id)
+                filter_obj[program_id][key]['values'].append(val)
+
+        results = {}
+
+        for prog in filter_obj:
+            results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog)
+
+        found_samples = False
+
+        for prog in results:
+            if int(results[prog]['count']) > 0:
+                found_samples = True
 
         # Do not allow 0 sample cohorts
-        if int(results['count']) == 0:
+        if not found_samples:
             messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
             if source:
                 redirect_url = reverse('cohort_details', args=[source])
@@ -753,23 +768,25 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 parent.active = False
                 parent.save()
 
-            items = results['items']
-
             # Create new cohort
             cohort = Cohort.objects.create(name=name)
             cohort.save()
 
-            # If there are sample ids
             sample_list = []
-            for item in items:
-                project = None
-                if 'project_id' in item:
-                    project = item['project_id']
-                sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
+
+            for prog in results:
+                items = results[prog]['items']
+
+                for item in items:
+                    project = None
+                    if 'project_id' in item:
+                        project = item['project_id']
+                    sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
+
             Samples.objects.bulk_create(sample_list)
 
             # Set permission for user to be owner
-            perm = Cohort_Perms(cohort=cohort, user=request.user,perm=Cohort_Perms.OWNER)
+            perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
             perm.save()
 
             # Create the source if it was given
@@ -778,15 +795,18 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
             # Create filters applied
             if filter_obj:
-                for this_filter in filter_obj:
-                    for val in filter_obj[this_filter]['values']:
-                        Filters.objects.create(resulting_cohort=cohort, name=this_filter, value=val).save()
+                for prog in filter_obj:
+                    prog_obj = Program.objects.get(id=prog)
+                    prog_filters = filter_obj[prog]
+                    for this_filter in prog_filters:
+                        for val in prog_filters[this_filter]['values']:
+                            Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter, value=val).save()
 
             # Store cohort to BigQuery
             bq_project_id = settings.BQ_PROJECT_ID
             cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
             bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            bq_result = bcs.add_cohort_to_bq(cohort.id,items)
+            bq_result = bcs.add_cohort_to_bq(cohort.id, items)
 
             # If BQ insertion fails, we immediately de-activate the cohort and warn the user
             if 'insertErrors' in bq_result:
@@ -797,7 +817,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     err_msg = 'There were '+str(len(bq_result['insertErrors'])) + ' insertion errors '
                 else:
                     err_msg = 'There was an insertion error '
-                messages.error(request,err_msg+' when creating your cohort in BigQuery. Creation of the cohort has failed.')
+                messages.error(request, err_msg+' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.')
 
             else:
                 # Check if this was a new cohort or an edit to an existing one and redirect accordingly
@@ -816,6 +836,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
                     worksheet_model.add_cohort(cohort)
                     redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
+
+    print >> sys.stdout, "delete"
 
     return redirect(redirect_url)
 
@@ -1066,7 +1088,7 @@ def set_operation(request):
                 Samples.objects.bulk_create(sample_list)
 
                 # get the full resulting sample and case ID set
-                samples_and_cases = get_sample_case_list(request.user,None,new_cohort.id)
+                samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
 
                 # Store cohort to BigQuery
                 project_id = settings.BQ_PROJECT_ID
@@ -1475,6 +1497,9 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             'metadata_filters': filters or {},
             'program': public_program
         }
+
+        if cohort_id:
+            template_values['cohort'] = Cohort.objects.get(id=cohort_id)
 
     else:
         # Requesting User Data filter panel
