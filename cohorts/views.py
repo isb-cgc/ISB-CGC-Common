@@ -351,8 +351,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             db.autocommit(True)
             cursor.execute(make_tmp_table_str, params_tuple)
 
-            cursor.execute('SELECT COUNT(sample_barcode) FROM {0};'.format(filter_table))
-
         elif tmp_mut_table and not cohort_id:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
