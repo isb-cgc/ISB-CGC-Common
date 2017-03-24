@@ -923,6 +923,8 @@ def set_operation(request):
     db = None
     cursor = None
 
+    name = None
+
     try:
 
         if request.POST:
@@ -1115,7 +1117,7 @@ def set_operation(request):
         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
         logger.error(traceback.format_exc())
         redirect_url = 'cohort_list'
-        message = 'There was an error while creating your cohort. It may have been partially created.'
+        message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % name) if name else '')
         messages.error(request, message)
     finally:
         if cursor: cursor.close()
