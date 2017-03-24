@@ -190,6 +190,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
     try:
         cursor = db.cursor()
+        db.autocommit(True)
         where_clause = None
 
         # construct the WHERE clauses needed
@@ -203,27 +204,15 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         tmp_cohort_table = None
         tmp_filter_table = None
 
-        programs = []
-        prog_tables = {}
-
         # if we have a program ID, the base table is that program's samples table;
         # otherwise the base table is the cohort_samples table
         if program_id:
-            programs.append(program_id)
-        if cohort_id:
-            cursor.callproc('get_programs_in_cohort', (cohort_id,))
-            for row in cursor.fetchall():
-                programs.append(row[0])
-            cursor.close()
-            cursor = db.cursor()
-            base_table = 'cohort_samples'
-
-        for program in programs:
-            program_tables = Public_Metadata_Tables.objects.filter(program_id=program).first()
+            program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
             if program_tables:
-                prog_tables[program] = {'table': program_tables.samples_table, 'where_clause': where_clause}
-                if program_id == program:
-                    base_table = program_tables.samples_table
+                base_table = program_tables.samples_table
+
+        if cohort_id:
+            base_table = 'cohort_samples'
 
         params_tuple = ()
 
@@ -321,12 +310,12 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             db.commit()
 
         # If there is a cohort, make a temporary table based on it and make it the base table
-        if cohort_id is not None:
+        if cohort_id:
             tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
             make_cohort_table_str = """
-                CREATE TEMPORARY TABLE %s AS SELECT sample_barcode
+                CREATE TEMPORARY TABLE %s AS SELECT sample_barcode, case_barcode, project_id
                 FROM cohorts_samples cs
-            """ % (tmp_cohort_table, base_table)
+            """ % (tmp_cohort_table,)
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
             # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
@@ -348,7 +337,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
-            db.autocommit(True)
             cursor.execute(make_tmp_table_str, params_tuple)
 
         elif tmp_mut_table and not cohort_id:
@@ -367,17 +355,24 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
         # and cases
-
-        cursor.execute("""
-            SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ps.id
-            FROM %s ms JOIN (
-                SELECT pp.id AS id, pp.name AS name
-                FROM projects_project pp
-                  JOIN auth_user au ON au.id = pp.owner_id
-                WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND pp.active = 1
-                  AND pp.program_id = %s
-            ) ps ON ps.name = ms.project_disease_type;
-        """ % (filter_table, program_id,))
+        # If there was a cohort ID, project IDs will have been stored in the cohort_samples table and we do not
+        # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
+        # determine the project based on the program
+        if cohort_id:
+            cursor.execute("""
+                SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ms.project_id FROM %s ms;
+            """ % (filter_table,))
+        else:
+            cursor.execute("""
+                SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ps.id
+                FROM %s ms JOIN (
+                    SELECT pp.id AS id, pp.name AS name
+                    FROM projects_project pp
+                      JOIN auth_user au ON au.id = pp.owner_id
+                    WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND pp.active = 1
+                      AND pp.program_id = %s
+                ) ps ON ps.name = ms.project_disease_type;
+            """ % (filter_table, program_id,))
 
         for row in cursor.fetchall():
             samples_and_cases['items'].append({'sample_barcode': row[0], 'case_barcode': row[1], 'project_id': row[2]})
@@ -981,7 +976,7 @@ def set_operation(request):
                         SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id SEPARATOR ';')
                         FROM cohorts_samples cs
                         WHERE cs.cohort_id IN ({0})
-                        GROUP BY cs.sample_barcode
+                        GROUP BY cs.sample_barcode,cs.case_barcode
                         HAVING COUNT(DISTINCT cs.cohort_id) = %s;
                     """.format(params)
 
@@ -1110,20 +1105,23 @@ def set_operation(request):
 
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
-
+                messages.info(request, 'Cohort "%s" created successfully.' % new_cohort.name)
             else:
                 message = 'Operation resulted in empty set of samples. Cohort not created.'
                 messages.warning(request, message)
-                return redirect('cohort_list')
-
-        return redirect(redirect_url)
+                redirect_url = 'cohort_list'
 
     except Exception as e:
         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
         logger.error(traceback.format_exc())
+        redirect_url = 'cohort_list'
+        message = 'There was an error while creating your cohort. It may have been partially created.'
+        messages.error(request, message)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
+
+    return redirect(redirect_url)
 
 
 @login_required
