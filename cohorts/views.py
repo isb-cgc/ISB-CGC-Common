@@ -544,48 +544,45 @@ def cohort_create_for_existing_workbook(request, workbook_id, worksheet_id):
 @login_required
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
-    users = User.objects.filter(is_superuser=0).exclude(id=request.user.id)
+    try:
+        users = User.objects.filter(is_superuser=0).exclude(id=request.user.id)
 
-    cohort = None
-    shared_with_users = []
+        cohort = None
+        shared_with_users = []
+
+        data_attr = [
+            'DNA_sequencing',
+            'RNA_sequencing',
+            'miRNA_sequencing',
+            'Protein',
+            'SNP_CN',
+            'DNA_methylation',
+        ]
 
 
-    data_attr = [
-        'DNA_sequencing',
-        'RNA_sequencing',
-        'miRNA_sequencing',
-        'Protein',
-        'SNP_CN',
-        'DNA_methylation',
-    ]
+        user = Django_User.objects.get(id=request.user.id)
+        filters = None
 
+        isb_user = Django_User.objects.filter(username='isb').first()
+        program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
-    user = Django_User.objects.get(id=request.user.id)
-    filters = None
+        template_values = {
+            'request': request,
+            'users': users,
+            'base_url': settings.BASE_URL,
+            'base_api_url': settings.BASE_API_URL,
+            'programs': program_list
+        }
 
-    isb_user = Django_User.objects.filter(username='isb').first()
-    program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
+        if workbook_id and worksheet_id :
+            template_values['workbook']  = Workbook.objects.get(id=workbook_id)
+            template_values['worksheet'] = Worksheet.objects.get(id=worksheet_id)
+        elif create_workbook:
+            template_values['create_workbook'] = True
 
-    template_values = {
-        'request': request,
-        'users': users,
-        'base_url': settings.BASE_URL,
-        'base_api_url': settings.BASE_API_URL,
-        'programs': program_list
-    }
+        template = 'cohorts/new_cohort.html'
 
-    if workbook_id and worksheet_id :
-        template_values['workbook']  = Workbook.objects.get(id=workbook_id)
-        template_values['worksheet'] = Worksheet.objects.get(id=worksheet_id)
-    elif create_workbook:
-        template_values['create_workbook'] = True
-
-    template = 'cohorts/new_cohort.html'
-
-    # template_values['metadata_counts'] = results
-
-    if cohort_id != 0:
-        try:
+        if cohort_id != 0:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             cohort.perm = cohort.get_perm(request)
             cohort.owner = cohort.get_owner()
@@ -603,10 +600,13 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['total_samples'] = cohort.sample_size()
             template_values['total_cases'] = cohort.case_size()
             template_values['shared_with_users'] = shared_with_users
-        except ObjectDoesNotExist:
-            # Cohort doesn't exist, return to user landing with error.
-            messages.error(request, 'The cohort you were looking for does not exist.')
-            return redirect('cohort_list')
+
+    except ObjectDoesNotExist:
+        messages.error(request, 'The cohort you were looking for does not exist.')
+        return redirect('cohort_list')
+    except Exception as e:
+        messages.error(request, "There was an error while trying to load the cohort details page.")
+        return redirect('cohort_list')
 
     return render(request, template, template_values)
 
