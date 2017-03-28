@@ -124,13 +124,18 @@ class Cohort(models.Model):
         # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
         while cohort:
             for filter in Filters.objects.filter(resulting_cohort=cohort):
-                if not filter.name in filters:
-                    filters[filter.name] = {}
-                    filters[filter.name]['id'] = cohort.id
-                    filters[filter.name]['values'] = []
-
-                if filters[filter.name]['id'] == cohort.id:
-                    filters[filter.name]['values'].append(filter.value)
+                prog_name = filter.program.name
+                if prog_name not in filters:
+                    filters[prog_name] = {}
+                prog_filters = filters[prog_name]
+                if filter.name not in prog_filters:
+                    prog_filters[filter.name] = {
+                        'id': cohort.id,
+                        'values': []
+                    }
+                prog_filter = prog_filters[filter.name]
+                if prog_filter['id'] == cohort.id:
+                    prog_filter['values'].append(filter.value)
 
 
             sources = Source.objects.filter(cohort=cohort)
@@ -139,11 +144,14 @@ class Cohort(models.Model):
             else:
                 cohort = None
 
-        current_filters = []
+        current_filters = {}
 
-        for filter in filters:
-            for value in filters[filter]['values']:
-                current_filters.append({'name': str(filter), 'value': str(value)})
+        for prog in filters:
+            current_filters[prog] = []
+            prog_filters = filters[prog]
+            for filter in prog_filters:
+                for value in prog_filters[filter]['values']:
+                    current_filters[prog].append({'name': str(filter), 'value': str(value)})
 
         return current_filters
 
@@ -188,7 +196,7 @@ class Cohort(models.Model):
                     source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
                     filters = []
                     for source_filter in source_filters:
-                        filters.append({'name': source_filter.name, 'value': source_filter.value})
+                        filters.append({'name': source_filter.name, 'value': source_filter.value, 'program': source_filter.program.name})
                     filter_history[source.cohort.id] = filters
             else:
                 keep_traversing = False
