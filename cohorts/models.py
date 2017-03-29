@@ -59,6 +59,10 @@ class Cohort(models.Model):
     def case_size(self):
         return len(set(self.samples_set.values_list('case_barcode', flat=True)))
 
+    def get_programs(self):
+        projects = set(self.samples_set.values_list('project_id', flat=True))
+        return Program.objects.filter(id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct()
+
     '''
     Sets the last viewed time for a cohort
     '''
