@@ -523,7 +523,7 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
                 for value in this_filter:
                     filters[key]['values'].append(value)
 
-        except Exception, e:
+        except Exception as e:
             logger.error(traceback.format_exc())
             raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
@@ -539,10 +539,14 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
         + ": " + (stop - start).__str__()
     )
 
-    return {'items': counts_and_total['data'],
-            'count': counts_and_total['counts'],
-            'cases': counts_and_total['cases'],
-            'total': counts_and_total['total'], }
+    return_vals = {
+        'items': counts_and_total['data'],
+        'count': counts_and_total['counts'],
+        'cases': counts_and_total['cases'],
+        'total': counts_and_total['total']
+    }
+
+    return return_vals
 
 
 def user_metadata_counts(user, user_data_filters, cohort_id):

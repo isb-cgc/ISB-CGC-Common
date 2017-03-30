@@ -593,6 +593,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort.mark_viewed(request)
 
+            cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
+
+            cohort_programs = [ {'id': x.id, 'name': x.name} for x in cohort_progs ]
+
             shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
             shared_with_users = User.objects.filter(id__in=shared_with_ids)
             template = 'cohorts/cohort_details.html'
@@ -600,6 +604,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['total_samples'] = cohort.sample_size()
             template_values['total_cases'] = cohort.case_size()
             template_values['shared_with_users'] = shared_with_users
+            template_values['cohort_programs'] = cohort_programs
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
@@ -1428,7 +1433,18 @@ def get_metadata(request):
     user = Django_User.objects.get(id=request.user.id)
 
     if program_id is not None and program_id > 0:
-        results = public_metadata_counts(filters, cohort, user, program_id, limit)
+        results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit)
+        # If there is an extent cohort, to get the cohort's new totals per applied filters
+        # we have to check the unfiltered programs for their numbers and tally them
+        if cohort:
+            results['cohort-total'] = results['total']
+            results['cohort-cases'] = results['cases']
+            cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
+            for prog in cohort_progs:
+                if prog.id != program_id:
+                    prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
+                    results['cohort-total'] += prog_res['total']
+                    results['cohort-cases'] += prog_res['cases']
     else:
         results = user_metadata_counts(user, filters, cohort)
 
@@ -1486,16 +1502,16 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                     ma['category'] = cat['value']
 
         results = public_metadata_counts(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
-        totals = results['total']
 
         template_values = {
             'request': request,
-            'attr_list_count': results['count'],
-            'total_samples': int(totals),
+            'attr_counts': results['count'],
+            'total_samples': int(results['total']),
             'clin_attr': clin_attr,
             'molecular_attr': molecular_attr,
             'metadata_filters': filters or {},
-            'program': public_program
+            'program': public_program,
+            'metadata_counts': results
         }
 
         if cohort_id:
