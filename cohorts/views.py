@@ -204,15 +204,9 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         tmp_cohort_table = None
         tmp_filter_table = None
 
-        # if we have a program ID, the base table is that program's samples table;
-        # otherwise the base table is the cohort_samples table
-        if program_id:
-            program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
-            if program_tables:
-                base_table = program_tables.samples_table
-
-        if cohort_id:
-            base_table = 'cohort_samples'
+        # The base table is the program's samples table
+        program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
+        base_table = program_tables.samples_table
 
         params_tuple = ()
 
@@ -310,18 +304,24 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             db.commit()
 
         # If there is a cohort, make a temporary table based on it and make it the base table
-        if cohort_id:
+        start = time.time()
+        # If there is a cohort, make a temporary table based on it and make it the base table
+        if cohort_id is not None:
             tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
+            base_table = tmp_cohort_table
             make_cohort_table_str = """
-                CREATE TEMPORARY TABLE %s AS SELECT sample_barcode, case_barcode, project_id
+                CREATE TEMPORARY TABLE %s AS SELECT cs.project_id, ms.*
                 FROM cohorts_samples cs
-            """ % (tmp_cohort_table,)
+                JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
+            """ % (tmp_cohort_table, program_tables.samples_table)
+            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
-            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
-            base_table = tmp_cohort_table
+
+            for row in cursor.fetchall():
+                logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
 
         # If there are filters, create a temporary table filtered off the base table
         if filters.__len__() > 0:
@@ -337,6 +337,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
+            print >> sys.stdout, make_tmp_table_str
             cursor.execute(make_tmp_table_str, params_tuple)
 
         elif tmp_mut_table and not cohort_id:
@@ -692,6 +693,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
     apply_filters = False
     apply_name = False
 
+    cohort_progs = None
+
     if request.POST:
         name = request.POST.get('name')
         whitelist = re.compile(WHITELIST_RE,re.UNICODE)
@@ -723,6 +726,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         # Given cohort_id is the only source id.
         if source:
             parent = Cohort.objects.get(id=source)
+            cohort_progs = parent.get_programs()
 
         filter_obj = {}
 
@@ -751,6 +755,11 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
         for prog in filter_obj:
             results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog)
+
+        if cohort_progs:
+            for prog in cohort_progs:
+                if prog.id not in results:
+                    results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
 
         found_samples = False
 
