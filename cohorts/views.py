@@ -80,6 +80,10 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # we have no way to know where to source our samples from
         raise Exception("No Program or Cohort ID was provided when trying to obtain sample and case lists!")
 
+    if inc_filters and not program_id:
+        # You cannot filter samples without specifying the program they apply to
+        raise Exception("Filters were supplied, but no program was indicated - you cannot filter samples without knowing the program!")
+
     samples_and_cases = {'items': [], 'cases': [], 'count': 0}
 
     sample_ids = {}
@@ -204,14 +208,12 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         tmp_cohort_table = None
         tmp_filter_table = None
 
-        # if we have a program ID, the base table is that program's samples table;
-        # otherwise the base table is the cohort_samples table
+        # The base table is the program's samples table if a program was supplied
         if program_id:
             program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
-            if program_tables:
-                base_table = program_tables.samples_table
-
-        if cohort_id:
+            base_table = program_tables.samples_table
+        # ...otherwise it's the cohort_samples table
+        elif cohort_id:
             base_table = 'cohort_samples'
 
         params_tuple = ()
@@ -310,18 +312,30 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             db.commit()
 
         # If there is a cohort, make a temporary table based on it and make it the base table
+        start = time.time()
+        # If there is a cohort, make a temporary table based on it and make it the base table
         if cohort_id:
             tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
-            make_cohort_table_str = """
-                CREATE TEMPORARY TABLE %s AS SELECT sample_barcode, case_barcode, project_id
-                FROM cohorts_samples cs
-            """ % (tmp_cohort_table,)
+            base_table = tmp_cohort_table
+            if program_id:
+                make_cohort_table_str = """
+                    CREATE TEMPORARY TABLE %s AS SELECT cs.project_id, ms.*
+                    FROM cohorts_samples cs
+                    JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
+                """ % (tmp_cohort_table, program_tables.samples_table)
+            else:
+                make_cohort_table_str = """
+                    CREATE TEMPORARY TABLE %s AS SELECT cs.*
+                    FROM cohorts_samples cs
+                """ % (tmp_cohort_table,)
+            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             if tmp_mut_table:
                 make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
-            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
-            base_table = tmp_cohort_table
+
+            for row in cursor.fetchall():
+                logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
 
         # If there are filters, create a temporary table filtered off the base table
         if filters.__len__() > 0:
@@ -337,6 +351,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
+
             cursor.execute(make_tmp_table_str, params_tuple)
 
         elif tmp_mut_table and not cohort_id:
@@ -380,8 +395,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # Fetch the project IDs for these samples
 
         samples_and_cases['count'] = len(samples_and_cases['items'])
-
-        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('case_barcode', filter_table,))
 
         for row in cursor.fetchall():
             samples_and_cases['cases'].append(row[0])
@@ -692,6 +705,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
     apply_filters = False
     apply_name = False
 
+    cohort_progs = None
+
     if request.POST:
         name = request.POST.get('name')
         whitelist = re.compile(WHITELIST_RE,re.UNICODE)
@@ -723,6 +738,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         # Given cohort_id is the only source id.
         if source:
             parent = Cohort.objects.get(id=source)
+            cohort_progs = parent.get_programs()
 
         filter_obj = {}
 
@@ -751,6 +767,11 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
         for prog in filter_obj:
             results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog)
+
+        if cohort_progs:
+            for prog in cohort_progs:
+                if prog.id not in results:
+                    results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
 
         found_samples = False
 
@@ -909,7 +930,9 @@ def clone_cohort(request, cohort_id):
 
     # BQ needs an explicit case-per-sample dataset; get that now
 
-    samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
+    cohort_progs = source.get_programs()
+
+    samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
 
     # Store cohort to BigQuery
     bq_project_id = settings.BQ_PROJECT_ID
@@ -956,7 +979,9 @@ def set_operation(request):
                     ids += (cohort.id,)
 
                 start = time.time()
-                samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_barcode', 'case_barcode', 'project_id')
+                union_samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_barcode', 'case_barcode', 'project_id')
+                samples = [{'id': x[0], 'case': x[1], 'project': x[2]} for x in union_samples]
+
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
 
@@ -1057,10 +1082,30 @@ def set_operation(request):
                 base_id = request.POST.get('base-id')
                 subtract_ids = request.POST.getlist('subtract-ids')
 
-                base_samples = Samples.objects.filter(cohort_id=base_id)
-                subtract_samples = Samples.objects.filter(cohort_id__in=subtract_ids).distinct()
-                cohort_samples = base_samples.exclude(sample_barcode__in=subtract_samples.values_list('sample_barcode', flat=True))
-                samples = cohort_samples.values_list('sample_barcode', 'case_barcode', 'project_id')
+                cohort_list = tuple(int(i) for i in subtract_ids)
+                params = ('%s,' * len(subtract_ids))[:-1]
+
+                db = get_sql_connection()
+                cursor = db.cursor()
+
+                complement_cohort_list_def = """
+                    SELECT base.sample_barcode,base.case_barcode,base.project_id
+                    FROM cohorts_samples base
+                    LEFT JOIN (
+                        SELECT DISTINCT cs.sample_barcode,cs.case_barcode,cs.project_id
+                        FROM cohorts_samples cs
+                        WHERE cs.cohort_id IN ({0})
+                    ) AS subtract
+                    ON subtract.sample_barcode = base.sample_barcode AND subtract.case_barcode = base.case_barcode AND subtract.project_id = base.project_id
+                    WHERE base.cohort_id = %s AND subtract.sample_barcode IS NULL;
+                """.format(params)
+
+                cohort_list += (int(base_id),)
+
+                cursor.execute(complement_cohort_list_def, cohort_list)
+
+                for row in cursor.fetchall():
+                    samples.append({'id': row[0], 'case': row[1], 'project': row[2]})
 
                 notes = 'Subtracted '
                 base_cohort = Cohort.objects.get(id=base_id)
@@ -1083,10 +1128,8 @@ def set_operation(request):
                 # Store cohort samples to CloudSQL
                 sample_list = []
                 for sample in samples:
-                    if op == 'intersect':
-                        sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
-                    else:
-                        sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
+                    sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
+
                 Samples.objects.bulk_create(sample_list)
 
                 # get the full resulting sample and case ID set

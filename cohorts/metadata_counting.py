@@ -377,7 +377,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
             cursor.execute(make_cohort_table_str, (cohort_id,))
 
-            cursor.execute('SELECT COUNT(*) AS count FROM '+tmp_cohort_table+';')
             for row in cursor.fetchall():
                 logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
 
