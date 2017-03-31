@@ -351,7 +351,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
-            print >> sys.stdout, make_tmp_table_str
+
             cursor.execute(make_tmp_table_str, params_tuple)
 
         elif tmp_mut_table and not cohort_id:
