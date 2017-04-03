@@ -57,7 +57,7 @@ class Cohort(models.Model):
         return len(self.samples_set.all())
 
     def case_size(self):
-        return len(set(self.samples_set.values_list('case_barcode', flat=True)))
+        return len(self.samples_set.values_list('case_barcode', flat=True).distinct())
 
     def get_programs(self):
         projects = self.samples_set.values_list('project_id', flat=True).distinct()
