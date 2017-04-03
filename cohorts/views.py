@@ -21,7 +21,7 @@ import traceback
 import re
 
 import django
-from bq_data_access.cohort_bigquery import BigQueryCohortSupport
+from bq_data_access.v2.cohort_bigquery import BigQueryCohortSupport
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User

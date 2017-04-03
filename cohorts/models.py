@@ -178,7 +178,14 @@ class Cohort(models.Model):
             else:
                 cohort = None
 
-        return filter_list
+        filters = {}
+
+        for filter in filter_list:
+            if filter.program.name not in filters:
+                filters[filter.program.name] = []
+            filters[filter.program.name].append({'name': str(filter.name), 'value': str(filter.value)})
+
+        return filters
 
     '''
     Creates a historical list of the filters applied to produce this cohort
