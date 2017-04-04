@@ -57,7 +57,7 @@ class Cohort(models.Model):
         return len(self.samples_set.all())
 
     def case_size(self):
-        return len(set(self.samples_set.values_list('case_barcode', flat=True)))
+        return len(self.samples_set.values_list('case_barcode', flat=True).distinct())
 
     def get_programs(self):
         projects = self.samples_set.values_list('project_id', flat=True).distinct()
@@ -178,7 +178,14 @@ class Cohort(models.Model):
             else:
                 cohort = None
 
-        return filter_list
+        filters = {}
+
+        for filter in filter_list:
+            if filter.program.name not in filters:
+                filters[filter.program.name] = []
+            filters[filter.program.name].append({'name': str(filter.name), 'value': str(filter.value)})
+
+        return filters
 
     '''
     Creates a historical list of the filters applied to produce this cohort
