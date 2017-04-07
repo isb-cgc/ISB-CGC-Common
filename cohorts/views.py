@@ -41,7 +41,7 @@ from accounts.models import NIH_User
 from metadata_helpers import *
 from metadata_counting import *
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
+from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 
 BQ_ATTEMPT_MAX = 10
 
@@ -1280,7 +1280,8 @@ def cohort_filelist(request, cohort_id=0):
         messages.error(request, 'Cohort provided does not exist.')
         return redirect('/user_landing')
 
-    items = cohort_files(request, cohort_id)
+    build = request.GET.get('build', 'HG19')
+    items = cohort_files(request, cohort_id, build=build)
     file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
     nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
@@ -1294,7 +1295,7 @@ def cohort_filelist(request, cohort_id=0):
     cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
     if len(cohort_sample_list):
         messages.info(request,
-                      "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
+            "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
 
     return render(request, 'cohorts/cohort_filelist.html', {'request': request,
                                                             'cohort': cohort,
@@ -1307,7 +1308,8 @@ def cohort_filelist(request, cohort_id=0):
                                                             'filelist': file_list,
                                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                                             'sel_file_max': MAX_SEL_FILES,
-                                                            'has_access': has_access})
+                                                            'has_access': has_access,
+                                                            'build': build})
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
@@ -1332,8 +1334,9 @@ def cohort_filelist_ajax(request, cohort_id=0):
     if request.GET.get('limit', None) is not None:
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
+    build = request.GET.get('build','HG19')
     result = cohort_files(request=request,
-                          cohort_id=cohort_id, **params)
+                          cohort_id=cohort_id, build=build, **params)
 
     return JsonResponse(result, status=200)
 
@@ -1391,8 +1394,10 @@ def streaming_csv_view(request, cohort_id=0):
     file_list = []
     offset = None
 
+    build = reuest.GET.get('build','HG19')
+
     while keep_fetching:
-        items = cohort_files(request=request, cohort_id=cohort_id, limit=limit)
+        items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
         if 'file_list' in items:
             file_list += items['file_list']
             # offsets are counted from row 0, so setting the offset to the current number of
@@ -1588,7 +1593,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
     return render(request, template, template_values)
 
 # Copied over from metadata api
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
 
     GET = request.GET.copy()
     platform_count_only = GET.pop('platform_count_only', None)
@@ -1596,119 +1601,134 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0):
     user_email = user.email
     user_id = user.id
 
+    resp = None
+    db = None
+    cursor = None
+
     try:
-        cohort_perm = Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
-    except (ObjectDoesNotExist, MultipleObjectsReturned), e:
-        logger.warn(e)
-        logger.error(traceback.format_exc())
+        # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
+        Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        return {'error': "%s does not have permission to view cohort %d." % (user_email, cohort_id)}
+        platform_count_query = """
+            SELECT md.platform, count(md.platform) as platform_count
+            FROM {0} md
+            JOIN (
+              SELECT sample_barcode
+              FROM cohorts_samples
+              WHERE cohort_id = %s
+            ) cs
+            ON cs.sample_barcode = md.sample_barcode
+            WHERE md.file_uploaded='true'
+            GROUP BY md.platform;"""
 
+        query = """
+            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.access, md.platform, md.data_type, md.data_category, md.experimental_strategy
+            FROM {0} md
+            JOIN (
+                SELECT sample_barcode
+                FROM cohorts_samples
+                WHERE cohort_id = %s
+            ) cs
+            ON cs.sample_barcode = md.sample_barcode
+            WHERE md.file_uploaded='true'
+        """
 
-    sample_query = 'select sample_barcode from cohorts_samples where cohort_id=%s;'
-    sample_list = ()
-    try:
+        params = (cohort_id,)
+
+        # Check for incoming platform selectors
+        platform_selector_list = []
+        for key, value in GET.items():
+            if GET.get(key, None) is not None and GET.get(key) == 'True':
+                platform_selector_list.append(key)
+
+        if len(platform_selector_list):
+            query += ' AND Platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1])
+            params += tuple(x for x in platform_selector_list)
+
+        if limit > 0:
+            query += ' LIMIT %s'
+            params += (limit,)
+            # Offset is only valid when there is a limit
+            if offset > 0:
+                query += ' OFFSET %s'
+                params += (offset,)
+
+        query += ';'
+
         db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute(sample_query, (cohort_id,))
-        in_clause = ''
-        for row in cursor.fetchall():
-            sample_list += (row['sample_barcode'],)
-            in_clause += '%s,'
-        in_clause = in_clause[:-1]
+
+        platform_count_list = []
+        file_list = []
+
+        for program in Cohort.objects.get(id=cohort_id).get_programs():
+
+            program_data_table = Public_Data_Tables.objects.get(program=program, build=build).data_table
+
+            cursor.execute(platform_count_query.format(program_data_table), (cohort_id,))
+
+            count = 0
+            if cursor.rowcount > 0:
+                for row in cursor.fetchall():
+                    if len(platform_selector_list):
+                        if row['platform'] in platform_selector_list:
+                            count += int(row['platform_count'])
+                    else:
+                        count += int(row['platform_count'])
+                    platform_count_list.append({'platform': row['platform'], 'count': int(row['platform_count'])})
+            else:
+                platform_count_list.append({'platform': 'None', 'count': 0})
+
+            if not platform_count_only:
+                cursor.execute(query.format(program_data_table), params)
+                if cursor.rowcount > 0:
+                    for item in cursor.fetchall():
+                        # If there's a datafilenamekey
+                        if 'file_name_key' in item and item['file_name_key'] != '':
+                            # Find protected bucket it should belong to
+                            bucket_name = ''
+                            # if item['Repository'] and item['Repository'].lower() == 'dcc':
+                            #     bucket_name = settings.DCC_CONTROLLED_DATA_BUCKET
+                            # elif item['Repository'] and item['Repository'].lower() == 'cghub':
+                            #     bucket_name = settings.CGHUB_CONTROLLED_DATA_BUCKET
+                            # else:
+                            #     bucket_name = settings.OPEN_DATA_BUCKET
+
+                            item['file_name_key'] = "gs://{}{}".format(bucket_name, item['file_name_key'])
+
+                        file_list.append({
+                            'sample': item['sample_barcode'],
+                            'cloudstorage_location': item['file_name_key'],
+                            'access': (item['access'] or 'N/A'),
+                            'filename': item['file_name'],
+                            'exp_strat': item['experimental_strategy'],
+                            'platform': item['platform'],
+                            'datacat': item['data_category'],
+                            'datatype': (item['data_type'] or " ")
+                        })
+                else:
+                    file_list.append({'sample': 'None', 'filename': '', 'pipeline': '', 'platform': '', 'datalevel': '', 'datacat':''})
+
+            resp = {'total_file_count': count, 'page': page, 'platform_count_list': platform_count_list,
+                               'file_list': file_list, 'build': build}
 
     except (IndexError, TypeError):
         logger.error("Error obtaining list of samples in cohort file list")
         logger.error(traceback.format_exc())
-        return {'error': 'Error obtaining list of samples in cohort file list'}
+        resp = {'error': 'Error obtaining list of samples in cohort file list'}
+
+    except (ObjectDoesNotExist, MultipleObjectsReturned), e:
+        logger.error("[ERROR] Exception when retrieving cohort file list:")
+        logger.exception(e)
+        resp = {'error': "%s does not have permission to view cohort %d." % (user_email, cohort_id)}
+
+    except Exception as e:
+        logger.error("[ERROR] Exception obtaining file list and platform counts:")
+        logger.error(traceback.format_exc())
+        resp = {'error': 'Error getting counts'}
+
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
-    platform_count_query = 'select Platform, count(Platform) as platform_count ' \
-                           'from metadata_data where sample_barcode in ({0}) ' \
-                           '  and DatafileUploaded="true"  group by Platform order by sample_barcode;'.format(in_clause)
-
-    query = 'select sample_barcode, DatafileName, DatafileNameKey, SecurityProtocol, ' \
-            'Pipeline, Platform, DataLevel, Datatype, GG_readgroupset_id, Repository, SecurityProtocol ' \
-            'from metadata_data where sample_barcode in ({0}) and DatafileUploaded="true" '.format(in_clause)
-
-    # Check for incoming platform selectors
-    platform_selector_list = []
-    for key, value in GET.items():
-        if GET.get(key, None) is not None and GET.get(key) == 'True':
-            platform_selector_list.append(key)
-
-    if len(platform_selector_list):
-        query += ' and Platform in ("' + '","'.join(platform_selector_list) + '")'
-
-    query_tuple = sample_list
-
-    if limit > 0:
-        query += ' limit %s'
-        query_tuple += (limit,)
-        # Offset is only valid when there is a limit
-        if offset > 0:
-            query += ' offset %s'
-            query_tuple += (offset,)
-
-    query += ';'
-
-    try:
-        db = get_sql_connection()
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
-        cursor.execute(platform_count_query, sample_list)
-        platform_count_list = []
-        count = 0
-        if cursor.rowcount > 0:
-            for row in cursor.fetchall():
-                if len(platform_selector_list):
-                    if row['Platform'] in platform_selector_list:
-                        count += int(row['platform_count'])
-                else:
-                    count += int(row['platform_count'])
-                platform_count_list.append({'platform': row['Platform'], 'count': int(row['platform_count'])})
-        else:
-            platform_count_list.append({'platform': 'None', 'count': 0})
-
-        file_list = []
-        if not platform_count_only:
-            cursor.execute(query, query_tuple)
-            if cursor.rowcount > 0:
-                for item in cursor.fetchall():
-                    # If there's a datafilenamekey
-                    if 'DatafileNameKey' in item and item['DatafileNameKey'] != '':
-                        # Find protected bucket it should belong to
-                        bucket_name = ''
-                        if item['Repository'] and item['Repository'].lower() == 'dcc':
-                            bucket_name = settings.DCC_CONTROLLED_DATA_BUCKET
-                        elif item['Repository'] and item['Repository'].lower() == 'cghub':
-                            bucket_name = settings.CGHUB_CONTROLLED_DATA_BUCKET
-                        else:
-                            bucket_name = settings.OPEN_DATA_BUCKET
-
-                        item['DatafileNameKey'] = "gs://{}{}".format(bucket_name, item['DatafileNameKey'])
-
-                    file_list.append(
-                        {'sample': item['sample_barcode'],
-                         'cloudstorage_location': item['DatafileNameKey'],
-                         'access': (item['SecurityProtocol'] or 'N/A'),
-                         'filename': item['DatafileName'],
-                         'pipeline': item['Pipeline'],
-                         'platform': item['Platform'],
-                         'datalevel': item['DataLevel'],
-                         'datatype': (item['Datatype'] or " "),
-                         'gg_readgroupset_id': item['GG_readgroupset_id']})
-            else:
-                file_list.append({'sample': 'None', 'filename': '', 'pipeline': '', 'platform': '', 'datalevel': ''})
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-        return {'total_file_count': count, 'page': page, 'platform_count_list': platform_count_list,
-                           'file_list': file_list}
-
-    except Exception as e:
-        logger.error("Error obtaining platform counts")
-        logger.error(traceback.format_exc())
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-        return {'error': 'Error getting counts'}
+    return resp
