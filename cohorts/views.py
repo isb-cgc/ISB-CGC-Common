@@ -912,12 +912,12 @@ def clone_cohort(request, cohort_id):
     Samples.objects.bulk_create(sample_list)
 
     # Clone the filters
-    filters = Filters.objects.filter(resulting_cohort=parent_cohort).values_list('name', 'value')
+    filters = Filters.objects.filter(resulting_cohort=parent_cohort)
     # ...but only if there are any (there may not be)
     if filters.__len__() > 0:
         filters_list = []
         for filter_pair in filters:
-            filters_list.append(Filters(name=filter_pair[0], value=filter_pair[1], resulting_cohort=cohort))
+            filters_list.append(Filters(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
         Filters.objects.bulk_create(filters_list)
 
     # Set source
@@ -930,7 +930,7 @@ def clone_cohort(request, cohort_id):
 
     # BQ needs an explicit case-per-sample dataset; get that now
 
-    cohort_progs = source.get_programs()
+    cohort_progs = parent_cohort.get_programs()
 
     samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
 
@@ -1572,14 +1572,17 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             filters = None
 
         results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
-        totals = results['total']
+
+        print >> sys.stdout, str(results)
 
         template_values = {
             'request': request,
-            'attr_list_count': results['count'],
-            'total_samples': int(totals),
+            'attr_counts': results['count'],
+            'total_samples': int(results['total']),
+            'total_cases': int(results['cases']),
             'metadata_filters': filters or {},
-            'program': -1
+            'metadata_counts': results,
+            'program': 0
         }
 
     return render(request, template, template_values)
