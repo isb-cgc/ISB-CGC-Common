@@ -547,7 +547,7 @@ def project_data_success(request, program_id=0, project_id=0, dataset_id=0):
             continue
         col_name = filter_column_name(user_feature.feature_name)
 
-        cursor.execute('SELECT COUNT(1) AS "count", '+ col_name +' AS "val" FROM ' + datatables.metadata_samples_table)
+        cursor.execute('SELECT COUNT(1) AS "count", '+ col_name +' AS "val" FROM ' + datatables.metadata_samples_table +' GROUP BY '+col_name+';')
         values = cursor.fetchall()
 
         for value in values:
