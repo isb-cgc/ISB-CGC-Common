@@ -558,8 +558,11 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
             'user_data_cases': 0,
         }
 
+        found_user_data = False
+
         if user:
             if len(Project.get_user_projects(user)) > 0:
+                found_user_data = True
                 user_data_result = count_user_metadata(user, user_data_filters, cohort_id)
 
                 for key in user_data_result:
@@ -570,20 +573,18 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
                     else:
                         counts_and_total['user_data'].append(user_data_result[key])
                         counts_and_total['counts'].append(user_data_result[key])
-
-                        # TODO: If we allow users to filter their data on our filters, we would create the user_base_table here
-                        # Proposition: a separate method would be passed the current db connection and any filters to make the tmp table
-                        # It would pass back the name of the table for use by count_metadata in a UNION statement
-
             else:
                 logger.info('[STATUS] No projects were found for this user.')
+
         else:
             logger.info("[STATUS] User not authenticated; no user data will be available.")
 
-        return {'items': counts_and_total['user_data'],
-                'count': counts_and_total['counts'],
-                'cases': counts_and_total['user_data_cases'],
-                'total': counts_and_total['user_data_total'], }
+        return {
+            'user_data': found_user_data,
+            'count': counts_and_total['counts'],
+            'cases': counts_and_total['user_data_cases'],
+            'total': counts_and_total['user_data_total'],
+        }
 
     except Exception, e:
         logger.error('[ERROR] Exception when counting user metadata: ' + e.message)
