@@ -176,277 +176,282 @@ def upload_files(request):
     program = None
     project = None
 
-    # TODO: Validation
-    whitelist = re.compile(WHITELIST_RE, re.UNICODE)
+    try:
 
-    if request.POST['program-type'] == 'new':
-        program_name = request.POST['program-name']
-        program_desc = request.POST['program-description']
-        match_name = whitelist.search(unicode(program_name))
-        match_desc = whitelist.search(unicode(program_desc))
+        # TODO: Validation
+        whitelist = re.compile(WHITELIST_RE, re.UNICODE)
 
-        if match_name or match_desc:
-            # XSS risk, log and fail this cohort save
-            matches = ""
-            fields = ""
-            if match_name:
-                match_name = whitelist.findall(unicode(program_name))
-                logger.error(
-                    '[ERROR] While saving a user program, saw a malformed name: ' + program_name + ', characters: ' + match_name.__str__())
-                matches = "name contains"
-                fields = "name"
-            if match_desc:
-                match_desc = whitelist.findall(unicode(program_desc))
-                logger.error(
-                    '[ERROR] While saving a user program, saw a malformed description: ' + program_desc + ', characters: ' + match_desc.__str__())
-                matches = "name and description contain" if match_name else "description contains"
-                fields += (" and description" if match_name else "description")
+        if request.POST['program-type'] == 'new':
+            program_name = request.POST['program-name']
+            program_desc = request.POST['program-description']
+            match_name = whitelist.search(unicode(program_name))
+            match_desc = whitelist.search(unicode(program_desc))
 
-            err_msg = "Your program's %s invalid characters; please choose another %s." % (matches, fields,)
+            if match_name or match_desc:
+                # XSS risk, log and fail this cohort save
+                matches = ""
+                fields = ""
+                if match_name:
+                    match_name = whitelist.findall(unicode(program_name))
+                    logger.error(
+                        '[ERROR] While saving a user program, saw a malformed name: ' + program_name + ', characters: ' + match_name.__str__())
+                    matches = "name contains"
+                    fields = "name"
+                if match_desc:
+                    match_desc = whitelist.findall(unicode(program_desc))
+                    logger.error(
+                        '[ERROR] While saving a user program, saw a malformed description: ' + program_desc + ', characters: ' + match_desc.__str__())
+                    matches = "name and description contain" if match_name else "description contains"
+                    fields += (" and description" if match_name else "description")
 
-            resp = {
-                'status': "error",
-                'error': "bad_input",
-                'message': err_msg
-            }
-            return JsonResponse(resp)
-
-        program = request.user.program_set.create(name=request.POST['program-name'], description=request.POST['program-description'])
-        program.save()
-    else:
-        try:
-            program = Program.objects.get(id=request.POST['program-id'])
-        except ObjectDoesNotExist:
-            resp = {
-                'status': "error",
-                'error': "bad_file",
-                'message': "The program you wish to upload to does not exist."
-            }
-            return JsonResponse(resp)
-
-
-    if program is None:
-        status = 'error'
-        message = 'Unable to create program'
-    else:
-        project_name = request.POST['project-name']
-        project_desc = request.POST['project-description']
-        match_name = whitelist.search(unicode(project_name))
-        match_desc = whitelist.search(unicode(project_desc))
-
-        if match_name or match_desc:
-            # XSS risk, log and fail this cohort save
-            matches = ""
-            fields = ""
-            if match_name:
-                match_name = whitelist.findall(unicode(project_name))
-                logger.error(
-                    '[ERROR] While saving a user project, saw a malformed name: ' + project_name + ', characters: ' + match_name.__str__())
-                matches = "name contains"
-                fields = "name"
-            if match_desc:
-                match_desc = whitelist.findall(unicode(project_desc))
-                logger.error(
-                    '[ERROR] While saving a user project, saw a malformed description: ' + project_desc + ', characters: ' + match_desc.__str__())
-                matches = "name and description contain" if match_name else "description contains"
-                fields += (" and description" if match_name else "description")
-
-            err_msg = "Your project's %s invalid characters; please choose another %s." % (matches, fields,)
-
-            resp = {
-                'status': "error",
-                'error': "bad_input",
-                'message': err_msg
-            }
-            return JsonResponse(resp)
-
-        project = program.project_set.create(
-            name=request.POST['project-name'],
-            description=request.POST['project-description'],
-            owner=request.user
-        )
-
-        if request.POST['data-type'] == 'extend':
-            # TODO Does this need a share check??
-            project.extends_id = request.POST['extend-project-id']
-
-        project.save()
-
-        upload = UserUpload(owner=request.user)
-        upload.save()
-
-        bucket = Bucket.objects.get(id=request.POST['bucket'])
-        dataset = BqDataset.objects.get(id=request.POST['dataset'])
-        google_project = bucket.google_project
-
-        # TODO: This has to be done at the same time as the user data processor
-        config = {
-            "USER_PROJECT": program.id,
-            "USER_ID": request.user.id,
-            "STUDY": project.id,
-            "BUCKET": bucket.bucket_name,
-            "GOOGLE_PROJECT": google_project.project_name,
-            "BIGQUERY_DATASET": dataset.dataset_name,
-            "FILES": [],
-            "USER_METADATA_TABLES": {
-                "METADATA_DATA" : "user_metadata_" + str(request.user.id) + "_" + str(project.id),
-                "METADATA_SAMPLES" : "user_metadata_samples_" + str(request.user.id) + "_" + str(project.id),
-                "FEATURE_DEFS": User_Feature_Definitions._meta.db_table
-            }
-        }
-        all_columns = []
-        bq_table_names = []
-        seen_user_columns = []
-        for formfield in request.FILES:
-            file = request.FILES[formfield]
-            file_upload = UserUploadedFile(upload=upload, file=file, bucket=config['BUCKET'])
-            try :
-                file_upload.save()
-            except Exception :
-                project.delete()
-                upload.delete()
-                if request.POST['program-type'] == 'new':
-                    program.delete()
+                err_msg = "Your program's %s invalid characters; please choose another %s." % (matches, fields,)
 
                 resp = {
                     'status': "error",
-                    'error' : "bad_file",
-                    'message': "There is a problem with the format of your file. Check for empty lines at the end of your file"
+                    'error': "bad_input",
+                    'message': err_msg
                 }
                 return JsonResponse(resp)
 
-            descriptor = json.loads(request.POST[formfield + '_desc'])
-            datatype = request.POST[formfield + '_type']
-            bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(program.id) + "_" + str(project.id)
+            program = request.user.program_set.create(name=request.POST['program-name'], description=request.POST['program-description'])
+            program.save()
+        else:
+            program = Program.objects.get(id=request.POST['program-id'])
 
-            if bq_table_name not in bq_table_names:
-                bq_table_names.append(bq_table_name)
 
-            fileJSON = {
-                "FILENAME": file_upload.file.name,
-                "PLATFORM": descriptor['platform'],
-                "PIPELINE": descriptor['pipeline'],
-                "BIGQUERY_TABLE_NAME": bq_table_name,
-                "DATATYPE": datatype,
-                "COLUMNS": []
-            }
+        if program is None:
+            status = 'error'
+            message = 'Unable to create program'
+        else:
+            project_name = request.POST['project-name']
+            project_desc = request.POST['project-description']
+            match_name = whitelist.search(unicode(project_name))
+            match_desc = whitelist.search(unicode(project_desc))
 
-            if datatype == "user_gen":
-                for column in descriptor['columns']:
-                    print column
-                    if column['ignored']:
-                        continue
+            if match_name or match_desc:
+                # XSS risk, log and fail this cohort save
+                matches = ""
+                fields = ""
+                if match_name:
+                    match_name = whitelist.findall(unicode(project_name))
+                    logger.error(
+                        '[ERROR] While saving a user project, saw a malformed name: ' + project_name + ', characters: ' + match_name.__str__())
+                    matches = "name contains"
+                    fields = "name"
+                if match_desc:
+                    match_desc = whitelist.findall(unicode(project_desc))
+                    logger.error(
+                        '[ERROR] While saving a user project, saw a malformed description: ' + project_desc + ', characters: ' + match_desc.__str__())
+                    matches = "name and description contain" if match_name else "description contains"
+                    fields += (" and description" if match_name else "description")
 
-                    # Check column type not null
-                    type = column['type']
-                    if not type:
-                        project.delete()
-                        program.delete()
-                        upload.delete()
+                err_msg = "Your project's %s invalid characters; please choose another %s." % (matches, fields,)
 
-                        resp = {
-                            'status': "error",
-                            'error': "bad_file",
-                            'message': "Could not properly verify column type for {0}. Please ensure all columns contain some data and a type is selected.".format(column['name'])
-                        }
-                        return JsonResponse(resp)
+                resp = {
+                    'status': "error",
+                    'error': "bad_input",
+                    'message': err_msg
+                }
+                return JsonResponse(resp)
 
-                    elif type == 'string' or type == 'url' or type == 'file':
-                        type = 'VARCHAR(200)'
-                    else:
-                        type = filter_column_name(type)
+            project = program.project_set.create(
+                name=request.POST['project-name'],
+                description=request.POST['project-description'],
+                owner=request.user
+            )
 
-                    controlled = None
-                    shared_id = None
-                    if 'controlled' in column and column['controlled'] is not None:
-                        controlled = column['controlled']['key']
-                        shared_id = "CLIN:" + controlled # All shared IDs at the moment are clinical TCGA
-                    else:
-                        controlled = filter_column_name(column['name'])
+            if request.POST['data-type'] == 'extend':
+                # TODO Does this need a share check??
+                project.extends_id = request.POST['extend-project-id']
 
-                    fileJSON['COLUMNS'].append({
-                        "NAME"      : column['name'],
-                        "TYPE"      : type,
-                        "INDEX"     : column['index'],
-                        "MAP_TO"    : controlled,
-                        "SHARED_ID" : shared_id
-                    })
+            project.save()
 
-                    if column['name'] not in seen_user_columns:
-                        seen_user_columns.append(column['name'])
-                        all_columns.append({
-                            "name": column['name'],
-                            "type": type
-                        })
-
-            config['FILES'].append(fileJSON)
-
-        # Skip *_samples table for low level data
-        create_metadata_tables(request.user, project, all_columns, request.POST['data-type'] == 'low')
-
-        dataset = request.user.user_data_tables_set.create(
-            project=project,
-            metadata_data_table=config['USER_METADATA_TABLES']['METADATA_DATA'],
-            metadata_samples_table=config['USER_METADATA_TABLES']['METADATA_SAMPLES'],
-            data_upload=upload,
-            google_project=google_project,
-            google_bucket=bucket,
-            google_bq_dataset=dataset
-        )
-
-        bq_table_items = []
-        for bq_table in bq_table_names:
-            bq_table_items.append(Project_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
-        Project_BQ_Tables.objects.bulk_create(bq_table_items)
-
-        # print settings.PROCESSING_ENABLED
-        if settings.PROCESSING_ENABLED:
-            files = {'config.json': ('config.json', json.dumps(config))}
-            post_args = {
-                'program_id':program.id,
-                'project_id':project.id,
-                'dataset_id':dataset.id
-            }
-            success_url = reverse('project_data_success', kwargs=post_args) + '?key=' + upload.key
-            failure_url = reverse('project_data_error', kwargs=post_args) + '?key=' + upload.key
-
-            abs_success_url = request.build_absolute_uri(success_url)
-            abs_failure_url = request.build_absolute_uri(failure_url)
-
-            #
-            # Previous forcing to https did not check if it was already there. Thus: httpss://...
-            #
-            if abs_success_url.find("https") != 0:
-                abs_success_url = abs_success_url.replace('http', 'https')
-
-            if abs_failure_url.find("https") != 0:
-                abs_failure_url = abs_failure_url.replace('http', 'https')
-
-            parameters = {
-                'SUCCESS_POST_URL': abs_success_url,
-                'FAILURE_POST_URL': abs_failure_url
-            }
-
-            r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
-                              files=files, params=parameters,
-                              auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD), verify=False)
-
-            if r.status_code < 400:
-                upload.status = 'Processing'
-                upload.jobURL = r.headers['Location']
-            else:
-                upload.status = 'Error Initializing'
-                status = 'error'
-                message = 'Could not connect to data upload server: (code {})'.format(r.status_code)
-
+            upload = UserUpload(owner=request.user)
             upload.save()
 
-    resp = {
-        'status': status,
-        'message': message
-    }
-    if status is "success":
-        resp['redirect_url'] = '/programs/' + str(program.id) + '/'
+            bucket = Bucket.objects.get(id=request.POST['bucket'])
+            dataset = BqDataset.objects.get(id=request.POST['dataset'])
+            google_project = bucket.google_project
+
+            # TODO: This has to be done at the same time as the user data processor
+            config = {
+                "USER_PROJECT": program.id,
+                "USER_ID": request.user.id,
+                "STUDY": project.id,
+                "BUCKET": bucket.bucket_name,
+                "GOOGLE_PROJECT": google_project.project_name,
+                "BIGQUERY_DATASET": dataset.dataset_name,
+                "FILES": [],
+                "USER_METADATA_TABLES": {
+                    "METADATA_DATA" : "user_metadata_" + str(request.user.id) + "_" + str(project.id),
+                    "METADATA_SAMPLES" : "user_metadata_samples_" + str(request.user.id) + "_" + str(project.id),
+                    "FEATURE_DEFS": User_Feature_Definitions._meta.db_table
+                }
+            }
+            all_columns = []
+            bq_table_names = []
+            seen_user_columns = []
+            for formfield in request.FILES:
+                file = request.FILES[formfield]
+                file_upload = UserUploadedFile(upload=upload, file=file, bucket=config['BUCKET'])
+                file_upload.save()
+
+                descriptor = json.loads(request.POST[formfield + '_desc'])
+                datatype = request.POST[formfield + '_type']
+                bq_table_name = "cgc_" + ("user" if datatype == 'user_gen' else datatype) + "_" + str(program.id) + "_" + str(project.id)
+
+                if bq_table_name not in bq_table_names:
+                    bq_table_names.append(bq_table_name)
+
+                fileJSON = {
+                    "FILENAME": file_upload.file.name,
+                    "PLATFORM": descriptor['platform'],
+                    "PIPELINE": descriptor['pipeline'],
+                    "BIGQUERY_TABLE_NAME": bq_table_name,
+                    "DATATYPE": datatype,
+                    "COLUMNS": []
+                }
+
+                if datatype == "user_gen":
+                    for column in descriptor['columns']:
+                        print column
+                        if column['ignored']:
+                            continue
+
+                        # Check column type not null
+                        type = column['type']
+                        if not type:
+                            project.delete()
+                            program.delete()
+                            upload.delete()
+
+                            resp = {
+                                'status': "error",
+                                'error': "bad_file",
+                                'message': "Could not properly verify column type for {0}. Please ensure all columns contain some data and a type is selected.".format(column['name'])
+                            }
+                            return JsonResponse(resp)
+
+                        elif type == 'string' or type == 'url' or type == 'file':
+                            type = 'VARCHAR(200)'
+                        else:
+                            type = filter_column_name(type)
+
+                        controlled = None
+                        shared_id = None
+                        if 'controlled' in column and column['controlled'] is not None:
+                            controlled = column['controlled']['key']
+                            shared_id = "CLIN:" + controlled # All shared IDs at the moment are clinical TCGA
+                        else:
+                            controlled = filter_column_name(column['name'])
+
+                        fileJSON['COLUMNS'].append({
+                            "NAME"      : column['name'],
+                            "TYPE"      : type,
+                            "INDEX"     : column['index'],
+                            "MAP_TO"    : controlled,
+                            "SHARED_ID" : shared_id
+                        })
+
+                        if column['name'] not in seen_user_columns:
+                            seen_user_columns.append(column['name'])
+                            all_columns.append({
+                                "name": column['name'],
+                                "type": type
+                            })
+
+                config['FILES'].append(fileJSON)
+
+            # Skip *_samples table for low level data
+            create_metadata_tables(request.user, project, all_columns, request.POST['data-type'] == 'low')
+
+            dataset = request.user.user_data_tables_set.create(
+                project=project,
+                metadata_data_table=config['USER_METADATA_TABLES']['METADATA_DATA'],
+                metadata_samples_table=config['USER_METADATA_TABLES']['METADATA_SAMPLES'],
+                data_upload=upload,
+                google_project=google_project,
+                google_bucket=bucket,
+                google_bq_dataset=dataset
+            )
+
+            bq_table_items = []
+            for bq_table in bq_table_names:
+                bq_table_items.append(Project_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
+            Project_BQ_Tables.objects.bulk_create(bq_table_items)
+
+            # print settings.PROCESSING_ENABLED
+            if settings.PROCESSING_ENABLED:
+                files = {'config.json': ('config.json', json.dumps(config))}
+                post_args = {
+                    'program_id':program.id,
+                    'project_id':project.id,
+                    'dataset_id':dataset.id
+                }
+                success_url = reverse('project_data_success', kwargs=post_args) + '?key=' + upload.key
+                failure_url = reverse('project_data_error', kwargs=post_args) + '?key=' + upload.key
+
+                abs_success_url = request.build_absolute_uri(success_url)
+                abs_failure_url = request.build_absolute_uri(failure_url)
+
+                #
+                # Previous forcing to https did not check if it was already there. Thus: httpss://...
+                #
+                if abs_success_url.find("https") != 0:
+                    abs_success_url = abs_success_url.replace('http', 'https')
+
+                if abs_failure_url.find("https") != 0:
+                    abs_failure_url = abs_failure_url.replace('http', 'https')
+
+                parameters = {
+                    'SUCCESS_POST_URL': abs_success_url,
+                    'FAILURE_POST_URL': abs_failure_url
+                }
+
+                r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
+                                  files=files, params=parameters,
+                                  auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD), verify=False)
+
+                if r.status_code < 400:
+                    upload.status = 'Processing'
+                    upload.jobURL = r.headers['Location']
+                else:
+                    upload.status = 'Error Initializing'
+                    status = 'error'
+                    message = 'Could not connect to data upload server: (code {})'.format(r.status_code)
+
+                upload.save()
+
+        resp = {
+            'status': status,
+            'message': message
+        }
+        if status is "success":
+            resp['redirect_url'] = '/programs/' + str(program.id) + '/'
+
+    except ObjectDoesNotExist as e:
+        print >> sys.stdout, "[ERROR] ObjectDoesNotExist exception in upload_files:"
+        logger.exception(e)
+
+        resp = {
+            'status': "error",
+            'error': "program_does_not_exist",
+            'message': "The program you wish to upload to does not exist."
+        }
+    except Exception as e:
+        print >> sys.stdout, "[ERROR] Exception in upload_files:"
+        logger.exception(e)
+
+        project.delete()
+        upload.delete()
+        if request.POST['program-type'] == 'new':
+            program.delete()
+
+        resp = {
+            'status': "error",
+            'error': "exception",
+            'message': "There was an error processing your user data - please double check your files and try again. There must be no empty lines at the end of your files."
+        }
 
     return JsonResponse(resp)
 

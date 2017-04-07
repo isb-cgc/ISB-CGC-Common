@@ -386,7 +386,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                       JOIN auth_user au ON au.id = pp.owner_id
                     WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND pp.active = 1
                       AND pp.program_id = %s
-                ) ps ON ps.name = ms.project_disease_type;
+                ) ps ON ps.name = SUBSTRING(ms.project_short_name,LOCATE('-',ms.project_short_name)+1);
             """ % (filter_table, program_id,))
 
         for row in cursor.fetchall():
