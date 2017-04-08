@@ -1610,7 +1610,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
         platform_count_query = """
-            SELECT md.platform, count(md.platform) as platform_count
+            SELECT md.platform, count(*) as platform_count
             FROM {0} md
             JOIN (
               SELECT sample_barcode
@@ -1660,24 +1660,35 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
 
         platform_count_list = []
         file_list = []
+        progs_without_files = []
+        cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
 
-        for program in Cohort.objects.get(id=cohort_id).get_programs():
+        for program in cohort_programs:
 
-            program_data_table = Public_Data_Tables.objects.get(program=program, build=build).data_table
+            program_data_table = None
+            program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
+
+            if len(program_data_tables) <= 0:
+                # This program has no metadata_data table for this build, or at all--skip
+                progs_without_files.append(program.name)
+                continue
+
+            program_data_table = program_data_tables[0].data_table
 
             cursor.execute(platform_count_query.format(program_data_table), (cohort_id,))
 
             count = 0
             if cursor.rowcount > 0:
                 for row in cursor.fetchall():
+                    platform = row['platform'] or 'None'
                     if len(platform_selector_list):
-                        if row['platform'] in platform_selector_list:
+                        if platform in platform_selector_list:
                             count += int(row['platform_count'])
                     else:
                         count += int(row['platform_count'])
-                    platform_count_list.append({'platform': row['platform'], 'count': int(row['platform_count'])})
+                    platform_count_list.append({'platform': platform, 'count': int(row['platform_count'])})
             else:
-                platform_count_list.append({'platform': 'None', 'count': 0})
+                progs_without_files.append(program.name)
 
             if not platform_count_only:
                 cursor.execute(query.format(program_data_table), params)
@@ -1709,8 +1720,14 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                 else:
                     file_list.append({'sample': 'None', 'filename': '', 'pipeline': '', 'platform': '', 'datalevel': '', 'datacat':''})
 
-            resp = {'total_file_count': count, 'page': page, 'platform_count_list': platform_count_list,
-                               'file_list': file_list, 'build': build}
+            resp = {
+                'total_file_count': count,
+                'page': page,
+                'platform_count_list': platform_count_list,
+                'file_list': file_list,
+                'build': build,
+                'programs_no_files': progs_without_files
+            }
 
     except (IndexError, TypeError):
         logger.error("Error obtaining list of samples in cohort file list")
