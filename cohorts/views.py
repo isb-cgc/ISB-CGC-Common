@@ -1301,7 +1301,7 @@ def cohort_filelist(request, cohort_id=0):
                                                             'cohort': cohort,
                                                             'base_url': settings.BASE_URL,
                                                             'base_api_url': settings.BASE_API_URL,
-                                                            # 'file_count': items['total_file_count'],
+                                                            'total_files': items['total_file_count'],
                                                             # 'page': items['page'],
                                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
                                                             'platform_counts': items['platform_count_list'],
@@ -1394,7 +1394,7 @@ def streaming_csv_view(request, cohort_id=0):
     file_list = []
     offset = None
 
-    build = reuest.GET.get('build','HG19')
+    build = request.GET.get('build','HG19')
 
     while keep_fetching:
         items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
@@ -1578,8 +1578,6 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
         results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
 
-        print >> sys.stdout, str(results)
-
         template_values = {
             'request': request,
             'attr_counts': results['count'],
@@ -1642,7 +1640,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                 platform_selector_list.append(key)
 
         if len(platform_selector_list):
-            query += ' AND Platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1])
+            query += ' AND platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1])
             params += tuple(x for x in platform_selector_list)
 
         if limit > 0:
@@ -1658,10 +1656,13 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
         db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-        platform_count_list = []
         file_list = []
         progs_without_files = []
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+
+        platform_counts = {}
+
+        total_file_count = 0
 
         for program in cohort_programs:
 
@@ -1677,16 +1678,14 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
 
             cursor.execute(platform_count_query.format(program_data_table), (cohort_id,))
 
-            count = 0
             if cursor.rowcount > 0:
                 for row in cursor.fetchall():
                     platform = row['platform'] or 'None'
-                    if len(platform_selector_list):
-                        if platform in platform_selector_list:
-                            count += int(row['platform_count'])
-                    else:
-                        count += int(row['platform_count'])
-                    platform_count_list.append({'platform': platform, 'count': int(row['platform_count'])})
+                    if len(platform_selector_list) <= 0 or platform in platform_selector_list:
+                        total_file_count += int(row['platform_count'])
+                        if platform not in platform_counts:
+                            platform_counts[platform] = 0
+                        platform_counts[platform] += int(row['platform_count'])
             else:
                 progs_without_files.append(program.name)
 
@@ -1694,21 +1693,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                 cursor.execute(query.format(program_data_table), params)
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
-                        # If there's a datafilenamekey
-                        if 'file_name_key' in item and item['file_name_key'] != '':
-                            # Find protected bucket it should belong to
-                            bucket_name = ''
-                            # if item['Repository'] and item['Repository'].lower() == 'dcc':
-                            #     bucket_name = settings.DCC_CONTROLLED_DATA_BUCKET
-                            # elif item['Repository'] and item['Repository'].lower() == 'cghub':
-                            #     bucket_name = settings.CGHUB_CONTROLLED_DATA_BUCKET
-                            # else:
-                            #     bucket_name = settings.OPEN_DATA_BUCKET
-
-                            item['file_name_key'] = "gs://{}{}".format(bucket_name, item['file_name_key'])
-
                         file_list.append({
                             'sample': item['sample_barcode'],
+                            'program': program.name,
                             'cloudstorage_location': item['file_name_key'],
                             'access': (item['access'] or 'N/A'),
                             'filename': item['file_name'],
@@ -1717,17 +1704,17 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                             'datacat': item['data_category'],
                             'datatype': (item['data_type'] or " ")
                         })
-                else:
-                    file_list.append({'sample': 'None', 'filename': '', 'pipeline': '', 'platform': '', 'datalevel': '', 'datacat':''})
 
-            resp = {
-                'total_file_count': count,
-                'page': page,
-                'platform_count_list': platform_count_list,
-                'file_list': file_list,
-                'build': build,
-                'programs_no_files': progs_without_files
-            }
+        platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]
+
+        resp = {
+            'total_file_count': total_file_count,
+            'page': page,
+            'platform_count_list': platform_count_list,
+            'file_list': file_list,
+            'build': build,
+            'programs_no_files': progs_without_files
+        }
 
     except (IndexError, TypeError):
         logger.error("Error obtaining list of samples in cohort file list")
