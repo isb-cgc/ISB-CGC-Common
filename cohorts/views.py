@@ -1301,7 +1301,7 @@ def cohort_filelist(request, cohort_id=0):
                                                             'cohort': cohort,
                                                             'base_url': settings.BASE_URL,
                                                             'base_api_url': settings.BASE_API_URL,
-                                                            # 'file_count': items['total_file_count'],
+                                                            'total_files': items['total_file_count'],
                                                             # 'page': items['page'],
                                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
                                                             'platform_counts': items['platform_count_list'],
@@ -1662,6 +1662,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
 
         platform_counts = {}
 
+        total_file_count = 0
+
         for program in cohort_programs:
 
             program_data_table = None
@@ -1676,12 +1678,11 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
 
             cursor.execute(platform_count_query.format(program_data_table), (cohort_id,))
 
-            count = 0
             if cursor.rowcount > 0:
                 for row in cursor.fetchall():
                     platform = row['platform'] or 'None'
-                    if not len(platform_selector_list) or platform in platform_selector_list:
-                        count += int(row['platform_count'])
+                    if len(platform_selector_list) <= 0 or platform in platform_selector_list:
+                        total_file_count += int(row['platform_count'])
                         if platform not in platform_counts:
                             platform_counts[platform] = 0
                         platform_counts[platform] += int(row['platform_count'])
@@ -1707,7 +1708,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
         platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]
 
         resp = {
-            'total_file_count': count,
+            'total_file_count': total_file_count,
             'page': page,
             'platform_count_list': platform_count_list,
             'file_list': file_list,
