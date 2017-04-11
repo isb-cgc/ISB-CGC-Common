@@ -1656,10 +1656,11 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
         db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-        platform_count_list = []
         file_list = []
         progs_without_files = []
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+
+        platform_counts = {}
 
         for program in cohort_programs:
 
@@ -1681,7 +1682,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                     platform = row['platform'] or 'None'
                     if not len(platform_selector_list) or platform in platform_selector_list:
                         count += int(row['platform_count'])
-                        platform_count_list.append({'platform': platform, 'count': int(row['platform_count']), 'program': program.name})
+                        if platform not in platform_counts:
+                            platform_counts[platform] = 0
+                        platform_counts[platform] += int(row['platform_count'])
             else:
                 progs_without_files.append(program.name)
 
@@ -1700,6 +1703,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                             'datacat': item['data_category'],
                             'datatype': (item['data_type'] or " ")
                         })
+
+        platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]
 
         resp = {
             'total_file_count': count,
