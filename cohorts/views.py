@@ -1394,7 +1394,7 @@ def streaming_csv_view(request, cohort_id=0):
     file_list = []
     offset = None
 
-    build = reuest.GET.get('build','HG19')
+    build = request.GET.get('build','HG19')
 
     while keep_fetching:
         items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
@@ -1578,8 +1578,6 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
         results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
 
-        print >> sys.stdout, str(results)
-
         template_values = {
             'request': request,
             'attr_counts': results['count'],
@@ -1642,7 +1640,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                 platform_selector_list.append(key)
 
         if len(platform_selector_list):
-            query += ' AND Platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1])
+            query += ' AND platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1])
             params += tuple(x for x in platform_selector_list)
 
         if limit > 0:
@@ -1717,8 +1715,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                             'datacat': item['data_category'],
                             'datatype': (item['data_type'] or " ")
                         })
-                else:
-                    file_list.append({'sample': 'None', 'filename': '', 'pipeline': '', 'platform': '', 'datalevel': '', 'datacat':''})
 
             resp = {
                 'total_file_count': count,

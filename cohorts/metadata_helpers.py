@@ -66,13 +66,28 @@ MOLECULAR_CATEGORIES = {
 #       <attr name>: {
 #           'displ_name': <attr display name>,
 #           'values': {
-#               <metadata_attr_val>: <metadata attr display name>, [...]
+#               <metadata attr value>: <metadata attr display value>, [...]
 #           }, [...]
 #       }, [...]
 #   }, [...]
 # }
 # The data is stored to prevent excessive retrieval
 METADATA_ATTR = {}
+
+### METADATA_DATA_TYPES ###
+# Local storage of the metadata data types, values, and their display strings for a program. This dict takes the form:
+# {
+#   <program id>: {
+#       <data type name>: {
+#           'displ_name': <data type display name>,
+#           'values': {
+#               <data type value>: <data type display value>, [...]
+#           }, [...]
+#       }, [...]
+#   }, [...]
+# }
+# The data is stored to prevent excessive retrieval
+METADATA_DATA_TYPES = {}
 
 ISB_CGC_PROJECTS = {
     'list': [],
@@ -110,6 +125,48 @@ def get_sql_connection():
     except Exception as e:
         logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
         logger.error(traceback.format_exc())
+        if db and db.open: db.close()
+
+
+def fetch_program_data_types(program):
+
+    db = None
+    cursor = None
+
+    try:
+
+        if not program:
+            program = get_public_program_id('TCGA')
+
+        if program not in METADATA_DATA_TYPES or len(METADATA_DATA_TYPES[program]) <= 0:
+
+            METADATA_DATA_TYPES[program] = {}
+
+            preformatted_attr = get_preformatted_attr(program)
+
+            db = get_sql_connection()
+            cursor = db.cursor()
+            cursor.callproc('get_program_data_types', (program,))
+            for row in cursor.fetchall():
+                METADATA_DATA_TYPES[program][row[0]] = \
+                    {'name': row[0], 'displ_name': format_for_display(row[0]) if row[0] not in preformatted_attr else row[0], 'values': {}, 'type': row[1]}
+
+            cursor.close()
+            cursor = db.cursor(MySQLdb.cursors.DictCursor)
+            cursor.callproc('get_program_display_strings', (program,))
+
+            for row in cursor.fetchall():
+                if row['value_name'] is None and row['attr_name'] in METADATA_DATA_TYPES[program]:
+                    METADATA_DATA_TYPES[program][row['attr_name']]['displ_name'] = row['display_string']
+
+        return copy.deepcopy(METADATA_DATA_TYPES[program])
+
+    except Exception as e:
+        print >> sys.stdout, traceback.format_exc()
+        logger.error('[ERROR] Exception while trying to get data types for program #%s:' % str(program))
+        logger.error(traceback.format_exc())
+    finally:
+        if cursor: cursor.close()
         if db and db.open: db.close()
 
 
