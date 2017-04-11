@@ -1679,12 +1679,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
             if cursor.rowcount > 0:
                 for row in cursor.fetchall():
                     platform = row['platform'] or 'None'
-                    if len(platform_selector_list):
-                        if platform in platform_selector_list:
-                            count += int(row['platform_count'])
-                    else:
+                    if not len(platform_selector_list) or platform in platform_selector_list:
                         count += int(row['platform_count'])
-                    platform_count_list.append({'platform': platform, 'count': int(row['platform_count'])})
+                        platform_count_list.append({'platform': platform, 'count': int(row['platform_count']), 'program': program.name})
             else:
                 progs_without_files.append(program.name)
 
@@ -1692,21 +1689,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                 cursor.execute(query.format(program_data_table), params)
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
-                        # If there's a datafilenamekey
-                        if 'file_name_key' in item and item['file_name_key'] != '':
-                            # Find protected bucket it should belong to
-                            bucket_name = ''
-                            # if item['Repository'] and item['Repository'].lower() == 'dcc':
-                            #     bucket_name = settings.DCC_CONTROLLED_DATA_BUCKET
-                            # elif item['Repository'] and item['Repository'].lower() == 'cghub':
-                            #     bucket_name = settings.CGHUB_CONTROLLED_DATA_BUCKET
-                            # else:
-                            #     bucket_name = settings.OPEN_DATA_BUCKET
-
-                            item['file_name_key'] = "gs://{}{}".format(bucket_name, item['file_name_key'])
-
                         file_list.append({
                             'sample': item['sample_barcode'],
+                            'program': program.name,
                             'cloudstorage_location': item['file_name_key'],
                             'access': (item['access'] or 'N/A'),
                             'filename': item['file_name'],
@@ -1716,14 +1701,14 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                             'datatype': (item['data_type'] or " ")
                         })
 
-            resp = {
-                'total_file_count': count,
-                'page': page,
-                'platform_count_list': platform_count_list,
-                'file_list': file_list,
-                'build': build,
-                'programs_no_files': progs_without_files
-            }
+        resp = {
+            'total_file_count': count,
+            'page': page,
+            'platform_count_list': platform_count_list,
+            'file_list': file_list,
+            'build': build,
+            'programs_no_files': progs_without_files
+        }
 
     except (IndexError, TypeError):
         logger.error("Error obtaining list of samples in cohort file list")
