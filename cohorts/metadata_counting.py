@@ -87,7 +87,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     project_counts = {}
 
     for program in Program.get_user_programs(user):
-        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'displ_name': program.name, 'name': program.name, 'count': 0, })
+        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'displ_name': program.name, 'name': program.name, 'count': 0, 'program': program.id,})
         project_counts[program.id] = 0
 
     for project in Project.get_user_projects(user):

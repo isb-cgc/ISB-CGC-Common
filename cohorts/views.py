@@ -80,7 +80,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # we have no way to know where to source our samples from
         raise Exception("No Program or Cohort ID was provided when trying to obtain sample and case lists!")
 
-    if inc_filters and not program_id:
+    if inc_filters and program_id is None:
         # You cannot filter samples without specifying the program they apply to
         raise Exception("Filters were supplied, but no program was indicated - you cannot filter samples without knowing the program!")
 
@@ -116,12 +116,13 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     if user_data_filters:
         if user:
 
-            db = get_sql_connection()
+            db = None
             cursor = None
             filtered_programs = None
             filtered_projects = None
 
             try:
+                db = get_sql_connection()
                 cursor = db.cursor()
                 project_table_set = []
                 if 'user_program' in user_data_filters:
@@ -707,158 +708,183 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
     cohort_progs = None
 
-    if request.POST:
-        name = request.POST.get('name')
-        whitelist = re.compile(WHITELIST_RE,re.UNICODE)
-        match = whitelist.search(unicode(name))
-        if match:
-            # XSS risk, log and fail this cohort save
-            match = whitelist.findall(unicode(name))
-            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
-            messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
-            redirect_url = reverse('cohort_list')
-            return redirect(redirect_url)
+    redirect_url = ''
 
-        source = request.POST.get('source')
-        filters = request.POST.getlist('filters')
-        apply_filters = request.POST.getlist('apply-filters')
-        apply_name = request.POST.getlist('apply-name')
-        projects = request.user.project_set.all()
+    try:
 
-        # we only deactivate the source if we are applying filters to a previously-existing
-        # source cohort
-        deactivate_sources = (len(filters) > 0) and source is not None and source != 0
+        if request.POST:
+            name = request.POST.get('name')
+            whitelist = re.compile(WHITELIST_RE,re.UNICODE)
+            match = whitelist.search(unicode(name))
+            if match:
+                # XSS risk, log and fail this cohort save
+                match = whitelist.findall(unicode(name))
+                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
+                messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+                redirect_url = reverse('cohort_list')
+                return redirect(redirect_url)
 
-        # If we're only changing the name, just edit the cohort and update it
-        if apply_name and not apply_filters and not deactivate_sources:
-            Cohort.objects.filter(id=source).update(name=name)
-            messages.info(request, 'Changes applied successfully.')
-            return redirect(reverse('cohort_details', args=[source]))
+            source = request.POST.get('source')
+            filters = request.POST.getlist('filters')
+            apply_filters = request.POST.getlist('apply-filters')
+            apply_name = request.POST.getlist('apply-name')
+            projects = request.user.project_set.all()
 
-        # Given cohort_id is the only source id.
-        if source:
-            parent = Cohort.objects.get(id=source)
-            cohort_progs = parent.get_programs()
+            # we only deactivate the source if we are applying filters to a previously-existing
+            # source cohort
+            deactivate_sources = (len(filters) > 0) and source is not None and source != 0
 
-        filter_obj = {}
+            # If we're only changing the name, just edit the cohort and update it
+            if apply_name and not apply_filters and not deactivate_sources:
+                Cohort.objects.filter(id=source).update(name=name)
+                messages.info(request, 'Changes applied successfully.')
+                return redirect(reverse('cohort_details', args=[source]))
 
-        if len(filters) > 0:
-            for this_filter in filters:
-                tmp = json.loads(this_filter)
-                key = tmp['feature']['name']
-                val = tmp['value']['name']
-                program_id = tmp['program']['id']
-
-                if 'id' in tmp['feature'] and tmp['feature']['id']:
-                    key = tmp['feature']['id']
-
-                if 'id' in tmp['value'] and tmp['value']['id']:
-                    val = tmp['value']['id']
-
-                if program_id not in filter_obj:
-                    filter_obj[program_id] = {}
-
-                if key not in filter_obj[program_id]:
-                    filter_obj[program_id][key] = {'values': []}
-
-                filter_obj[program_id][key]['values'].append(val)
-
-        results = {}
-
-        for prog in filter_obj:
-            results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog)
-
-        if cohort_progs:
-            for prog in cohort_progs:
-                if prog.id not in results:
-                    results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
-
-        found_samples = False
-
-        for prog in results:
-            if int(results[prog]['count']) > 0:
-                found_samples = True
-
-        # Do not allow 0 sample cohorts
-        if not found_samples:
-            messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
+            # Given cohort_id is the only source id.
             if source:
-                redirect_url = reverse('cohort_details', args=[source])
-            else:
-                redirect_url = reverse('cohort')
-        else:
-            if deactivate_sources:
-                parent.active = False
-                parent.save()
+                parent = Cohort.objects.get(id=source)
+                cohort_progs = parent.get_programs()
 
-            # Create new cohort
-            cohort = Cohort.objects.create(name=name)
-            cohort.save()
+            filter_obj = {}
 
-            sample_list = []
+            if len(filters) > 0:
+                for this_filter in filters:
+                    tmp = json.loads(this_filter)
+                    key = tmp['feature']['name']
+                    val = tmp['value']['name']
+                    program_id = tmp['program']['id']
+
+                    if 'id' in tmp['feature'] and tmp['feature']['id']:
+                        key = tmp['feature']['id']
+
+                    if 'id' in tmp['value'] and tmp['value']['id']:
+                        val = tmp['value']['id']
+
+                    if program_id not in filter_obj:
+                        filter_obj[program_id] = {}
+
+                    if key not in filter_obj[program_id]:
+                        filter_obj[program_id][key] = {'values': [],}
+
+                    if program_id <= 0 and 'program' not in filter_obj[program_id][key]:
+                        # User Data
+                        filter_obj[program_id][key]['program'] = tmp['user_program']
+
+                    filter_obj[program_id][key]['values'].append(val)
+
+            results = {}
+
+            for prog in filter_obj:
+                results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog)
+
+            if cohort_progs:
+                for prog in cohort_progs:
+                    if prog.id not in results:
+                        results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
+
+            found_samples = False
 
             for prog in results:
-                items = results[prog]['items']
+                if int(results[prog]['count']) > 0:
+                    found_samples = True
 
-                for item in items:
-                    project = None
-                    if 'project_id' in item:
-                        project = item['project_id']
-                    sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
-
-            Samples.objects.bulk_create(sample_list)
-
-            # Set permission for user to be owner
-            perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-            perm.save()
-
-            # Create the source if it was given
-            if source:
-                Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
-
-            # Create filters applied
-            if filter_obj:
-                for prog in filter_obj:
-                    prog_obj = Program.objects.get(id=prog)
-                    prog_filters = filter_obj[prog]
-                    for this_filter in prog_filters:
-                        for val in prog_filters[this_filter]['values']:
-                            Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter, value=val).save()
-
-            # Store cohort to BigQuery
-            bq_project_id = settings.BQ_PROJECT_ID
-            cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-            bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-            bq_result = bcs.add_cohort_to_bq(cohort.id, items)
-
-            # If BQ insertion fails, we immediately de-activate the cohort and warn the user
-            if 'insertErrors' in bq_result:
-                Cohort.objects.filter(id=cohort.id).update(active=False)
-                redirect_url = reverse('cohort_list')
-                err_msg = ''
-                if len(bq_result['insertErrors']) > 1:
-                    err_msg = 'There were '+str(len(bq_result['insertErrors'])) + ' insertion errors '
+            # Do not allow 0 sample cohorts
+            if not found_samples:
+                messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
+                if source:
+                    redirect_url = reverse('cohort_details', args=[source])
                 else:
-                    err_msg = 'There was an insertion error '
-                messages.error(request, err_msg+' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.')
-
+                    redirect_url = reverse('cohort')
             else:
-                # Check if this was a new cohort or an edit to an existing one and redirect accordingly
-                if not source:
-                    redirect_url = reverse('cohort_list')
-                    messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
-                else:
-                    redirect_url = reverse('cohort_details', args=[cohort.id])
-                    messages.info(request, 'Changes applied successfully.')
+                if deactivate_sources:
+                    parent.active = False
+                    parent.save()
 
-                if workbook_id and worksheet_id :
-                    Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
-                    redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_id, 'worksheet_id' : worksheet_id})
-                elif create_workbook :
-                    workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
-                    worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
-                    worksheet_model.add_cohort(cohort)
-                    redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
+                # Create new cohort
+                cohort = Cohort.objects.create(name=name)
+                cohort.save()
+
+                sample_list = []
+
+                for prog in results:
+                    items = results[prog]['items']
+
+                    for item in items:
+                        project = None
+                        if 'project_id' in item:
+                            project = item['project_id']
+                        sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
+
+                Samples.objects.bulk_create(sample_list)
+
+                # Set permission for user to be owner
+                perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
+                perm.save()
+
+                # Create the source if it was given
+                if source:
+                    Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
+
+                # Create filters applied
+                if filter_obj:
+                    for prog in filter_obj:
+                        if prog <= 0:
+                            # User Data
+                            prog_filters = filter_obj[prog]
+                            for this_filter in prog_filters:
+                                prog_obj = Program.objects.get(id=prog_filters[this_filter]['program'])
+                                for val in prog_filters[this_filter]['values']:
+                                    Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter,
+                                                           value=val).save()
+                        else:
+                            prog_obj = Program.objects.get(id=prog)
+                            prog_filters = filter_obj[prog]
+                            for this_filter in prog_filters:
+                                for val in prog_filters[this_filter]['values']:
+                                    Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter, value=val).save()
+
+                # Store cohort to BigQuery
+                bq_project_id = settings.BQ_PROJECT_ID
+                cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+                bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+                bq_result = bcs.add_cohort_to_bq(cohort.id, items)
+
+                # If BQ insertion fails, we immediately de-activate the cohort and warn the user
+                if 'insertErrors' in bq_result:
+                    Cohort.objects.filter(id=cohort.id).update(active=False)
+                    redirect_url = reverse('cohort_list')
+                    err_msg = ''
+                    if len(bq_result['insertErrors']) > 1:
+                        err_msg = 'There were '+str(len(bq_result['insertErrors'])) + ' insertion errors '
+                    else:
+                        err_msg = 'There was an insertion error '
+                    messages.error(request, err_msg+' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.')
+
+                else:
+                    # Check if this was a new cohort or an edit to an existing one and redirect accordingly
+                    if not source:
+                        redirect_url = reverse('cohort_list')
+                        messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
+                    else:
+                        redirect_url = reverse('cohort_details', args=[cohort.id])
+                        messages.info(request, 'Changes applied successfully.')
+
+                    if workbook_id and worksheet_id :
+                        Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
+                        redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_id, 'worksheet_id' : worksheet_id})
+                    elif create_workbook :
+                        workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
+                        worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
+                        worksheet_model.add_cohort(cohort)
+                        redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
+
+    except Exception as e:
+        redirect_url = reverse('cohort_list')
+        messages.error(request, "There was an error saving your cohort; it may not have been saved correctly.")
+        logger.error('[ERROR] Exception while saving a cohort:')
+        logger.exception(e)
+        print >> sys.stdout, "[ERROR] Exception while saving a cohort:"
+        print >> sys.stdout, traceback.format_exc()
 
     return redirect(redirect_url)
 
