@@ -382,7 +382,9 @@ def get_preformatted_values(program=None):
 def validate_filter_key(col,program):
     if not program in METADATA_ATTR:
         fetch_program_attr(program)
-    if ':' in col:
+    if 'MUT:' in col and not ':category' in col:
+        return False
+    elif ':' in col:
         col = col.split(':')[1]
     return col in METADATA_ATTR[program]
 

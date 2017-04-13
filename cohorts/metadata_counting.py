@@ -513,9 +513,10 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
     filters = {}
 
     if req_filters is not None:
+        print >> sys.stdout, str(req_filters)
         try:
             for key in req_filters:
-                if not validate_filter_key(key,program_id):
+                if not validate_filter_key(key, program_id):
                     raise Exception('Invalid filter key received: ' + key)
                 this_filter = req_filters[key]
                 if key not in filters:
