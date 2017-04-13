@@ -77,6 +77,8 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
     cursor = None
 
+    print >> sys.stdout, str(inc_filters)
+
     user_data_counts = {
         'program': {'id': 'user_program', 'displ_name': 'User Program', 'name': 'user_program', 'values': [], },
         'project': {'id': 'user_project', 'name': 'user_project', 'displ_name': 'User Project', 'values': [], },
@@ -124,18 +126,19 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         # If there's a cohort_id, the count is actually done against a filtered cohort_samples set instead of the project table
         if cohort_id is not None:
             project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s"
-            case_count_query_str = "SELECT COUNT(DISTINCT st.case_barcode) FROM %s"
-            case_count_query_str_join = " st JOIN (SELECT sample_barcode FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s) cs ON cs.sample_barcode = st.sample_barcode;"
+            case_count_query_str = "SELECT COUNT(DISTINCT case_barcode) FROM cohorts_samples WHERE cohort_id = %s AND project_id = %s"
 
     try:
         cursor = db.cursor()
+
+        query_params = None
 
         # Project counts
         for project in user_data_counts['project']['values']:
             project_incl = False
             program_incl = False
 
-            if inc_filters is None or 'user_project' not in inc_filters or project['program'] in inc_filters['user_project']['values']:
+            if inc_filters is None or 'user_program' not in inc_filters or project['program'] in inc_filters['user_program']:
                 project_incl = True
                 if cohort_id is not None:
                     query_params = (cohort_id,project['id'],)
@@ -150,9 +153,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                 else:
                     project['count'] = int(result)
 
-            if inc_filters is None or 'user_project' not in inc_filters or project['id'] in inc_filters['user_project']['values']:
-                project_counts[project['program']] += project['count']
+            if inc_filters is None or 'user_project' not in inc_filters or project['id'] in inc_filters['user_project']:
                 program_incl = True
+                project_counts[project['program']] += project['count']
 
             if project_incl and program_incl:
                 user_data_counts['total'] += project['count']
@@ -160,7 +163,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                 if query_params is None:
                     cursor.execute(case_count_query_str % project['metadata_samples'])
                 else:
-                    cursor.execute((case_count_query_str % project['metadata_samples']) + case_count_query_str_join, query_params)
+                    cursor.execute(case_count_query_str, query_params)
 
                 result = cursor.fetchall()[0][0]
                 if result is None:
@@ -171,8 +174,6 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         # Program counts
         for program in user_data_counts['program']['values']:
             program['count'] = project_counts[int(program['id'])]
-
-        # TODO: Feature counts, this will probably require creation of where clauses and tmp tables
 
         return user_data_counts
 
@@ -550,6 +551,9 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
 
 def user_metadata_counts(user, user_data_filters, cohort_id):
     try:
+
+        if user_data_filters and '0' in user_data_filters:
+            user_data_filters = user_data_filters['0']
 
         counts_and_total = {
             'user_data': [],
