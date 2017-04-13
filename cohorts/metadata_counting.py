@@ -117,7 +117,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                                                           'name': project.name,
                                                           'count': 0,
                                                           'metadata_samples': project_ms_table,
-                                                          'program': program.id,
+                                                          'program': project.program.id,
                                                           'displ_name': project.name,})
 
         project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
