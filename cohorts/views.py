@@ -1547,33 +1547,37 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
         clin_attr = fetch_program_attr(program_id)
 
-        molecular_attr = {
-            'categories': [
-                {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
-                    'Missense_Mutation': 1,
-                    'Nonsense_Mutation': 1,
-                    'Nonstop_Mutation': 1,
-                    'Frame_Shift_Del': 1,
-                    'Frame_Shift_Ins': 1,
-                    'De_novo_Start_OutOfFrame': 1,
-                    'De_novo_Start_InFrame': 1,
-                    'In_Frame_Del': 1,
-                    'In_Frame_Ins': 1,
-                    'Start_Codon_SNP': 1,
-                    'Start_Codon_Del': 1,
-                    'Start_Codon_Ins': 1,
-                    'Stop_Codon_Del': 1,
-                    'Stop_Codon_Ins': 1,
-                }},
-            ],
-            'attrs': []
-        }
+        molecular_attr = {}
 
-        for cat in molecular_attr['categories']:
-            for attr in cat['attrs']:
-                ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
-                if ma:
-                    ma['category'] = cat['value']
+        if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
+            molecular_attr = {
+                'categories': [
+                    {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
+                        'Missense_Mutation': 1,
+                        'Nonsense_Mutation': 1,
+                        'Nonstop_Mutation': 1,
+                        'Frame_Shift_Del': 1,
+                        'Frame_Shift_Ins': 1,
+                        'De_novo_Start_OutOfFrame': 1,
+                        'De_novo_Start_InFrame': 1,
+                        'In_Frame_Del': 1,
+                        'In_Frame_Ins': 1,
+                        'Start_Codon_SNP': 1,
+                        'Start_Codon_Del': 1,
+                        'Start_Codon_Ins': 1,
+                        'Stop_Codon_Del': 1,
+                        'Stop_Codon_Ins': 1,
+                    }},
+                ],
+                'attrs': MOLECULAR_ATTR
+            }
+
+            # Note which attributes are in which categories
+            for cat in molecular_attr['categories']:
+                for attr in cat['attrs']:
+                    ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
+                    if ma:
+                        ma['category'] = cat['value']
 
         results = public_metadata_counts(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
 
@@ -1583,6 +1587,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             'total_samples': int(results['total']),
             'clin_attr': clin_attr,
             'molecular_attr': molecular_attr,
+            'data_types': {},
             'metadata_filters': filters or {},
             'program': public_program,
             'metadata_counts': results

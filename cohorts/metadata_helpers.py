@@ -59,6 +59,32 @@ MOLECULAR_CATEGORIES = {
     ]
 }
 
+MOLECULAR_ATTR = [
+    {'value': 'Missense_Mutation', 'displ_name': 'Missense Mutation'},
+    {'value': 'Frame_Shift_Del', 'displ_name': 'Frame Shift - Deletion'},
+    {'value': 'Frame_Shift_Ins', 'displ_name': 'Frame Shift - Insertion'},
+    {'value': 'De_novo_Start_OutOfFrame', 'displ_name': 'De novo Start Out of Frame'},
+    {'value': 'De_novo_Start_InFrame', 'displ_name': 'De novo Start In Frame'},
+    {'value': 'In_Frame_Del', 'displ_name': 'In Frame Deletion'},
+    {'value': 'In_Frame_Ins', 'displ_name': 'In Frame Insertion'},
+    {'value': 'Nonsense_Mutation', 'displ_name': 'Nonsense Mutation'},
+    {'value': 'Start_Codon_SNP', 'displ_name': 'Start Codon - SNP'},
+    {'value': 'Start_Codon_Del', 'displ_name': 'Start Codon - Deletion'},
+    {'value': 'Start_Codon_Ins', 'displ_name': 'Start Codon - Insertion'},
+    {'value': 'Stop_Codon_Del', 'displ_name': 'Stop Codon - Deletion'},
+    {'value': 'Stop_Codon_Ins', 'displ_name': 'Stop Codon - Insertion'},
+    {'value': 'Nonstop_Mutation', 'displ_name': 'Nonstop Mutation'},
+    {'value': 'Silent', 'displ_name': 'Silent'},
+    {'value': 'RNA', 'displ_name': 'RNA'},
+    {'value': 'Intron', 'displ_name': 'Intron'},
+    {'value': 'lincRNA', 'displ_name': 'lincRNA'},
+    {'value': 'Splice_Site', 'displ_name': 'Splice Site'},
+    {'value': "3'UTR", 'displ_name': '3\' UTR'},
+    {'value': "5'UTR", 'displ_name': '5\' UTR'},
+    {'value': 'IGR', 'displ_name': 'IGR'},
+    {'value': "5'Flank", 'displ_name': '5\' Flank'},
+]
+
 ### METADATA_ATTR ###
 # Local storage of the metadata attributes, values, and their display names for a program. This dict takes the form:
 # {
@@ -146,18 +172,11 @@ def fetch_program_data_types(program):
 
             db = get_sql_connection()
             cursor = db.cursor()
-            cursor.callproc('get_program_data_types', (program,))
+            cursor.callproc('get_program_datatypes', (program,))
             for row in cursor.fetchall():
-                METADATA_DATA_TYPES[program][row[0]] = \
-                    {'name': row[0], 'displ_name': format_for_display(row[0]) if row[0] not in preformatted_attr else row[0], 'values': {}, 'type': row[1]}
+                METADATA_DATA_TYPES[program][row[0]] = {'name': row[1], 'displ_name': row[1]}
 
             cursor.close()
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program,))
-
-            for row in cursor.fetchall():
-                if row['value_name'] is None and row['attr_name'] in METADATA_DATA_TYPES[program]:
-                    METADATA_DATA_TYPES[program][row['attr_name']]['displ_name'] = row['display_string']
 
         return copy.deepcopy(METADATA_DATA_TYPES[program])
 
@@ -378,13 +397,28 @@ def get_preformatted_values(program=None):
         if db and db.open: db.close()
 
 
-# Confirm that a filter key is a valid column in the attribute set
+# Confirm that a filter key is a valid column in the attribute and data type sets or a valid mutation filter
 def validate_filter_key(col,program):
+
     if not program in METADATA_ATTR:
         fetch_program_attr(program)
+
+    if not program in METADATA_DATA_TYPES:
+        fetch_program_data_types(program)
+
+    if 'MUT:' in col:
+        return (':category' in col or ':specific' in col)
+
+    valid_data_type = False
+
+    for build in METADATA_DATA_TYPES[program]:
+        if not valid_data_type:
+            valid_data_type = col in METADATA_DATA_TYPES[program][build]
+
     if ':' in col:
         col = col.split(':')[1]
-    return col in METADATA_ATTR[program]
+
+    return col in METADATA_ATTR[program] or valid_data_type
 
 
 # Make standard adjustments to a string for display: replace _ with ' ', title case (except for 'to')

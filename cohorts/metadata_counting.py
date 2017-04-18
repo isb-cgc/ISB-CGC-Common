@@ -24,6 +24,20 @@ from time import sleep
 import django
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
+from google_helpers.bigquery_service import authorize_credentials_with_Google
+
+BQ_MOLECULAR_ATTR_TABLES = {
+    'TCGA': {
+        'HG19': {
+            'table': 'Somatic_Mutation_MC3',
+            'dataset': 'TCGA_hg19_data_v0',
+        },
+        'HG38': None,
+    },
+    'CCLE': None,
+    'TARGET': None,
+}
+
 
 BQ_ATTEMPT_MAX = 10
 
@@ -117,7 +131,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                                                           'name': project.name,
                                                           'count': 0,
                                                           'metadata_samples': project_ms_table,
-                                                          'program': program.id,
+                                                          'program': project.program.id,
                                                           'displ_name': project.name,})
 
         project_count_query_str = "SELECT COUNT(DISTINCT sample_barcode) AS count FROM %s"
@@ -185,7 +199,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
 
 # Tally counts for metadata filters of public programs
-def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None):
+def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19'):
 
     counts_and_total = {
         'counts': [],
@@ -228,7 +242,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
     cursor = None
 
     try:
-
         params_tuple = ()
         counts = {}
         cursor = db.cursor()
@@ -274,13 +287,18 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             bq_cohort_table = ''
             bq_cohort_dataset = ''
             cohort = ''
+
+            bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+            bq_dataset = bq_table_info['dataset']
+            bq_table = bq_table_info['table']
+
             query_template = None
 
             if cohort_id is not None:
                 query_template = \
                     ("SELECT ct.sample_barcode"
                      " FROM [{project_name}:{cohort_dataset}.{cohort_table}] ct"
-                     " JOIN (SELECT Tumor_SampleBarcode AS barcode "
+                     " JOIN (SELECT sample_barcode_tumor AS barcode "
                      " FROM [{project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY barcode) mt"
@@ -291,15 +309,15 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 cohort = cohort_id
             else:
                 query_template = \
-                    ("SELECT Tumor_SampleBarcode"
+                    ("SELECT sample_barcode_tumor"
                      " FROM [{project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY Tumor_SampleBarcode; ")
+                     " GROUP BY sample_barcode_tumor; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
-            query = query_template.format(dataset_name=settings.BIGQUERY_DATASET, project_name=settings.BIGQUERY_PROJECT_NAME,
-                                          table_name="Somatic_Mutation_calls", hugo_symbol=str(params['gene']),
+            query = query_template.format(dataset_name=bq_dataset, project_name=settings.BIGQUERY_PROJECT_NAME,
+                                          table_name=bq_table, hugo_symbol=str(params['gene']),
                                           var_class=params['var_class'], cohort_dataset=bq_cohort_dataset,
                                           cohort_table=bq_cohort_table, cohort=cohort)
 
@@ -515,7 +533,9 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
     if req_filters is not None:
         try:
             for key in req_filters:
-                if not validate_filter_key(key,program_id):
+                # mutation filters do not insert column names into queries, so they don't need to be
+                # validated
+                if not validate_filter_key(key, program_id):
                     raise Exception('Invalid filter key received: ' + key)
                 this_filter = req_filters[key]
                 if key not in filters:
