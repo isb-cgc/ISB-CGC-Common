@@ -1551,24 +1551,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
         if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
             molecular_attr = {
-                'categories': [
-                    {'name': 'Non-silent', 'value': 'nonsilent', 'count': 0, 'attrs': {
-                        'Missense_Mutation': 1,
-                        'Nonsense_Mutation': 1,
-                        'Nonstop_Mutation': 1,
-                        'Frame_Shift_Del': 1,
-                        'Frame_Shift_Ins': 1,
-                        'De_novo_Start_OutOfFrame': 1,
-                        'De_novo_Start_InFrame': 1,
-                        'In_Frame_Del': 1,
-                        'In_Frame_Ins': 1,
-                        'Start_Codon_SNP': 1,
-                        'Start_Codon_Del': 1,
-                        'Start_Codon_Ins': 1,
-                        'Stop_Codon_Del': 1,
-                        'Stop_Codon_Ins': 1,
-                    }},
-                ],
+                'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
                 'attrs': MOLECULAR_ATTR
             }
 
