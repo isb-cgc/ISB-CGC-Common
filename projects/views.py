@@ -589,6 +589,8 @@ def system_data_dict(request):
     # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
     exclusion_list = ['Project',
                       'Study',
+                      'ParticipantBarcode',
+                      'SampleBarcode',
                       'sample_barcode',
                       'case_barcode',
                       'adenocarcinoma_invasion',
