@@ -45,16 +45,19 @@ PREFORMATTED_ATTRIBUTES = {}
 
 # TODO: move this into a table, maybe metadata_attr?
 MOLECULAR_CATEGORIES = {
-    'nonsilent': [
-        'Missense_Mutation',
-        'Nonsense_Mutation',
-        'Nonstop_Mutation',
-        'Frame_Shift_Del',
-        'Frame_Shift_Ins',
-        'In_Frame_Del',
-        'In_Frame_Ins',
-        'Translation_Start_Site',
-    ]
+    'nonsilent': {
+        'name': 'Non-silent',
+        'attrs': [
+            'Missense_Mutation',
+            'Nonsense_Mutation',
+            'Nonstop_Mutation',
+            'Frame_Shift_Del',
+            'Frame_Shift_Ins',
+            'In_Frame_Del',
+            'In_Frame_Ins',
+            'Translation_Start_Site',
+        ]
+    }
 }
 
 MOLECULAR_ATTR = [
