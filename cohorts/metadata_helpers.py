@@ -113,6 +113,18 @@ ISB_CGC_PROJECTS = {
     'list': [],
 }
 
+BQ_MOLECULAR_ATTR_TABLES = {
+    'TCGA': {
+        'HG19': {
+            'table': 'Somatic_Mutation_MC3',
+            'dataset': 'TCGA_hg19_data_v0',
+        },
+        'HG38': None,
+    },
+    'CCLE': None,
+    'TARGET': None,
+}
+
 
 # Get a set of random characters of 'length'
 def make_id(length):

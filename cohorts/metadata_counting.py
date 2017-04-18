@@ -26,19 +26,6 @@ from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery_service import authorize_credentials_with_Google
 
-BQ_MOLECULAR_ATTR_TABLES = {
-    'TCGA': {
-        'HG19': {
-            'table': 'Somatic_Mutation_MC3',
-            'dataset': 'TCGA_hg19_data_v0',
-        },
-        'HG38': None,
-    },
-    'CCLE': None,
-    'TARGET': None,
-}
-
-
 BQ_ATTEMPT_MAX = 10
 
 TCGA_PROJECT_SET = fetch_isbcgc_project_set()
