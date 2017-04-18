@@ -412,7 +412,8 @@ def validate_filter_key(col,program):
     valid_data_type = False
 
     for build in METADATA_DATA_TYPES[program]:
-        valid_data_type = col in METADATA_DATA_TYPES[program][build]
+        if not valid_data_type:
+            valid_data_type = col in METADATA_DATA_TYPES[program][build]
 
     if ':' in col:
         col = col.split(':')[1]
