@@ -506,7 +506,7 @@ def build_where_clause(filters, alt_key_map=False):
                     params['var_class'] = ''
                 else:
                     big_query_str += '%s IN ({var_class})' % 'Variant_Classification'
-                    values = MOLECULAR_CATEGORIES[value]
+                    values = MOLECULAR_CATEGORIES[value]['attrs']
             else:
                 big_query_str += '%s IN ({var_class})' % 'Variant_Classification'
                 values = value
