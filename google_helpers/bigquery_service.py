@@ -22,6 +22,7 @@ from oauth2client.file import Storage
 from oauth2client import tools
 from django.conf import settings
 import httplib2
+import sys
 
 BIGQUERY_SCOPES = ['https://www.googleapis.com/auth/bigquery',
                    'https://www.googleapis.com/auth/bigquery.insertdata']
@@ -34,4 +35,16 @@ def get_bigquery_service():
     http = credentials.authorize(http)
     service = discovery.build('bigquery', 'v2', http=http)
 
+    return service
+
+def authorize_credentials_with_Google():
+    if settings.DEBUG: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    # documentation: https://developers.google.com/accounts/docs/application-default-credentials
+    SCOPES = ['https://www.googleapis.com/auth/bigquery']
+    # credentials = GoogleCredentials.get_application_default().create_scoped(SCOPES)
+    credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(SCOPES)
+    http = httplib2.Http()
+    http = credentials.authorize(http)
+    service = discovery.build('bigquery', 'v2', http=http)
+    if settings.DEBUG: print >> sys.stderr,' big query authorization '+sys._getframe().f_code.co_name
     return service
