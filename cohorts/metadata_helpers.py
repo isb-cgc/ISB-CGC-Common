@@ -51,11 +51,9 @@ MOLECULAR_CATEGORIES = {
         'Nonstop_Mutation',
         'Frame_Shift_Del',
         'Frame_Shift_Ins',
-        'De_novo_Start_OutOfFrame',
         'In_Frame_Del',
         'In_Frame_Ins',
-        'Start_Codon_SNP',
-        'Start_Codon_Del',
+        'Translation_Start_Site',
     ]
 }
 
@@ -63,26 +61,19 @@ MOLECULAR_ATTR = [
     {'value': 'Missense_Mutation', 'displ_name': 'Missense Mutation'},
     {'value': 'Frame_Shift_Del', 'displ_name': 'Frame Shift - Deletion'},
     {'value': 'Frame_Shift_Ins', 'displ_name': 'Frame Shift - Insertion'},
-    {'value': 'De_novo_Start_OutOfFrame', 'displ_name': 'De novo Start Out of Frame'},
-    {'value': 'De_novo_Start_InFrame', 'displ_name': 'De novo Start In Frame'},
     {'value': 'In_Frame_Del', 'displ_name': 'In Frame Deletion'},
     {'value': 'In_Frame_Ins', 'displ_name': 'In Frame Insertion'},
+    {'value': 'Translation_Start_Site', 'displ_name': 'Translation Start Site'},
     {'value': 'Nonsense_Mutation', 'displ_name': 'Nonsense Mutation'},
-    {'value': 'Start_Codon_SNP', 'displ_name': 'Start Codon - SNP'},
-    {'value': 'Start_Codon_Del', 'displ_name': 'Start Codon - Deletion'},
-    {'value': 'Start_Codon_Ins', 'displ_name': 'Start Codon - Insertion'},
-    {'value': 'Stop_Codon_Del', 'displ_name': 'Stop Codon - Deletion'},
-    {'value': 'Stop_Codon_Ins', 'displ_name': 'Stop Codon - Insertion'},
     {'value': 'Nonstop_Mutation', 'displ_name': 'Nonstop Mutation'},
     {'value': 'Silent', 'displ_name': 'Silent'},
     {'value': 'RNA', 'displ_name': 'RNA'},
     {'value': 'Intron', 'displ_name': 'Intron'},
-    {'value': 'lincRNA', 'displ_name': 'lincRNA'},
     {'value': 'Splice_Site', 'displ_name': 'Splice Site'},
     {'value': "3'UTR", 'displ_name': '3\' UTR'},
     {'value': "5'UTR", 'displ_name': '5\' UTR'},
-    {'value': 'IGR', 'displ_name': 'IGR'},
     {'value': "5'Flank", 'displ_name': '5\' Flank'},
+    {'value': "3'Flank", 'displ_name': '3\' Flank'},
 ]
 
 ### METADATA_ATTR ###
