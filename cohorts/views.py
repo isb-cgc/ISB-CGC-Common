@@ -73,7 +73,7 @@ def convert(data):
         return data
 
 
-def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None):
+def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
 
     if program_id is None and cohort_id is None:
         # We must always have a program_id or a cohort_id - we cannot have neither, because then
@@ -229,11 +229,17 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             cohort = ''
             query_template = None
 
+            bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+            bq_dataset = bq_table_info['dataset']
+            bq_table = bq_table_info['table']
+
+            query_template = None
+
             if cohort_id is not None:
                 query_template = \
                     ("SELECT ct.sample_barcode"
                      " FROM [{project_name}:{cohort_dataset}.{cohort_table}] ct"
-                     " JOIN (SELECT Tumor_SampleBarcode AS barcode "
+                     " JOIN (SELECT sample_barcode_tumor AS barcode "
                      " FROM [{project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY barcode) mt"
@@ -244,16 +250,15 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 cohort = cohort_id
             else:
                 query_template = \
-                    ("SELECT Tumor_SampleBarcode"
+                    ("SELECT sample_barcode_tumor"
                      " FROM [{project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY Tumor_SampleBarcode; ")
+                     " GROUP BY sample_barcode_tumor; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
-            query = query_template.format(dataset_name=settings.BIGQUERY_DATASET,
-                                          project_name=settings.BIGQUERY_PROJECT_NAME,
-                                          table_name="Somatic_Mutation_calls", hugo_symbol=str(params['gene']),
+            query = query_template.format(dataset_name=bq_dataset, project_name=settings.BIGQUERY_PROJECT_NAME,
+                                          table_name=bq_table, hugo_symbol=str(params['gene']),
                                           var_class=params['var_class'], cohort_dataset=bq_cohort_dataset,
                                           cohort_table=bq_cohort_table, cohort=cohort)
 
