@@ -132,6 +132,7 @@ def program_upload(request, existing_proj=False):
 
     return render(request, template, context)
 
+
 def filter_column_name(original):
     return re.sub(r"[^a-zA-Z0-9]+", "_", original.lower())
 

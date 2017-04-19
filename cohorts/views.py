@@ -614,7 +614,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
 
-            cohort_programs = [ {'id': x.id, 'name': x.name} for x in cohort_progs ]
+            cohort_programs = [ {'id': x.id, 'name': x.name, 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
             shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
             shared_with_users = User.objects.filter(id__in=shared_with_ids)

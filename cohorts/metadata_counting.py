@@ -265,7 +265,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         tmp_cohort_table = None
         tmp_filter_table = None
 
-        # TODO: Not handling Mutation filters yet
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
         if mutation_where_clause:
