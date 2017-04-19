@@ -587,8 +587,12 @@ def system_data_dict(request):
 
     # Exclusion attributes: Program, project, has_, SampleBarcode, ParticipantBarcode
     # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
+
+    # 4/18/17: Pending decisions on how to present this info with data migration, the exclusion list is modified to shut up barcodes per #1903:
     exclusion_list = ['Project',
                       'Study',
+                      'ParticipantBarcode',
+                      'SampleBarcode',
                       'sample_barcode',
                       'case_barcode',
                       'adenocarcinoma_invasion',
