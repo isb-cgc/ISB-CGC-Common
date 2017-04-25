@@ -190,19 +190,33 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
     counts_and_total = {
         'counts': [],
+        'data_counts': [],
     }
 
     mutation_filters = None
-    data_avail_filters = None
     mutation_where_clause = None
     filters = {}
+
+    cohort_query = """
+        SELECT sample_barcode cs_sample_barcode
+        FROM cohorts_samples
+        WHERE cohort_id = %s
+    """
+
+    data_type_query = """
+        SELECT sample_barcode da_sample_barcode, metadata_data_type_availability_id data_type
+        FROM %s
+    """
 
     # returns an object or None
     program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
 
-    # Fetch the possible value set of all non-continuous columns
+    # Fetch the possible value set of all non-continuous attr columns
     # (also fetches the display strings for all attributes and values which have them)
-    metadata_values = fetch_metadata_value_set(program_id)
+    metadata_attr_values = fetch_metadata_value_set(program_id)
+
+    # Fetch the possible value set of all data types
+    metadata_data_type_values = fetch_program_data_types(program_id)
 
     # Divide our filters into 'mutation' and 'non-mutation' sets
     for key in inc_filters:
@@ -210,27 +224,22 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
-        elif 'DATA:' in key:
-            if not data_avail_filters:
-                data_avail_filters = {}
-                data_avail_filters[key.split(':')[-1]] = inc_filters[key]
         else:
             filters[key.split(':')[-1]] = inc_filters[key]
 
     if mutation_filters:
         mutation_where_clause = build_where_clause(mutation_filters)
 
-    db = get_sql_connection()
-
-    db.autocommit(True)
-
-    django.setup()
-
+    db = None
     cursor = None
 
     try:
         params_tuple = ()
         counts = {}
+        data_counts = {}
+
+        db = get_sql_connection()
+        db.autocommit(True)
         cursor = db.cursor()
 
         # We need to perform 2 sets of queries: one with each filter excluded from the others, against the full
@@ -241,7 +250,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         exclusionary_filter = {}
         where_clause = None
 
-        for attr in metadata_values:
+        for attr in metadata_attr_values:
             if attr not in filters:
                 unfiltered_attr.append(attr)
 
@@ -261,8 +270,11 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 exclusionary_filter[filter_key] = ex_where_clause
 
         base_table = program_tables.samples_table
+        data_avail_table = program_tables.sample_data_availability_table
+        data_type_table = program_tables.sample_data_type_availability_table
+
+        filter_table = None
         tmp_mut_table = None
-        tmp_cohort_table = None
         tmp_filter_table = None
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
@@ -367,52 +379,62 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             db.commit()
 
         start = time.time()
-        # If there is a cohort, make a temporary table based on it and make it the base table
-        if cohort_id is not None:
-            tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
-            base_table = tmp_cohort_table
-            make_cohort_table_str = """
-                CREATE TEMPORARY TABLE %s AS SELECT ms.*
-                FROM cohorts_samples cs
-                JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
-            """ % (tmp_cohort_table, program_tables.samples_table)
-            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
-            if tmp_mut_table:
-                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
-            make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
-            cursor.execute(make_cohort_table_str, (cohort_id,))
 
-            for row in cursor.fetchall():
-                logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
+        data_type_subquery = data_type_query % data_avail_table
 
         # If there are filters, create a temporary table filtered off the base table
-        if unfiltered_attr.__len__() > 0 and filters.__len__() > 0:
+        if len(filters) > 0:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
-            make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
 
-            if tmp_mut_table and not cohort_id:
+            make_tmp_table_str = """
+              CREATE TEMPORARY TABLE %s AS
+              SELECT ms.*, da.data_type
+              FROM %s ms
+              LEFT JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode
+            """ % (tmp_filter_table, base_table, data_type_subquery)
+
+            if tmp_mut_table:
                 make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table
 
-            if filters.__len__() > 0:
-                make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
-                params_tuple += where_clause['value_tuple']
+            if cohort_id:
+                cohort_subquery = cohort_query % cohort_id
+                make_tmp_table_str += ' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_subquery
 
-            make_tmp_table_str += ";"
-            print make_tmp_table_str
+            make_tmp_table_str += ' WHERE %s ' % where_clause['query_str'] + ';'
+            params_tuple += where_clause['value_tuple']
+
             cursor.execute(make_tmp_table_str, params_tuple)
-        elif tmp_mut_table and not cohort_id:
+
+        elif tmp_mut_table:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
+
             make_tmp_table_str = """
                 CREATE TEMPORARY TABLE %s AS
-                SELECT *
+                SELECT ms.*, da.data_type
                 FROM %s ms
-                JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode;
-            """ % (tmp_filter_table, base_table, tmp_mut_table,)
+                JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode
+                LEFT JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode
+            """ % (tmp_filter_table, base_table, tmp_mut_table, data_type_subquery)
+
+            if cohort_id:
+                cohort_subquery = cohort_query % cohort_id
+                make_tmp_table_str += ' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_subquery
+
+            make_tmp_table_str += ';'
+
             cursor.execute(make_tmp_table_str)
         else:
-            filter_table = base_table
+            # base table and filter table are equivalent
+
+            if cohort_id:
+                cohort_subquery = cohort_query % cohort_id
+                base_table += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery)
+
+            filter_table = base_table + (' LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode' % data_type_subquery)
+            base_table = filter_table
+
 
         stop = time.time()
 
@@ -420,20 +442,20 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         count_query_set = []
 
-        for col_name in metadata_values:
+        for col_name in metadata_attr_values:
             if col_name in unfiltered_attr:
                 count_query_set.append({'query_str':("""
-                    SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s;
+                    SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s GROUP BY %s;
                   """) % (col_name, filter_table, col_name,),
                 'params': None, })
             else:
-                subquery = base_table
+                subquery = base_table + (' LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode' % data_type_subquery)
                 if tmp_mut_table:
-                    subquery += ' JOIN %s ON %s = sample_barcode ' % (tmp_mut_table, 'tumor_sample_id', )
+                    subquery += ' JOIN %s ON tumor_sample_id = sample_barcode ' % (tmp_mut_table, )
                 if exclusionary_filter[col_name]['query_str']:
                     subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
                 count_query_set.append({'query_str':("""
-                    SELECT DISTINCT %s, COUNT(1) as count FROM %s GROUP BY %s
+                    SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s GROUP BY %s
                   """) % (col_name, subquery, col_name,),
                 'params': exclusionary_filter[col_name]['value_tuple']})
 
@@ -451,7 +473,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             if not col_headers[0] in counts:
                 # If this is a categorical attribute, fetch its list of possible values (so we can know what didn't come
                 # back in the query)
-                values = { k: 0 for k in metadata_values[col_headers[0]]['values'].keys() } if metadata_values[col_headers[0]]['type'] == 'C' else {}
+                values = { k: 0 for k in metadata_attr_values[col_headers[0]]['values'].keys() } if metadata_attr_values[col_headers[0]]['type'] == 'C' else {}
                 counts[col_headers[0]] = {
                     'counts': values,
                     'total': 0,
@@ -460,26 +482,53 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
 
+        if len(metadata_data_type_values.keys()) > 0:
+            # Query the data type counts
+            # Because data type is a set of possible values, we don't need to do exclusionary filtering,
+            # and can filter directly off the filter table
+
+            if filter_table == base_table:
+                cursor.execute("""
+                        SELECT DISTINCT data_type, isb_label, COUNT(DISTINCT sample_barcode) count
+                        FROM %s
+                        JOIN %s ON metadata_data_type_availability_id = data_type
+                        GROUP BY data_type;
+                    """ % (filter_table, data_type_table,))
+            else:
+                cursor.execute("""
+                    SELECT DISTINCT data_type, isb_label, COUNT(DISTINCT sample_barcode) count
+                    FROM (SELECT DISTINCT sample_barcode FROM %s) ms
+                    JOIN (%s) da ON da_sample_barcode = sample_barcode
+                    JOIN %s ON metadata_data_type_availability_id = data_type
+                    GROUP BY data_type;
+                """ % (filter_table, data_type_subquery, data_type_table,))
+
+            for row in cursor.fetchall():
+                if not row[1] in data_counts:
+                    values = {int(k): 0 for k in metadata_data_type_values[row[1]]['values'].keys()}
+                    data_counts[row[1]] = {
+                        'counts': values,
+                        'total': 0,
+                    }
+                data_counts[row[1]]['counts'][int(row[0])] = int(row[2])
+                data_counts[row[1]]['total'] += int(row[2])
+
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
         sample_and_case_counts = get_case_and_sample_count(filter_table, cursor)
 
         if cursor: cursor.close()
 
-        data = []
-
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
         # Drop the temporary tables
-        if tmp_cohort_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_cohort_table)
         if tmp_filter_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_filter_table)
         if tmp_mut_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_mut_table)
 
-        counts_and_total['data'] = data
         counts_and_total['cases'] = sample_and_case_counts['case_count']
         counts_and_total['total'] = sample_and_case_counts['sample_count']
 
-        for attr in metadata_values:
+        for attr in metadata_attr_values:
             if attr in counts:
                 value_list = []
                 feature = {
@@ -490,19 +539,42 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 # Special case for age ranges
                 if attr == 'age_at_initial_pathologic_diagnosis':
                     feature['values'] = normalize_ages(counts[attr]['counts'])
-                elif attr == 'BMI':
+                elif attr == 'bmi':
                     feature['values'] = normalize_bmi(counts[attr]['counts'])
+                elif attr == 'year_of_diagnosis':
+                    feature['values'] = normalize_years(counts[attr]['counts'])
+                elif attr == 'event_free_survival' or attr == 'days_to_death' or attr == 'overall_survival':
+                    feature['values'] = normalize_simple_days(counts[attr]['counts'])
 
                 for value, count in feature['values'].items():
 
                     val_obj = {'value': str(value), 'count': count,}
 
-                    if value in metadata_values[attr]['values'] and metadata_values[attr]['values'][value] is not None and len(metadata_values[attr]['values'][value]) > 0:
-                        val_obj['displ_name'] = metadata_values[attr]['values'][value]
+                    if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None and len(metadata_attr_values[attr]['values'][value]) > 0:
+                        val_obj['displ_name'] = metadata_attr_values[attr]['values'][value]
 
                     value_list.append(val_obj)
 
                 counts_and_total['counts'].append({'name': attr, 'values': value_list, 'id': attr, 'total': feature['total']})
+
+        for data_type in metadata_data_type_values:
+            if data_type in data_counts:
+                value_list = []
+                feature = {
+                    'values': data_counts[data_type]['counts'],
+                    'total': data_counts[data_type]['total'],
+                }
+
+                for value, count in feature['values'].items():
+
+                    val_obj = {'value': value, 'count': count, }
+
+                    if int(value) in metadata_data_type_values[data_type]['values'] and metadata_data_type_values[data_type]['values'][int(value)] and len(metadata_data_type_values[data_type]['values'][int(value)]) > 0:
+                        val_obj['displ_name'] = metadata_data_type_values[data_type]['values'][int(value)]
+
+                    value_list.append(val_obj)
+
+                counts_and_total['data_counts'].append({'name': data_type, 'values': value_list, 'id': data_type, 'total': feature['total']})
 
         return counts_and_total
 
@@ -546,7 +618,8 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
     )
 
     return_vals = {
-        'items': counts_and_total['data'],
+        'items': [],
+        'data_counts': counts_and_total['data_counts'],
         'count': counts_and_total['counts'],
         'cases': counts_and_total['cases'],
         'total': counts_and_total['total']

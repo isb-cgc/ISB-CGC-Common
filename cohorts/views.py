@@ -188,36 +188,55 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     if mutation_filters:
         mutation_where_clause = build_where_clause(mutation_filters)
 
-    db = get_sql_connection()
-    django.setup()
+    cohort_query = """
+        SELECT sample_barcode cs_sample_barcode, project_id
+        FROM cohorts_samples
+        WHERE cohort_id = %s
+    """
 
+    data_type_query = """
+        SELECT sample_barcode da_sample_barcode, metadata_data_type_availability_id data_type
+        FROM %s
+    """
+
+    # returns an object or None
+    program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
+
+    # Fetch the possible value set of all non-continuous attr columns
+    # (also fetches the display strings for all attributes and values which have them)
+    metadata_attr_values = fetch_metadata_value_set(program_id)
+
+    # Fetch the possible value set of all data types
+    metadata_data_type_values = fetch_program_data_types(program_id)
+
+    db = None
     cursor = None
 
     try:
+        params_tuple = ()
+
+        db = get_sql_connection()
         cursor = db.cursor()
         db.autocommit(True)
+
         where_clause = None
 
         # construct the WHERE clauses needed
-        if filters.__len__() > 0:
+        if len(filters) > 0:
             filter_copy = copy.deepcopy(filters)
             where_clause = build_where_clause(filter_copy)
 
-        base_table = None
         filter_table = None
         tmp_mut_table = None
-        tmp_cohort_table = None
         tmp_filter_table = None
+        base_table = None
 
-        # The base table is the program's samples table if a program was supplied
         if program_id:
-            program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
             base_table = program_tables.samples_table
-        # ...otherwise it's the cohort_samples table
-        elif cohort_id:
+        elif cohort_id and len(filters) <= 0:
             base_table = 'cohort_samples'
 
-        params_tuple = ()
+        data_avail_table = program_tables.sample_data_availability_table
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
@@ -319,56 +338,56 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # If there is a cohort, make a temporary table based on it and make it the base table
         start = time.time()
-        # If there is a cohort, make a temporary table based on it and make it the base table
-        if cohort_id:
-            tmp_cohort_table = "cohort_tmp_" + user.id.__str__() + "_" + make_id(6)
-            base_table = tmp_cohort_table
-            if program_id:
-                make_cohort_table_str = """
-                    CREATE TEMPORARY TABLE %s AS SELECT cs.project_id, ms.*
-                    FROM cohorts_samples cs
-                    JOIN %s ms ON ms.sample_barcode = cs.sample_barcode
-                """ % (tmp_cohort_table, program_tables.samples_table)
-            else:
-                make_cohort_table_str = """
-                    CREATE TEMPORARY TABLE %s AS SELECT cs.*
-                    FROM cohorts_samples cs
-                """ % (tmp_cohort_table,)
-            # if there is a mutation temp table, JOIN it here to match on those sample_barcode values
-            if tmp_mut_table:
-                make_cohort_table_str += (' JOIN %s sc ON sc.tumor_sample_id = cs.sample_barcode' % tmp_mut_table)
-            make_cohort_table_str += ' WHERE cs.cohort_id = %s;'
-            cursor.execute(make_cohort_table_str, (cohort_id,))
 
-            for row in cursor.fetchall():
-                logger.debug('[BENCHMAKRING] Cohort table '+tmp_cohort_table+' size: '+str(row[0]))
+        data_type_subquery = data_type_query % data_avail_table
 
         # If there are filters, create a temporary table filtered off the base table
-        if filters.__len__() > 0:
+        if len(filters) > 0:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
-            make_tmp_table_str = 'CREATE TEMPORARY TABLE %s AS SELECT * FROM %s ms' % (tmp_filter_table, base_table,)
 
-            if tmp_mut_table and not cohort_id:
-                make_tmp_table_str += ' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table
+            if cohort_id:
+                cohort_subquery = cohort_query % cohort_id
 
-            if filters.__len__() > 0:
-                make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
-                params_tuple += where_clause['value_tuple']
+                make_tmp_table_str = """
+                    CREATE TEMPORARY TABLE %s AS
+                    SELECT sample_barcode, case_barcode, project_id
+                    FROM %s
+                    JOIN (%s) cs ON cs_sample_barcode = sample_barcode
+                    LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode
+                  """ % (tmp_filter_table, base_table, cohort_subquery, data_type_subquery,)
+
+            else:
+                make_tmp_table_str = """
+                  CREATE TEMPORARY TABLE %s AS
+                  SELECT sample_barcode, case_barcode, project_short_name
+                  FROM %s
+                  LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode
+                """ % (tmp_filter_table, base_table, data_type_subquery,)
+
+            if tmp_mut_table:
+                make_tmp_table_str += ' JOIN %s ON tumor_sample_id = sample_barcode' % tmp_mut_table
+
+            make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
+            params_tuple += where_clause['value_tuple']
 
             make_tmp_table_str += ";"
 
             cursor.execute(make_tmp_table_str, params_tuple)
 
-        elif tmp_mut_table and not cohort_id:
+        elif tmp_mut_table:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = """
                 CREATE TEMPORARY TABLE %s AS
                 SELECT *
-                FROM %s ms
-                JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode;
+                FROM %s
+                JOIN %s ON tumor_sample_id = sample_barcode
             """ % (tmp_filter_table, base_table, tmp_mut_table,)
+
+            if cohort_id and program_id:
+                cohort_subquery = cohort_query % cohort_id
+                make_tmp_table_str += ' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery
 
             cursor.execute(make_tmp_table_str)
         else:
@@ -381,7 +400,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # determine the project based on the program
         if cohort_id:
             cursor.execute("""
-                SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ms.project_id FROM %s ms;
+                SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s;
             """ % (filter_table,))
         else:
             cursor.execute("""
@@ -1513,6 +1532,7 @@ def get_metadata(request):
 
     if program_id is not None and program_id > 0:
         results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit)
+
         # If there is an extent cohort, to get the cohort's new totals per applied filters
         # we have to check the unfiltered programs for their numbers and tally them
         if cohort:
@@ -1567,15 +1587,18 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                     if ma:
                         ma['category'] = cat['value']
 
+        data_types = fetch_program_data_types(program_id)
+
         results = public_metadata_counts(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
 
         template_values = {
             'request': request,
-            'attr_counts': results['count'],
+            'attr_counts': results['count'] if 'count' in results else [],
+            'data_type_counts': results['data_counts'] if 'data_counts' in results else [],
             'total_samples': int(results['total']),
             'clin_attr': clin_attr,
             'molecular_attr': molecular_attr,
-            'data_types': {},
+            'data_types': data_types,
             'metadata_filters': filters or {},
             'program': public_program,
             'metadata_counts': results
