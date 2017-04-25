@@ -180,9 +180,17 @@ def fetch_program_data_types(program):
             cursor = db.cursor()
             cursor.callproc('get_program_datatypes', (program,))
             for row in cursor.fetchall():
-                METADATA_DATA_TYPES[program][row[0]] = {'name': row[1], 'displ_name': row[1]}
+                if not row[2] in METADATA_DATA_TYPES[program]:
+                    METADATA_DATA_TYPES[program][row[2]] = {'name': row[2], 'displ_name': format_for_display(row[2]) if row[2] not in preformatted_attr else row[2], 'values': {}}
+                METADATA_DATA_TYPES[program][row[2]]['values'][int(row[0])] = ('Available' if row[1] is None else row[1])
 
             cursor.close()
+            cursor = db.cursor(MySQLdb.cursors.DictCursor)
+            cursor.callproc('get_program_display_strings', (program,))
+
+            for row in cursor.fetchall():
+                if row['value_name'] is None and row['attr_name'] in METADATA_DATA_TYPES[program]:
+                    METADATA_DATA_TYPES[program][row['attr_name']]['displ_name'] = row['display_string']
 
         return copy.deepcopy(METADATA_DATA_TYPES[program])
 
@@ -415,16 +423,10 @@ def validate_filter_key(col,program):
     if 'MUT:' in col:
         return (':category' in col or ':specific' in col)
 
-    valid_data_type = False
-
-    for build in METADATA_DATA_TYPES[program]:
-        if not valid_data_type:
-            valid_data_type = col in METADATA_DATA_TYPES[program][build]
-
     if ':' in col:
         col = col.split(':')[1]
 
-    return col in METADATA_ATTR[program] or valid_data_type
+    return col in METADATA_ATTR[program] or METADATA_DATA_TYPES[program]
 
 
 # Make standard adjustments to a string for display: replace _ with ' ', title case (except for 'to')
@@ -481,25 +483,8 @@ def build_where_clause(filters, alt_key_map=False):
 
         key_order.append(key)
 
-        # Bucket the grouped filter types (currently just certain has_ values, could be more)
-        if 'has_' in key and not key == 'has_Illumina_DNASeq' and not key == 'has_SNP6' and not key == 'has_RPPA':
-            if grouped_filters is None:
-                grouped_filters = {}
-
-            if key == 'has_27k' or key == 'has_450k':
-                if 'DNA_methylation' not in grouped_filters:
-                    grouped_filters['DNA_methylation'] = []
-                grouped_filters['DNA_methylation'].append({'filter': str(key), 'value': str(value)})
-            elif key == 'has_HiSeq_miRnaSeq' or key == 'has_GA_miRNASeq':
-                if 'miRNA_sequencing' not in grouped_filters:
-                    grouped_filters['miRNA_sequencing'] = []
-                grouped_filters['miRNA_sequencing'].append({'filter': str(key), 'value': str(value)})
-            elif key == 'has_UNC_HiSeq_RNASeq' or key == 'has_UNC_GA_RNASeq' or key == 'has_BCGSC_HiSeq_RNASeq' or key == 'has_BCGSC_GA_RNASeq':
-                if 'RNA_sequencing' not in grouped_filters:
-                    grouped_filters['RNA_sequencing'] = []
-                grouped_filters['RNA_sequencing'].append({'filter': str(key), 'value': str(value)})
         # BQ-only format
-        elif keyType == 'MUT':
+        if keyType == 'MUT':
             # If it's first in the list, don't append an "and"
             params = {}
             value_tuple += (params,)
