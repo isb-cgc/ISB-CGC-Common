@@ -147,7 +147,7 @@ def get_sql_connection():
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not (settings.IS_APP_ENGINE_FLEX or settings.IS_APP_ENGINE):
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
