@@ -147,7 +147,7 @@ def get_sql_connection():
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not (settings.IS_APP_ENGINE_FLEX or settings.IS_APP_ENGINE):
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
@@ -248,13 +248,17 @@ def fetch_program_attr(program):
 
 # Generate the ISB_CGC_PROJECTS['list'] value set based on the get_isbcgc_project_set sproc
 def fetch_isbcgc_project_set():
+
+    db = None
+    cursor = None
+
     try:
-        cursor = None
         db = get_sql_connection()
+
         if not ISB_CGC_PROJECTS['list'] or len(ISB_CGC_PROJECTS['list']) <= 0:
             cursor = db.cursor()
             cursor.execute("SELECT COUNT(SPECIFIC_NAME) FROM INFORMATION_SCHEMA.ROUTINES WHERE SPECIFIC_NAME = 'get_isbcgc_project_set';")
-            # Only try to fetch the study set if the sproc exists
+            # Only try to fetch the project set if the sproc exists
             if cursor.fetchall()[0][0] > 0:
                 cursor.execute("CALL get_isbcgc_project_set();")
                 ISB_CGC_PROJECTS['list'] = []
@@ -264,7 +268,8 @@ def fetch_isbcgc_project_set():
                 # Otherwise just warn
                 logger.warn("[WARNING] Stored procedure get_isbcgc_project_set was not found!")
 
-        return ISB_CGC_PROJECTS['list']
+        return copy.deepcopy(ISB_CGC_PROJECTS['list'])
+
     except Exception as e:
         logger.error(traceback.format_exc())
     finally:

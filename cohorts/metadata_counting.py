@@ -195,7 +195,9 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
     mutation_filters = None
     mutation_where_clause = None
+    data_type_where_clause = None
     filters = {}
+    data_type_filters = {}
 
     cohort_query = """
         SELECT sample_barcode cs_sample_barcode
@@ -224,11 +226,16 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
+        elif 'data_type' in key:
+            data_type_filters[key.split(':')[-1]] = inc_filters[key]
         else:
             filters[key.split(':')[-1]] = inc_filters[key]
 
     if mutation_filters:
         mutation_where_clause = build_where_clause(mutation_filters)
+
+    if data_type_filters:
+        data_type_where_clause = build_where_clause(data_type_filters)
 
     db = None
     cursor = None
@@ -381,6 +388,9 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         start = time.time()
 
         data_type_subquery = data_type_query % data_avail_table
+
+        if data_type_filters:
+            data_type_subquery += ' WHERE '+data_type_where_clause['query_str']
 
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
