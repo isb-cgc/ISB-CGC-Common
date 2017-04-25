@@ -528,18 +528,27 @@ def build_where_clause(filters, alt_key_map=False):
                 query_str += ' and'
                 big_query_str += ' and'
 
-            # If it's age ranges, give it special treament due to normalizations
+            # If it's a ranged value, calculate the bins
             if key == 'age_at_initial_pathologic_diagnosis':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
                 else:
                     query_str += ' (' + sql_age_by_ranges(value) + ') '
-            # If it's age ranges, give it special treament due to normalizations
-            elif key == 'BMI':
+            elif key == 'bmi':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
                 else:
                     query_str += ' (' + sql_bmi_by_ranges(value) + ') '
+            elif key == 'year_of_diagnosis':
+                if value == 'None':
+                    query_str += ' %s IS NULL' % key
+                else:
+                    query_str += ' (' + sql_bmi_by_ranges(value) + ') '
+            elif key == 'event_free_survival' or key == 'days_to_death' or key == 'overall_survival':
+                if value == 'None':
+                    query_str += ' %s IS NULL' % key
+                else:
+                    query_str += ' (' + sql_simple_days_by_ranges(value, key) + ') '
             # If it's a list of items for this key, create an or subclause
             elif isinstance(value, list):
                 has_null = False
@@ -617,6 +626,84 @@ def build_where_clause(filters, alt_key_map=False):
     return {'query_str': query_str, 'value_tuple': value_tuple, 'key_order': key_order, 'big_query_str': big_query_str}
 
 
+def sql_simple_days_by_ranges(value, field):
+    result = ''
+
+    if isinstance(value, basestring):
+        value = [value]
+
+    first = True
+    for val in value:
+        if first:
+            first = False
+        else:
+            result += ' or'
+
+        if str(val) == 'None':
+            result += (' %s IS NULL' % field)
+        elif str(val) == '1 to 500':
+            result += (' (%s <= 500)' % field)
+        elif str(val) == '501 to 1000':
+            result += (' (%s >= 501 and %s <= 1000)' % (field, field,))
+        elif str(val) == '1001 to 1500':
+             result += (' (%s >= 1001 and %s <= 1500)' % (field, field,))
+        elif str(val) == '1501 to 2000':
+             result += (' (%s >= 1501 and %s <= 2000)' % (field, field,))
+        elif str(val) == '2001 to 2500':
+             result += (' (%s >= 2001 and %s <= 2500)' % (field, field,))
+        elif str(val) == '2501 to 3000':
+             result += (' (%s >= 2501 and %s <= 3000)' % (field, field,))
+        elif str(val) == '3001 to 3500':
+             result += (' (%s >= 3001 and %s <= 3500)' % (field, field,))
+        elif str(val) == '3501 to 4000':
+             result += (' (%s >= 3501 and %s <= 4000)' % (field, field,))
+        elif str(val) == '4001 to 4500':
+             result += (' (%s >= 4001 and %s <= 4500)' % (field, field,))
+        elif str(val) == '4501 to 5000':
+             result += (' (%s >= 4501 and %s <= 5000)' % (field, field,))
+        elif str(val) == '5001 to 5500':
+             result += (' (%s >= 5001 and %s <= 5500)' % (field, field,))
+        elif str(val) == '5501 to 6000':
+             result += (' (%s >= 5501 and %s <= 6000)' % (field, field,))
+
+    return result
+
+
+def sql_year_by_ranges(value):
+    result = ''
+
+    if isinstance(value, basestring):
+        value = [value]
+
+    first = True
+    for val in value:
+        if first:
+            first = False
+        else:
+            result += ' or'
+
+        if str(val) == 'None':
+            result += ' year_of_diagnosis IS NULL'
+        elif str(val) == '1976 to 1980':
+            result += ' (year_of_diagnosis <= 1980)'
+        elif str(val) == '1981 to 1985':
+            result += ' (year_of_diagnosis >= 1981 and year_of_diagnosis <= 1985)'
+        elif str(val) == '1986 to 1990':
+            result += ' (year_of_diagnosis >= 1986 and year_of_diagnosis <= 1990)'
+        elif str(val) == '1991 to 1995':
+            result += ' (year_of_diagnosis >= 1991 and year_of_diagnosis <= 1995)'
+        elif str(val) == '1996 to 2000':
+            result += ' (year_of_diagnosis >= 1996 and year_of_diagnosis <= 2000)'
+        elif str(val) == '2000 to 2005':
+            result += ' (year_of_diagnosis >= 2001 and year_of_diagnosis <= 2005)'
+        elif str(val) == '2006 to 2010':
+            result += ' (year_of_diagnosis >= 2006 and year_of_diagnosis <= 2010)'
+        elif str(val) == '2011 to 2015':
+            result += ' (year_of_diagnosis >= 2011 and year_of_diagnosis <= 2015)'
+
+    return result
+
+
 def sql_bmi_by_ranges(value):
     if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
     result = ''
@@ -624,7 +711,7 @@ def sql_bmi_by_ranges(value):
         # value is a list of ranges
         first = True
         if 'None' in value:
-            result += 'BMI is null or '
+            result += 'bmi is null or '
             value.remove('None')
         for val in value:
             if first:
@@ -633,24 +720,24 @@ def sql_bmi_by_ranges(value):
             else:
                 result += ' or'
             if str(val) == 'underweight':
-                result += ' (BMI < 18.5)'
+                result += ' (bmi < 18.5)'
             elif str(val) == 'normal weight':
-                result += ' (BMI >= 18.5 and BMI <= 24.9)'
+                result += ' (bmi >= 18.5 and bmi <= 24.9)'
             elif str(val) == 'overweight':
-                result += ' (BMI > 24.9 and BMI <= 29.9)'
+                result += ' (bmi > 24.9 and bmi <= 29.9)'
             elif str(val) == 'obese':
-                result += ' (BMI > 29.9)'
+                result += ' (bmi > 29.9)'
 
     else:
         # value is a single range
         if str(value) == 'underweight':
-            result += ' (BMI < 18.5)'
+            result += ' (bmi < 18.5)'
         elif str(value) == 'normal weight':
-            result += ' (BMI >= 18.5 and BMI <= 24.9)'
+            result += ' (bmi >= 18.5 and bmi <= 24.9)'
         elif str(value) == 'overweight':
-            result += ' (BMI > 24.9 and BMI <= 29.9)'
+            result += ' (bmi > 24.9 and bmi <= 29.9)'
         elif str(value) == 'obese':
-            result += ' (BMI > 29.9)'
+            result += ' (bmi > 29.9)'
 
     return result
 
@@ -700,6 +787,7 @@ def sql_age_by_ranges(value):
             result += ' age_at_initial_pathologic_diagnosis is null'
 
     return result
+
 
 def gql_age_by_ranges(q, key, value):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
@@ -857,7 +945,7 @@ def data_availability_sort(key, value, attr_details):
             'count': count[0] if count.__len__() > 0 else 0
         })
 
-# TODO: These were copied over from api.api_helpers. Should no longer be needed after new slider widgets created
+# TODO: Convert to slider
 def normalize_bmi(bmis):
     if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
     bmi_list = {'underweight': 0, 'normal weight': 0, 'overweight': 0, 'obese': 0, 'None': 0}
@@ -878,6 +966,7 @@ def normalize_bmi(bmis):
 
     return bmi_list
 
+# TODO: Convert to slider
 def normalize_ages(ages):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     new_age_list = {'10 to 39': 0, '40 to 49': 0, '50 to 59': 0, '60 to 69': 0, '70 to 79': 0, 'Over 80': 0, 'None': 0}
@@ -903,3 +992,74 @@ def normalize_ages(ages):
             print age
 
     return new_age_list
+
+# TODO: Convert to slider
+def normalize_years(years):
+    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    new_year_list = {'1976 to 1980': 0, '1981 to 1985': 0, '1986 to 1990': 0, '1991 to 1995': 0, '1996 to 2000': 0, '2001 to 2005': 0, '2006 to 2010': 0, '2011 to 2015': 0, 'None': 0}
+    for year, count in years.items():
+        if type(year) != dict:
+            if year and year != 'None':
+                int_year = float(year)
+                if int_year <= 1980:
+                    new_year_list['1976 to 1980'] += int(count)
+                elif int_year <= 1985:
+                    new_year_list['1981 to 1985'] += int(count)
+                elif int_year <= 1990:
+                    new_year_list['1986 to 1990'] += int(count)
+                elif int_year <= 1995:
+                    new_year_list['1991 to 1995'] += int(count)
+                elif int_year <= 2000:
+                    new_year_list['1996 to 2000'] += int(count)
+                elif int_year <= 2005:
+                    new_year_list['2001 to 2005'] += int(count)
+                elif int_year <= 2010:
+                    new_year_list['2006 to 2010'] += int(count)
+                elif int_year <= 2015:
+                    new_year_list['2011 to 2015'] += int(count)
+            else:
+                new_year_list['None'] += int(count)
+        else:
+            print year
+
+    return new_year_list
+
+
+# TODO: Convert to slider
+def normalize_simple_days(days):
+    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    new_day_list = {'1 to 500': 0, '501 to 1000': 0, '1001 to 1500': 0, '1501 to 2000': 0, '2001 to 2500': 0,
+                    '2501 to 3000': 0, '3001 to 3500': 0, '3501 to 4000': 0, '4001 to 4500': 0, '4501 to 5000': 0,
+                    '5001 to 5500': 0, '5501 to 6000': 0, 'None': 0}
+    for day, count in days.items():
+        if type(day) != dict:
+            if day and day != 'None':
+                int_day = float(day)
+                if int_day <= 500:
+                    new_day_list['1 to 500'] += int(count)
+                elif int_day <= 1000:
+                    new_day_list['501 to 1000'] += int(count)
+                elif int_day <= 1500:
+                    new_day_list['1001 to 1500'] += int(count)
+                elif int_day <= 2000:
+                    new_day_list['1501 to 2000'] += int(count)
+                elif int_day <= 2500:
+                    new_day_list['2001 to 2500'] += int(count)
+                elif int_day <= 3000:
+                    new_day_list['2501 to 3000'] += int(count)
+                elif int_day <= 3500:
+                    new_day_list['3001 to 3500'] += int(count)
+                elif int_day <= 4000:
+                    new_day_list['3501 to 4000'] += int(count)
+                elif int_day <= 4500:
+                    new_day_list['4001 to 4500'] += int(count)
+                elif int_day <= 5000:
+                    new_day_list['4501 to 5000'] += int(count)
+                elif int_day <= 5500:
+                    new_day_list['5001 to 5500'] += int(count)
+                elif int_day <= 6000:
+                    new_day_list['5501 to 6000'] += int(count)
+            else:
+                new_day_list['None'] += int(count)
+
+    return new_day_list
