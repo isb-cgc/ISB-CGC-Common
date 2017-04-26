@@ -472,6 +472,9 @@ def build_where_clause(filters, alt_key_map=False):
         if alt_key_map and key in alt_key_map:
             key = alt_key_map[key]
 
+        if key == 'data_type':
+            key = 'metadata_data_type_availability_id'
+
         # Multitable where's will come in with : in the name. Only grab the column piece for now
         # TODO: Shouldn't throw away the entire key
         elif ':' in key:
