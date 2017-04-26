@@ -248,13 +248,17 @@ def fetch_program_attr(program):
 
 # Generate the ISB_CGC_PROJECTS['list'] value set based on the get_isbcgc_project_set sproc
 def fetch_isbcgc_project_set():
+
+    db = None
+    cursor = None
+
     try:
-        cursor = None
         db = get_sql_connection()
+
         if not ISB_CGC_PROJECTS['list'] or len(ISB_CGC_PROJECTS['list']) <= 0:
             cursor = db.cursor()
             cursor.execute("SELECT COUNT(SPECIFIC_NAME) FROM INFORMATION_SCHEMA.ROUTINES WHERE SPECIFIC_NAME = 'get_isbcgc_project_set';")
-            # Only try to fetch the study set if the sproc exists
+            # Only try to fetch the project set if the sproc exists
             if cursor.fetchall()[0][0] > 0:
                 cursor.execute("CALL get_isbcgc_project_set();")
                 ISB_CGC_PROJECTS['list'] = []
@@ -264,7 +268,8 @@ def fetch_isbcgc_project_set():
                 # Otherwise just warn
                 logger.warn("[WARNING] Stored procedure get_isbcgc_project_set was not found!")
 
-        return ISB_CGC_PROJECTS['list']
+        return copy.deepcopy(ISB_CGC_PROJECTS['list'])
+
     except Exception as e:
         logger.error(traceback.format_exc())
     finally:
@@ -466,6 +471,9 @@ def build_where_clause(filters, alt_key_map=False):
         # Check if we need to map to a different column name for a given key
         if alt_key_map and key in alt_key_map:
             key = alt_key_map[key]
+
+        if key == 'data_type':
+            key = 'metadata_data_type_availability_id'
 
         # Multitable where's will come in with : in the name. Only grab the column piece for now
         # TODO: Shouldn't throw away the entire key
