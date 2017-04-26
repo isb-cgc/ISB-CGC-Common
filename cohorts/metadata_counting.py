@@ -462,18 +462,23 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 'params': None, })
             else:
                 subquery = base_table
+                excl_params_tuple = exclusionary_filter[col_name]['value_tuple'] or ()
                 if tmp_mut_table:
-                    subquery += ' JOIN %s ON tumor_sample_id = sample_barcode ' % (tmp_mut_table, )
+                    subquery += (' JOIN %s ON tumor_sample_id = sample_barcode ' % tmp_mut_table)
+                if data_type_filters:
+                    subquery += (' JOIN (%s) da ON da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
+                    excl_params_tuple += data_type_where_clause['value_tuple']
                 if exclusionary_filter[col_name]['query_str']:
                     subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
                 count_query_set.append({'query_str':("""
                     SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s GROUP BY %s
                   """) % (col_name, subquery, col_name,),
-                'params': exclusionary_filter[col_name]['value_tuple']})
+                'params': excl_params_tuple})
 
         start = time.time()
         for query in count_query_set:
             if 'params' in query and query['params'] is not None:
+                print >> sys.stdout, query['query_str']
                 cursor.execute(query['query_str'], query['params'])
             else:
                 cursor.execute(query['query_str'])
