@@ -30,8 +30,9 @@ from django.http import JsonResponse, HttpResponseNotFound
 from django.conf import settings
 from django.db import connection
 from django.core.urlresolvers import reverse
+from collections import OrderedDict
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project, Project_BQ_Tables
+from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project, Project_BQ_Tables, Public_Metadata_Tables
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
 
@@ -584,7 +585,7 @@ def project_data_error(request, program_id=0, project_id=0, dataset_id=0):
         'status': 'success'
     })
 
-def system_data_dict(request):
+def legacy_system_data_dict(request):
 
     # Exclusion attributes: Program, project, has_, SampleBarcode, ParticipantBarcode
     # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
@@ -630,3 +631,77 @@ def system_data_dict(request):
 
     cursor.close()
     return render(request, 'projects/system_data_dict.html', {'attr_list': attr_list})
+
+
+def system_data_dict(request):
+
+    # Exclusion attributes: Program, project, has_, SampleBarcode, ParticipantBarcode
+    # Error columns: adenocarcinoma_invasion, country_of_procurement, Disease_Code, frozen_specimen_anatomic_site, history_of_prior_malignancy, mononucleotide_marker_panel_analysis_status, preservation_method, tissue_type, tumor_pathology
+
+    # 4/18/17: Pending decisions on how to present this info with data migration, the exclusion list is modified to shut up barcodes per #1903:
+    """
+    exclusion_list = ['Project',
+                      'Study',
+                      'ParticipantBarcode',
+                      'SampleBarcode',
+                      'sample_barcode',
+                      'case_barcode',
+                      'adenocarcinoma_invasion',
+                      'country_of_procurement',
+                      'Disease_Code',
+                      'frozen_specimen_anatomic_site',
+                      'history_of_prior_malignancy',
+                      'mononucleotide_marker_panel_analysis_status',
+                      'preservation_method',
+                      'tissue_type',
+                      'tumor_pathology']
+    """
+
+    exclusion_list = []
+
+    #
+    # Create a list of active public programs (e.g. TCGA, TARGET...) plus the attribute tables they use:
+    #
+
+    prog_list = []
+    progs = Program.objects.filter(is_public=True, active=True)
+    for prog in progs:
+        program_tables = Public_Metadata_Tables.objects.filter(program_id=prog.id).first()
+        prog_list.append({'name': prog.name, 'attr_table': program_tables.attr_table, 'sample_table': program_tables.samples_table})
+
+    cursor = connection.cursor()
+
+    attr_list_all = {}
+    for prog in prog_list:
+        prog_fetch_str = 'SELECT attribute, code from %s;'
+        cursor.execute(prog_fetch_str % (prog['attr_table'],))
+        results = cursor.fetchall()
+        attr_list = []
+        attr_list_all[prog['name']] = attr_list
+
+        for attr in results:
+            # print attr
+            name = attr[0]
+            type = attr[1]
+            if name not in exclusion_list and not name.startswith('has_'):
+                if type == 'C':
+                    # fetch possible values
+                    possible_values = ''
+                    fetch_str = 'SELECT DISTINCT %s from %s;'
+                    cursor.execute(fetch_str % (name, prog['sample_table'],))
+                    for value in cursor.fetchall():
+                        if value[0] is not None:
+                            possible_values = possible_values + str(value[0]) + ', '
+
+                    attr_list.append({'name': name, 'type': 'Categorical', 'values': possible_values[:-2]})
+                elif type == 'N':
+                    attr_list.append({'name': name, 'type': 'Numerical', 'values': ''})
+
+    cursor.close()
+
+    # There has GOT to be a better way to insure consistent presentation of programs on target page??
+    sorted_attr_list_all = OrderedDict()
+    for key in sorted(attr_list_all.iterkeys()):
+        sorted_attr_list_all[key] = attr_list_all[key]
+
+    return render(request, 'projects/system_data_dict.html', {'attr_list_all': sorted_attr_list_all})
