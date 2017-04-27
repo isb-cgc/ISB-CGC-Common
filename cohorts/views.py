@@ -1985,8 +1985,9 @@ def set_operation(request):
                 messages.warning(request, message)
 
     except Exception as e:
-        logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception in set_operation:')
+        logger.exception(e)
+        messages.warning(request, "There was an error while trying to create your cohort. It may not have been created correctly.")
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
