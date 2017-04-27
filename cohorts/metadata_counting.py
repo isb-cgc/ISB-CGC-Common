@@ -414,7 +414,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
             make_tmp_table_str += ';'
 
-            cursor.execute(make_tmp_table_str)
+            if len(params_tuple) > 0:
+                cursor.execute(make_tmp_table_str, params_tuple)
+            else:
+                cursor.execute(make_tmp_table_str)
         else:
             # base table and filter table are equivalent
             filter_table = base_table
