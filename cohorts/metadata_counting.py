@@ -212,14 +212,9 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
     if mutation_filters:
         mutation_where_clause = build_where_clause(mutation_filters)
 
-    cohort_subquery = None
-
-    if cohort_id:
-        cohort_subquery = cohort_query % cohort_id
-
     data_avail_sample_subquery = None
 
-    if data_type_filters:
+    if len(data_type_filters) > 0:
         data_type_where_clause = build_where_clause(data_type_filters)
         data_avail_sample_subquery = (data_avail_sample_query % data_avail_table) + ' WHERE '+data_type_where_clause['query_str']
 
@@ -255,7 +250,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 filter_copy = copy.deepcopy(filters)
                 del filter_copy[filter_key]
 
-                if filter_copy.__len__() <= 0:
+                if len(filter_copy) <= 0:
                     ex_where_clause = {'query_str': None, 'value_tuple': None}
                 else:
                     ex_where_clause = build_where_clause(filter_copy)
@@ -380,7 +375,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
               FROM %s ms
             """ % (tmp_filter_table, base_table,)
 
-            if data_type_filters:
+            if len(data_type_filters) > 0:
                 make_tmp_table_str += (' JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode ' % data_avail_sample_subquery)
                 params_tuple += data_type_where_clause['value_tuple']
 
@@ -388,7 +383,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             if tmp_mut_table:
                 make_tmp_table_str += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
             elif cohort_id:
-                make_tmp_table_str += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_subquery)
+                make_tmp_table_str += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
+                params_tuple += (cohort_id,)
 
             make_tmp_table_str += ' WHERE %s ' % where_clause['query_str'] + ';'
             params_tuple += where_clause['value_tuple']
@@ -406,7 +402,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode
             """ % (tmp_filter_table, base_table, tmp_mut_table,)
 
-            if data_type_filters:
+            if len(data_type_filters) > 0:
                 make_tmp_table_str += (' JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode' % data_avail_sample_subquery)
                 params_tuple += data_type_where_clause['value_tuple']
 
@@ -429,29 +425,37 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         for col_name in metadata_attr_values:
             if col_name in unfiltered_attr:
-                count_query_set.append({'query_str':("""
-                    SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s GROUP BY %s;
-                  """) % (col_name, filter_table, col_name,),
-                'params': None, })
+                count_params = ()
+                count_query = 'SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s' % (col_name, filter_table,)
+                if filter_table == base_table:
+                    if cohort_id and program_id:
+                        count_query += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
+                        count_params += (cohort_id,)
+                    if len(data_type_filters) > 0:
+                        count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
+                        count_params += data_type_where_clause['value_tuple']
+
+                count_query += ' GROUP BY %s;' % col_name
+
+                count_query_set.append({'query_str': count_query, 'params': None if len(count_params)<=0 else count_params, })
             else:
                 subquery = base_table
-                excl_params_tuple = exclusionary_filter[col_name]['value_tuple'] or ()
+                excl_params_tuple = ()
 
                 # Cohorts are built into the mutation table, so we don't need to check for the cohort if there is one
                 if tmp_mut_table:
                     subquery += (' JOIN %s ON tumor_sample_id = sample_barcode ' % tmp_mut_table)
                 elif cohort_id:
-                    subquery += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery)
+                    subquery += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
+                    excl_params_tuple += (cohort_id,)
 
-                if cohort_id and program_id:
-                    base_table += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery)
-
-                if data_type_filters:
+                if len(data_type_filters) > 0:
                     subquery += (' JOIN (%s) da ON da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
                     excl_params_tuple += data_type_where_clause['value_tuple']
 
                 if exclusionary_filter[col_name]['query_str']:
                     subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
+                    excl_params_tuple += exclusionary_filter[col_name]['value_tuple']
 
                 count_query_set.append({'query_str':("""
                     SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s GROUP BY %s
@@ -460,6 +464,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         start = time.time()
         for query in count_query_set:
+            print >> sys.stdout, query['query_str']
             if 'params' in query and query['params'] is not None:
                 cursor.execute(query['query_str'], query['params'])
             else:
@@ -487,16 +492,26 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             # If no proper filter table was built, or, it was but without data filters, we can use the 'filter table'
             if (len(filters) <= 0 and not mutation_filters) or len(data_type_filters) <= 0:
 
-                cohort_join = (' JOIN (%s) cs ON cs_sample_barcode = ms.sample_barcode' % cohort_subquery) if cohort_id and program_id and base_table == filter_table else ''
+                params = ()
+                cohort_join = ''
 
-                cursor.execute("""
-                        SELECT DISTINCT da.metadata_data_type_availability_id data_type, dt.isb_label, COUNT(DISTINCT ms.sample_barcode) count
-                        FROM %s ms
-                        JOIN %s da ON da.sample_barcode = ms.sample_barcode
-                        JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
-                        %s
-                        GROUP BY data_type;
-                    """ % (filter_table, data_avail_table, data_type_table, cohort_join))
+                if cohort_id and program_id and base_table == filter_table:
+                    cohort_join = (' JOIN (%s) cs ON cs_sample_barcode = ms.sample_barcode' % cohort_query)
+                    params += (cohort_id,)
+
+                count_query = """
+                    SELECT DISTINCT da.metadata_data_type_availability_id data_type, dt.isb_label, COUNT(DISTINCT ms.sample_barcode) count
+                    FROM %s ms
+                    JOIN %s da ON da.sample_barcode = ms.sample_barcode
+                    JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
+                    %s
+                    GROUP BY data_type;
+                """ % (filter_table, data_avail_table, data_type_table, cohort_join)
+
+                if len(params) <= 0:
+                    cursor.execute(count_query)
+                else:
+                    cursor.execute(count_query,params)
             # otherwise, we have to use the base table, or we'll be ANDing our data types
             else:
                 no_dt_filter_stmt = """
@@ -513,8 +528,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 if tmp_mut_table:
                     no_dt_filter_stmt += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
                 elif cohort_id:
-                    cohort_subquery = cohort_query % cohort_id
-                    no_dt_filter_stmt += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_subquery)
+                    no_dt_filter_stmt += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
+                    value_tuple += (cohort_id,)
 
                 if len(filters) > 0:
                     no_dt_filter_stmt += (' WHERE %s ' % where_clause['query_str'])
@@ -522,7 +537,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                 no_dt_filter_stmt += ' GROUP BY data_type;'
 
-                if len(filters) > 0:
+                if len(value_tuple) > 0:
                     cursor.execute(no_dt_filter_stmt, value_tuple)
                 else:
                     cursor.execute(no_dt_filter_stmt)
@@ -542,17 +557,24 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         # query sample and case counts
         count_query = 'SELECT COUNT(DISTINCT %s) FROM %s'
-        count_query += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery) if cohort_id and program_id and base_table == filter_table else ''
         sample_count_query = count_query % ('sample_barcode', filter_table,)
         case_count_query = count_query % ('case_barcode', filter_table,)
 
-        # If there are only data filters, we have to add those in to the sample/case counting table
-        # (they're excluded from the filter table if they're the only filter to make counting them easier)
-        if len(data_type_filters) > 0 and len(filters) <= 0 and not mutation_filters:
+        count_params = ()
 
-            sample_count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
-            case_count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
-            count_params = data_type_where_clause['value_tuple']
+        # If no filter table was built, we need to add cohorts and data type filters
+        if len(filters) <= 0 and not mutation_filters:
+            if len(data_type_filters) > 0:
+                sample_count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
+                case_count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
+                count_params += data_type_where_clause['value_tuple']
+            if cohort_id and program_id:
+                case_count_query += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
+                sample_count_query += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
+                count_params += (cohort_id,)
+
+
+        if len(count_params) > 0:
             cursor.execute(sample_count_query, count_params)
             counts_and_total['total'] = cursor.fetchall()[0][0]
             cursor.execute(case_count_query, count_params)
