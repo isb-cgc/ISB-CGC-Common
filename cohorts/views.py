@@ -195,7 +195,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     """
 
     data_type_query = """
-        SELECT sample_barcode da_sample_barcode, metadata_data_type_availability_id data_type
+        SELECT sample_barcode da_sample_barcode, metadata_data_type_availability_id
         FROM %s
     """
 

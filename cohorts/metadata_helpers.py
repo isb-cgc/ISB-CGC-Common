@@ -837,9 +837,6 @@ def gql_age_by_ranges(q, key, value):
     return result
 
 
-
-
-
 """
 BigQuery methods
 """
