@@ -1,6 +1,6 @@
 """
 
-Copyright 2015, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ def get_bigquery_service():
     service = discovery.build('bigquery', 'v2', http=http)
 
     return service
+
 
 def authorize_credentials_with_Google():
     if settings.DEBUG: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
