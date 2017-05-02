@@ -464,7 +464,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         start = time.time()
         for query in count_query_set:
-            print >> sys.stdout, query['query_str']
             if 'params' in query and query['params'] is not None:
                 cursor.execute(query['query_str'], query['params'])
             else:

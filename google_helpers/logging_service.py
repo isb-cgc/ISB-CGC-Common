@@ -40,5 +40,5 @@ def get_logging_resource():
 
     http_auth = credentials.authorize(Http())
 
-    service = discovery.build('logging', 'v1beta3', http=http_auth)
+    service = discovery.build('logging', 'v1beta3', http=http_auth, cache_discovery=False)
     return service, http_auth
