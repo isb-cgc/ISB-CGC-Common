@@ -409,19 +409,23 @@ def upload_files(request):
                     'SUCCESS_POST_URL': abs_success_url,
                     'FAILURE_POST_URL': abs_failure_url
                 }
-
-                r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
-                                  files=files, params=parameters,
-                                  auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD), verify=False)
-
-                if r.status_code < 400:
-                    upload.status = 'Processing'
-                    upload.jobURL = r.headers['Location']
-                else:
-                    upload.status = 'Error Initializing'
+                try:
+                    r = requests.post(settings.PROCESSING_JENKINS_URL + '/job/' + settings.PROCESSING_JENKINS_PROJECT + '/buildWithParameters',
+                                      files=files, params=parameters,
+                                      auth=(settings.PROCESSING_JENKINS_USER, settings.PROCESSING_JENKINS_PASSWORD), verify=False)
+                except requests.exceptions.RequestException as e:
+                    upload.status = 'No Server Response'
                     status = 'error'
-                    message = 'Could not connect to data upload server: (code {})'.format(r.status_code)
-
+                    message = 'Could not connect to data upload server'
+                    print >> sys.stdout, "[ERROR] No UDU Server response: {0}".format(e)
+                else:
+                    if r.status_code < 400:
+                        upload.status = 'Processing'
+                        upload.jobURL = r.headers['Location']
+                    else:
+                        upload.status = 'Error Initializing'
+                        status = 'error'
+                        message = 'Error response from data upload server: (code {0})'.format(r.status_code)
                 upload.save()
 
         resp = {
