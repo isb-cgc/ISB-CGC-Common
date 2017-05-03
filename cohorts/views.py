@@ -195,12 +195,14 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     """
 
     data_type_query = """
-        SELECT sample_barcode da_sample_barcode, metadata_data_type_availability_id data_type
+        SELECT sample_barcode da_sample_barcode, metadata_data_type_availability_id
         FROM %s
     """
 
     # returns an object or None
     program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
+    data_avail_table = None
+    data_type_subquery = None
 
     # Fetch the possible value set of all non-continuous attr columns
     # (also fetches the display strings for all attributes and values which have them)
@@ -234,9 +236,10 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         if program_id:
             base_table = program_tables.samples_table
         elif cohort_id and len(filters) <= 0:
-            base_table = 'cohort_samples'
+            base_table = 'cohorts_samples'
 
-        data_avail_table = program_tables.sample_data_availability_table
+        if program_id:
+            data_avail_table = program_tables.sample_data_availability_table
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
@@ -339,7 +342,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # If there is a cohort, make a temporary table based on it and make it the base table
         start = time.time()
 
-        data_type_subquery = data_type_query % data_avail_table
+        if data_avail_table:
+            data_type_subquery = data_type_query % data_avail_table
 
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
@@ -399,9 +403,10 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
         # determine the project based on the program
         if cohort_id:
-            cursor.execute("""
-                SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s;
-            """ % (filter_table,))
+            if len(filters) <= 0 and not mutation_filters:
+                cursor.execute(('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table) + ' WHERE cohort_id = %s;', (cohort_id,))
+            else:
+                cursor.execute('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table)
         else:
             cursor.execute("""
                 SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ps.id

@@ -1,6 +1,6 @@
 """
 
-Copyright 2015, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,9 +33,10 @@ def get_bigquery_service():
     credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(BIGQUERY_SCOPES)
     http = httplib2.Http()
     http = credentials.authorize(http)
-    service = discovery.build('bigquery', 'v2', http=http)
+    service = discovery.build('bigquery', 'v2', http=http, cache_discovery=False)
 
     return service
+
 
 def authorize_credentials_with_Google():
     if settings.DEBUG: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
@@ -45,6 +46,6 @@ def authorize_credentials_with_Google():
     credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(SCOPES)
     http = httplib2.Http()
     http = credentials.authorize(http)
-    service = discovery.build('bigquery', 'v2', http=http)
+    service = discovery.build('bigquery', 'v2', http=http, cache_discovery=False)
     if settings.DEBUG: print >> sys.stderr,' big query authorization '+sys._getframe().f_code.co_name
     return service

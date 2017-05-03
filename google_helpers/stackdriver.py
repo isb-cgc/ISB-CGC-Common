@@ -37,7 +37,7 @@ class StackDriverLogger(object):
 
     def _get_service(self):
         http_auth = self.credentials.authorize(Http())
-        service = discovery.build('logging', 'v2', http=http_auth)
+        service = discovery.build('logging', 'v2', http=http_auth, cache_discovery=False)
 
         return service, http_auth
 

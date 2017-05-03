@@ -147,7 +147,7 @@ def get_sql_connection():
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
-        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not settings.IS_APP_ENGINE_FLEX:
+        if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not (settings.IS_APP_ENGINE_FLEX or settings.IS_APP_ENGINE):
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
         db = MySQLdb.connect(**connect_options)
@@ -248,13 +248,17 @@ def fetch_program_attr(program):
 
 # Generate the ISB_CGC_PROJECTS['list'] value set based on the get_isbcgc_project_set sproc
 def fetch_isbcgc_project_set():
+
+    db = None
+    cursor = None
+
     try:
-        cursor = None
         db = get_sql_connection()
+
         if not ISB_CGC_PROJECTS['list'] or len(ISB_CGC_PROJECTS['list']) <= 0:
             cursor = db.cursor()
             cursor.execute("SELECT COUNT(SPECIFIC_NAME) FROM INFORMATION_SCHEMA.ROUTINES WHERE SPECIFIC_NAME = 'get_isbcgc_project_set';")
-            # Only try to fetch the study set if the sproc exists
+            # Only try to fetch the project set if the sproc exists
             if cursor.fetchall()[0][0] > 0:
                 cursor.execute("CALL get_isbcgc_project_set();")
                 ISB_CGC_PROJECTS['list'] = []
@@ -264,7 +268,8 @@ def fetch_isbcgc_project_set():
                 # Otherwise just warn
                 logger.warn("[WARNING] Stored procedure get_isbcgc_project_set was not found!")
 
-        return ISB_CGC_PROJECTS['list']
+        return copy.deepcopy(ISB_CGC_PROJECTS['list'])
+
     except Exception as e:
         logger.error(traceback.format_exc())
     finally:
@@ -295,7 +300,7 @@ def get_public_program_id(program):
             print >> sys.stderr, '[WARNING] More than one program found with this short name! Using the first one.'
             return int(prog[0].id)
 
-        return int(prog.id)
+        return int(prog[0].id)
 
     except Exception as e:
         logger.error('[ERROR] Excpetion while fetching %s program ID:' % program)
@@ -467,6 +472,9 @@ def build_where_clause(filters, alt_key_map=False):
         if alt_key_map and key in alt_key_map:
             key = alt_key_map[key]
 
+        if key == 'data_type':
+            key = 'metadata_data_type_availability_id'
+
         # Multitable where's will come in with : in the name. Only grab the column piece for now
         # TODO: Shouldn't throw away the entire key
         elif ':' in key:
@@ -543,7 +551,7 @@ def build_where_clause(filters, alt_key_map=False):
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
                 else:
-                    query_str += ' (' + sql_bmi_by_ranges(value) + ') '
+                    query_str += ' (' + sql_year_by_ranges(value) + ') '
             elif key == 'event_free_survival' or key == 'days_to_death' or key == 'overall_survival':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
@@ -694,7 +702,7 @@ def sql_year_by_ranges(value):
             result += ' (year_of_diagnosis >= 1991 and year_of_diagnosis <= 1995)'
         elif str(val) == '1996 to 2000':
             result += ' (year_of_diagnosis >= 1996 and year_of_diagnosis <= 2000)'
-        elif str(val) == '2000 to 2005':
+        elif str(val) == '2001 to 2005':
             result += ' (year_of_diagnosis >= 2001 and year_of_diagnosis <= 2005)'
         elif str(val) == '2006 to 2010':
             result += ' (year_of_diagnosis >= 2006 and year_of_diagnosis <= 2010)'
@@ -827,9 +835,6 @@ def gql_age_by_ranges(q, key, value):
         elif str(value).lower() == 'over80':
             result += ' (%s >= 80)' % key
     return result
-
-
-
 
 
 """
