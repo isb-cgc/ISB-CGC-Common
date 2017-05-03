@@ -31,7 +31,7 @@ class BigQueryServiceSupport(object):
 
     def get_client(self):
         http_auth = self.credentials.authorize(Http())
-        client = discovery.build('bigquery', 'v2', credentials=self.credentials)
+        client = discovery.build('bigquery', 'v2', credentials=self.credentials, cache_discovery=False)
 
         return client
 
