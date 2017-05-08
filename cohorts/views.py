@@ -403,6 +403,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
         # determine the project based on the program
         if cohort_id:
+            print >> sys.stdout, "[STATUS] In get_sample_case_list, filter table: "+filter_table
             if len(filters) <= 0 and not mutation_filters:
                 cursor.execute(('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table) + ' WHERE cohort_id = %s;', (cohort_id,))
             else:
@@ -1322,7 +1323,7 @@ def save_cohort_from_plot(request):
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
 
         result['message'] = "Cohort '" + cohort.name + "' created from the selection set."
-    else :
+    else:
         result['error'] = "No cohort name was supplied - the cohort was not saved."
 
     return HttpResponse(json.dumps(result), status=200)

@@ -15,12 +15,14 @@ limitations under the License.
 """
 
 import operator
+import string
 import sys
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
 from projects.models import Project, Program, User_Feature_Definitions
 from sharing.models import Shared_Resource
+from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
 
 
 class CohortManager(models.Manager):
@@ -152,10 +154,32 @@ class Cohort(models.Model):
 
         for prog in filters:
             current_filters[prog] = []
+            prog_values = fetch_metadata_value_set(Program.objects.get(name=prog, active=True, is_public=True).id)
+            prog_data_types = fetch_program_data_types(Program.objects.get(name=prog, active=True, is_public=True).id, True)
             prog_filters = filters[prog]
             for filter in prog_filters:
                 for value in prog_filters[filter]['values']:
-                    current_filters[prog].append({'name': str(filter), 'value': str(value)})
+                    if 'MUT:' in filter:
+                        current_filters[prog].append({
+                            'name': str(filter),
+                            'displ_name': filter.split(':')[1].upper() + ' [' + string.capwords(filter.split(':')[2]),
+                            'value': str(value),
+                            'displ_val': MOLECULAR_DISPLAY_STRINGS['values'][str(value)] if filter.split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][str(value)] + ']'
+                        })
+                    elif filter == 'data_type':
+                        current_filters[prog].append({
+                            'name': str(filter),
+                            'displ_name': 'Data Type',
+                            'value': str(value),
+                            'displ_val': prog_data_types[value]
+                        })
+                    else:
+                        current_filters[prog].append({
+                            'name': str(filter),
+                            'displ_name': prog_values[filter]['displ_name'],
+                            'value': str(value),
+                            'displ_val': prog_values[filter]['values'][value]
+                        })
 
         return current_filters
 
@@ -180,10 +204,43 @@ class Cohort(models.Model):
 
         filters = {}
 
+        prog_vals = {}
+        prog_dts = {}
+        prog_values = None
+        prog_data_types = None
+
         for filter in filter_list:
             if filter.program.name not in filters:
                 filters[filter.program.name] = []
-            filters[filter.program.name].append({'name': str(filter.name), 'value': str(filter.value)})
+            if filter.program.id not in prog_vals:
+                prog_vals[filter.program.id] = fetch_metadata_value_set(filter.program.id)
+            if filter.program.id not in prog_dts:
+                prog_dts[filter.program.id] = fetch_program_data_types(filter.program.id, True)
+
+            prog_values = prog_vals[filter.program.id]
+            prog_data_types = prog_dts[filter.program.id]
+
+            if 'MUT:' in filter.name:
+                filters[filter.program.name].append({
+                    'name': str(filter.name),
+                    'displ_name': filter.name.split(':')[1].upper() + ' [' + string.capwords(filter.name.split(':')[2]),
+                    'value': str(filter.value),
+                    'displ_val': MOLECULAR_DISPLAY_STRINGS['values'][str(filter.value)] if filter.name.split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][str(filter.value)] + ']'
+                })
+            elif filter.name == 'data_type':
+                filters[filter.program.name].append({
+                    'name': str(filter.name),
+                    'displ_name': 'Data Type',
+                    'value': str(filter.value),
+                    'displ_val': prog_data_types[filter.value]
+                })
+            else:
+                filters[filter.program.name].append({
+                    'name': str(filter.name),
+                    'displ_name': prog_values[filter.name]['displ_name'],
+                    'value': str(filter.name),
+                    'displ_val': prog_values[filter.name]['values'][filter.value]
+                })
 
         return filters
 
@@ -197,6 +254,11 @@ class Cohort(models.Model):
 
         keep_traversing = True
 
+        prog_vals = {}
+        prog_dts = {}
+        prog_values = None
+        prog_data_types = None
+
         while sources and keep_traversing:
             # single parent
             if len(sources) == 1:
@@ -207,7 +269,36 @@ class Cohort(models.Model):
                     source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
                     filters = []
                     for source_filter in source_filters:
-                        filters.append({'name': source_filter.name, 'value': source_filter.value, 'program': source_filter.program.name})
+                        if source_filter.program.id not in prog_vals:
+                            prog_vals[source_filter.program.id] = fetch_metadata_value_set(source_filter.program.id)
+                        if source_filter.program.id not in prog_dts:
+                            prog_dts[source_filter.program.id] = fetch_program_data_types(source_filter.program.id, True)
+                        prog_values = prog_vals[source_filter.program.id]
+                        prog_data_types = prog_dts[source_filter.program.id]
+
+                        if 'MUT:' in source_filter.name:
+                            filters[source_filter.program.name].append({
+                                'name': str(source_filter.name),
+                                'displ_name': source_filter.name.split(':')[1].upper() + ' [' + string.capwords(
+                                    source_filter.name.split(':')[2]),
+                                'value': str(source_filter.value),
+                                'displ_val': MOLECULAR_DISPLAY_STRINGS['values'][str(source_filter.value)] if source_filter.name.split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][str(source_filter.value)] + ']'
+                            })
+                        elif source_filter.name == 'data_type':
+                            filters[source_filter.program.name].append({
+                                'name': str(source_filter.name),
+                                'displ_name': 'Data Type',
+                                'value': str(source_filter.value),
+                                'displ_val': prog_data_types[source_filter.value]
+                            })
+                        else:
+                            filters.append({
+                                'name': source_filter.name,
+                                'displ_name': prog_values[source_filter.name]['displ_name'],
+                                'value': source_filter.value,
+                                'displ_val': prog_values[source_filter.name]['values'][source_filter.value],
+                                'program': source_filter.program.name
+                            })
                     filter_history[source.cohort.id] = filters
             else:
                 keep_traversing = False
