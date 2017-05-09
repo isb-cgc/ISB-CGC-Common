@@ -267,9 +267,12 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                      " GROUP BY barcode) mt"
                      " ON mt.barcode = ct.sample_barcode"
                      " WHERE ct.cohort_id = {cohort};")
+
+
                 bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
                 bq_cohort_dataset = settings.COHORT_DATASET_ID
                 cohort = cohort_id
+
             else:
                 query_template = \
                     ("SELECT sample_barcode_tumor"

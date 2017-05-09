@@ -387,8 +387,12 @@ def fetch_metadata_value_set(program=None):
             cursor.callproc('get_program_display_strings', (program,))
 
             for row in cursor.fetchall():
-                if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program] and row['value_name'] in METADATA_ATTR[program][row['attr_name']]['values']:
-                    METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
+                if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program]:
+                    if row['value_name'] in METADATA_ATTR[program][row['attr_name']]['values']:
+                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
+                    # Bucketed continuous numerics like BMI will not already have values in, since the bucketing is done in post-process
+                    elif METADATA_ATTR[program][row['attr_name']]['type'] == 'N':
+                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
 
         return copy.deepcopy(METADATA_ATTR[program])
 

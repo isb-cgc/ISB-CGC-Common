@@ -613,7 +613,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                 for value, count in feature['values'].items():
 
-                    val_obj = {'value': str(value), 'count': count,}
+                    val_obj = {'value': str(value), 'count': count, }
+
+                    if attr == 'bmi':
+                        print >> sys.stdout, str(metadata_attr_values[attr])
 
                     if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None and len(metadata_attr_values[attr]['values'][value]) > 0:
                         val_obj['displ_name'] = metadata_attr_values[attr]['values'][value]
