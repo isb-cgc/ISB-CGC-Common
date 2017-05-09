@@ -154,32 +154,16 @@ class Cohort(models.Model):
 
         for prog in filters:
             current_filters[prog] = []
-            prog_values = fetch_metadata_value_set(Program.objects.get(name=prog, active=True, is_public=True).id)
-            prog_data_types = fetch_program_data_types(Program.objects.get(name=prog, active=True, is_public=True).id, True)
             prog_filters = filters[prog]
             for filter in prog_filters:
                 for value in prog_filters[filter]['values']:
-                    if 'MUT:' in filter:
-                        current_filters[prog].append({
-                            'name': str(filter),
-                            'displ_name': filter.split(':')[1].upper() + ' [' + string.capwords(filter.split(':')[2]),
-                            'value': str(value),
-                            'displ_val': MOLECULAR_DISPLAY_STRINGS['values'][str(value)] if filter.split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][str(value)] + ']'
-                        })
-                    elif filter == 'data_type':
-                        current_filters[prog].append({
-                            'name': str(filter),
-                            'displ_name': 'Data Type',
-                            'value': str(value),
-                            'displ_val': prog_data_types[value]
-                        })
-                    else:
-                        current_filters[prog].append({
-                            'name': str(filter),
-                            'displ_name': prog_values[filter]['displ_name'],
-                            'value': str(value),
-                            'displ_val': prog_values[filter]['values'][value]
-                        })
+                    current_filters[prog].append({
+                        'name': str(filter),
+                        'value': str(value),
+                        'program': prog
+                    })
+            
+            Cohort.format_filters_for_display(current_filters[prog])
 
         return current_filters
 
@@ -204,43 +188,18 @@ class Cohort(models.Model):
 
         filters = {}
 
-        prog_vals = {}
-        prog_dts = {}
-        prog_values = None
-        prog_data_types = None
-
         for filter in filter_list:
             if filter.program.name not in filters:
                 filters[filter.program.name] = []
-            if filter.program.id not in prog_vals:
-                prog_vals[filter.program.id] = fetch_metadata_value_set(filter.program.id)
-            if filter.program.id not in prog_dts:
-                prog_dts[filter.program.id] = fetch_program_data_types(filter.program.id, True)
 
-            prog_values = prog_vals[filter.program.id]
-            prog_data_types = prog_dts[filter.program.id]
-
-            if 'MUT:' in filter.name:
-                filters[filter.program.name].append({
-                    'name': str(filter.name),
-                    'displ_name': filter.name.split(':')[1].upper() + ' [' + string.capwords(filter.name.split(':')[2]),
-                    'value': str(filter.value),
-                    'displ_val': MOLECULAR_DISPLAY_STRINGS['values'][str(filter.value)] if filter.name.split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][str(filter.value)] + ']'
-                })
-            elif filter.name == 'data_type':
-                filters[filter.program.name].append({
-                    'name': str(filter.name),
-                    'displ_name': 'Data Type',
-                    'value': str(filter.value),
-                    'displ_val': prog_data_types[filter.value]
-                })
-            else:
-                filters[filter.program.name].append({
-                    'name': str(filter.name),
-                    'displ_name': prog_values[filter.name]['displ_name'],
-                    'value': str(filter.name),
-                    'displ_val': prog_values[filter.name]['values'][filter.value]
-                })
+            filters[filter.program.name].append({
+                'name': str(filter.name),
+                'value': str(filter.value),
+                'program': filter.program.name
+            })
+            
+        for prog in filters:
+            Cohort.format_filters_for_display(filters[prog])
 
         return filters
 
@@ -254,11 +213,6 @@ class Cohort(models.Model):
 
         keep_traversing = True
 
-        prog_vals = {}
-        prog_dts = {}
-        prog_values = None
-        prog_data_types = None
-
         while sources and keep_traversing:
             # single parent
             if len(sources) == 1:
@@ -269,36 +223,11 @@ class Cohort(models.Model):
                     source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
                     filters = []
                     for source_filter in source_filters:
-                        if source_filter.program.id not in prog_vals:
-                            prog_vals[source_filter.program.id] = fetch_metadata_value_set(source_filter.program.id)
-                        if source_filter.program.id not in prog_dts:
-                            prog_dts[source_filter.program.id] = fetch_program_data_types(source_filter.program.id, True)
-                        prog_values = prog_vals[source_filter.program.id]
-                        prog_data_types = prog_dts[source_filter.program.id]
-
-                        if 'MUT:' in source_filter.name:
-                            filters[source_filter.program.name].append({
-                                'name': str(source_filter.name),
-                                'displ_name': source_filter.name.split(':')[1].upper() + ' [' + string.capwords(
-                                    source_filter.name.split(':')[2]),
-                                'value': str(source_filter.value),
-                                'displ_val': MOLECULAR_DISPLAY_STRINGS['values'][str(source_filter.value)] if source_filter.name.split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][str(source_filter.value)] + ']'
-                            })
-                        elif source_filter.name == 'data_type':
-                            filters[source_filter.program.name].append({
-                                'name': str(source_filter.name),
-                                'displ_name': 'Data Type',
-                                'value': str(source_filter.value),
-                                'displ_val': prog_data_types[source_filter.value]
-                            })
-                        else:
-                            filters.append({
-                                'name': source_filter.name,
-                                'displ_name': prog_values[source_filter.name]['displ_name'],
-                                'value': source_filter.value,
-                                'displ_val': prog_values[source_filter.name]['values'][source_filter.value],
-                                'program': source_filter.program.name
-                            })
+                        filters.append({
+                            'name': source_filter.name,
+                            'value': source_filter.value,
+                            'program': source_filter.program.name
+                        })
                     filter_history[source.cohort.id] = filters
             else:
                 keep_traversing = False
@@ -324,7 +253,13 @@ class Cohort(models.Model):
                 if source.type == Source.FILTERS:
                     if source_filters is None:
                         source_filters = self.get_filter_history()
-                    revision_list.append({'type': 'filter', 'vals': source_filters[source.cohort.id]})
+                    Cohort.format_filters_for_display(source_filters[source.cohort.id])
+                    prog_filters = {}
+                    for cohort_filter in source_filters[source.cohort.id]:
+                        if cohort_filter['program'] not in prog_filters:
+                            prog_filters[cohort_filter['program']] = []
+                        prog_filters[cohort_filter['program']].append(cohort_filter)
+                    revision_list.append({'type': 'filter', 'vals': prog_filters})
                 elif source.type == Source.CLONE:
                     revision_list.append('Cloned from %s.' % source.parent.name)
                 elif source.type == Source.PLOT_SEL:
@@ -352,6 +287,34 @@ class Cohort(models.Model):
             revision_list = ['There is no revision history.']
 
         return revision_list
+    
+    @classmethod
+    def format_filters_for_display(cls, filters):
+        prog_vals = {}
+        prog_dts = {}
+        prog_values = None
+        prog_data_types = None
+
+        for cohort_filter in filters:
+            prog_id = Program.objects.get(name=cohort_filter['program'], is_public=True, active=True).id
+            if prog_id not in prog_vals:
+                prog_vals[prog_id] = fetch_metadata_value_set(prog_id)
+            if prog_id not in prog_dts:
+                prog_dts[prog_id] = fetch_program_data_types(prog_id, True)
+                
+            prog_values = prog_vals[prog_id]
+            prog_data_types = prog_dts[prog_id]
+
+            if 'MUT:' in cohort_filter['name']:
+                cohort_filter['displ_name'] = cohort_filter['name'].split(':')[1].upper() + ' [' + string.capwords(cohort_filter['name'].split(':')[2])
+                cohort_filter['displ_val'] = (MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) + ']'
+            elif cohort_filter['name'] == 'data_type':
+                cohort_filter['displ_name'] = 'Data Type'
+                cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
+            else:
+                cohort_filter['displ_name'] = prog_values[cohort_filter['name']]['displ_name']
+                cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]
+
 
     class Meta:
         verbose_name_plural = "Saved Cohorts"

@@ -83,7 +83,7 @@ MOLECULAR_DISPLAY_STRINGS = {
     'categories': {
         'nonsilent': 'Non-silent',
         'any': 'Any',
-        'specific': 'Specific',
+        'specific': 'Specific Mutation Type',
     },
     'values': {
         'Missense_Mutation': 'Missense Mutation',
