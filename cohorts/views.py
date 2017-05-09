@@ -403,6 +403,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
         # determine the project based on the program
         if cohort_id:
+            print >> sys.stdout, "[STATUS] In get_sample_case_list, filter table: "+filter_table
             if len(filters) <= 0 and not mutation_filters:
                 cursor.execute(('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table) + ' WHERE cohort_id = %s;', (cohort_id,))
             else:
@@ -1309,7 +1310,8 @@ def save_cohort_from_plot(request):
             samples = json.loads(samples)
         sample_list = []
         for sample in samples:
-            sample_list.append(Samples(cohort=cohort, sample_barcode=sample['sample'], case_barcode=sample['case']))
+            for project in sample['project']:
+                sample_list.append(Samples(cohort=cohort, sample_barcode=sample['sample'], case_barcode=sample['case'], project_id=project))
         Samples.objects.bulk_create(sample_list)
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
@@ -1321,7 +1323,7 @@ def save_cohort_from_plot(request):
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
 
         result['message'] = "Cohort '" + cohort.name + "' created from the selection set."
-    else :
+    else:
         result['error'] = "No cohort name was supplied - the cohort was not saved."
 
     return HttpResponse(json.dumps(result), status=200)
@@ -1680,14 +1682,22 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
 
         params = (cohort_id,)
 
+        none_in_filters = False
+
         # Check for incoming platform selectors
         platform_selector_list = []
         for key, value in GET.items():
-            if GET.get(key, None) is not None and GET.get(key) == 'True':
+            if key == 'None':
+                if GET.get(key, None) is not None and GET.get(key) == 'True':
+                    none_in_filters = True
+            elif GET.get(key, None) is not None and GET.get(key) == 'True':
                 platform_selector_list.append(key)
 
+        if none_in_filters:
+            query += ' AND platform IS NULL'
+
         if len(platform_selector_list):
-            query += ' AND platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1])
+            query += ((' OR' if none_in_filters else ' AND') + ' platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1]))
             params += tuple(x for x in platform_selector_list)
 
         if limit > 0:
@@ -1728,7 +1738,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
             if cursor.rowcount > 0:
                 for row in cursor.fetchall():
                     platform = row['platform'] or 'None'
-                    if len(platform_selector_list) <= 0 or platform in platform_selector_list:
+                    if (len(platform_selector_list) <= 0 and not none_in_filters) or platform in platform_selector_list or (none_in_filters and platform == 'None'):
                         total_file_count += int(row['platform_count'])
                         if platform not in platform_counts:
                             platform_counts[platform] = 0

@@ -79,6 +79,32 @@ MOLECULAR_ATTR = [
     {'value': "3'Flank", 'displ_name': '3\' Flank'},
 ]
 
+MOLECULAR_DISPLAY_STRINGS = {
+    'categories': {
+        'nonsilent': 'Non-silent',
+        'any': 'Any',
+        'specific': 'Specific Mutation Type',
+    },
+    'values': {
+        'Missense_Mutation': 'Missense Mutation',
+        'Frame_Shift_Del': 'Frame Shift - Deletion',
+        'Frame_Shift_Ins': 'Frame Shift - Insertion',
+        'In_Frame_Del': 'In Frame Deletion',
+        'In_Frame_Ins': 'In Frame Insertion',
+        'Translation_Start_Site': 'Translation Start Site',
+        'Nonsense_Mutation': 'Nonsense Mutation',
+        'Nonstop_Mutation': 'Nonstop Mutation',
+        'Silent': 'Silent',
+        'RNA': 'RNA',
+        'Intron': 'Intron',
+        'Splice_Site': 'Splice Site',
+        "3'UTR": '3\' UTR',
+        "5'UTR": '5\' UTR',
+        "5'Flank": '5\' Flank',
+        "3'Flank": '3\' Flank',
+    },
+}
+
 ### METADATA_ATTR ###
 # Local storage of the metadata attributes, values, and their display names for a program. This dict takes the form:
 # {
@@ -108,6 +134,17 @@ METADATA_ATTR = {}
 # }
 # The data is stored to prevent excessive retrieval
 METADATA_DATA_TYPES = {}
+
+### METADATA_DATA_TYPES_DISPLAY ###
+# Local storage of the metadata data types, values, and their display strings keyed against the values instead of the
+# types. This dict takes the form:
+# {
+#   <program id>: {
+#       <data type id>: <data type display string>, [...]
+#   }, [...]
+# }
+# The data is stored to prevent excessive retrieval
+METADATA_DATA_TYPES_DISPLAY = {}
 
 ISB_CGC_PROJECTS = {
     'list': [],
@@ -160,7 +197,7 @@ def get_sql_connection():
         if db and db.open: db.close()
 
 
-def fetch_program_data_types(program):
+def fetch_program_data_types(program, for_display=False):
 
     db = None
     cursor = None
@@ -173,6 +210,7 @@ def fetch_program_data_types(program):
         if program not in METADATA_DATA_TYPES or len(METADATA_DATA_TYPES[program]) <= 0:
 
             METADATA_DATA_TYPES[program] = {}
+            METADATA_DATA_TYPES_DISPLAY[program] = {}
 
             preformatted_attr = get_preformatted_attr(program)
 
@@ -192,6 +230,13 @@ def fetch_program_data_types(program):
                 if row['value_name'] is None and row['attr_name'] in METADATA_DATA_TYPES[program]:
                     METADATA_DATA_TYPES[program][row['attr_name']]['displ_name'] = row['display_string']
 
+            for data_type in METADATA_DATA_TYPES[program]:
+                for value in METADATA_DATA_TYPES[program][data_type]['values']:
+                    if not str(value) in METADATA_DATA_TYPES_DISPLAY[program]:
+                        METADATA_DATA_TYPES_DISPLAY[program][str(value)] = METADATA_DATA_TYPES[program][data_type]['displ_name'] + ', ' + METADATA_DATA_TYPES[program][data_type]['values'][value]
+
+        if for_display:
+            return copy.deepcopy(METADATA_DATA_TYPES_DISPLAY[program])
         return copy.deepcopy(METADATA_DATA_TYPES[program])
 
     except Exception as e:
