@@ -603,7 +603,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                 # Special case for age ranges
                 if attr == 'age_at_initial_pathologic_diagnosis' or attr == 'age_at_diagnosis':
-                    feature['values'] = normalize_ages(counts[attr]['counts'])
+                    if Program.objects.get(id=program_id).name == 'TARGET':
+                        feature['values'] = normalize_ages(counts[attr]['counts'],True)
+                    else:
+                        feature['values'] = normalize_ages(counts[attr]['counts'])
                 elif attr == 'bmi':
                     feature['values'] = normalize_bmi(counts[attr]['counts'])
                 elif attr == 'year_of_diagnosis':

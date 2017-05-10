@@ -1021,31 +1021,57 @@ def normalize_bmi(bmis):
     return bmi_list
 
 # TODO: Convert to slider
-def normalize_ages(ages):
+def normalize_ages(ages,bin_by_five=False):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
-    new_age_list = {'10 to 39': 0, '40 to 49': 0, '50 to 59': 0, '60 to 69': 0, '70 to 79': 0, 'Over 80': 0, 'None': 0}
+    new_age_list = None
+    if bin_by_five:
+        new_age_list = {'0 to 4': 0, '5 to 9': 0, '10 to 14': 0, '15 to 19': 0, '20 to 24': 0, '25 to 29': 0, '30 to 34':0, '3 to 39': 0, 'Over 40': 0, 'None': 0}
+    else:
+        new_age_list = {'10 to 39': 0, '40 to 49': 0, '50 to 59': 0, '60 to 69': 0, '70 to 79': 0, 'Over 80': 0, 'None': 0}
     for age, count in ages.items():
         if type(age) != dict:
             if age and age != 'None':
                 int_age = float(age)
-                if int_age < 40:
-                    new_age_list['10 to 39'] += int(count)
-                elif int_age < 50:
-                    new_age_list['40 to 49'] += int(count)
-                elif int_age < 60:
-                    new_age_list['50 to 59'] += int(count)
-                elif int_age < 70:
-                    new_age_list['60 to 69'] += int(count)
-                elif int_age < 80:
-                    new_age_list['70 to 79'] += int(count)
+                if bin_by_five:
+                    if int_age < 5:
+                        new_age_list['0 to 4'] += int(count)
+                    elif int_age < 10:
+                        new_age_list['5 to 9'] += int(count)
+                    elif int_age < 15:
+                        new_age_list['10 to 14'] += int(count)
+                    elif int_age < 20:
+                        new_age_list['15 to 19'] += int(count)
+                    elif int_age < 25:
+                        new_age_list['20 to 24'] += int(count)
+                    elif int_age < 30:
+                        new_age_list['25 to 29'] += int(count)
+                    elif int_age < 35:
+                        new_age_list['30 to 34'] += int(count)
+                    elif int_age < 40:
+                        new_age_list['35 to 39'] += int(count)
+                    else:
+                        new_age_list['Over 40'] += int(count)
                 else:
-                    new_age_list['Over 80'] += int(count)
+                    if int_age < 40:
+                        new_age_list['10 to 39'] += int(count)
+                    elif int_age < 50:
+                        new_age_list['40 to 49'] += int(count)
+                    elif int_age < 60:
+                        new_age_list['50 to 59'] += int(count)
+                    elif int_age < 70:
+                        new_age_list['60 to 69'] += int(count)
+                    elif int_age < 80:
+                        new_age_list['70 to 79'] += int(count)
+                    else:
+                        new_age_list['Over 80'] += int(count)
             else:
                 new_age_list['None'] += int(count)
         else:
-            print age
+            logger.warn("[WARNING] Age was sent as a dict.")
+            print >> sys.stdout, "[WARNING] Age was sent as a dict."
 
     return new_age_list
+
 
 # TODO: Convert to slider
 def normalize_years(years):
