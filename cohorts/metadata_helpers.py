@@ -1117,3 +1117,64 @@ def normalize_simple_days(days):
                 new_day_list['None'] += int(count)
 
     return new_day_list
+
+
+# TODO: Convert to slider
+def normalize_negative_days(days):
+    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    new_day_list = {'0 to -5000': 0, '-5001 to -10000': 0, '-10001 to -15000': 0, '-15001 to -20000': 0, '-20001 to -25000': 0,
+                    '-25001 to -30000': 0, '-30001 to -35000': 0, 'None': 0}
+    for day, count in days.items():
+        if type(day) != dict:
+            if day and day != 'None':
+                int_day = float(day)
+                if int_day >= -5000:
+                    new_day_list['0 to -5000'] += int(count)
+                elif int_day >= -10000:
+                    new_day_list['-5001 to -10000'] += int(count)
+                elif int_day >= -15000:
+                    new_day_list['-10001 to -15000'] += int(count)
+                elif int_day >= -20000:
+                    new_day_list['-15001 to -20000'] += int(count)
+                elif int_day >= -25000:
+                    new_day_list['-20001 to -25000'] += int(count)
+                elif int_day >= -30000:
+                    new_day_list['-25001 to 30000'] += int(count)
+                elif int_day >= -35000:
+                    new_day_list['-30001 to -35000'] += int(count)
+            else:
+                new_day_list['None'] += int(count)
+
+    return new_day_list
+
+
+# TODO: Convert to slider
+def normalize_by_200(days):
+    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    new_day_list = {'0 to 200': 0, '201 to 400': 0, '401 to 600': 0, '601 to 800': 0, '801 to 1000': 0,
+                    '1001 to 1200': 0, '1201 to 1400': 0, '1400+': 0, 'None': 0}
+    for day, count in days.items():
+        if type(day) != dict:
+            if day and day != 'None':
+                int_day = float(day)
+                if int_day <= 200:
+                    new_day_list['0 to 200'] += int(count)
+                elif int_day <= 400:
+                    new_day_list['201 to 400'] += int(count)
+                elif int_day <= 600:
+                    new_day_list['401 to 600'] += int(count)
+                elif int_day <= 800:
+                    new_day_list['601 to 800'] += int(count)
+                elif int_day <= 1000:
+                    new_day_list['801 to 1000'] += int(count)
+                elif int_day <= 1200:
+                    new_day_list['1001 to 1200'] += int(count)
+                elif int_day <= 1400:
+                    new_day_list['1201 to 1400'] += int(count)
+                elif int_day > 1400:
+                    new_day_list['1400+'] += int(count)
+            else:
+                new_day_list['None'] += int(count)
+
+    return new_day_list
+

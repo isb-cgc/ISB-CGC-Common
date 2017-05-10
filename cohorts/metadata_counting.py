@@ -611,6 +611,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 elif attr == 'event_free_survival' or attr == 'days_to_death' or attr == 'overall_survival' \
                         or attr == 'days_to_last_known_alive' or attr == 'days_to_last_followup':
                     feature['values'] = normalize_simple_days(counts[attr]['counts'])
+                elif attr == 'days_to_birth':
+                    feature['values'] = normalize_negative_days(counts[attr]['counts'])
+                elif attr == 'wbc_at_diagnosis':
+                    feature['values'] = normalize_by_200(counts[attr]['counts'])
 
                 for value, count in feature['values'].items():
 
