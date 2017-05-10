@@ -1025,7 +1025,7 @@ def normalize_ages(ages,bin_by_five=False):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     new_age_list = None
     if bin_by_five:
-        new_age_list = {'0 to 4': 0, '5 to 9': 0, '10 to 14': 0, '15 to 19': 0, '20 to 24': 0, '25 to 29': 0, '30 to 34':0, '3 to 39': 0, 'Over 40': 0, 'None': 0}
+        new_age_list = {'0 to 4': 0, '5 to 9': 0, '10 to 14': 0, '15 to 19': 0, '20 to 24': 0, '25 to 29': 0, '30 to 34':0, '35 to 39': 0, 'Over 40': 0, 'None': 0}
     else:
         new_age_list = {'10 to 39': 0, '40 to 49': 0, '50 to 59': 0, '60 to 69': 0, '70 to 79': 0, 'Over 80': 0, 'None': 0}
     for age, count in ages.items():
