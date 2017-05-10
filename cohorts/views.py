@@ -1479,9 +1479,9 @@ def streaming_csv_view(request, cohort_id=0):
         # Generate a sequence of rows. The range is based on the maximum number of
         # rows that can be handled by a single sheet in most spreadsheet
         # applications.
-        rows = (["Sample", "Platform", "Pipeline", "Data Level", "Data Type", "Cloud Storage Location", "Access Type"],)
+        rows = (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
         for file in file_list:
-            rows += ([file['sample'], file['platform'], file['pipeline'], file['datalevel'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
+            rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
         pseudo_buffer = Echo()
         writer = csv.writer(pseudo_buffer)
         response = StreamingHttpResponse((writer.writerow(row) for row in rows),
@@ -1756,13 +1756,13 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                         file_list.append({
                             'sample': item['sample_barcode'],
                             'program': program.name,
-                            'cloudstorage_location': item['file_name_key'],
+                            'cloudstorage_location': item['file_name_key'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
-                            'filename': item['file_name'],
-                            'exp_strat': item['experimental_strategy'],
-                            'platform': item['platform'],
-                            'datacat': item['data_category'],
-                            'datatype': (item['data_type'] or " ")
+                            'filename': item['file_name'] or 'N/A',
+                            'exp_strat': item['experimental_strategy'] or 'N/A',
+                            'platform': item['platform'] or 'N/A',
+                            'datacat': item['data_category'] or 'N/A',
+                            'datatype': (item['data_type'] or 'N/A')
                         })
 
         platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]

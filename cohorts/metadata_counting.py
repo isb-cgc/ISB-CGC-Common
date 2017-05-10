@@ -602,21 +602,19 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 }
 
                 # Special case for age ranges
-                if attr == 'age_at_initial_pathologic_diagnosis':
+                if attr == 'age_at_initial_pathologic_diagnosis' or attr == 'age_at_diagnosis':
                     feature['values'] = normalize_ages(counts[attr]['counts'])
                 elif attr == 'bmi':
                     feature['values'] = normalize_bmi(counts[attr]['counts'])
                 elif attr == 'year_of_diagnosis':
                     feature['values'] = normalize_years(counts[attr]['counts'])
-                elif attr == 'event_free_survival' or attr == 'days_to_death' or attr == 'overall_survival':
+                elif attr == 'event_free_survival' or attr == 'days_to_death' or attr == 'overall_survival' \
+                        or attr == 'days_to_last_known_alive' or attr == 'days_to_last_followup':
                     feature['values'] = normalize_simple_days(counts[attr]['counts'])
 
                 for value, count in feature['values'].items():
 
                     val_obj = {'value': str(value), 'count': count, }
-
-                    if attr == 'bmi':
-                        print >> sys.stdout, str(metadata_attr_values[attr])
 
                     if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None and len(metadata_attr_values[attr]['values'][value]) > 0:
                         val_obj['displ_name'] = metadata_attr_values[attr]['values'][value]
