@@ -582,17 +582,30 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 item = {}
                 for type_build in data_types:
                     type = type_build.split('; ')[0]
+                    build = type_build.split('; ')[1]
                     if type in METADATA_DATA_AVAIL_PLOT_MAP:
                         if METADATA_DATA_AVAIL_PLOT_MAP[type] not in item:
-                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = type_build
-                        else:
-                            if type_build.split('; ')[1] not in item[METADATA_DATA_AVAIL_PLOT_MAP[type]]:
-                                item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = (item[METADATA_DATA_AVAIL_PLOT_MAP[type]] + ', ' + type_build.split('; ')[1])
+                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = {}
+                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type] = [build, ]
+                        elif type not in item[METADATA_DATA_AVAIL_PLOT_MAP[type]]:
+                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type] = [build, ]
+                        elif build not in item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type]:
+                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type].append(build)
                 for type in METADATA_DATA_AVAIL_PLOT_MAP.values():
                     if type not in item:
                         item[type] = 'None'
 
                 data_avail_items.append(item)
+
+        for item in data_avail_items:
+            for type in item:
+                if item[type] == 'None':
+                    continue
+                avail_set = item[type]
+                item[type] = ''
+                for subtype in avail_set:
+                    item[type] += ((subtype + ': ') + ', '.join(avail_set[subtype]) + '; ')
+                item[type] = item[type][:-2]
 
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
