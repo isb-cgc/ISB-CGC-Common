@@ -165,6 +165,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
     counts_and_total = {
         'counts': [],
         'data_counts': [],
+        'data_avail_items': []
     }
 
     mutation_filters = None
@@ -225,6 +226,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         params_tuple = ()
         counts = {}
         data_counts = {}
+        data_avail_items = []
 
         db = get_sql_connection()
         db.autocommit(True)
@@ -485,13 +487,13 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
                 counts[col_headers[0]]['total'] += int(row[1])
 
+        # Query the data type counts
         if len(metadata_data_type_values.keys()) > 0:
-
-            # Query the data type counts
+            data_avail_query = None
+            params = ()
             # If no proper filter table was built, or, it was but without data filters, we can use the 'filter table'
             if (len(filters) <= 0 and not mutation_filters) or len(data_type_filters) <= 0:
 
-                params = ()
                 cohort_join = ''
 
                 if cohort_id and program_id and base_table == filter_table:
@@ -507,6 +509,15 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                     GROUP BY data_type;
                 """ % (filter_table, data_avail_table, data_type_table, cohort_join)
 
+                data_avail_query = """
+                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,':',dt.genomic_build))
+                    FROM %s ms
+                    JOIN %s da ON da.sample_barcode = ms.sample_barcode
+                    JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
+                    %s
+                    GROUP BY ms.sample_barcode;
+                """ % (filter_table, data_avail_table, data_type_table, cohort_join)
+
                 if len(params) <= 0:
                     cursor.execute(count_query)
                 else:
@@ -520,24 +531,33 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                     JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
                 """ % (base_table, data_avail_table, data_type_table,)
 
-                value_tuple = ()
+                data_avail_query = """
+                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,':',dt.genomic_build))
+                    FROM %s ms
+                    JOIN %s da ON da.sample_barcode = ms.sample_barcode
+                    JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
+                """ % (base_table, data_avail_table, data_type_table,)
 
                 # Cohorts are baked into the mutation table, so we only need to add the cohort suubquery in if there
                 # isn't a mutation table
                 if tmp_mut_table:
                     no_dt_filter_stmt += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
+                    data_avail_query += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
                 elif cohort_id:
                     no_dt_filter_stmt += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
-                    value_tuple += (cohort_id,)
+                    data_avail_query += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
+                    params += (cohort_id,)
 
                 if len(filters) > 0:
                     no_dt_filter_stmt += (' WHERE %s ' % where_clause['query_str'])
-                    value_tuple += where_clause['value_tuple']
+                    data_avail_query += (' WHERE %s ' % where_clause['query_str'])
+                    params += where_clause['value_tuple']
 
                 no_dt_filter_stmt += ' GROUP BY data_type;'
+                data_avail_query += ' GROUP BY ms.sample_barcode;'
 
-                if len(value_tuple) > 0:
-                    cursor.execute(no_dt_filter_stmt, value_tuple)
+                if len(params) > 0:
+                    cursor.execute(no_dt_filter_stmt, params)
                 else:
                     cursor.execute(no_dt_filter_stmt)
 
@@ -550,6 +570,28 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                     }
                 data_counts[row[1]]['counts'][int(row[0])] = int(row[2])
                 data_counts[row[1]]['total'] += int(row[2])
+
+            if len(params) > 0:
+                cursor.execute(data_avail_query, params)
+            else:
+                cursor.execute(data_avail_query)
+
+            sample_data_set = {}
+            for row in cursor.fetchall():
+                data_types = row[1].split(',')
+                item = {}
+                for type_build in data_types:
+                    type = type_build.split(':')[0]
+                    if type in METADATA_DATA_AVAIL_PLOT_MAP:
+                        if METADATA_DATA_AVAIL_PLOT_MAP[type] not in item:
+                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = type_build
+                        else:
+                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = (item[METADATA_DATA_AVAIL_PLOT_MAP[type]] + ' and ' + type_build)
+                for type in METADATA_DATA_AVAIL_PLOT_MAP.values():
+                    if type not in item:
+                        item[type] = 'None'
+
+                data_avail_items.append(item)
 
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
@@ -584,14 +626,9 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             cursor.execute(case_count_query)
             counts_and_total['cases'] = cursor.fetchall()[0][0]
 
-        if cursor: cursor.close()
-
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
-
         # Drop the temporary tables
         if tmp_filter_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_filter_table)
         if tmp_mut_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_mut_table)
-
 
         for attr in metadata_attr_values:
             if attr in counts:
@@ -649,6 +686,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                 counts_and_total['data_counts'].append({'name': data_type, 'values': value_list, 'id': data_type, 'total': feature['total']})
 
+        counts_and_total['data_avail_items'] = data_avail_items
+
         return counts_and_total
 
     except Exception as e:
@@ -680,6 +719,7 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
 
     start = time.time()
     counts_and_total = count_public_metadata(user, cohort_id, filters, program_id)
+    # parsets_items = build_data_avail_plot_data(user, cohort_id, filters, program_id)
 
     stop = time.time()
     logger.debug(
@@ -691,7 +731,7 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
     )
 
     return_vals = {
-        'items': [],
+        'data_avail': counts_and_total['data_avail_items'],
         'data_counts': counts_and_total['data_counts'],
         'count': counts_and_total['counts'],
         'cases': counts_and_total['cases'],
@@ -708,10 +748,9 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
             user_data_filters = user_data_filters['0']
 
         counts_and_total = {
-            'user_data': [],
             'counts': [],
-            'user_data_total': 0,
-            'user_data_cases': 0,
+            'total': 0,
+            'cases': 0,
         }
 
         found_user_data = False
@@ -723,11 +762,10 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
 
                 for key in user_data_result:
                     if 'total' in key:
-                        counts_and_total['user_data_total'] = user_data_result[key]
+                        counts_and_total['total'] = user_data_result[key]
                     elif 'cases' in key:
-                        counts_and_total['user_data_cases'] = user_data_result[key]
+                        counts_and_total['cases'] = user_data_result[key]
                     else:
-                        counts_and_total['user_data'].append(user_data_result[key])
                         counts_and_total['counts'].append(user_data_result[key])
             else:
                 logger.info('[STATUS] No projects were found for this user.')
@@ -738,12 +776,15 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
         return {
             'user_data': found_user_data,
             'count': counts_and_total['counts'],
-            'cases': counts_and_total['user_data_cases'],
-            'total': counts_and_total['user_data_total'],
+            'cases': counts_and_total['cases'],
+            'total': counts_and_total['total'],
+            # Data types are current not supported for user data
+            'data_counts': [],
         }
 
     except Exception, e:
-        logger.error('[ERROR] Exception when counting user metadata: ' + e.message)
+        logger.error('[ERROR] Exception when counting user metadata: ')
+        logger.exeception(e)
         logger.error(traceback.format_exc())
 
 '''------------------------------------- End metadata counting methods -------------------------------------'''
