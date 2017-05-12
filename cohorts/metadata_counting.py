@@ -510,7 +510,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 """ % (filter_table, data_avail_table, data_type_table, cohort_join)
 
                 data_avail_query = """
-                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,':',dt.genomic_build))
+                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,'; ',dt.genomic_build))
                     FROM %s ms
                     JOIN %s da ON da.sample_barcode = ms.sample_barcode
                     JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
@@ -532,7 +532,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 """ % (base_table, data_avail_table, data_type_table,)
 
                 data_avail_query = """
-                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,':',dt.genomic_build))
+                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,'; ',dt.genomic_build))
                     FROM %s ms
                     JOIN %s da ON da.sample_barcode = ms.sample_barcode
                     JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
@@ -581,12 +581,13 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 data_types = row[1].split(',')
                 item = {}
                 for type_build in data_types:
-                    type = type_build.split(':')[0]
+                    type = type_build.split('; ')[0]
                     if type in METADATA_DATA_AVAIL_PLOT_MAP:
                         if METADATA_DATA_AVAIL_PLOT_MAP[type] not in item:
                             item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = type_build
                         else:
-                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = (item[METADATA_DATA_AVAIL_PLOT_MAP[type]] + ' and ' + type_build)
+                            if type_build.split('; ')[1] not in item[METADATA_DATA_AVAIL_PLOT_MAP[type]]:
+                                item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = (item[METADATA_DATA_AVAIL_PLOT_MAP[type]] + ', ' + type_build.split('; ')[1])
                 for type in METADATA_DATA_AVAIL_PLOT_MAP.values():
                     if type not in item:
                         item[type] = 'None'
