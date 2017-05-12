@@ -1544,16 +1544,23 @@ def get_metadata(request):
         results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit)
 
         # If there is an extent cohort, to get the cohort's new totals per applied filters
-        # we have to check the unfiltered programs for their numbers and tally them
+        # we have to check the unfiltered programs for their numbers and tally them in
+        # This includes user data!
         if cohort:
             results['cohort-total'] = results['total']
             results['cohort-cases'] = results['cases']
-            cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
-            for prog in cohort_progs:
+            cohort_pub_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct(), is_public=True)
+            for prog in cohort_pub_progs:
                 if prog.id != program_id:
                     prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
                     results['cohort-total'] += prog_res['total']
                     results['cohort-cases'] += prog_res['cases']
+
+            cohort_user_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id', flat=True).distinct(), is_public=False)
+            for prog in cohort_user_progs:
+                user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
+                results['cohort-total'] += user_prog_res['total']
+                results['cohort-cases'] += user_prog_res['cases']
     else:
         results = user_metadata_counts(user, filters, cohort)
 
