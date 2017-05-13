@@ -38,7 +38,7 @@ def get_genomics_resource():
         GOOGLE_APPLICATION_CREDENTIALS, GENOMICS_SCOPES)
 
     http_auth = credentials.authorize(Http())
-    service = discovery.build('genomics', 'v1', http=http_auth)
+    service = discovery.build('genomics', 'v1', http=http_auth, cache_discovery=False)
     return service, http_auth
 
 

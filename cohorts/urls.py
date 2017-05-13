@@ -37,7 +37,7 @@ urlpatterns = [
     url(r'^set_operation/',                         views.set_operation, name='set_operation'),
     url(r'^save_cohort_comment/',                   views.save_comment, name='save_cohort_comment'),
     url(r'^download_filelist/(?P<cohort_id>\d+)/',  views.streaming_csv_view, name='download_filelist'),
-    url(r'^download_ids/(?P<cohort_id>\d+)/',       views.cohort_samples_patients, name='download_ids'),
+    url(r'^download_ids/(?P<cohort_id>\d+)/',       views.cohort_samples_cases, name='download_ids'),
 
 
     url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)$',        views.cohort_select_for_existing_workbook,  name="cohort_select_for_existing_workbook"),
@@ -51,5 +51,7 @@ urlpatterns = [
     url(r'^save_cohort_for_workbook/$',                                            views.save_cohort_for_existing_workbook,    name="save_cohort_for_existing_workbook"),
     url(r'^save_cohort_and_workbook/$',                                            views.save_cohort_for_new_workbook,         name="save_cohort_for_new_workbook"),
 
-    url(r'^get_metadata_ajax/$',                views.get_metadata, name='metadata_count_ajax')
+    url(r'^get_metadata_ajax/$',                                        views.get_metadata, name='metadata_count_ajax'),
+    url(r'^filter_panel/(?P<program_id>\d+)/$',                         views.get_cohort_filter_panel, name='cohort_filter_panel'),
+    url(r'^(?P<cohort_id>\d+)/filter_panel/(?P<program_id>\d+)/$',      views.get_cohort_filter_panel, name='cohort_filter_panel')
 ]
