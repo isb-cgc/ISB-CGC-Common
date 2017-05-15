@@ -617,6 +617,11 @@ def build_where_clause(filters, alt_key_map=False):
                     query_str += ' %s IS NULL' % key
                 else:
                     query_str += ' (' + sql_simple_days_by_ranges(value, key) + ') '
+            elif key == 'wbc_at_diagnosis':
+                if value == 'None':
+                    query_str += ' % IS NULL' % key
+                else:
+                    query_str += ' (' + sql_simple_number_by_200(value, key) + ') '
             # If it's a list of items for this key, create an or subclause
             elif isinstance(value, list):
                 has_null = False
@@ -694,7 +699,40 @@ def build_where_clause(filters, alt_key_map=False):
     return {'query_str': query_str, 'value_tuple': value_tuple, 'key_order': key_order, 'big_query_str': big_query_str}
 
 
+def sql_simple_number_by_200(value, field):
+    if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
+    result = ''
+
+    if isinstance(value, basestring):
+        value = [value]
+
+    first = True
+    for val in value:
+        if first:
+            first = False
+        else:
+            result += ' or'
+
+        if str(val) == '0 to 200':
+            result += (' (%s <= 200)' % field)
+        elif str(val) == '201 to 400':
+            result += (' (%s >= 201 and %s <= 400)' % (field, field,))
+        elif str(val) == '401 to 600':
+            result += (' (%s >= 401 and %s <= 600)' % (field, field,))
+        elif str(val) == '601 to 800':
+            result += (' (%s >= 601 and %s <= 800)' % (field, field,))
+        elif str(val) == '801 to 1000':
+            result += (' (%s >= 801 and %s <= 1000)' % (field, field,))
+        elif str(val) == '1001 to 1200':
+            result += (' (%s >= 1001 and %s <= 1200)' % (field, field,))
+        elif str(val) == '1201 to 1400':
+            result += (' (%s >= 1201 and %s <= 1400)' % (field, field,))
+        elif str(val) == '1400+':
+            result += (' (%s > 1400)' % (field,))
+
+
 def sql_simple_days_by_ranges(value, field):
+    if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
     result = ''
 
     if isinstance(value, basestring):
