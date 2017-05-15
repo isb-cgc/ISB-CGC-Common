@@ -317,6 +317,8 @@ class Cohort(models.Model):
                 cohort_filter['displ_name'] = prog_values[cohort_filter['name']]['displ_name']
                 if cohort_filter['value'] in prog_values[cohort_filter['name']]['values']:
                     cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]
+                else:
+                    cohort_filter['displ_val'] = cohort_filter['value']
 
 
     class Meta:
