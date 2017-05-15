@@ -305,8 +305,6 @@ class Cohort(models.Model):
             prog_values = prog_vals[prog_id]
             prog_data_types = prog_dts[prog_id]
 
-            print >> sys.stdout, str(prog_values)
-
             if 'MUT:' in cohort_filter['name']:
                 cohort_filter['displ_name'] = cohort_filter['name'].split(':')[1].upper() + ' [' + string.capwords(cohort_filter['name'].split(':')[2])
                 cohort_filter['displ_val'] = (MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) + ']'
