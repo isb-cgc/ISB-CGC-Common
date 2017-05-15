@@ -301,9 +301,11 @@ class Cohort(models.Model):
                 prog_vals[prog_id] = fetch_metadata_value_set(prog_id)
             if prog_id not in prog_dts:
                 prog_dts[prog_id] = fetch_program_data_types(prog_id, True)
-                
+
             prog_values = prog_vals[prog_id]
             prog_data_types = prog_dts[prog_id]
+
+            print >> sys.stdout, str(prog_values)
 
             if 'MUT:' in cohort_filter['name']:
                 cohort_filter['displ_name'] = cohort_filter['name'].split(':')[1].upper() + ' [' + string.capwords(cohort_filter['name'].split(':')[2])
@@ -313,7 +315,8 @@ class Cohort(models.Model):
                 cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
             else:
                 cohort_filter['displ_name'] = prog_values[cohort_filter['name']]['displ_name']
-                cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]
+                if cohort_filter['value'] in prog_values[cohort_filter['name']]['values']:
+                    cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]
 
 
     class Meta:
