@@ -18,15 +18,14 @@ limitations under the License.
 
 import csv
 import logging
-import os
 from StringIO import StringIO
-import sys
 
 from django.test import TestCase
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
-from tasks.nih_whitelist_processor.utils import NIHWhitelist, DatasetToACLMapping
+from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
+from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
 from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater
 from tasks.tests.data_generators import create_csv_file_object
 
@@ -98,7 +97,7 @@ class TestWhitelistMultiACL(TestCase):
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
-        whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
+        whitelist = NIHDatasetAuthorizationList.from_stream(create_csv_file_object(test_csv_data, include_header=True))
         dsu = AccessControlUpdater(whitelist, database_alias='default')
         result = dsu.process()
 
@@ -118,7 +117,7 @@ class TestWhitelistMultiACL(TestCase):
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
-        whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
+        whitelist = NIHDatasetAuthorizationList.from_stream(create_csv_file_object(test_csv_data, include_header=True))
 
         uad = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset)
         uad.save()
@@ -202,7 +201,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
              '']
         ]
 
-        whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
+        whitelist = NIHDatasetAuthorizationList.from_stream(create_csv_file_object(test_csv_data, include_header=True))
 
         uad_123 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_123)
         uad_123.save()
