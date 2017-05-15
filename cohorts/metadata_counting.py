@@ -609,6 +609,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
+        logger.debug('[BENCHMARKING] Filters requested: '+str(inc_filters))
 
         # query sample and case counts
         count_query = 'SELECT COUNT(DISTINCT %s) FROM %s'
@@ -674,7 +675,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                     val_obj = {'value': str(value), 'count': count, }
 
-                    if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None and len(metadata_attr_values[attr]['values'][value]) > 0:
+                    if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None \
+                            and len(metadata_attr_values[attr]['values'][value]) > 0:
                         val_obj['displ_name'] = metadata_attr_values[attr]['values'][value]
 
                     value_list.append(val_obj)
