@@ -916,8 +916,8 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         messages.error(request, "There was an error saving your cohort; it may not have been saved correctly.")
         logger.error('[ERROR] Exception while saving a cohort:')
         logger.exception(e)
-        print >> sys.stdout, "[ERROR] Exception while saving a cohort:"
-        print >> sys.stdout, traceback.format_exc()
+        print >> sys.stderr, "[ERROR] Exception while saving a cohort:"
+        print >> sys.stderr, traceback.format_exc()
 
     return redirect(redirect_url)
 
