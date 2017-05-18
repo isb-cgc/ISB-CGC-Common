@@ -270,11 +270,13 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             cohort_where_str = ''
             bq_cohort_table = ''
             bq_cohort_dataset = ''
+            bq_cohort_project_name = ''
             cohort = ''
 
             bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
             bq_dataset = bq_table_info['dataset']
             bq_table = bq_table_info['table']
+            bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
 
             query_template = None
 
@@ -288,10 +290,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                      " GROUP BY barcode) mt"
                      " ON mt.barcode = ct.sample_barcode"
                      " WHERE ct.cohort_id = {cohort};")
+
                 bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
                 bq_cohort_dataset = settings.COHORT_DATASET_ID
                 bq_cohort_project_name = settings.BIGQUERY_PROJECT_NAME
-                bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
 
                 cohort = cohort_id
             else:
