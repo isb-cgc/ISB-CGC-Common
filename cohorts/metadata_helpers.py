@@ -511,7 +511,7 @@ def format_for_display(item):
 # Construct WHERE clauses for BigQuery and CloudSQL based on a set of filters
 # If the names of the columns differ across the 2 platforms, the alt_key_map can be
 # used to map a filter 'key' to a different column name
-def build_where_clause(filters, alt_key_map=False):
+def build_where_clause(filters, alt_key_map=False, program=None):
     first = True
     query_str = ''
     big_query_str = ''  # todo: make this work for non-string values -- use {}.format
@@ -601,7 +601,7 @@ def build_where_clause(filters, alt_key_map=False):
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
                 else:
-                    query_str += ' (' + sql_age_by_ranges(value) + ') '
+                    query_str += ' (' + sql_age_by_ranges(value,(program and Program.objects.get(id=program).name == 'TARGET')) + ') '
             elif key == 'bmi':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
@@ -870,40 +870,40 @@ def sql_age_by_ranges(value, bin_by_five=False):
             result += ' or'
 
         if str(val) == 'None':
-            result += ' age_at_initial_pathologic_diagnosis IS NULL'
+            result += ' age_at_diagnosis IS NULL'
         else:
             if not bin_by_five:
                 if str(val) == '10 to 39':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 10 and age_at_initial_pathologic_diagnosis < 40)'
+                    result += ' (age_at_diagnosis >= 10 and age_at_diagnosis < 40)'
                 elif str(val) == '40 to 49':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 40 and age_at_initial_pathologic_diagnosis < 50)'
+                    result += ' (age_at_diagnosis >= 40 and age_at_diagnosis < 50)'
                 elif str(val) == '50 to 59':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 50 and age_at_initial_pathologic_diagnosis < 60)'
+                    result += ' (age_at_diagnosis >= 50 and age_at_diagnosis < 60)'
                 elif str(val) == '60 to 69':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 60 and age_at_initial_pathologic_diagnosis < 70)'
+                    result += ' (age_at_diagnosis >= 60 and age_at_diagnosis < 70)'
                 elif str(val) == '70 to 79':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 70 and age_at_initial_pathologic_diagnosis < 80)'
+                    result += ' (age_at_diagnosis >= 70 and age_at_diagnosis < 80)'
                 elif str(val).lower() == 'over 80':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 80)'
+                    result += ' (age_at_diagnosis >= 80)'
             else:
                 if str(val) == '0 to 4':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 0 and age_at_initial_pathologic_diagnosis < 5)'
+                    result += ' (age_at_diagnosis >= 0 and age_at_diagnosis < 5)'
                 elif str(val) == '5 to 9':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 5 and age_at_initial_pathologic_diagnosis < 10)'
+                    result += ' (age_at_diagnosis >= 5 and age_at_diagnosis < 10)'
                 elif str(val) == '10 to 14':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 10 and age_at_initial_pathologic_diagnosis < 15'
+                    result += ' (age_at_diagnosis >= 10 and age_at_diagnosis < 15)'
                 elif str(val) == '15 to 19':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 15 and age_at_initial_pathologic_diagnosis < 20)'
+                    result += ' (age_at_diagnosis >= 15 and age_at_diagnosis < 20)'
                 elif str(val) == '20 to 24':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 20 and age_at_initial_pathologic_diagnosis < 25)'
+                    result += ' (age_at_diagnosis >= 20 and age_at_diagnosis < 25)'
                 elif str(val) == '25 to 29':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 25 and age_at_initial_pathologic_diagnosis < 30)'
+                    result += ' (age_at_diagnosis >= 25 and age_at_diagnosis < 30)'
                 elif str(val) == '30 to 34':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 30 and age_at_initial_pathologic_diagnosis < 35)'
+                    result += ' (age_at_diagnosis >= 30 and age_at_diagnosis < 35)'
                 elif str(val) == '35 to 39':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 35 and age_at_initial_pathologic_diagnosis < 40)'
+                    result += ' (age_at_diagnosis >= 35 and age_at_diagnosis < 40)'
                 elif str(val).lower() == 'over 40':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 40)'
+                    result += ' (age_at_diagnosis >= 40)'
 
 
     return result
