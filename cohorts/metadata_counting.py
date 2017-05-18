@@ -247,7 +247,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         # construct the WHERE clauses needed
         if len(filters) > 0:
             filter_copy = copy.deepcopy(filters)
-            where_clause = build_where_clause(filter_copy)
+            where_clause = build_where_clause(filter_copy, program=program_id)
             for filter_key in filters:
                 filter_copy = copy.deepcopy(filters)
                 del filter_copy[filter_key]
@@ -255,7 +255,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 if len(filter_copy) <= 0:
                     ex_where_clause = {'query_str': None, 'value_tuple': None}
                 else:
-                    ex_where_clause = build_where_clause(filter_copy)
+                    ex_where_clause = build_where_clause(filter_copy, program=program_id)
 
                 exclusionary_filter[filter_key] = ex_where_clause
 
@@ -391,6 +391,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             make_tmp_table_str += ' WHERE %s ' % where_clause['query_str'] + ';'
             params_tuple += where_clause['value_tuple']
 
+            print >> sys.stdout, "table string: " + make_tmp_table_str
             cursor.execute(make_tmp_table_str, params_tuple)
 
         elif tmp_mut_table:
@@ -654,11 +655,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 }
 
                 # Special case for age ranges
-                if attr == 'age_at_initial_pathologic_diagnosis' or attr == 'age_at_diagnosis':
-                    if Program.objects.get(id=program_id).name == 'TARGET':
-                        feature['values'] = normalize_ages(counts[attr]['counts'],True)
-                    else:
-                        feature['values'] = normalize_ages(counts[attr]['counts'])
+                if attr == 'age_at_diagnosis':
+                    feature['values'] = normalize_ages(counts[attr]['counts'], Program.objects.get(id=program_id).name == 'TARGET')
                 elif attr == 'bmi':
                     feature['values'] = normalize_bmi(counts[attr]['counts'])
                 elif attr == 'year_of_diagnosis':
