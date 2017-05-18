@@ -391,7 +391,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             make_tmp_table_str += ' WHERE %s ' % where_clause['query_str'] + ';'
             params_tuple += where_clause['value_tuple']
 
-            print >> sys.stdout, "table string: " + make_tmp_table_str
             cursor.execute(make_tmp_table_str, params_tuple)
 
         elif tmp_mut_table:
