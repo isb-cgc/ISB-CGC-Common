@@ -514,7 +514,7 @@ def format_for_display(item):
 # Construct WHERE clauses for BigQuery and CloudSQL based on a set of filters
 # If the names of the columns differ across the 2 platforms, the alt_key_map can be
 # used to map a filter 'key' to a different column name
-def build_where_clause(filters, alt_key_map=False):
+def build_where_clause(filters, alt_key_map=False, program=None):
     first = True
     query_str = ''
     big_query_str = ''  # todo: make this work for non-string values -- use {}.format
@@ -600,11 +600,11 @@ def build_where_clause(filters, alt_key_map=False):
                 big_query_str += ' and'
 
             # If it's a ranged value, calculate the bins
-            if key == 'age_at_initial_pathologic_diagnosis':
+            if key == 'age_at_diagnosis':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
                 else:
-                    query_str += ' (' + sql_age_by_ranges(value) + ') '
+                    query_str += ' (' + sql_age_by_ranges(value,(program and Program.objects.get(id=program).name == 'TARGET')) + ') '
             elif key == 'bmi':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
@@ -615,7 +615,7 @@ def build_where_clause(filters, alt_key_map=False):
                     query_str += ' %s IS NULL' % key
                 else:
                     query_str += ' (' + sql_year_by_ranges(value) + ') '
-            elif key == 'event_free_survival' or key == 'days_to_death' or key == 'days_to_last_known_alive' or key == 'days_to_last_followup' or key == 'days_to_birth':
+            elif key == 'event_free_survival' or key == 'days_to_death' or key == 'days_to_last_known_alive' or key == 'days_to_last_followup':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
                 else:
@@ -715,23 +715,26 @@ def sql_simple_number_by_200(value, field):
             first = False
         else:
             result += ' or'
-
-        if str(val) == '0 to 200':
+        if str(val) == 'None':
+            result += (' (%s IS NULL)' % field)
+        elif str(val) == '0 to 200':
             result += (' (%s <= 200)' % field)
-        elif str(val) == '201 to 400':
-            result += (' (%s >= 201 and %s <= 400)' % (field, field,))
-        elif str(val) == '401 to 600':
-            result += (' (%s >= 401 and %s <= 600)' % (field, field,))
-        elif str(val) == '601 to 800':
-            result += (' (%s >= 601 and %s <= 800)' % (field, field,))
-        elif str(val) == '801 to 1000':
-            result += (' (%s >= 801 and %s <= 1000)' % (field, field,))
-        elif str(val) == '1001 to 1200':
-            result += (' (%s >= 1001 and %s <= 1200)' % (field, field,))
-        elif str(val) == '1201 to 1400':
-            result += (' (%s >= 1201 and %s <= 1400)' % (field, field,))
-        elif str(val) == '1400+':
+        elif str(val) == '200.01 to 400':
+            result += (' (%s > 200 and %s <= 400)' % (field, field,))
+        elif str(val) == '400.01 to 600':
+            result += (' (%s > 400 and %s <= 600)' % (field, field,))
+        elif str(val) == '600.01 to 800':
+            result += (' (%s > 600 and %s <= 800)' % (field, field,))
+        elif str(val) == '800.01 to 1000':
+            result += (' (%s > 800 and %s <= 1000)' % (field, field,))
+        elif str(val) == '1000.01 to 1200':
+            result += (' (%s > 1000 and %s <= 1200)' % (field, field,))
+        elif str(val) == '1200.01 to 1400':
+            result += (' (%s > 1200 and %s <= 1400)' % (field, field,))
+        elif str(val) == '1400.01+':
             result += (' (%s > 1400)' % (field,))
+
+    return result
 
 
 def sql_simple_days_by_ranges(value, field):
@@ -870,40 +873,40 @@ def sql_age_by_ranges(value, bin_by_five=False):
             result += ' or'
 
         if str(val) == 'None':
-            result += ' age_at_initial_pathologic_diagnosis IS NULL'
+            result += ' age_at_diagnosis IS NULL'
         else:
             if not bin_by_five:
                 if str(val) == '10 to 39':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 10 and age_at_initial_pathologic_diagnosis < 40)'
+                    result += ' (age_at_diagnosis >= 10 and age_at_diagnosis < 40)'
                 elif str(val) == '40 to 49':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 40 and age_at_initial_pathologic_diagnosis < 50)'
+                    result += ' (age_at_diagnosis >= 40 and age_at_diagnosis < 50)'
                 elif str(val) == '50 to 59':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 50 and age_at_initial_pathologic_diagnosis < 60)'
+                    result += ' (age_at_diagnosis >= 50 and age_at_diagnosis < 60)'
                 elif str(val) == '60 to 69':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 60 and age_at_initial_pathologic_diagnosis < 70)'
+                    result += ' (age_at_diagnosis >= 60 and age_at_diagnosis < 70)'
                 elif str(val) == '70 to 79':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 70 and age_at_initial_pathologic_diagnosis < 80)'
+                    result += ' (age_at_diagnosis >= 70 and age_at_diagnosis < 80)'
                 elif str(val).lower() == 'over 80':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 80)'
+                    result += ' (age_at_diagnosis >= 80)'
             else:
                 if str(val) == '0 to 4':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 0 and age_at_initial_pathologic_diagnosis < 5)'
+                    result += ' (age_at_diagnosis >= 0 and age_at_diagnosis < 5)'
                 elif str(val) == '5 to 9':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 5 and age_at_initial_pathologic_diagnosis < 10)'
+                    result += ' (age_at_diagnosis >= 5 and age_at_diagnosis < 10)'
                 elif str(val) == '10 to 14':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 10 and age_at_initial_pathologic_diagnosis < 15'
+                    result += ' (age_at_diagnosis >= 10 and age_at_diagnosis < 15)'
                 elif str(val) == '15 to 19':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 15 and age_at_initial_pathologic_diagnosis < 20)'
+                    result += ' (age_at_diagnosis >= 15 and age_at_diagnosis < 20)'
                 elif str(val) == '20 to 24':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 20 and age_at_initial_pathologic_diagnosis < 25)'
+                    result += ' (age_at_diagnosis >= 20 and age_at_diagnosis < 25)'
                 elif str(val) == '25 to 29':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 25 and age_at_initial_pathologic_diagnosis < 30)'
+                    result += ' (age_at_diagnosis >= 25 and age_at_diagnosis < 30)'
                 elif str(val) == '30 to 34':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 30 and age_at_initial_pathologic_diagnosis < 35)'
+                    result += ' (age_at_diagnosis >= 30 and age_at_diagnosis < 35)'
                 elif str(val) == '35 to 39':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 35 and age_at_initial_pathologic_diagnosis < 40)'
+                    result += ' (age_at_diagnosis >= 35 and age_at_diagnosis < 40)'
                 elif str(val).lower() == 'over 40':
-                    result += ' (age_at_initial_pathologic_diagnosis >= 40)'
+                    result += ' (age_at_diagnosis >= 40)'
 
 
     return result
@@ -1238,32 +1241,34 @@ def normalize_negative_days(days):
 
 
 # TODO: Convert to slider
-def normalize_by_200(days):
+def normalize_by_200(values):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
-    new_day_list = {'0 to 200': 0, '201 to 400': 0, '401 to 600': 0, '601 to 800': 0, '801 to 1000': 0,
-                    '1001 to 1200': 0, '1201 to 1400': 0, '1400+': 0, 'None': 0}
-    for day, count in days.items():
-        if type(day) != dict:
-            if day and day != 'None':
-                int_day = float(day)
-                if int_day <= 200:
-                    new_day_list['0 to 200'] += int(count)
-                elif int_day <= 400:
-                    new_day_list['201 to 400'] += int(count)
-                elif int_day <= 600:
-                    new_day_list['401 to 600'] += int(count)
-                elif int_day <= 800:
-                    new_day_list['601 to 800'] += int(count)
-                elif int_day <= 1000:
-                    new_day_list['801 to 1000'] += int(count)
-                elif int_day <= 1200:
-                    new_day_list['1001 to 1200'] += int(count)
-                elif int_day <= 1400:
-                    new_day_list['1201 to 1400'] += int(count)
-                elif int_day > 1400:
-                    new_day_list['1400+'] += int(count)
+    new_value_list = {'0 to 200': 0, '200.01 to 400': 0, '400.01 to 600': 0, '600.01 to 800': 0, '800.01 to 1000': 0,
+                    '1000.01 to 1200': 0, '1200.01 to 1400': 0, '1400.01+': 0, 'None': 0}
+    for value, count in values.items():
+        if type(value) != dict:
+            if value and value != 'None':
+                int_value = float(value)
+                if int_value <= 200:
+                    new_value_list['0 to 200'] += int(count)
+                elif int_value <= 400:
+                    new_value_list['200.01 to 400'] += int(count)
+                elif int_value <= 600:
+                    new_value_list['400.01 to 600'] += int(count)
+                elif int_value <= 800:
+                    new_value_list['600.01 to 800'] += int(count)
+                elif int_value <= 1000:
+                    new_value_list['800.01 to 1000'] += int(count)
+                elif int_value <= 1200:
+                    new_value_list['1000.01 to 1200'] += int(count)
+                elif int_value <= 1400:
+                    new_value_list['1200.01 to 1400'] += int(count)
+                elif int_value > 1400:
+                    new_value_list['1400.01+'] += int(count)
             else:
-                new_day_list['None'] += int(count)
+                new_value_list['None'] += int(count)
 
-    return new_day_list
+    print >> sys.stdout, str(new_value_list)
+
+    return new_value_list
 
