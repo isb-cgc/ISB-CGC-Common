@@ -1268,7 +1268,5 @@ def normalize_by_200(values):
             else:
                 new_value_list['None'] += int(count)
 
-    print >> sys.stdout, str(new_value_list)
-
     return new_value_list
 
