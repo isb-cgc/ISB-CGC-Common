@@ -886,7 +886,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 bq_project_id = settings.BQ_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                bq_result = bcs.add_cohort_to_bq(cohort.id, items)
+                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in results.keys()] for item in sublist])
 
                 # If BQ insertion fails, we immediately de-activate the cohort and warn the user
                 if 'insertErrors' in bq_result:
