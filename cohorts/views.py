@@ -248,12 +248,14 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             cohort_where_str = ''
             bq_cohort_table = ''
             bq_cohort_dataset = ''
+            bq_cohort_project_name = ''
             cohort = ''
             query_template = None
 
             bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
             bq_dataset = bq_table_info['dataset']
             bq_table = bq_table_info['table']
+            bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
 
             query_template = None
 
@@ -262,7 +264,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                     ("SELECT ct.sample_barcode"
                      " FROM [{project_name}:{cohort_dataset}.{cohort_table}] ct"
                      " JOIN (SELECT sample_barcode_tumor AS barcode "
-                     " FROM [{project_name}:{dataset_name}.{table_name}]"
+                     " FROM [{data_project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY barcode) mt"
                      " ON mt.barcode = ct.sample_barcode"
@@ -271,21 +273,23 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
                 bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
                 bq_cohort_dataset = settings.COHORT_DATASET_ID
+                bq_cohort_project_name = settings.BIGQUERY_PROJECT_NAME
                 cohort = cohort_id
 
             else:
                 query_template = \
                     ("SELECT sample_barcode_tumor"
-                     " FROM [{project_name}:{dataset_name}.{table_name}]"
+                     " FROM [{data_project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY sample_barcode_tumor; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
-            query = query_template.format(dataset_name=bq_dataset, project_name=settings.BIGQUERY_PROJECT_NAME,
-                                          table_name=bq_table, hugo_symbol=str(params['gene']),
-                                          var_class=params['var_class'], cohort_dataset=bq_cohort_dataset,
-                                          cohort_table=bq_cohort_table, cohort=cohort)
+            query = query_template.format(
+                dataset_name=bq_dataset, project_name=bq_cohort_project_name, table_name=bq_table,
+                hugo_symbol=str(params['gene']), data_project_name=bq_data_project_name,  var_class=params['var_class'],
+                cohort_dataset=bq_cohort_dataset,cohort_table=bq_cohort_table, cohort=cohort
+            )
 
             bq_service = authorize_credentials_with_Google()
             query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, query)
