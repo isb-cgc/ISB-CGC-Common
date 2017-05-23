@@ -802,7 +802,7 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
 
     except Exception, e:
         logger.error('[ERROR] Exception when counting user metadata: ')
-        logger.exeception(e)
+        logger.exception(e)
         logger.error(traceback.format_exc())
 
 '''------------------------------------- End metadata counting methods -------------------------------------'''
