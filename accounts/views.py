@@ -375,7 +375,7 @@ def verify_service_account(gcp_id, service_account, datasets):
                         if not member['datasets_valid']:
                             user_dataset_verified = False
                             if dataset_objs:
-                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                     # IF USER HAS NO ERA COMMONS ID
                     else:
@@ -384,7 +384,7 @@ def verify_service_account(gcp_id, service_account, datasets):
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
                         if dataset_objs:
                             user_dataset_verified = False
-                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
