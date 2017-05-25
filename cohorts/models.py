@@ -1,6 +1,5 @@
 """
-
-Copyright 2015, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,15 +12,17 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 """
 
 import operator
+import string
 import sys
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
-from projects.models import Study, User_Feature_Definitions
+from projects.models import Project, Program, User_Feature_Definitions
+from sharing.models import Shared_Resource
+from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
 
 
 class CohortManager(models.Manager):
@@ -48,12 +49,21 @@ class Cohort(models.Model):
     active = models.BooleanField(default=True)
     last_date_saved = models.DateTimeField(auto_now=True)
     objects = CohortManager()
+    shared = models.ManyToManyField(Shared_Resource)
 
+    '''
+    Note that neither of these counts is unique; if a sample/case is present in a cohort more than once, it will
+    count as more than one
+    '''
     def sample_size(self):
         return len(self.samples_set.all())
 
-    def patient_size(self):
-        return len(self.patients_set.all())
+    def case_size(self):
+        return len(self.samples_set.values_list('case_barcode', flat=True).distinct())
+
+    def get_programs(self):
+        projects = self.samples_set.values_list('project_id', flat=True).distinct()
+        return Program.objects.filter(id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct()
 
     '''
     Sets the last viewed time for a cohort
@@ -120,13 +130,18 @@ class Cohort(models.Model):
         # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
         while cohort:
             for filter in Filters.objects.filter(resulting_cohort=cohort):
-                if not filter.name in filters:
-                    filters[filter.name] = {}
-                    filters[filter.name]['id'] = cohort.id
-                    filters[filter.name]['values'] = []
-
-                if filters[filter.name]['id'] == cohort.id:
-                    filters[filter.name]['values'].append(filter.value)
+                prog_name = filter.program.name
+                if prog_name not in filters:
+                    filters[prog_name] = {}
+                prog_filters = filters[prog_name]
+                if filter.name not in prog_filters:
+                    prog_filters[filter.name] = {
+                        'id': cohort.id,
+                        'values': []
+                    }
+                prog_filter = prog_filters[filter.name]
+                if prog_filter['id'] == cohort.id:
+                    prog_filter['values'].append(filter.value)
 
 
             sources = Source.objects.filter(cohort=cohort)
@@ -135,11 +150,20 @@ class Cohort(models.Model):
             else:
                 cohort = None
 
-        current_filters = []
+        current_filters = {}
 
-        for filter in filters:
-            for value in filters[filter]['values']:
-                current_filters.append({'name': str(filter), 'value': str(value)})
+        for prog in filters:
+            current_filters[prog] = []
+            prog_filters = filters[prog]
+            for filter in prog_filters:
+                for value in prog_filters[filter]['values']:
+                    current_filters[prog].append({
+                        'name': str(filter),
+                        'value': str(value),
+                        'program': prog
+                    })
+            
+            Cohort.format_filters_for_display(current_filters[prog])
 
         return current_filters
 
@@ -162,7 +186,22 @@ class Cohort(models.Model):
             else:
                 cohort = None
 
-        return filter_list
+        filters = {}
+
+        for filter in filter_list:
+            if filter.program.name not in filters:
+                filters[filter.program.name] = []
+
+            filters[filter.program.name].append({
+                'name': str(filter.name),
+                'value': str(filter.value),
+                'program': filter.program.name
+            })
+            
+        for prog in filters:
+            Cohort.format_filters_for_display(filters[prog])
+
+        return filters
 
     '''
     Creates a historical list of the filters applied to produce this cohort
@@ -184,7 +223,11 @@ class Cohort(models.Model):
                     source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
                     filters = []
                     for source_filter in source_filters:
-                        filters.append({'name': source_filter.name, 'value': source_filter.value})
+                        filters.append({
+                            'name': source_filter.name,
+                            'value': source_filter.value,
+                            'program': source_filter.program.name
+                        })
                     filter_history[source.cohort.id] = filters
             else:
                 keep_traversing = False
@@ -210,7 +253,13 @@ class Cohort(models.Model):
                 if source.type == Source.FILTERS:
                     if source_filters is None:
                         source_filters = self.get_filter_history()
-                    revision_list.append({'type': 'filter', 'vals': source_filters[source.cohort.id]})
+                    Cohort.format_filters_for_display(source_filters[source.cohort.id])
+                    prog_filters = {}
+                    for cohort_filter in source_filters[source.cohort.id]:
+                        if cohort_filter['program'] not in prog_filters:
+                            prog_filters[cohort_filter['program']] = []
+                        prog_filters[cohort_filter['program']].append(cohort_filter)
+                    revision_list.append({'type': 'filter', 'vals': prog_filters})
                 elif source.type == Source.CLONE:
                     revision_list.append('Cloned from %s.' % source.parent.name)
                 elif source.type == Source.PLOT_SEL:
@@ -238,19 +287,48 @@ class Cohort(models.Model):
             revision_list = ['There is no revision history.']
 
         return revision_list
+    
+    @classmethod
+    def format_filters_for_display(cls, filters):
+        prog_vals = {}
+        prog_dts = {}
+        prog_values = None
+        prog_data_types = None
+
+        for cohort_filter in filters:
+            prog_id = Program.objects.get(name=cohort_filter['program'], is_public=True, active=True).id
+            if prog_id not in prog_vals:
+                prog_vals[prog_id] = fetch_metadata_value_set(prog_id)
+            if prog_id not in prog_dts:
+                prog_dts[prog_id] = fetch_program_data_types(prog_id, True)
+
+            prog_values = prog_vals[prog_id]
+            prog_data_types = prog_dts[prog_id]
+
+            if 'MUT:' in cohort_filter['name']:
+                cohort_filter['displ_name'] = cohort_filter['name'].split(':')[1].upper() + ' [' + string.capwords(cohort_filter['name'].split(':')[2])
+                cohort_filter['displ_val'] = (MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) + ']'
+            elif cohort_filter['name'] == 'data_type':
+                cohort_filter['displ_name'] = 'Data Type'
+                cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
+            else:
+                cohort_filter['displ_name'] = prog_values[cohort_filter['name']]['displ_name']
+                if cohort_filter['value'] in prog_values[cohort_filter['name']]['values']:
+                    cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]
+                else:
+                    cohort_filter['displ_val'] = cohort_filter['value']
+
 
     class Meta:
         verbose_name_plural = "Saved Cohorts"
 
+
 class Samples(models.Model):
     cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    sample_id = models.TextField(null=False)
-    study = models.ForeignKey(Study, null=True, blank=True)
+    sample_barcode = models.CharField(max_length=45, null=False, db_index=True)
+    case_barcode = models.CharField(max_length=45, null=True, blank=False, default=None)
+    project = models.ForeignKey(Project, null=True, blank=True)
 
-class Patients(models.Model):
-    cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    patient_id = models.TextField(null=False)
-    # TODO this will need a study column eventually too, but is currently not supported in other areas
 
 class Source(models.Model):
     FILTERS = 'FILTERS'
@@ -285,6 +363,7 @@ class Filters(models.Model):
     resulting_cohort = models.ForeignKey(Cohort, null=True, blank=True)
     name = models.CharField(max_length=256, null=False)
     value = models.CharField(max_length=512, null=False)
+    program = models.ForeignKey(Program, null=True, blank=True)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True)
 
 class Cohort_Comments(models.Model):

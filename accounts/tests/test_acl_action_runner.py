@@ -17,18 +17,17 @@ limitations under the License.s
 """
 
 import csv
-import pytz
 import logging
 from StringIO import StringIO
-import datetime
 
-from django.core.exceptions import ObjectDoesNotExist
 from django.test import TestCase
 from django.utils import timezone
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
-from tasks.nih_whitelist_processor.utils import NIHWhitelist, DatasetToACLMapping, ACLGroupSupportSimulator
+from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
+from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
+from tasks.nih_whitelist_processor.acl_group_util import ACLGroupSupportSimulator
 from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater, \
     AccessControlActionRunner, ExpiredServiceAccountRemover, ServiceAccountDeactivateAction, ServiceAccountRemoveAction
 from tasks.tests.data_generators import create_csv_file_object
@@ -144,7 +143,7 @@ class TestAccessControlActionRunner(TestCase):
              '']
         ]
 
-        whitelist = NIHWhitelist.from_stream(create_csv_file_object(test_csv_data, include_header=True))
+        whitelist = NIHDatasetAuthorizationList.from_stream(create_csv_file_object(test_csv_data, include_header=True))
 
         uad_123 = UserAuthorizedDatasets(nih_user=self.nih_user, authorized_dataset=self.auth_dataset_123)
         uad_123.save()
