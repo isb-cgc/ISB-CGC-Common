@@ -1,11 +1,9 @@
 import logging
 import requests
-from django.core.mail import send_mail
 from django.core.validators import validate_email
 from django.template.loader import get_template
 from django.contrib.auth.models import User
 from django.conf import settings
-from django.template.context import Context
 from django.core.urlresolvers import reverse
 
 from urllib import urlencode
@@ -89,12 +87,3 @@ def create_share(request, item, emails, type, share_user=None):
         }
 
         send_email_message(message_data)
-        # message = mail.EmailMessage()
-        #
-        # message.subject = 'You Were Added on a ' + type
-        # message.body = email_text_template.render(ctx)
-        # message.html = email_template.render(ctx)
-        # message.sender = 'noreply@' + settings.PROJECT_NAME + '.appspotmail.com'
-        # message.to = email
-        #
-        # message.send()

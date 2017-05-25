@@ -44,5 +44,5 @@ def get_directory_resource():
 
     http_auth = delegated_credentials.authorize(Http())
 
-    service = discovery.build('admin', 'directory_v1', http=http_auth)
+    service = discovery.build('admin', 'directory_v1', http=http_auth, cache_discovery=False)
     return service, http_auth

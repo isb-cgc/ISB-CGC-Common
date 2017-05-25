@@ -33,4 +33,4 @@ def get_iam_resource():
         settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(IAM_SCOPES)
     http = httplib2.Http()
     http = credentials.authorize(http)
-    return discovery.build('iam', 'v1', http=http)
+    return discovery.build('iam', 'v1', http=http, cache_discovery=False)

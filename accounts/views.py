@@ -1,6 +1,5 @@
 """
-
-Copyright 2015, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +12,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 """
 
 import logging
@@ -375,7 +373,7 @@ def verify_service_account(gcp_id, service_account, datasets):
                         if not member['datasets_valid']:
                             user_dataset_verified = False
                             if dataset_objs:
-                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                     # IF USER HAS NO ERA COMMONS ID
                     else:
@@ -384,7 +382,7 @@ def verify_service_account(gcp_id, service_account, datasets):
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
                         if dataset_objs:
                             user_dataset_verified = False
-                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{1}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
@@ -580,7 +578,7 @@ def delete_bucket(request, user_id, bucket_id):
         bucket = Bucket.objects.get(id=bucket_id)
 
         # Check to make sure it's not being used by user data
-        user_data_tables = User_Data_Tables.objects.filter(google_bucket_id=bucket_id, study__active=True)
+        user_data_tables = User_Data_Tables.objects.filter(google_bucket_id=bucket_id, project__active=True)
         if len(user_data_tables):
             messages.error(request, 'The bucket, {0}, is being used for uploaded program data. Please delete the program(s) before deleting this bucket. This includes any programs uploaded by other users to ths same bucket.'.format(bucket.bucket_name))
         else:
@@ -638,7 +636,7 @@ def delete_bqdataset(request, user_id, bqdataset_id):
         bqdataset = BqDataset.objects.get(id=bqdataset_id)
 
         # Check to make sure it's not being used by user data
-        user_data_tables = User_Data_Tables.objects.filter(google_bq_dataset_id=bqdataset_id, study__active=True)
+        user_data_tables = User_Data_Tables.objects.filter(google_bq_dataset_id=bqdataset_id, project__active=True)
         if len(user_data_tables):
             messages.error(request,
                            'The dataset, {0}, is being used for uploaded program data. Please delete the program(s) before unregistering this dataset. This includes any programs uploaded by other users to ths same dataset.'.format(
