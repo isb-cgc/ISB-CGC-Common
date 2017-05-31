@@ -57,10 +57,6 @@ BQ_SERVICE = None
 logger = logging.getLogger(__name__)
 
 USER_DATA_ON = settings.USER_DATA_ON
-BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
-COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
-METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
-# This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 def convert(data):
     if isinstance(data, basestring):
@@ -1346,7 +1342,6 @@ def cohort_filelist(request, cohort_id=0):
 
     build = request.GET.get('build', 'HG19')
     items = cohort_files(request, cohort_id, build=build)
-    file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
     nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
     has_access = False
@@ -1366,10 +1361,8 @@ def cohort_filelist(request, cohort_id=0):
                                                             'base_url': settings.BASE_URL,
                                                             'base_api_url': settings.BASE_API_URL,
                                                             'total_files': items['total_file_count'],
-                                                            # 'page': items['page'],
                                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
                                                             'platform_counts': items['platform_count_list'],
-                                                            'filelist': file_list,
                                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                                             'sel_file_max': MAX_SEL_FILES,
                                                             'has_access': has_access,
@@ -1773,7 +1766,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
                             'datacat': item['data_category'] or 'N/A',
-                            'datatype': (item['data_type'] or 'N/A')
+                            'datatype': (item['data_type'] or 'N/A'),
+                            'program': program.name
                         })
 
         platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]
