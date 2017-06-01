@@ -23,7 +23,8 @@ from django.test import TestCase
 
 from accounts.models import NIH_User, AuthorizedDataset, UserAuthorizedDatasets
 
-from tasks.nih_whitelist_processor.utils import NIHWhitelist, DatasetToACLMapping
+from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
+from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
 from tasks.nih_whitelist_processor.django_utils import ERAUserAuthDatasetUpdater, NIHDatasetAdder
 from tasks.tests.data_generators import create_csv_file_object
 
@@ -34,6 +35,7 @@ logging.basicConfig(
 
 DATABASE_ALIAS = 'default'
 
+
 class OneDatasetTestCase(TestCase):
     def test_one_line(self):
         test_csv_data = [
@@ -42,7 +44,7 @@ class OneDatasetTestCase(TestCase):
         ]
 
         data = create_csv_file_object(test_csv_data, include_header=True)
-        whitelist = NIHWhitelist.from_stream(data)
+        whitelist = NIHDatasetAuthorizationList.from_stream(data)
 
         test_dataset_mapping = {
             'phs000123': {
@@ -67,7 +69,7 @@ class OneDatasetTestCase(TestCase):
         ]
 
         data = create_csv_file_object(test_csv_data, include_header=True)
-        whitelist = NIHWhitelist.from_stream(data)
+        whitelist = NIHDatasetAuthorizationList.from_stream(data)
 
         test_dataset_mapping = {
             'phs000123': {
@@ -96,7 +98,7 @@ class OneDatasetTestCase(TestCase):
         ]
 
         data = create_csv_file_object(test_csv_data, include_header=True)
-        whitelist = NIHWhitelist.from_stream(data)
+        whitelist = NIHDatasetAuthorizationList.from_stream(data)
 
         test_dataset_mapping = {
             'phs000123': {

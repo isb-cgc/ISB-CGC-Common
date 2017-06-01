@@ -35,5 +35,5 @@ def get_reports_resource():
 
     http_auth = delegated_credentials.authorize(Http())
 
-    service = discovery.build('admin', 'reports_v1', http=http_auth)
+    service = discovery.build('admin', 'reports_v1', http=http_auth, cache_discovery=False)
     return service, http_auth
