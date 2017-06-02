@@ -377,7 +377,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             filter_table = tmp_filter_table
 
             make_tmp_table_str = """
-              CREATE TEMPORARY TABLE %s AS
+              CREATE TEMPORARY TABLE %s
+              (INDEX (sample_barcode))
               SELECT ms.*
               FROM %s ms
             """ % (tmp_filter_table, base_table,)
@@ -403,7 +404,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             filter_table = tmp_filter_table
 
             make_tmp_table_str = """
-                CREATE TEMPORARY TABLE %s AS
+                CREATE TEMPORARY TABLE %s
+                (INDEX (sample_barcode))
                 SELECT ms.*
                 FROM %s ms
                 JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode

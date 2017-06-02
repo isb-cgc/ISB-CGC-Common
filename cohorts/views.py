@@ -89,6 +89,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     filters = {}
     mutation_filters = None
     user_data_filters = None
+    data_type_filters = False
     mutation_where_clause = None
 
     if inc_filters is None:
@@ -105,6 +106,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 user_data_filters = {}
             user_data_filters[key] = inc_filters[key]
         else:
+            if 'data_type' in key:
+                data_type_filters = True
             filters[key] = inc_filters[key]
 
     # User data filters trump all other filters; if there are any which came along
@@ -222,7 +225,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # construct the WHERE clauses needed
         if len(filters) > 0:
             filter_copy = copy.deepcopy(filters)
-            where_clause = build_where_clause(filter_copy)
+            where_clause = build_where_clause(filter_copy, program=program_id)
 
         filter_table = None
         tmp_mut_table = None
@@ -350,29 +353,36 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         if data_avail_table:
             data_type_subquery = data_type_query % data_avail_table
 
+        data_type_join = ''
+
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
 
+            if data_type_subquery and data_type_filters:
+                data_type_join = 'LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode ' % data_type_subquery
+
             if cohort_id:
                 cohort_subquery = cohort_query % cohort_id
 
                 make_tmp_table_str = """
-                    CREATE TEMPORARY TABLE %s AS
+                    CREATE TEMPORARY TABLE %s
+                    (INDEX (sample_barcode))
                     SELECT sample_barcode, case_barcode, project_id
                     FROM %s
                     JOIN (%s) cs ON cs_sample_barcode = sample_barcode
-                    LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode
-                  """ % (tmp_filter_table, base_table, cohort_subquery, data_type_subquery,)
+                    %s
+                  """ % (tmp_filter_table, base_table, cohort_subquery, data_type_join,)
 
             else:
                 make_tmp_table_str = """
-                  CREATE TEMPORARY TABLE %s AS
+                  CREATE TEMPORARY TABLE %s
+                  (INDEX (sample_barcode))
                   SELECT sample_barcode, case_barcode, project_short_name
                   FROM %s
-                  LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode
-                """ % (tmp_filter_table, base_table, data_type_subquery,)
+                  %s
+                """ % (tmp_filter_table, base_table, data_type_join,)
 
             if tmp_mut_table:
                 make_tmp_table_str += ' JOIN %s ON tumor_sample_id = sample_barcode' % tmp_mut_table
@@ -383,12 +393,14 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             make_tmp_table_str += ";"
 
             cursor.execute(make_tmp_table_str, params_tuple)
+            db.commit()
 
         elif tmp_mut_table:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = """
-                CREATE TEMPORARY TABLE %s AS
+                CREATE TEMPORARY TABLE %s
+                (INDEX (sample_barcode))
                 SELECT *
                 FROM %s
                 JOIN %s ON tumor_sample_id = sample_barcode
@@ -399,6 +411,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 make_tmp_table_str += ' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery
 
             cursor.execute(make_tmp_table_str)
+            db.commit()
         else:
             filter_table = base_table
 
@@ -408,7 +421,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
         # determine the project based on the program
         if cohort_id:
-            print >> sys.stdout, "[STATUS] In get_sample_case_list, filter table: "+filter_table
             if len(filters) <= 0 and not mutation_filters:
                 cursor.execute(('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table) + ' WHERE cohort_id = %s;', (cohort_id,))
             else:
