@@ -71,8 +71,6 @@ def convert(data):
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
 
-    print >> sys.stdout, "Getting samples and cases for program "+('None' if not program_id else str(program_id))
-
     if program_id is None and cohort_id is None:
         # We must always have a program_id or a cohort_id - we cannot have neither, because then
         # we have no way to know where to source our samples from
@@ -357,7 +355,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
-            print >> sys.stdout, "Filters seen, making temporary filtered table..."
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
 
@@ -416,15 +413,12 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         else:
             filter_table = base_table
 
-        print >> sys.stdout, "tmp table made, JOINing against MS samples for project IDs..."
-
         # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
         # and cases
         # If there was a cohort ID, project IDs will have been stored in the cohort_samples table and we do not
         # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
         # determine the project based on the program
         if cohort_id:
-            print >> sys.stdout, "[STATUS] In get_sample_case_list, filter table: "+filter_table
             if len(filters) <= 0 and not mutation_filters:
                 cursor.execute(('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table) + ' WHERE cohort_id = %s;', (cohort_id,))
             else:
@@ -450,8 +444,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         for row in cursor.fetchall():
             samples_and_cases['cases'].append(row[0])
-
-        print >> sys.stdout, "Got sample case list"
 
         return samples_and_cases
 
