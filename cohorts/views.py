@@ -101,6 +101,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
+            build = key.split(':')[1]
         elif 'user_' in key:
             if not user_data_filters:
                 user_data_filters = {}
@@ -252,6 +253,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             query_template = None
 
             bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+            sample_barcode_col = bq_table_info['sample_barcode_col']
             bq_dataset = bq_table_info['dataset']
             bq_table = bq_table_info['table']
             bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
@@ -277,15 +279,15 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
             else:
                 query_template = \
-                    ("SELECT sample_barcode_tumor"
+                    ("SELECT {barcode_col}"
                      " FROM [{data_project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY sample_barcode_tumor; ")
+                     " GROUP BY {barcode_col}; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
             query = query_template.format(
-                dataset_name=bq_dataset, project_name=bq_cohort_project_name, table_name=bq_table,
+                dataset_name=bq_dataset, project_name=bq_cohort_project_name, table_name=bq_table, barcode_col=sample_barcode_col,
                 hugo_symbol=str(params['gene']), data_project_name=bq_data_project_name,  var_class=params['var_class'],
                 cohort_dataset=bq_cohort_dataset,cohort_table=bq_cohort_table, cohort=cohort
             )
@@ -1599,12 +1601,17 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
         clin_attr = fetch_program_attr(program_id)
 
         molecular_attr = {}
+        molecular_attr_builds = None
 
         if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
             molecular_attr = {
                 'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
                 'attrs': MOLECULAR_ATTR
             }
+
+            molecular_attr_builds = [
+                {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys() if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
+            ]
 
             # Note which attributes are in which categories
             for cat in molecular_attr['categories']:
@@ -1624,6 +1631,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             'total_samples': int(results['total']),
             'clin_attr': clin_attr,
             'molecular_attr': molecular_attr,
+            'molecular_attr_builds': molecular_attr_builds,
             'data_types': data_types,
             'metadata_filters': filters or {},
             'program': public_program,
