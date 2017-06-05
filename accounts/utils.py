@@ -20,7 +20,7 @@ from json import loads as json_loads
 import logging
 from re import compile as re_compile
 
-from google_helpers.storage_service import get_storage_resource
+from jsonschema import validate as schema_validate, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,7 @@ class ServiceObjectBase(object):
         Returns:
             File contents.
         """
+        from google_helpers.storage_service import get_storage_resource
         logger.debug("{}.from_google_cloud_storage {} {}".format(type(cls), repr(bucket_name), repr(filename)))
         storage_service = get_storage_resource()
         req = storage_service.objects().get_media(bucket=bucket_name,
@@ -118,11 +119,26 @@ class ServiceObjectBase(object):
 
 
 class ServiceAccountBlacklist(ServiceObjectBase):
-    def __init__(self, ):
-        pass
+    SCHEMA = {
+        'type': 'object',
+        'properties': {
+            'service_account_blacklist': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                }
+            }
+        },
+        'required': [
+            'service_account_blacklist'
+        ]
+    }
+
+    def __init__(self, service_account_blacklist):
+        self.service_account_blacklist = set(service_account_blacklist)
 
     def is_blacklisted(self, service_account_email):
-        pass
+        return service_account_email in self.service_account_blacklist
 
     @staticmethod
     def get_django_values():
@@ -142,6 +158,14 @@ class ServiceAccountBlacklist(ServiceObjectBase):
         return set(values)
 
     @classmethod
-    def from_json_file(cls, file_path, include_django_settings=False):
-        pass
+    def from_dict(cls, data):
+        """
+
+        Throws:
+            ValidationError if the data object does not match the required schema.
+        """
+        schema_validate(data, cls.SCHEMA)
+        return cls(data['service_account_blacklist'])
+
+
 
