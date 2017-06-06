@@ -36,10 +36,13 @@ from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 
+from .utils import ServiceAccountBlacklist
+
 logger = logging.getLogger(__name__)
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 CONTROLLED_ACL_GOOGLE_GROUP = settings.ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
+SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 
 @login_required
 def extended_logout_view(request):
@@ -306,6 +309,19 @@ def verify_service_account(gcp_id, service_account, datasets):
         'message': '{0}: Begin verification of service account.'.format(service_account)
     }
     st_logger.write_struct_log_entry(log_name, resp)
+
+    # Block verification of service accounts used by the application
+    try:
+        sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
+    except Exception as e:
+        logger.error("Error while creating ServiceAccountBlacklist instance")
+        logger.exception(e)
+        return {'message': 'An error occurred while validating the service account.'}
+
+    if sab.is_blacklisted(service_account):
+        st_logger.write_text_log_entry(log_name, "{0}: Service account is blacklisted.".format(service_account))
+        return {'message': 'This service account cannot be registered.'}
+
     # 1. GET ALL USERS ON THE PROJECT.
     try:
         crm_service = get_special_crm_resource()
