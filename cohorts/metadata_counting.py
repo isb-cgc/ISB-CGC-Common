@@ -205,6 +205,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
+            build = key.split(':')[1]
         elif 'data_type' in key:
             data_type_filters[key.split(':')[-1]] = inc_filters[key]
         else:
@@ -274,6 +275,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             cohort = ''
 
             bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+            sample_barcode_col = bq_table_info['sample_barcode_col']
             bq_dataset = bq_table_info['dataset']
             bq_table = bq_table_info['table']
             bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
@@ -298,17 +300,19 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 cohort = cohort_id
             else:
                 query_template = \
-                    ("SELECT sample_barcode_tumor"
+                    ("SELECT {barcode_col}"
                      " FROM [{data_project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY sample_barcode_tumor; ")
+                     " GROUP BY {barcode_col}; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
             query = query_template.format(dataset_name=bq_dataset, cohort_project_name=bq_cohort_project_name,
-                                          data_project_name=bq_data_project_name, table_name=bq_table,
+                                          data_project_name=bq_data_project_name, table_name=bq_table, barcode_col=sample_barcode_col,
                                           hugo_symbol=str(params['gene']), var_class=params['var_class'],
                                           cohort_dataset=bq_cohort_dataset, cohort_table=bq_cohort_table, cohort=cohort)
+
+            print >> sys.stdout, str(query)
 
             bq_service = authorize_credentials_with_Google()
             query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, query)
@@ -377,7 +381,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             filter_table = tmp_filter_table
 
             make_tmp_table_str = """
-              CREATE TEMPORARY TABLE %s AS
+              CREATE TEMPORARY TABLE %s
+              (INDEX (sample_barcode))
               SELECT ms.*
               FROM %s ms
             """ % (tmp_filter_table, base_table,)
@@ -403,7 +408,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             filter_table = tmp_filter_table
 
             make_tmp_table_str = """
-                CREATE TEMPORARY TABLE %s AS
+                CREATE TEMPORARY TABLE %s
+                (INDEX (sample_barcode))
                 SELECT ms.*
                 FROM %s ms
                 JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode
