@@ -648,12 +648,11 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort_programs = [ {'id': x.id, 'name': x.name, 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
-            shared_with_users = []
-
-            # Do not show shared users for public cohorts
-            if not cohort.is_public():
-                shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
-                shared_with_users = User.objects.filter(id__in=shared_with_ids)
+            # Disable sharing and share-listing for now
+            # # Do not show shared users for public cohorts
+            # if not cohort.is_public():
+            #     shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
+            #     shared_with_users = User.objects.filter(id__in=shared_with_ids)
 
             template = 'cohorts/cohort_details.html'
             template_values['cohort'] = cohort
@@ -666,7 +665,9 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         messages.error(request, 'The cohort you were looking for does not exist.')
         return redirect('cohort_list')
     except Exception as e:
-        messages.error(request, "There was an error while trying to load the cohort details page.")
+        logger.error("[ERROR] Exception while trying to view a cohort:")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to load that cohort's details page.")
         return redirect('cohort_list')
 
     return render(request, template, template_values)
