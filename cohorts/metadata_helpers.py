@@ -410,6 +410,14 @@ def fetch_metadata_value_set(program=None):
                     elif METADATA_ATTR[program][row['attr_name']]['type'] == 'N':
                         METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
 
+            # Fetch the tooltip strings for Disease Codes
+            cursor = db.cursor()
+            cursor.callproc('get_project_tooltips', (program,))
+
+            for row in cursor.fetchall():
+                if 'disease_code' in METADATA_ATTR[program] and row[0] in METADATA_ATTR[program]['disease_code']['values']:
+                    METADATA_ATTR[program]['disease_code']['values'][row[0]]['tooltip'] = row[1]
+
         return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
