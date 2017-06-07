@@ -241,6 +241,7 @@ class Public_Metadata_Tables(models.Model):
     attr_table = models.CharField(max_length=100)
     clin_table = models.CharField(max_length=100)
     biospec_table = models.CharField(max_length=100)
+    projects_table = models.CharField(max_length=100,  null=True)
     annot_tables = models.ForeignKey(Public_Annotation_Tables, null=True)
     sample_data_availability_table = models.CharField(max_length=100)
     sample_data_type_availability_table = models.CharField(max_length=100)
