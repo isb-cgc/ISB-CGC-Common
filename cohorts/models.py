@@ -306,8 +306,8 @@ class Cohort(models.Model):
             prog_data_types = prog_dts[prog_id]
 
             if 'MUT:' in cohort_filter['name']:
-                cohort_filter['displ_name'] = cohort_filter['name'].split(':')[1].upper() + ' [' + string.capwords(cohort_filter['name'].split(':')[2])
-                cohort_filter['displ_val'] = (MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[2] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) + ']'
+                cohort_filter['displ_name'] = cohort_filter['name'].split(':')[2].upper() + ' [' + cohort_filter['name'].split(':')[1].upper() + ',' + string.capwords(cohort_filter['name'].split(':')[3])
+                cohort_filter['displ_val'] = (MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[3] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) + ']'
             elif cohort_filter['name'] == 'data_type':
                 cohort_filter['displ_name'] = 'Data Type'
                 cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
@@ -318,7 +318,7 @@ class Cohort(models.Model):
                 else:
                     cohort_filter['displ_name'] = prog_values[cohort_filter['name']]['displ_name']
                     if cohort_filter['value'] in prog_values[cohort_filter['name']]['values']:
-                        cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]
+                        cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]['displ_value']
                     else:
                         cohort_filter['displ_val'] = cohort_filter['value']
 
