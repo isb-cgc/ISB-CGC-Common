@@ -529,13 +529,13 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     cohorts.has_private_cohorts = False
     shared_users = {}
 
-    # for item in cohorts:
-    #     item.perm = item.get_perm(request).get_perm_display()
-    #     item.owner = item.get_owner()
+    for item in cohorts:
+        item.perm = item.get_perm(request).get_perm_display()
+        item.owner = item.get_owner()
     #     shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user', flat=True)
     #     item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
-    #     if not item.owner.is_superuser:
-    #         cohorts.has_private_cohorts = True
+        if not item.owner.is_superuser:
+            cohorts.has_private_cohorts = True
     #         # if it is not a public cohort and it has been shared with other users
     #         # append the list of shared users to the shared_users array
     #         if item.shared_with_users:
