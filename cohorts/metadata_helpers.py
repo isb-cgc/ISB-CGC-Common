@@ -112,7 +112,10 @@ MOLECULAR_DISPLAY_STRINGS = {
 #       <attr name>: {
 #           'displ_name': <attr display name>,
 #           'values': {
-#               <metadata attr value>: <metadata attr display value>, [...]
+#               <metadata attr value>: {
+#                   'displ_value': <metadata attr display value>,
+#                   'tooltip': <tooltip value>
+#               }
 #           }, [...]
 #       }, [...]
 #   }, [...]
@@ -392,11 +395,15 @@ def fetch_metadata_value_set(program=None):
             cursor.callproc('get_metadata_values', (program,))
 
             for row in cursor.fetchall():
-                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
+                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = {
+                    'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
+                }
 
             while (cursor.nextset() and cursor.description is not None):
                 for row in cursor.fetchall():
-                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
+                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = {
+                        'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
+                    }
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -405,18 +412,24 @@ def fetch_metadata_value_set(program=None):
             for row in cursor.fetchall():
                 if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program]:
                     if row['value_name'] in METADATA_ATTR[program][row['attr_name']]['values']:
-                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
+                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = {
+                            'displ_value': row['display_string'],
+                        }
                     # Bucketed continuous numerics like BMI will not already have values in, since the bucketing is done in post-process
                     elif METADATA_ATTR[program][row['attr_name']]['type'] == 'N':
-                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
+                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = {
+                            'displ_value': row['display_string'],
+                        }
 
             # Fetch the tooltip strings for Disease Codes
-            # cursor = db.cursor()
-            # cursor.callproc('get_project_tooltips', (program,))
-            #
-            # for row in cursor.fetchall():
-            #     if 'disease_code' in METADATA_ATTR[program] and row[0] in METADATA_ATTR[program]['disease_code']['values']:
-            #         METADATA_ATTR[program]['disease_code']['values'][row[0]]['tooltip'] = row[1]
+            cursor = db.cursor()
+            cursor.callproc('get_project_tooltips', (program,))
+
+            for row in cursor.fetchall():
+                if 'disease_code' in METADATA_ATTR[program] and row[0] in METADATA_ATTR[program]['disease_code']['values']:
+                    METADATA_ATTR[program]['disease_code']['values'][row[0]]['tooltip'] = row[2]
+                if 'project_short_name' in METADATA_ATTR[program] and row[1] in METADATA_ATTR[program]['project_short_name']['values']:
+                    METADATA_ATTR[program]['project_short_name']['values'][row[1]]['tooltip'] = row[2]
 
         return copy.deepcopy(METADATA_ATTR[program])
 
