@@ -685,7 +685,9 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                     if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None \
                             and len(metadata_attr_values[attr]['values'][value]) > 0:
-                        val_obj['displ_name'] = metadata_attr_values[attr]['values'][value]
+                        val_obj['displ_name'] = metadata_attr_values[attr]['values'][value]['displ_value']
+                        if 'tooltip' in metadata_attr_values[attr]['values'][value]:
+                            val_obj['tooltip'] = metadata_attr_values[attr]['values'][value]['tooltip']
 
                     value_list.append(val_obj)
 
