@@ -618,7 +618,16 @@ def project_data_error(request, program_id=0, project_id=0, dataset_id=0):
     if not datatables.data_upload.key == request.GET.get('key'):
         raise Exception("Invalid data key when marking data success")
 
+    #
+    # New! We can get an error message back from the UDU server:
+    #
+
+    err_msg = request.GET.get('errmsg')
+    if err_msg:
+        datatables.data_upload.message = err_msg
+
     datatables.data_upload.status = 'Error'
+
     datatables.data_upload.save()
 
     return JsonResponse({
