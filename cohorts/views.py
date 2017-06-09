@@ -532,14 +532,14 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     for item in cohorts:
         item.perm = item.get_perm(request).get_perm_display()
         item.owner = item.get_owner()
-        shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user', flat=True)
-        item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
+    #     shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user', flat=True)
+    #     item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
         if not item.owner.is_superuser:
             cohorts.has_private_cohorts = True
-            # if it is not a public cohort and it has been shared with other users
-            # append the list of shared users to the shared_users array
-            if item.shared_with_users:
-                shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
+    #         # if it is not a public cohort and it has been shared with other users
+    #         # append the list of shared users to the shared_users array
+    #         if item.shared_with_users:
+    #             shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
         # print local_zone.localize(item.last_date_saved)
 
@@ -648,12 +648,11 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort_programs = [ {'id': x.id, 'name': x.name, 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
-            shared_with_users = []
-
-            # Do not show shared users for public cohorts
-            if not cohort.is_public():
-                shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
-                shared_with_users = User.objects.filter(id__in=shared_with_ids)
+            # Disable sharing and share-listing for now
+            # # Do not show shared users for public cohorts
+            # if not cohort.is_public():
+            #     shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
+            #     shared_with_users = User.objects.filter(id__in=shared_with_ids)
 
             template = 'cohorts/cohort_details.html'
             template_values['cohort'] = cohort
@@ -666,7 +665,9 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         messages.error(request, 'The cohort you were looking for does not exist.')
         return redirect('cohort_list')
     except Exception as e:
-        messages.error(request, "There was an error while trying to load the cohort details page.")
+        logger.error("[ERROR] Exception while trying to view a cohort:")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to load that cohort's details page.")
         return redirect('cohort_list')
 
     return render(request, template, template_values)
@@ -944,21 +945,23 @@ def delete_cohort(request):
 @csrf_protect
 def share_cohort(request, cohort_id=0):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
-    user_ids = request.POST.getlist('users')
-    users = User.objects.filter(id__in=user_ids)
+    redirect_url = '/cohorts/'
 
-    if cohort_id == 0:
-        redirect_url = '/cohorts/'
-        cohort_ids = request.POST.getlist('cohort-ids')
-        cohorts = Cohort.objects.filter(id__in=cohort_ids)
-    else:
-        redirect_url = '/cohorts/%s' % cohort_id
-        cohorts = Cohort.objects.filter(id=cohort_id)
-    for user in users:
-
-        for cohort in cohorts:
-            obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-            obj.save()
+    # user_ids = request.POST.getlist('users')
+    # users = User.objects.filter(id__in=user_ids)
+    #
+    # if cohort_id == 0:
+    #     redirect_url = '/cohorts/'
+    #     cohort_ids = request.POST.getlist('cohort-ids')
+    #     cohorts = Cohort.objects.filter(id__in=cohort_ids)
+    # else:
+    #     redirect_url = '/cohorts/%s' % cohort_id
+    #     cohorts = Cohort.objects.filter(id=cohort_id)
+    # for user in users:
+    #
+    #     for cohort in cohorts:
+    #         obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+    #         obj.save()
 
     return redirect(redirect_url)
 
