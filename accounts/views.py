@@ -18,6 +18,7 @@ limitations under the License.
 
 import logging
 import datetime
+import traceback
 
 from allauth.account import views as account_views
 from allauth.socialaccount.models import SocialAccount
@@ -37,6 +38,7 @@ from models import *
 from projects.models import User_Data_Tables
 
 from .utils import ServiceAccountBlacklist
+import json
 
 logger = logging.getLogger(__name__)
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
@@ -53,7 +55,7 @@ def extended_logout_view(request):
         nih_user.dbGaP_authorized = False
         nih_user.save()
         logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
-    except (ObjectDoesNotExist, MultipleObjectsReturned), e:
+    except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
         if type(e) is MultipleObjectsReturned:
             logger.warn("Error %s on logout: more than one NIH User with user id %d" % (str(e), request.user.id))
 
@@ -65,7 +67,7 @@ def extended_logout_view(request):
         logger.info("Attempting to delete user {} from group {}. "
                     "If an error message doesn't follow, they were successfully deleted"
                     .format(str(user_email), CONTROLLED_ACL_GOOGLE_GROUP))
-    except HttpError, e:
+    except HttpError as e:
         logger.info(e)
 
     # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
@@ -75,7 +77,7 @@ def extended_logout_view(request):
         logger.info("Attempting to insert user {} into group {}. "
                     "If an error message doesn't follow, they were successfully added."
                     .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
-    except HttpError, e:
+    except HttpError as e:
         logger.info(e)
 
     response = account_views.logout(request)
@@ -125,7 +127,7 @@ def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
         nih_account_to_unlink.save()
         unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
-    except MultipleObjectsReturned, e:
+    except MultipleObjectsReturned as e:
         nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
 
         for nih_account_to_unlink in nih_user_query_set:
@@ -162,7 +164,7 @@ def unlink_accounts(request):
         try:
             directory_service.members().delete(groupKey=action.acl_group_name,
                                                memberKey=user_email).execute(http=http_auth)
-        except HttpError, e:
+        except HttpError as e:
             logger.error("{} could not be deleted from {}, probably because they were not a member" .format(user_email, CONTROLLED_ACL_GOOGLE_GROUP))
             logger.exception(e)
 
@@ -287,7 +289,7 @@ def user_gcp_delete(request, user_id, gcp_id):
                 logger.info("Attempting to delete user {} from group {}. "
                             "If an error message doesn't follow, they were successfully deleted"
                             .format(service_account.service_account, CONTROLLED_ACL_GOOGLE_GROUP))
-        except HttpError, e:
+        except HttpError as e:
             logger.info(e)
 
         gcp.delete()
@@ -314,8 +316,11 @@ def verify_service_account(gcp_id, service_account, datasets):
     try:
         sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
     except Exception as e:
-        logger.error("Error while creating ServiceAccountBlacklist instance")
+        logger.error("Exception while creating ServiceAccountBlacklist instance")
         logger.exception(e)
+        trace_msg = traceback.format_exc()
+        st_logger.write_text_log_entry(log_name, "Exception while creating ServiceAccountBlacklist instance")
+        st_logger.write_text_log_entry(log_name, trace_msg)
         return {'message': 'An error occurred while validating the service account.'}
 
     if sab.is_blacklisted(service_account):
@@ -414,7 +419,7 @@ def verify_service_account(gcp_id, service_account, datasets):
                 # 4. VERIFY PI IS ON THE PROJECT
 
 
-    except HttpError, e:
+    except HttpError as e:
         return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
 
     '''
@@ -509,7 +514,7 @@ def register_sa(request, user_id):
                                 "If an error message doesn't follow, they were successfully added."
                                 .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
-                except HttpError, e:
+                except HttpError as e:
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
                     logger.info(e)
 
@@ -538,7 +543,7 @@ def delete_sa(request, user_id, sa_id):
             logger.info("Attempting to delete user {} from group {}. "
                         "If an error message doesn't follow, they were successfully deleted"
                         .format(sa.service_account, sa.authorized_dataset.acl_google_group))
-        except HttpError, e:
+        except HttpError as e:
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(sa.service_account), sa.authorized_dataset.acl_google_group)})
             logger.info(e)
@@ -579,8 +584,22 @@ def register_bucket(request, user_id, gcp_id):
                     messages.error(request, 'The bucket, {0}, was not found in the Google Cloud Project, {1}.'.format(
                         bucket_name, gcp.project_id))
 
-        except HttpError, e:
-            messages.error(request, 'There was an unknown error processing this request.')
+        except HttpError as e:
+            if e.resp.status == 403:
+                messages.error(request, 'Access to the bucket {0} in Google Cloud Project {1} was denied.'.format(
+                    bucket_name, gcp.project_id))
+            elif e.resp.get('content-type', '').startswith('application/json'):
+                err_val = json.loads(e.content).get('error')
+                if err_val:
+                    e_message = err_val.get('message')
+                else:
+                    e_message = "HTTP error {0}".format(str(e.resp.status))
+                messages.error(request,
+                               'Error returned trying to access bucket {0} in Google Cloud Project {1}: {2}.'.format(
+                                bucket_name, gcp.project_id, e_message))
+            else:
+                messages.error(request, 'There was an unknown error processing this request.')
+
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '{0}: There was an error accessing the Google Cloud Project bucket list.'.format(
                     str(gcp.project_id))})
@@ -636,7 +655,7 @@ def register_bqdataset(request, user_id, gcp_id):
                 messages.error(request, 'The dataset, {0}, was not found in the Google Cloud Project, {1}.'.format(
                     bqdataset_name, gcp.project_id))
 
-        except HttpError, e:
+        except HttpError as e:
             messages.error(request, 'There was an unknown error processing this request.')
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '{0}: There was an error accessing the Google Cloud Project dataset list.'.format(

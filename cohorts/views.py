@@ -870,7 +870,11 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                             project = item['project_id']
                         sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
 
+                bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
+                bulk_stop = time.time()
+                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+
 
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -992,7 +996,10 @@ def clone_cohort(request, cohort_id):
     sample_list = []
     for sample in samples:
         sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
+    bulk_start = time.time()
     Samples.objects.bulk_create(sample_list)
+    bulk_stop = time.time()
+    logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
     # Clone the filters
     filters = Filters.objects.filter(resulting_cohort=parent_cohort)
@@ -1213,7 +1220,10 @@ def set_operation(request):
                 for sample in samples:
                     sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
 
+                bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
+                bulk_stop = time.time()
+                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
                 # get the full resulting sample and case ID set
                 samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
@@ -1339,7 +1349,10 @@ def save_cohort_from_plot(request):
         for sample in samples:
             for project in sample['project']:
                 sample_list.append(Samples(cohort=cohort, sample_barcode=sample['sample'], case_barcode=sample['case'], project_id=project))
+        bulk_start = time.time()
         Samples.objects.bulk_create(sample_list)
+        bulk_stop = time.time()
+        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
