@@ -1,6 +1,6 @@
 """
 
-Copyright 2015, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -59,6 +59,7 @@ class BqDataset(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     dataset_name = models.CharField(null=False, max_length=155)
 
+
 class AuthorizedDataset(models.Model):
     name = models.CharField(max_length=256, null=False)
     whitelist_id = models.CharField(max_length=256, null=False)
@@ -77,13 +78,24 @@ class UserAuthorizedDatasets(models.Model):
 class ServiceAccount(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     service_account = models.CharField(max_length=1024, null=False)
-    authorized_date = models.DateTimeField(auto_now=True)
-    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=True)
     active = models.BooleanField(default=False, null=False)
 
     def __str__(self):
-        return '{service_account} of project {google_project} for dataset id {authorized_dataset}'.format(
+        auth_datasets = AuthorizedDataset.objects.filter(
+            id__in=ServiceAccountAuthorizedDatasets.objects.filter(
+                service_account=self).values_list('authorized_dataset', flat=True
+            )
+        ).values_list('name','whitelist_id')
+
+
+        return '{service_account} of project {google_project} authorized for datasets: {datasets}'.format(
             service_account=self.service_account,
             google_project=str(self.google_project),
-            authorized_dataset=self.authorized_dataset.whitelist_id
+            datasets=", ".join([x[0]+' ['+x[1]+']' for x in auth_datasets])
         )
+
+
+class ServiceAccountAuthorizedDatasets(models.Model):
+    service_account = models.ForeignKey(ServiceAccount, null=False)
+    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
+    authorized_date = models.DateTimeField(auto_now=True)
