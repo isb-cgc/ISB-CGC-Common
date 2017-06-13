@@ -199,7 +199,8 @@ def get_sql_connection():
             'passwd': database['PASSWORD'],
         }
 
-        if not settings.IS_DEV:
+        # Only use the socket if it's there to be used and we're not in a dev environment
+        if not settings.IS_DEV and settings.DB_SOCKET:
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
