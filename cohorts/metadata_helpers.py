@@ -200,7 +200,7 @@ def get_sql_connection():
             'passwd': database['PASSWORD'],
         }
 
-        if not settings.IS_DEV:
+        if not settings.IS_DEV and settings.DB_SOCKET:
             print >> sys.stdout, "Deployment detected - using socket"
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
