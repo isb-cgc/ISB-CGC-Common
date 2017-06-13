@@ -77,9 +77,9 @@ class DatasetConfiguration(ServiceObjectBase):
     def __init__(self, whitelist_files):
         self.whitelist_files = whitelist_files
 
-    def get_auth_list_gcs_path_for_dataset_id(self, dataset_id):
+    def get_auth_list_gcs_bucket_and_object_for_dataset_id(self, dataset_id):
         """
-        Answers the authorization list GCS path given a dataset ID.
+        Answers the GCS bucket and object names of an authorization list file given a dataset ID.
         """
         # TODO implement
         pass
