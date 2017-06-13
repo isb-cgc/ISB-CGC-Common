@@ -494,7 +494,7 @@ def upload_files(request):
             resp = {
                 'status': "error",
                 'error': "exception",
-                'message': "There was an error processing your user data - check that destination project allows ISB-CGC editor permissions."
+                'message': "There was an error: check that destination project still allows ISB-CGC editor permissions and that selected Cloud Bucket and BigQuery dataset still exist."
             }
 
         else:
