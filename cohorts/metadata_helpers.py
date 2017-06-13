@@ -201,15 +201,21 @@ def get_sql_connection():
         }
 
         if not settings.IS_DEV:
+            print >> sys.stdout, "Deployment detected - using socket"
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
         if 'OPTIONS' in database and 'ssl' in database['OPTIONS'] and not (settings.IS_APP_ENGINE_FLEX or settings.IS_APP_ENGINE):
+            print >> sys.stdout, "Lack of AE detected and SSL detected - using SSL"
             connect_options['ssl'] = database['OPTIONS']['ssl']
 
-        print >> sys.stdout, "[STATUS] connect_options: "+ connect_options['host'] + ':' + connect_options['db'] + ':' + \
-             connect_options['user'] + ((':' + connect_options['unix_socket']) if 'unix_socket' in connect_options else '') + \
-             ((':' + str(connect_options['ssl'])) if 'ssl' in connect_options else '')
+        print >> sys.stdout, "[STATUS] connect_options: "+ connect_options['host'] + ':' + connect_options['db'] + ':' + connect_options['user']
+        if 'unix_socket' in connect_options and connect_options['unix_socket'] is not None:
+            print >> sys.stdout, "unix_socket: "+connect_options['unix_socket']
+        if 'ssl' in connect_options and connect_options['ssl'] is not None:
+            print >> sys.stdout, "unix_socket: "+str(connect_options['ssl'])
+
+
 
         db = MySQLdb.connect(**connect_options)
 
