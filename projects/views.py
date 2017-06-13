@@ -489,11 +489,20 @@ def upload_files(request):
         if request.POST['program-type'] == 'new':
             program.delete()
 
-        resp = {
-            'status': "error",
-            'error': "exception",
-            'message': "There was an error processing your user data - please double check your files and try again. There must be no empty lines at the end of your files."
-        }
+        # Seeing broken pipe error when trying to access project with permissions removed, instead of no HTTP access:
+        if 'Broken pipe' in e.message:
+            resp = {
+                'status': "error",
+                'error': "exception",
+                'message': "There was an error: check that destination project still allows ISB-CGC editor permissions and that selected Cloud Bucket and BigQuery dataset still exist."
+            }
+
+        else:
+            resp = {
+                'status': "error",
+                'error': "exception",
+                'message': "There was an error processing your user data - please double check your files and project permissions and try again."
+            }
 
     return JsonResponse(resp)
 
