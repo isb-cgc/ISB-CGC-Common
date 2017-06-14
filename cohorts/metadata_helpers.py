@@ -174,7 +174,7 @@ BQ_MOLECULAR_ATTR_TABLES = {
         'HG38': {
             'table': 'Somatic_Mutation',
             'dataset': 'TCGA_hg38_data_v0',
-            'sample_barcode_col': 'Tumor_Sample_Barcode',
+            'sample_barcode_col': 'sample_barcode_tumor',
         },
     },
     'CCLE': None,
