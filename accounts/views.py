@@ -18,6 +18,7 @@ limitations under the License.
 
 import logging
 import datetime
+import traceback
 
 from allauth.account import views as account_views
 from allauth.socialaccount.models import SocialAccount
@@ -315,8 +316,11 @@ def verify_service_account(gcp_id, service_account, datasets):
     try:
         sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
     except Exception as e:
-        logger.error("Error while creating ServiceAccountBlacklist instance")
+        logger.error("Exception while creating ServiceAccountBlacklist instance")
         logger.exception(e)
+        trace_msg = traceback.format_exc()
+        st_logger.write_text_log_entry(log_name, "Exception while creating ServiceAccountBlacklist instance")
+        st_logger.write_text_log_entry(log_name, trace_msg)
         return {'message': 'An error occurred while validating the service account.'}
 
     if sab.is_blacklisted(service_account):
