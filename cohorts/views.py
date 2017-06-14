@@ -57,10 +57,6 @@ BQ_SERVICE = None
 logger = logging.getLogger(__name__)
 
 USER_DATA_ON = settings.USER_DATA_ON
-BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
-COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
-METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
-# This URL is not used : META_DISCOVERY_URL = settings.BASE_API_URL + '/_ah/api/discovery/v1/apis/meta_api/v1/rest'
 
 def convert(data):
     if isinstance(data, basestring):
@@ -93,6 +89,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     filters = {}
     mutation_filters = None
     user_data_filters = None
+    data_type_filters = False
     mutation_where_clause = None
 
     if inc_filters is None:
@@ -104,11 +101,14 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             if not mutation_filters:
                 mutation_filters = {}
             mutation_filters[key] = inc_filters[key]
+            build = key.split(':')[1]
         elif 'user_' in key:
             if not user_data_filters:
                 user_data_filters = {}
             user_data_filters[key] = inc_filters[key]
         else:
+            if 'data_type' in key:
+                data_type_filters = True
             filters[key] = inc_filters[key]
 
     # User data filters trump all other filters; if there are any which came along
@@ -226,7 +226,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # construct the WHERE clauses needed
         if len(filters) > 0:
             filter_copy = copy.deepcopy(filters)
-            where_clause = build_where_clause(filter_copy)
+            where_clause = build_where_clause(filter_copy, program=program_id)
 
         filter_table = None
         tmp_mut_table = None
@@ -253,6 +253,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             query_template = None
 
             bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+            sample_barcode_col = bq_table_info['sample_barcode_col']
             bq_dataset = bq_table_info['dataset']
             bq_table = bq_table_info['table']
             bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
@@ -278,15 +279,15 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
             else:
                 query_template = \
-                    ("SELECT sample_barcode_tumor"
+                    ("SELECT {barcode_col}"
                      " FROM [{data_project_name}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY sample_barcode_tumor; ")
+                     " GROUP BY {barcode_col}; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
             query = query_template.format(
-                dataset_name=bq_dataset, project_name=bq_cohort_project_name, table_name=bq_table,
+                dataset_name=bq_dataset, project_name=bq_cohort_project_name, table_name=bq_table, barcode_col=sample_barcode_col,
                 hugo_symbol=str(params['gene']), data_project_name=bq_data_project_name,  var_class=params['var_class'],
                 cohort_dataset=bq_cohort_dataset,cohort_table=bq_cohort_table, cohort=cohort
             )
@@ -352,29 +353,36 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         if data_avail_table:
             data_type_subquery = data_type_query % data_avail_table
 
+        data_type_join = ''
+
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
 
+            if data_type_subquery and data_type_filters:
+                data_type_join = 'LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode ' % data_type_subquery
+
             if cohort_id:
                 cohort_subquery = cohort_query % cohort_id
 
                 make_tmp_table_str = """
-                    CREATE TEMPORARY TABLE %s AS
+                    CREATE TEMPORARY TABLE %s
+                    (INDEX (sample_barcode))
                     SELECT sample_barcode, case_barcode, project_id
                     FROM %s
                     JOIN (%s) cs ON cs_sample_barcode = sample_barcode
-                    LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode
-                  """ % (tmp_filter_table, base_table, cohort_subquery, data_type_subquery,)
+                    %s
+                  """ % (tmp_filter_table, base_table, cohort_subquery, data_type_join,)
 
             else:
                 make_tmp_table_str = """
-                  CREATE TEMPORARY TABLE %s AS
+                  CREATE TEMPORARY TABLE %s
+                  (INDEX (sample_barcode))
                   SELECT sample_barcode, case_barcode, project_short_name
                   FROM %s
-                  LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode
-                """ % (tmp_filter_table, base_table, data_type_subquery,)
+                  %s
+                """ % (tmp_filter_table, base_table, data_type_join,)
 
             if tmp_mut_table:
                 make_tmp_table_str += ' JOIN %s ON tumor_sample_id = sample_barcode' % tmp_mut_table
@@ -385,12 +393,14 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             make_tmp_table_str += ";"
 
             cursor.execute(make_tmp_table_str, params_tuple)
+            db.commit()
 
         elif tmp_mut_table:
             tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = """
-                CREATE TEMPORARY TABLE %s AS
+                CREATE TEMPORARY TABLE %s
+                (INDEX (sample_barcode))
                 SELECT *
                 FROM %s
                 JOIN %s ON tumor_sample_id = sample_barcode
@@ -401,6 +411,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 make_tmp_table_str += ' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery
 
             cursor.execute(make_tmp_table_str)
+            db.commit()
         else:
             filter_table = base_table
 
@@ -410,7 +421,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
         # determine the project based on the program
         if cohort_id:
-            print >> sys.stdout, "[STATUS] In get_sample_case_list, filter table: "+filter_table
             if len(filters) <= 0 and not mutation_filters:
                 cursor.execute(('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table) + ' WHERE cohort_id = %s;', (cohort_id,))
             else:
@@ -858,7 +868,11 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                             project = item['project_id']
                         sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
 
+                bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
+                bulk_stop = time.time()
+                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+
 
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -980,7 +994,10 @@ def clone_cohort(request, cohort_id):
     sample_list = []
     for sample in samples:
         sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
+    bulk_start = time.time()
     Samples.objects.bulk_create(sample_list)
+    bulk_stop = time.time()
+    logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
     # Clone the filters
     filters = Filters.objects.filter(resulting_cohort=parent_cohort)
@@ -1199,7 +1216,10 @@ def set_operation(request):
                 for sample in samples:
                     sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
 
+                bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
+                bulk_stop = time.time()
+                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
                 # get the full resulting sample and case ID set
                 samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
@@ -1325,7 +1345,10 @@ def save_cohort_from_plot(request):
         for sample in samples:
             for project in sample['project']:
                 sample_list.append(Samples(cohort=cohort, sample_barcode=sample['sample'], case_barcode=sample['case'], project_id=project))
+        bulk_start = time.time()
         Samples.objects.bulk_create(sample_list)
+        bulk_stop = time.time()
+        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
@@ -1352,7 +1375,6 @@ def cohort_filelist(request, cohort_id=0):
 
     build = request.GET.get('build', 'HG19')
     items = cohort_files(request, cohort_id, build=build)
-    file_list = []
     cohort = Cohort.objects.get(id=cohort_id, active=True)
     nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
     has_access = False
@@ -1372,10 +1394,8 @@ def cohort_filelist(request, cohort_id=0):
                                                             'base_url': settings.BASE_URL,
                                                             'base_api_url': settings.BASE_API_URL,
                                                             'total_files': items['total_file_count'],
-                                                            # 'page': items['page'],
                                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
                                                             'platform_counts': items['platform_count_list'],
-                                                            'filelist': file_list,
                                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                                             'sel_file_max': MAX_SEL_FILES,
                                                             'has_access': has_access,
@@ -1600,12 +1620,17 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
         clin_attr = fetch_program_attr(program_id)
 
         molecular_attr = {}
+        molecular_attr_builds = None
 
         if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
             molecular_attr = {
                 'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
                 'attrs': MOLECULAR_ATTR
             }
+
+            molecular_attr_builds = [
+                {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys() if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
+            ]
 
             # Note which attributes are in which categories
             for cat in molecular_attr['categories']:
@@ -1625,6 +1650,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             'total_samples': int(results['total']),
             'clin_attr': clin_attr,
             'molecular_attr': molecular_attr,
+            'molecular_attr_builds': molecular_attr_builds,
             'data_types': data_types,
             'metadata_filters': filters or {},
             'program': public_program,
@@ -1779,7 +1805,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
                             'datacat': item['data_category'] or 'N/A',
-                            'datatype': (item['data_type'] or 'N/A')
+                            'datatype': (item['data_type'] or 'N/A'),
+                            'program': program.name
                         })
 
         platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]

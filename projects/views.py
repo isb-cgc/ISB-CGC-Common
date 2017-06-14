@@ -33,6 +33,7 @@ from data_upload.models import UserUpload, UserUploadedFile
 from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project, Project_BQ_Tables, Public_Metadata_Tables
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
+from googleapiclient.errors import HttpError
 
 import json
 import requests
@@ -293,6 +294,8 @@ def upload_files(request):
             seen_user_columns = []
             for formfield in request.FILES:
                 file = request.FILES[formfield]
+                # If we do not have permissions to load files into the user's project, this will throw a Http 403 error
+                # (caught below):
                 file_upload = UserUploadedFile(upload=upload, file=file, bucket=config['BUCKET'])
                 file_upload.save()
 
@@ -442,6 +445,39 @@ def upload_files(request):
             'error': "program_does_not_exist",
             'message': "The program you wish to upload to does not exist."
         }
+
+    except HttpError as e:
+        project.delete()
+        upload.delete()
+        if request.POST['program-type'] == 'new':
+            program.delete()
+
+        print >> sys.stdout, e
+        if e.resp.status == 403:
+            resp = {
+                'status': "error",
+                'error': "access_forbidden",
+                'message': "No permissions to access project resource."
+            }
+        elif e.resp.get('content-type', '').startswith('application/json'):
+            err_val = json.loads(e.content).get('error')
+            if err_val:
+                message = err_val.get('message')
+            else:
+                message = "HTTP error {0}".format(str(e.resp.status))
+            resp = {
+                'status': "error",
+                'error': "http_exception",
+                'message': message
+            }
+        else:
+            resp = {
+                'status': "error",
+                'error': "http_exception",
+                'message': 'There was an unknown HTTP error processing this request.'
+            }
+            logger.info(e)
+
     except Exception as e:
         print >> sys.stdout, "[ERROR] Exception in upload_files:"
         logger.exception(e)
@@ -451,11 +487,20 @@ def upload_files(request):
         if request.POST['program-type'] == 'new':
             program.delete()
 
-        resp = {
-            'status': "error",
-            'error': "exception",
-            'message': "There was an error processing your user data - please double check your files and try again. There must be no empty lines at the end of your files."
-        }
+        # Seeing broken pipe error when trying to access project with permissions removed, instead of no HTTP access:
+        if 'Broken pipe' in e.message:
+            resp = {
+                'status': "error",
+                'error': "exception",
+                'message': "There was an error: check that destination project still allows ISB-CGC editor permissions and that selected Cloud Bucket and BigQuery dataset still exist."
+            }
+
+        else:
+            resp = {
+                'status': "error",
+                'error': "exception",
+                'message': "There was an error processing your user data - please double check your files and project permissions and try again."
+            }
 
     return JsonResponse(resp)
 
@@ -580,7 +625,16 @@ def project_data_error(request, program_id=0, project_id=0, dataset_id=0):
     if not datatables.data_upload.key == request.GET.get('key'):
         raise Exception("Invalid data key when marking data success")
 
+    #
+    # New! We can get an error message back from the UDU server:
+    #
+
+    err_msg = request.GET.get('errmsg')
+    if err_msg:
+        datatables.data_upload.message = err_msg
+
     datatables.data_upload.status = 'Error'
+
     datatables.data_upload.save()
 
     return JsonResponse({
