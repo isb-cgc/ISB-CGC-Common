@@ -112,7 +112,10 @@ MOLECULAR_DISPLAY_STRINGS = {
 #       <attr name>: {
 #           'displ_name': <attr display name>,
 #           'values': {
-#               <metadata attr value>: <metadata attr display value>, [...]
+#               <metadata attr value>: {
+#                   'displ_value': <metadata attr display value>,
+#                   'tooltip': <tooltip value>
+#               }
 #           }, [...]
 #       }, [...]
 #   }, [...]
@@ -166,8 +169,13 @@ BQ_MOLECULAR_ATTR_TABLES = {
         'HG19': {
             'table': 'Somatic_Mutation_MC3',
             'dataset': 'TCGA_hg19_data_v0',
+            'sample_barcode_col': 'sample_barcode_tumor',
         },
-        'HG38': None,
+        'HG38': {
+            'table': 'Somatic_Mutation',
+            'dataset': 'TCGA_hg38_data_v0',
+            'sample_barcode_col': 'sample_barcode_tumor',
+        },
     },
     'CCLE': None,
     'TARGET': None,
@@ -191,7 +199,8 @@ def get_sql_connection():
             'passwd': database['PASSWORD'],
         }
 
-        if not settings.IS_DEV:
+        # Only use the socket if it's there to be used and we're not in a dev environment
+        if not settings.IS_DEV and settings.DB_SOCKET:
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
@@ -389,11 +398,15 @@ def fetch_metadata_value_set(program=None):
             cursor.callproc('get_metadata_values', (program,))
 
             for row in cursor.fetchall():
-                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
+                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = {
+                    'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
+                }
 
             while (cursor.nextset() and cursor.description is not None):
                 for row in cursor.fetchall():
-                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0])
+                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = {
+                        'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
+                    }
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -402,10 +415,24 @@ def fetch_metadata_value_set(program=None):
             for row in cursor.fetchall():
                 if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program]:
                     if row['value_name'] in METADATA_ATTR[program][row['attr_name']]['values']:
-                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
+                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = {
+                            'displ_value': row['display_string'],
+                        }
                     # Bucketed continuous numerics like BMI will not already have values in, since the bucketing is done in post-process
                     elif METADATA_ATTR[program][row['attr_name']]['type'] == 'N':
-                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = row['display_string']
+                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = {
+                            'displ_value': row['display_string'],
+                        }
+
+            # Fetch the tooltip strings for Disease Codes
+            cursor = db.cursor()
+            cursor.callproc('get_project_tooltips', (program,))
+
+            for row in cursor.fetchall():
+                if 'disease_code' in METADATA_ATTR[program] and row[0] in METADATA_ATTR[program]['disease_code']['values']:
+                    METADATA_ATTR[program]['disease_code']['values'][row[0]]['tooltip'] = row[2]
+                if 'project_short_name' in METADATA_ATTR[program] and row[1] in METADATA_ATTR[program]['project_short_name']['values']:
+                    METADATA_ATTR[program]['project_short_name']['values'][row[1]]['tooltip'] = row[2]
 
         return copy.deepcopy(METADATA_ATTR[program])
 
@@ -544,7 +571,7 @@ def build_where_clause(filters, alt_key_map=False, program=None):
         elif ':' in key:
             keyType = key.split(':')[0]
             if keyType == 'MUT':
-                gene = key.split(':')[1]
+                gene = key.split(':')[2]
             key = key.split(':')[-1]
 
         # Multitable filter lists don't come in as string as they can contain arbitrary text in values

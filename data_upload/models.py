@@ -33,6 +33,7 @@ class UserUpload(models.Model):
     status = models.CharField(max_length=50,default="Pending")
     jobURL = models.CharField(max_length=250,null=True)
     key = models.CharField(max_length=64,default=generate_upload_key)
+    message = models.CharField(max_length=512, null=True)
 
 class UserUploadedFile(models.Model):
     id = models.AutoField(primary_key=True)
