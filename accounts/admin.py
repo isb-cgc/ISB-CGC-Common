@@ -19,7 +19,7 @@ limitations under the License.
 from django.contrib import admin
 from django.contrib.auth.models import User
 
-from accounts.models import NIH_User, Bucket, GoogleProject, ServiceAccount, AuthorizedDataset
+from accounts.models import NIH_User, Bucket, GoogleProject, ServiceAccount, AuthorizedDataset, ServiceAccountAuthorizedDatasets
 from allauth.socialaccount.models import SocialToken, SocialApp
 
 # Required import otherwise SocialToken is not registered before unregistering
@@ -62,10 +62,15 @@ class GoogleProjectAdmin(admin.ModelAdmin):
 class ServiceAccountAdmin(admin.ModelAdmin):
     list_display = (
         'google_project',
+        'service_account'
+    )
+
+@admin.register(ServiceAccountAuthorizedDatasets)
+class ServiceAccountAdmin(admin.ModelAdmin):
+    list_display = (
         'service_account',
         'authorized_date',
-        'authorized_dataset',
-        'active'
+        'authorized_dataset'
     )
 
 @admin.register(AuthorizedDataset)

@@ -493,17 +493,21 @@ def register_sa(request, user_id):
             # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
             public_datasets = AuthorizedDataset.objects.filter(public=True)
             directory_service, http_auth = get_directory_resource()
-            for dataset in public_datasets | protected_datasets:
+            service_account_obj, created = ServiceAccount.objects.update_or_create(
+                google_project=user_gcp, service_account=user_sa,
+                defaults={
+                   'google_project': user_gcp,
+                   'service_account': user_sa,
+               })
 
-                service_account_obj, created = ServiceAccount.objects.update_or_create(google_project=user_gcp,
-                                                                                       service_account=user_sa,
-                                                                                       authorized_dataset=dataset,
-                                                                                       defaults={
-                                                                                           'google_project': user_gcp,
-                                                                                           'service_account': user_sa,
-                                                                                           'authorized_dataset': dataset,
-                                                                                           'active': True
-                                                                                       })
+            for dataset in public_datasets | protected_datasets:
+                service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.update_or_create(
+                    service_account=service_account_obj, authorized_dataset=dataset,
+                    defaults={
+                        'service_account': service_account_obj,
+                        'authorized_dataset': dataset
+                    }
+                )
 
                 try:
                     body = {"email": service_account_obj.service_account, "role": "MEMBER"}
@@ -548,6 +552,9 @@ def delete_sa(request, user_id, sa_id):
                 'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(sa.service_account), sa.authorized_dataset.acl_google_group)})
             logger.info(e)
 
+        saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
+        for saad in saads:
+            saad.delete()
         sa.delete()
 
     return redirect('user_gcp_list', user_id=user_id)
