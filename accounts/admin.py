@@ -66,7 +66,7 @@ class ServiceAccountAdmin(admin.ModelAdmin):
     )
 
 @admin.register(ServiceAccountAuthorizedDatasets)
-class ServiceAccountAdmin(admin.ModelAdmin):
+class ServiceAccountAuthorizedDatasetsAdmin(admin.ModelAdmin):
     list_display = (
         'service_account',
         'authorized_date',
