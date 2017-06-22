@@ -25,7 +25,6 @@ class NIH_User(models.Model):
     NIH_username = models.TextField(null=True)
     NIH_assertion = models.TextField(null=True)
     NIH_assertion_expiration = models.DateTimeField(null=True)
-    dbGaP_authorized = models.BooleanField(default=False)
     active = models.BooleanField(default=True)
     linked = models.BooleanField(default=True)
 

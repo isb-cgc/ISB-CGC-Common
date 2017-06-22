@@ -33,7 +33,6 @@ class NIH_UserAdmin(admin.ModelAdmin):
         'NIH_username',
         'NIH_assertion_truncated',
         'NIH_assertion_expiration',
-        'dbGaP_authorized',
         'active',
         'google_email'
     )
