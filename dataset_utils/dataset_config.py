@@ -74,8 +74,8 @@ class DatasetConfiguration(ServiceObjectBase):
         }
     }
 
-    def __init__(self, whitelist_files):
-        self.whitelist_files = whitelist_files
+    def __init__(self, authorization_list_files):
+        self.authorization_list_files = authorization_list_files
 
     def get_auth_list_gcs_bucket_and_object_for_dataset_id(self, dataset_id):
         """
@@ -83,6 +83,13 @@ class DatasetConfiguration(ServiceObjectBase):
         """
         # TODO implement
         pass
+
+    def is_era_login_in_authorization_list(self, era_login_name, dataset_id):
+        pass
+    
+    def get_auth_list_for_dataset_id(self, dataset_id):
+        pass
+    
 
     @classmethod
     def from_dict(cls, data):
@@ -96,3 +103,8 @@ class DatasetConfiguration(ServiceObjectBase):
         # TODO Validate that dataset IDs are unique
 
         return cls(data['authorization_list_files'])
+
+    def get_datasets(self, user=None):
+        # TODO Implement
+        pass
+
