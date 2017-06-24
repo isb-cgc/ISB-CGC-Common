@@ -52,9 +52,13 @@ def extended_logout_view(request):
     try:
         nih_user = NIH_User.objects.get(user_id=request.user.id)
         nih_user.active = False
-        nih_user.dbGaP_authorized = False
         nih_user.save()
         logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
+
+        user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+        for dataset in user_auth_datasets:
+            dataset.delete()
+        logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
     except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
         if type(e) is MultipleObjectsReturned:
             logger.warn("Error %s on logout: more than one NIH User with user id %d" % (str(e), request.user.id))
@@ -62,13 +66,17 @@ def extended_logout_view(request):
     # remove from CONTROLLED_ACL_GOOGLE_GROUP if exists
     directory_service, http_auth = get_directory_resource()
     user_email = User.objects.get(id=request.user.id).email
-    try:
-        directory_service.members().delete(groupKey=CONTROLLED_ACL_GOOGLE_GROUP, memberKey=str(user_email)).execute(http=http_auth)
-        logger.info("Attempting to delete user {} from group {}. "
-                    "If an error message doesn't follow, they were successfully deleted"
-                    .format(str(user_email), CONTROLLED_ACL_GOOGLE_GROUP))
-    except HttpError as e:
-        logger.info(e)
+
+    # TODO @kleisb will need the class for this too
+    authorized_datasets = None
+    for dataset in authorized_datasets:
+        try:
+            directory_service.members().delete(groupKey=dataset['google_group_acl'], memberKey=str(user_email)).execute(http=http_auth)
+            logger.info("Attempting to delete user {} from group {}. "
+                "If an error message doesn't follow, they were successfully deleted"
+                .format(str(user_email), CONTROLLED_ACL_GOOGLE_GROUP))
+        except HttpError as e:
+            logger.info(e)
 
     # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
     try:

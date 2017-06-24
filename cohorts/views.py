@@ -37,7 +37,7 @@ from django.utils import formats
 from django.views.decorators.csrf import csrf_protect
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
-from accounts.models import NIH_User
+from accounts.models import NIH_User, UserAuthorizedDatasets
 from metadata_helpers import *
 from metadata_counting import *
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
@@ -1376,12 +1376,17 @@ def cohort_filelist(request, cohort_id=0):
         return redirect('/user_landing')
 
     build = request.GET.get('build', 'HG19')
-    items = cohort_files(request, cohort_id, build=build)
-    cohort = Cohort.objects.get(id=cohort_id, active=True)
-    nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
-    has_access = False
+    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    has_access = None
     if len(nih_user) > 0:
-        has_access = True
+        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+        for dataset in user_auth_sets:
+            if not has_access:
+                has_access = []
+            has_access.append(dataset.whitelist_id)
+
+    items = cohort_files(request, cohort_id, build=build, access=has_access)
+    cohort = Cohort.objects.get(id=cohort_id, active=True)
 
     # Check if cohort contains user data samples - return info message if it does.
     # Get user accessed projects
@@ -1688,7 +1693,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
     return render(request, template, template_values)
 
 # Copied over from metadata api
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None):
 
     GET = request.GET.copy()
     platform_count_only = GET.pop('platform_count_only', None)
@@ -1798,11 +1803,20 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                 cursor.execute(query.format(program_data_table), params)
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
+                        whitelist_found = False
+                        # If this is a controlled-access entry, check for the user's access to it
+                        if item['access'] == 'controlled' and access:
+                            whitelists = item['acl'].split(',')
+                            for whitelist in whitelists:
+                                if whitelist in access:
+                                    whitelist_found = True
+
                         file_list.append({
                             'sample': item['sample_barcode'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
+                            'user_access': (item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
