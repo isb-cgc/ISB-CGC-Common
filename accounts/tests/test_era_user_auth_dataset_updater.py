@@ -55,7 +55,6 @@ class TestUserAuthDatasets(TestCase):
         nih_user = NIH_User(user=user,
                             NIH_username='USERNAME1',
                             NIH_assertion='012345689',
-                            dbGaP_authorized=True,
                             active=True,
                             linked=True
                             )
