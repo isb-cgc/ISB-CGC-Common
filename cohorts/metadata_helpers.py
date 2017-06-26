@@ -174,7 +174,7 @@ BQ_MOLECULAR_ATTR_TABLES = {
         'HG38': {
             'table': 'Somatic_Mutation',
             'dataset': 'TCGA_hg38_data_v0',
-            'sample_barcode_col': 'Tumor_Sample_Barcode',
+            'sample_barcode_col': 'sample_barcode_tumor',
         },
     },
     'CCLE': None,
@@ -199,7 +199,8 @@ def get_sql_connection():
             'passwd': database['PASSWORD'],
         }
 
-        if not settings.IS_DEV:
+        # Only use the socket if it's there to be used and we're not in a dev environment
+        if not settings.IS_DEV and settings.DB_SOCKET:
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
