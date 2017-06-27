@@ -98,3 +98,12 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
                 filtered_rows.append(row)
 
         return cls(items, filtered_rows)
+
+    def is_era_login_active(self, era_login_name):
+        found = False
+        for item in self.get_active_items():
+            if era_login_name == item.login:
+                found = True
+                break
+
+        return found

@@ -18,38 +18,46 @@ limitations under the License.
 
 from unittest import TestCase
 
-from .data_generators import create_csv_file_object
+from dataset_utils.tests.data_generators import create_csv_file_object
+from dataset_utils.dataset_config import DatasetConfiguration, DatasetAccessSupport
+from dataset_utils.gcs_support import GCSSupportSimulator
 
 
 class test_one_file(TestCase):
-    def test_one_line(self):
+    def test_one_dbgap_one_line(self):
+        """
+        Test that one NIH dbGaP file entry is handled correctly.
+        """
         test_config = {
             "authorization_list_files": [
                 {
                     "dataset_name": "Dev Fake Dataset",
                     "dataset_id": "phs000123",
-                    "acl_group": "isb-cgc-test-cntl@isb-cgc.org",
-                    "gcs_path": "gs://isb-cgc-nih-users/fake_dbGaP_authentication_list",
+                    "acl_group": "test-dataset@test.org",
+                    "gcs_path": "gs://bucket/authorization_list",
                     "type": "nih-dbgap"
-                },
-                {
-                    "acl_group": "cosmic-users@isb-cgc.org",
-                    "gcs_path": "gs://isb-cgc-nih-users/sanger_cosmic_authorization_list.json",
-                    "type": "sanger-cosmic",
-                    "logging_config": {
-                        "log_name": "data_set_auth.cosmic_users"
-                    }
                 }
             ]
         }
-        
+
+        config_instance = DatasetConfiguration.from_dict(test_config)
+
+        self.assertEquals(1, len(config_instance.authorization_list_files))
+        self.assertEquals("Dev Fake Dataset", config_instance.authorization_list_files[0]['dataset_name'])
+
         test_csv_data = [
             ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs123456.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
         data = create_csv_file_object(test_csv_data, include_header=True)
+        
+        gcs_data_map = {
+            ("bucket", "authorization_list"): data
+        }
+        
+        gss = GCSSupportSimulator(gcs_data_map)
+        dsas = DatasetAccessSupport(config_instance, gss)
 
-        parser = NIHDatasetAuthorizationList.from_stream(data)
-
+        self.assertEquals(True, dsas.is_era_login_in_authorization_list("USERNAME1", "phs000123"))
 

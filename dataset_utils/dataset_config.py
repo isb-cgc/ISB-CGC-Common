@@ -22,7 +22,11 @@ from jsonschema import validate as schema_validate, ValidationError
 
 logger = logging.getLogger(__name__)
 
+from enum import Enum
+
 from accounts.utils import ServiceObjectBase
+
+from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 
 
 class DatasetConfiguration(ServiceObjectBase):
@@ -77,20 +81,6 @@ class DatasetConfiguration(ServiceObjectBase):
     def __init__(self, authorization_list_files):
         self.authorization_list_files = authorization_list_files
 
-    def get_auth_list_gcs_bucket_and_object_for_dataset_id(self, dataset_id):
-        """
-        Answers the GCS bucket and object names of an authorization list file given a dataset ID.
-        """
-        # TODO implement
-        pass
-
-    def is_era_login_in_authorization_list(self, era_login_name, dataset_id):
-        pass
-    
-    def get_auth_list_for_dataset_id(self, dataset_id):
-        pass
-    
-
     @classmethod
     def from_dict(cls, data):
         """
@@ -107,4 +97,45 @@ class DatasetConfiguration(ServiceObjectBase):
     def get_datasets(self, user=None):
         # TODO Implement
         pass
+
+
+class DatasetAccessSupport(object):
+    def __init__(self, dataset_config, gcs_support):
+        self.dataset_config = dataset_config
+        self.gcs_support = gcs_support
+        self.authorization_list_map = {}
+    
+    def get_auth_list_gcs_path_for_dataset_id(self, dataset_id):
+        """
+        Answers the GCS bucket and object names of an authorization list file given a dataset ID.
+        """
+        # Is a dataset configured for this identifier?
+        auth_list_config = None
+        for dataset_item in self.dataset_config.authorization_list_files:
+            if dataset_item['type'] == "nih-dbgap" and dataset_item["dataset_id"] == dataset_id:
+                auth_list_config = dataset_item
+
+        # TODO Implement error handling
+        if auth_list_config is None:
+            raise Exception("No auth list config for {}".format(dataset_id))
+
+        full_gcs_path = auth_list_config['gcs_path']
+        return full_gcs_path
+
+    def get_auth_list_instance_for_dataset_id(self, dataset_id):
+        # Has this already been loaded?
+        if dataset_id in self.authorization_list_map:
+            return self.authorization_list_map[dataset_id]
+
+        auth_list_gcs_path = self.get_auth_list_gcs_path_for_dataset_id(dataset_id)
+        auth_list_data = self.gcs_support.get_data_from_gcs_path(auth_list_gcs_path)
+        auth_list_instance = NIHDatasetAuthorizationList.from_stream(auth_list_data)
+
+        self.authorization_list_map[dataset_id] = auth_list_instance
+        return auth_list_instance
+
+    # TODO Implement
+    def is_era_login_in_authorization_list(self, era_login_name, dataset_id):
+        auth_list = self.get_auth_list_instance_for_dataset_id(dataset_id)
+        return auth_list.is_era_login_active(era_login_name)
 

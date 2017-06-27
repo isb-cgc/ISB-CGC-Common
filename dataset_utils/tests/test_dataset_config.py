@@ -54,7 +54,6 @@ class test_one_file(TestCase):
         self.assertEquals(1, len(config_instance.authorization_list_files))
         self.assertEquals("Dev Fake Dataset", config_instance.authorization_list_files[0]['dataset_name'])
 
-
     def test_one_cosmic_auth_list(self):
         """
         Test that one NIH dbGaP file entry is handled correctly.
