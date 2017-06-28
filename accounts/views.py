@@ -68,7 +68,7 @@ def extended_logout_view(request):
     user_email = User.objects.get(id=request.user.id).email
 
     # TODO @kleisb will need the class for this too
-    authorized_datasets = None
+    authorized_datasets = []
     for dataset in authorized_datasets:
         try:
             directory_service.members().delete(groupKey=dataset['google_group_acl'], memberKey=str(user_email)).execute(http=http_auth)

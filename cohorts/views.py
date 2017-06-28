@@ -1405,7 +1405,6 @@ def cohort_filelist(request, cohort_id=0):
                                                             'platform_counts': items['platform_count_list'],
                                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                                             'sel_file_max': MAX_SEL_FILES,
-                                                            'has_access': has_access,
                                                             'build': build})
 
 @login_required
@@ -1806,6 +1805,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         whitelist_found = False
                         # If this is a controlled-access entry, check for the user's access to it
                         if item['access'] == 'controlled' and access:
+                            print >> sys.stdout, "access: "+str(access)
+                            print >> sys.stdout, "whitelists: "+str(whitelists)
                             whitelists = item['acl'].split(',')
                             for whitelist in whitelists:
                                 if whitelist in access:
