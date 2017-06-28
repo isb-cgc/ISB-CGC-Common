@@ -94,9 +94,16 @@ class DatasetConfiguration(ServiceObjectBase):
 
         return cls(data['authorization_list_files'])
 
-    def get_datasets(self, user=None):
-        # TODO Implement
-        pass
+
+class GetDatasetsStatus(Enum):
+    GET_DATASETS_STATUS_OK = 1
+    GET_DATASETS_STATUS_ERROR = 2
+
+
+class DatasetGoogleGroupPair(object):
+    def __init__(self, dataset_id, google_group_name):
+        self.dataset_id = dataset_id
+        self.google_group_name = google_group_name
 
 
 class DatasetAccessSupport(object):
@@ -104,15 +111,23 @@ class DatasetAccessSupport(object):
         self.dataset_config = dataset_config
         self.gcs_support = gcs_support
         self.authorization_list_map = {}
-    
+
+    def get_nih_dbgap_auth_lists(self):
+        result = []
+        for dataset_item in self.dataset_config.authorization_list_files:
+            if dataset_item['type'] == 'nih-dbgap':
+                result.append(dataset_item)
+
+        return result
+
     def get_auth_list_gcs_path_for_dataset_id(self, dataset_id):
         """
         Answers the GCS bucket and object names of an authorization list file given a dataset ID.
         """
         # Is a dataset configured for this identifier?
         auth_list_config = None
-        for dataset_item in self.dataset_config.authorization_list_files:
-            if dataset_item['type'] == "nih-dbgap" and dataset_item["dataset_id"] == dataset_id:
+        for dataset_item in self.get_nih_dbgap_auth_lists():
+            if dataset_item["dataset_id"] == dataset_id:
                 auth_list_config = dataset_item
 
         # TODO Implement error handling
@@ -134,8 +149,33 @@ class DatasetAccessSupport(object):
         self.authorization_list_map[dataset_id] = auth_list_instance
         return auth_list_instance
 
-    # TODO Implement
     def is_era_login_in_authorization_list(self, era_login_name, dataset_id):
         auth_list = self.get_auth_list_instance_for_dataset_id(dataset_id)
         return auth_list.is_era_login_active(era_login_name)
 
+    def get_datasets_for_era_login(self, user=None):
+        """
+        Answer the data sets an ERA user has access to.
+        """
+        result = {
+            'era_login': user
+        }
+
+        for dataset_item in self.get_nih_dbgap_auth_lists():
+            if self.is_era_login_in_authorization_list(user, dataset_item['dataset_id']):
+                result[dataset_item['dataset_id']] = dataset_item
+
+        return result
+
+    def get_all_datasets_and_google_groups(self):
+        """
+        Returns a list of data set ID pairs and Google Group names.
+
+        Returns: Array of DatasetGoogleGroupPair instances.
+
+        """
+        result = []
+        for dataset_item in self.get_nih_dbgap_auth_lists():
+            result.append(DatasetGoogleGroupPair(dataset_item['dataset_id'], dataset_item['acl_group']))
+        
+        return result
