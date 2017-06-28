@@ -23,7 +23,7 @@ from dataset_utils.dataset_config import DatasetConfiguration, DatasetAccessSupp
 from dataset_utils.gcs_support import GCSSupportSimulator
 
 
-class test_one_file(TestCase):
+class TestDatasetAccessSupportAuthLists(TestCase):
     def test_one_dbgap_one_line(self):
         """
         Test that one NIH dbGaP file entry is handled correctly.
@@ -59,5 +59,6 @@ class test_one_file(TestCase):
         gss = GCSSupportSimulator(gcs_data_map)
         dsas = DatasetAccessSupport(config_instance, gss)
 
-        self.assertEquals(True, dsas.is_era_login_in_authorization_list("USERNAME1", "phs000123"))
+        self.assertTrue(dsas.is_era_login_in_authorization_list("USERNAME1", "phs000123"))
+        self.assertFalse(dsas.is_era_login_in_authorization_list("UNKNOWN", "phs000123"))
 
