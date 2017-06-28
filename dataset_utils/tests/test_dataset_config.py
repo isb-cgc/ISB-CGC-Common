@@ -24,7 +24,7 @@ from dataset_utils.tests.data_generators import create_csv_file_object
 from dataset_utils.dataset_config import DatasetConfiguration
 
 
-class test_one_file(TestCase):
+class TestDatasetConfigAuthListFiles(TestCase):
     def test_empty_config_object(self):
         """
         Test than instantiating the configuration class with empty configuration object
@@ -75,7 +75,3 @@ class test_one_file(TestCase):
 
         self.assertEquals(1, len(config_instance.authorization_list_files))
         self.assertEquals("gs://bucket/sanger_authorization_list", config_instance.authorization_list_files[0]['gcs_path'])
-        
-
-
-
