@@ -37,7 +37,7 @@ from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 
-from .utils import ServiceAccountBlacklist
+from .utils import ServiceAccountBlacklist, is_email_in_iam_roles
 import json
 
 logger = logging.getLogger(__name__)
@@ -305,7 +305,7 @@ def user_gcp_delete(request, user_id, gcp_id):
     return redirect('user_gcp_list', user_id=request.user.id)
 
 
-def verify_service_account(gcp_id, service_account, datasets):
+def verify_service_account(gcp_id, service_account, datasets, user_email):
     # Only verify for protected datasets
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_ids = dataset_objs.values_list('id', flat=True)
@@ -358,7 +358,15 @@ def verify_service_account(gcp_id, service_account, datasets):
                     if member.find(':'+service_account) > 0:
                         verified_sa = True
 
-        # 2. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
+        # 2. Verify that the current user is a member of the GCP project
+        if not is_email_in_iam_roles(roles, user_email):
+            logging.info('{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id))
+            st_logger.write_struct_log_entry(log_name, {
+                'message': '{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
+            })
+            return {'message': 'You must be a member of a project in order to register it'}
+
+        # 3. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
             logging.info('Provided service account does not exist in project.')
 
@@ -367,7 +375,7 @@ def verify_service_account(gcp_id, service_account, datasets):
             return {'message': 'The provided service account does not exist in the selected project'}
 
 
-        # 3. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
+        # 4. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
         user_dataset_verified = True
 
         for role, members in roles.items():
@@ -444,11 +452,12 @@ def verify_sa(request, user_id):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     if request.POST.get('gcp_id'):
+        user_email = request.user.email
         gcp_id = request.POST.get('gcp_id')
         user_sa = request.POST.get('user_sa')
         datasets = request.POST.getlist('datasets')
         status = '200'
-        result = verify_service_account(gcp_id, user_sa, datasets)
+        result = verify_service_account(gcp_id, user_sa, datasets, user_email)
         if 'message' in result.keys():
             status = '400'
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
@@ -474,6 +483,7 @@ def register_sa(request, user_id):
                    'authorized_datasets': authorized_datasets}
         return render(request, 'GenespotRE/register_sa.html', context)
     elif request.POST.get('gcp_id'):
+        user_email = request.user.email
         gcp_id = request.POST.get('gcp_id')
         user_sa = request.POST.get('user_sa')
         datasets = list(request.POST.get('datasets'))
@@ -485,7 +495,7 @@ def register_sa(request, user_id):
             datasets = map(int, datasets)
 
         # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-        result = verify_service_account(gcp_id, user_sa, datasets)
+        result = verify_service_account(gcp_id, user_sa, datasets, user_email)
         if 'message' in result.keys():
             messages.error(request, result['message'])
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
