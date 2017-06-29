@@ -33,7 +33,7 @@ class TestDatasetAccessSupportAuthLists(TestCase):
                 {
                     "dataset_name": "Dev Fake Dataset",
                     "dataset_id": "phs000123",
-                    "acl_group": "test-dataset@test.org",
+                    "acl_group": "test-dataset-123@test.org",
                     "gcs_path": "gs://bucket/authorization_list",
                     "type": "nih-dbgap"
                 }
