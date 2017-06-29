@@ -77,6 +77,7 @@ class UserAuthorizedDatasets(models.Model):
 class ServiceAccount(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     service_account = models.CharField(max_length=1024, null=False)
+    active = models.BooleanField(default=False, null=False)
 
     def __str__(self):
         auth_datasets = AuthorizedDataset.objects.filter(
