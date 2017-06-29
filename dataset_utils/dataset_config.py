@@ -105,7 +105,6 @@ class DatasetGoogleGroupPair(object):
         self.dataset_id = dataset_id
         self.google_group_name = google_group_name
 
-
 class DatasetAccessSupport(object):
     def __init__(self, dataset_config, gcs_support):
         self.dataset_config = dataset_config
@@ -156,23 +155,22 @@ class DatasetAccessSupport(object):
     def get_datasets_for_era_login(self, user=None):
         """
         Answer the data sets an ERA user has access to.
-        """
-        result = {
-            'era_login': user
-        }
 
+        Returns: Array of DatasetGoogleGroupPair instances.
+        """
+        result = []
+        
         for dataset_item in self.get_nih_dbgap_auth_lists():
             if self.is_era_login_in_authorization_list(user, dataset_item['dataset_id']):
-                result[dataset_item['dataset_id']] = dataset_item
-
+                result.append(DatasetGoogleGroupPair(dataset_item['dataset_id'], dataset_item['acl_group']))
+        
         return result
-
+    
     def get_all_datasets_and_google_groups(self):
         """
         Returns a list of data set ID pairs and Google Group names.
 
         Returns: Array of DatasetGoogleGroupPair instances.
-
         """
         result = []
         for dataset_item in self.get_nih_dbgap_auth_lists():
