@@ -37,7 +37,7 @@ from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 
-from .utils import ServiceAccountBlacklist
+from .utils import ServiceAccountBlacklist, is_email_in_iam_roles
 import json
 
 logger = logging.getLogger(__name__)
@@ -52,9 +52,13 @@ def extended_logout_view(request):
     try:
         nih_user = NIH_User.objects.get(user_id=request.user.id)
         nih_user.active = False
-        nih_user.dbGaP_authorized = False
         nih_user.save()
         logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
+
+        user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+        for dataset in user_auth_datasets:
+            dataset.delete()
+        logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
     except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
         if type(e) is MultipleObjectsReturned:
             logger.warn("Error %s on logout: more than one NIH User with user id %d" % (str(e), request.user.id))
@@ -62,13 +66,17 @@ def extended_logout_view(request):
     # remove from CONTROLLED_ACL_GOOGLE_GROUP if exists
     directory_service, http_auth = get_directory_resource()
     user_email = User.objects.get(id=request.user.id).email
-    try:
-        directory_service.members().delete(groupKey=CONTROLLED_ACL_GOOGLE_GROUP, memberKey=str(user_email)).execute(http=http_auth)
-        logger.info("Attempting to delete user {} from group {}. "
-                    "If an error message doesn't follow, they were successfully deleted"
-                    .format(str(user_email), CONTROLLED_ACL_GOOGLE_GROUP))
-    except HttpError as e:
-        logger.info(e)
+
+    # TODO @kleisb will need the class for this too
+    authorized_datasets = []
+    for dataset in authorized_datasets:
+        try:
+            directory_service.members().delete(groupKey=dataset['google_group_acl'], memberKey=str(user_email)).execute(http=http_auth)
+            logger.info("Attempting to delete user {} from group {}. "
+                "If an error message doesn't follow, they were successfully deleted"
+                .format(str(user_email), CONTROLLED_ACL_GOOGLE_GROUP))
+        except HttpError as e:
+            logger.info(e)
 
     # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
     try:
@@ -297,7 +305,7 @@ def user_gcp_delete(request, user_id, gcp_id):
     return redirect('user_gcp_list', user_id=request.user.id)
 
 
-def verify_service_account(gcp_id, service_account, datasets):
+def verify_service_account(gcp_id, service_account, datasets, user_email):
     # Only verify for protected datasets
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_ids = dataset_objs.values_list('id', flat=True)
@@ -350,7 +358,15 @@ def verify_service_account(gcp_id, service_account, datasets):
                     if member.find(':'+service_account) > 0:
                         verified_sa = True
 
-        # 2. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
+        # 2. Verify that the current user is a member of the GCP project
+        if not is_email_in_iam_roles(roles, user_email):
+            logging.info('{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id))
+            st_logger.write_struct_log_entry(log_name, {
+                'message': '{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
+            })
+            return {'message': 'You must be a member of a project in order to register it'}
+
+        # 3. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
             logging.info('Provided service account does not exist in project.')
 
@@ -359,7 +375,7 @@ def verify_service_account(gcp_id, service_account, datasets):
             return {'message': 'The provided service account does not exist in the selected project'}
 
 
-        # 3. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
+        # 4. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
         user_dataset_verified = True
 
         for role, members in roles.items():
@@ -436,11 +452,12 @@ def verify_sa(request, user_id):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     if request.POST.get('gcp_id'):
+        user_email = request.user.email
         gcp_id = request.POST.get('gcp_id')
         user_sa = request.POST.get('user_sa')
         datasets = request.POST.getlist('datasets')
         status = '200'
-        result = verify_service_account(gcp_id, user_sa, datasets)
+        result = verify_service_account(gcp_id, user_sa, datasets, user_email)
         if 'message' in result.keys():
             status = '400'
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
@@ -466,6 +483,7 @@ def register_sa(request, user_id):
                    'authorized_datasets': authorized_datasets}
         return render(request, 'GenespotRE/register_sa.html', context)
     elif request.POST.get('gcp_id'):
+        user_email = request.user.email
         gcp_id = request.POST.get('gcp_id')
         user_sa = request.POST.get('user_sa')
         datasets = list(request.POST.get('datasets'))
@@ -477,7 +495,7 @@ def register_sa(request, user_id):
             datasets = map(int, datasets)
 
         # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-        result = verify_service_account(gcp_id, user_sa, datasets)
+        result = verify_service_account(gcp_id, user_sa, datasets, user_email)
         if 'message' in result.keys():
             messages.error(request, result['message'])
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
@@ -493,17 +511,21 @@ def register_sa(request, user_id):
             # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
             public_datasets = AuthorizedDataset.objects.filter(public=True)
             directory_service, http_auth = get_directory_resource()
-            for dataset in public_datasets | protected_datasets:
+            service_account_obj, created = ServiceAccount.objects.update_or_create(
+                google_project=user_gcp, service_account=user_sa,
+                defaults={
+                   'google_project': user_gcp,
+                   'service_account': user_sa,
+               })
 
-                service_account_obj, created = ServiceAccount.objects.update_or_create(google_project=user_gcp,
-                                                                                       service_account=user_sa,
-                                                                                       authorized_dataset=dataset,
-                                                                                       defaults={
-                                                                                           'google_project': user_gcp,
-                                                                                           'service_account': user_sa,
-                                                                                           'authorized_dataset': dataset,
-                                                                                           'active': True
-                                                                                       })
+            for dataset in public_datasets | protected_datasets:
+                service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.update_or_create(
+                    service_account=service_account_obj, authorized_dataset=dataset,
+                    defaults={
+                        'service_account': service_account_obj,
+                        'authorized_dataset': dataset
+                    }
+                )
 
                 try:
                     body = {"email": service_account_obj.service_account, "role": "MEMBER"}
@@ -548,6 +570,9 @@ def delete_sa(request, user_id, sa_id):
                 'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(sa.service_account), sa.authorized_dataset.acl_google_group)})
             logger.info(e)
 
+        saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
+        for saad in saads:
+            saad.delete()
         sa.delete()
 
     return redirect('user_gcp_list', user_id=user_id)

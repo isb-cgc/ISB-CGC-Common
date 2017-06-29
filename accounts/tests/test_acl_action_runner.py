@@ -73,7 +73,6 @@ class TestAccessControlActionRunner(TestCase):
         self.nih_user = NIH_User(user=self.auth_user,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()
