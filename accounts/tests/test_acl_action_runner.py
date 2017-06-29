@@ -25,7 +25,8 @@ from django.utils import timezone
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
-from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
+#from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
+from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
 from tasks.nih_whitelist_processor.acl_group_util import ACLGroupSupportSimulator
 from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater, \
@@ -72,7 +73,6 @@ class TestAccessControlActionRunner(TestCase):
         self.nih_user = NIH_User(user=self.auth_user,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()

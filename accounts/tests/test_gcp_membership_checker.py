@@ -54,7 +54,6 @@ class TestPublicDatasetServiceAccount(TestCase):
         self.nih_user = NIH_User(user=self.auth_user,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()
@@ -97,7 +96,6 @@ class TestUnauthorizedUser(TestCase):
         self.nih_user = NIH_User(user=self.auth_user_1,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()
