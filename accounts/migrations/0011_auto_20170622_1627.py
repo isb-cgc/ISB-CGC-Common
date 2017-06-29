@@ -28,10 +28,6 @@ class Migration(migrations.Migration):
         ),
         migrations.RemoveField(
             model_name='serviceaccount',
-            name='active',
-        ),
-        migrations.RemoveField(
-            model_name='serviceaccount',
             name='authorized_dataset',
         ),
         migrations.RemoveField(
