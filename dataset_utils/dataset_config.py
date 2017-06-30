@@ -197,3 +197,16 @@ class DatasetAccessSupport(object):
             result.append(DatasetGoogleGroupPair(dataset_item['dataset_id'], dataset_item['acl_group']))
         
         return result
+    
+    def get_google_group_name_for_dataset_id(self, dataset_id):
+        """
+        Answers Google Group name for a dataset ID.
+        """
+        google_group_name = None
+
+        for dataset_item in self.get_all_datasets_and_google_groups():
+            if dataset_item.dataset_id == dataset_id:
+                google_group_name = dataset_item.google_group_name
+                break
+        
+        return google_group_name
