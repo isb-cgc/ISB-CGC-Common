@@ -514,9 +514,10 @@ def register_sa(request, user_id):
             service_account_obj, created = ServiceAccount.objects.update_or_create(
                 google_project=user_gcp, service_account=user_sa,
                 defaults={
-                   'google_project': user_gcp,
-                   'service_account': user_sa,
-               })
+                    'google_project': user_gcp,
+                    'service_account': user_sa,
+                    'active': True
+                })
 
             for dataset in public_datasets | protected_datasets:
                 service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.update_or_create(
