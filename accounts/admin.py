@@ -61,7 +61,9 @@ class GoogleProjectAdmin(admin.ModelAdmin):
 class ServiceAccountAdmin(admin.ModelAdmin):
     list_display = (
         'google_project',
-        'service_account'
+        'service_account',
+        'authorized_date',
+        'active'
     )
 
 @admin.register(ServiceAccountAuthorizedDatasets)
