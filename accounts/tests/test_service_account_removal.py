@@ -21,7 +21,7 @@ import logging
 from django.contrib.auth.models import User
 from django.test import TestCase
 
-from accounts.models import NIH_User, AuthorizedDataset, GoogleProject, ServiceAccount
+from accounts.models import NIH_User, AuthorizedDataset, GoogleProject, ServiceAccount, ServiceAccountAuthorizedDatasets
 
 from tasks.nih_whitelist_processor.django_utils import ServiceAccountDatasetRemover
 
@@ -54,11 +54,14 @@ class TestUserServiceAccountRemoval(TestCase):
         project.save()
         project.user.add(user)
 
-        account = ServiceAccount(google_project=project, service_account="abc", authorized_dataset=auth_dataset)
+        account = ServiceAccount(google_project=project, service_account="abc")
         account.save()
+
+        saad = ServiceAccountAuthorizedDatasets(service_account=account,authorized_dataset=auth_dataset)
+        saad.save()
 
         sadr = ServiceAccountDatasetRemover('USERNAME1')
         sadr.process([auth_dataset])
 
-        self.assertEquals(ServiceAccount.objects.filter(google_project=project, service_account="abc", authorized_dataset=auth_dataset).count(), 0)
+        self.assertEquals(ServiceAccount.objects.filter(google_project=project, service_account="abc").count(), 0)
 

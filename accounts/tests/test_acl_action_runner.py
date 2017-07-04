@@ -24,7 +24,7 @@ from django.test import TestCase
 from django.utils import timezone
 
 from django.contrib.auth.models import User
-from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
+from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
 #from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
@@ -90,7 +90,6 @@ class TestAccessControlActionRunner(TestCase):
 
         self.account_123 = ServiceAccount(google_project=self.project_123,
                                           service_account="service_account123@developer.gserviceaccount.com",
-                                          authorized_dataset=self.auth_dataset_123,
                                           active=True)
         self.account_123.save()
 
@@ -107,7 +106,6 @@ class TestAccessControlActionRunner(TestCase):
 
         self.account_456 = ServiceAccount(google_project=self.project_456,
                                           service_account="service_account456@developer.gserviceaccount.com",
-                                          authorized_dataset=self.auth_dataset_456,
                                           active=True)
         self.account_456.save()
 
@@ -192,7 +190,6 @@ class TestAccessControlActionRunner(TestCase):
         # 1. one service account that is not expired. run esar and the sa_action_list should be empty
         account_123_unexpired = ServiceAccount(google_project=self.project_123,
                                                service_account="service_account_unexpired123@developer.gserviceaccount.com",
-                                               authorized_dataset=self.auth_dataset_123,
                                                active=True)
         account_123_unexpired.save()
 
@@ -209,16 +206,23 @@ class TestAccessControlActionRunner(TestCase):
 
 
         self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_off_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
         account_123_expired = ServiceAccount(google_project=self.project_123,
                                              service_account="service_account_expired123@developer.gserviceaccount.com",
                                              authorized_date=eight_days_ago,
-                                             authorized_dataset=self.auth_dataset_123,
                                              active=True)
         account_123_expired.save()
+        account_dataset_123_expired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_expired,
+            authorized_dataset=self.auth_dataset_123,
+            authorized_date=eight_days_ago
+        )
+        account_dataset_123_expired.save()
 
         self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_on_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         expired_service_account_remover = ExpiredServiceAccountRemover('default')
         # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
@@ -236,21 +240,32 @@ class TestAccessControlActionRunner(TestCase):
 
         account_123_unexpired = ServiceAccount(google_project=self.project_123,
                                                service_account="service_account_unexpired123@developer.gserviceaccount.com",
-                                               authorized_dataset=self.auth_dataset_123,
                                                active=True)
         account_123_unexpired.save()
+        account_dataset_123_unexpired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_unexpired,
+            authorized_dataset=self.auth_dataset_123
+        )
+        account_dataset_123_unexpired.save()
 
         self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_off_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
         account_123_expired = ServiceAccount(google_project=self.project_123,
                                              service_account="service_account_expired123@developer.gserviceaccount.com",
                                              authorized_date=eight_days_ago,
-                                             authorized_dataset=self.auth_dataset_123,
                                              active=True)
         account_123_expired.save()
+        account_dataset_123_expired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_expired,
+            authorized_dataset=self.auth_dataset_123,
+            authorized_date=eight_days_ago
+        )
+        account_dataset_123_expired.save()
 
         self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_on_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         expired_service_account_remover = ExpiredServiceAccountRemover('default')
         # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
@@ -266,16 +281,23 @@ class TestAccessControlActionRunner(TestCase):
     def test_expired_service_account_deactivated_and_removed(self):
 
         self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_off_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
         account_123_expired = ServiceAccount(google_project=self.project_123,
                                              service_account="service_account_expired123@developer.gserviceaccount.com",
                                              authorized_date=eight_days_ago,
-                                             authorized_dataset=self.auth_dataset_123,
                                              active=True)
         account_123_expired.save()
+        account_dataset_123_expired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_expired,
+            authorized_dataset=self.auth_dataset_123,
+            authorized_date=eight_days_ago
+        )
+        account_dataset_123_expired.save()
 
         self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_on_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         expired_service_account_remover = ExpiredServiceAccountRemover('default')
         # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
@@ -302,5 +324,5 @@ class TestAccessControlActionRunner(TestCase):
         # there should be no members in the project-123 acl group
         self.assertEquals(acl_controller.get_group_members('project-123@acl-groups.org'), set([]))
 
-
-
+        # there should be no ServiceAccountAuthorizedDatasets for service account 123
+        self.assertEquals(len(ServiceAccountAuthorizedDatasets.objects.filter(service_account=account_123_expired)), 0)
