@@ -20,7 +20,7 @@ from unittest import TestCase
 
 from dataset_utils.tests.data_generators import create_csv_file_object
 from dataset_utils.dataset_config import DatasetConfiguration, DatasetAccessSupport, DatasetGoogleGroupPair
-from dataset_utils.gcs_support import GCSSupportSimulator
+from dataset_utils.gcs_support_simulator import GCSSupportSimulator
 
 
 class TestDatasetAccessSupportGetAllDatasets(TestCase):
