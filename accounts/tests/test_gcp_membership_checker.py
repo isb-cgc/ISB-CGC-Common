@@ -68,8 +68,7 @@ class TestPublicDatasetServiceAccount(TestCase):
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
 
-        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
-                                          authorized_dataset=self.auth_dataset_123)
+        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123")
         self.account_123.save()
 
 
@@ -114,7 +113,6 @@ class TestUnauthorizedUser(TestCase):
         self.project_123.user.add(self.auth_user_1)
         self.project_123.user.add(self.auth_user_2)
 
-        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
-                                          authorized_dataset=self.auth_dataset_123)
+        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123")
         self.account_123.save()
 
