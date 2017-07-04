@@ -27,7 +27,6 @@ from enum import Enum
 from accounts.utils import ServiceObjectBase
 
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
-from dataset_utils.gcs_support import GCSSupportConcrete
 
 
 class DatasetConfiguration(ServiceObjectBase):
@@ -112,24 +111,6 @@ class DatasetAccessSupport(object):
         self.dataset_config = dataset_config
         self.gcs_support = gcs_support
         self.authorization_list_map = {}
-
-    @classmethod
-    def from_webapp_django_settings(cls):
-        """
-        Builds and instance from a Django settings object.
-        
-        Creates a DatasetConfiguration instance using a JSON configuration file assumed to be
-        present on the local file system in a path indicated by DATASET_CONFIGURATION_PATH.
-        
-        The above DatasetConfiguration instance and GCSSupportConcrete are then used to create
-        an instance of this class.
-        """
-        from django.conf import settings as django_settings
-        config_file_path = django_settings.DATASET_CONFIGURATION_PATH
-        dataset_config = DatasetConfiguration.from_json_file_path(config_file_path)
-        gcs_support = GCSSupportConcrete()
-
-        return cls(dataset_config, gcs_support)
 
     def get_nih_dbgap_auth_lists(self):
         result = []

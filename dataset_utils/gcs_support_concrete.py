@@ -16,36 +16,38 @@ limitations under the License.
 
 """
 
+from oauth2client.client import GoogleCredentials
+from googleapiclient import discovery
+
+
 from dataset_utils.gcs_utils import get_gcs_bucket_and_object_from_path
 
 
 class GCSSupportConcrete(object):
-    def __init__(self):
-        pass
+    STORAGE_SCOPES = [
+        'https://www.googleapis.com/auth/devstorage.read_only',
+        'https://www.googleapis.com/auth/devstorage.read_write',
+        'https://www.googleapis.com/auth/devstorage.full_control'
+    ]
 
-    @classmethod
-    def get_data_from_gcs_bucket_and_object(cls, bucket_name, object_name):
-        from google_helpers.storage_service import get_storage_resource
-        storage_service = get_storage_resource()
+    def __init__(self, credentials_instance):
+        self.credentials = credentials_instance
+
+    def get_data_from_gcs_bucket_and_object(self, bucket_name, object_name):
+        storage_service = discovery.build('storage', 'v1', credentials=self.credentials, cache_discovery=False)
         req = storage_service.objects().get_media(bucket=bucket_name,
                                                   object=object_name)
         object_contents = req.execute()
         return object_contents
 
-    @classmethod
-    def get_data_from_gcs_path(cls, gcs_path):
-        bucket_name, object_name = get_gcs_bucket_and_object_from_path(gcs_path)
-        return cls.get_data_from_gcs_bucket_and_object(bucket_name, object_name)
-
-
-class GCSSupportSimulator(object):
-    def __init__(self, data_map):
-        self.data_map = data_map
-
-    def get_data_from_gcs_bucket_and_object(self, bucket_name, object_name):
-        return self.data_map[(bucket_name, object_name)]
-    
     def get_data_from_gcs_path(self, gcs_path):
         bucket_name, object_name = get_gcs_bucket_and_object_from_path(gcs_path)
         return self.get_data_from_gcs_bucket_and_object(bucket_name, object_name)
+
+    @classmethod
+    def build_from_webapp_django_settings(cls):
+        from django.conf import settings as django_settings
+        credentials_path = django_settings.GOOGLE_APPLICATION_CREDENTIALS
+        credentials = GoogleCredentials.from_stream(credentials_path).create_scoped(cls.STORAGE_SCOPES)
+        return cls(credentials)
 
