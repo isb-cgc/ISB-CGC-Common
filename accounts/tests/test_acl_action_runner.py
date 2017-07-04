@@ -206,6 +206,7 @@ class TestAccessControlActionRunner(TestCase):
 
 
         self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_off_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
         account_123_expired = ServiceAccount(google_project=self.project_123,
@@ -213,8 +214,15 @@ class TestAccessControlActionRunner(TestCase):
                                              authorized_date=eight_days_ago,
                                              active=True)
         account_123_expired.save()
+        account_dataset_123_expired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_expired,
+            authorized_dataset=self.auth_dataset_123,
+            authorized_date=eight_days_ago
+        )
+        account_dataset_123_expired.save()
 
         self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_on_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         expired_service_account_remover = ExpiredServiceAccountRemover('default')
         # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
@@ -234,8 +242,14 @@ class TestAccessControlActionRunner(TestCase):
                                                service_account="service_account_unexpired123@developer.gserviceaccount.com",
                                                active=True)
         account_123_unexpired.save()
+        account_dataset_123_unexpired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_unexpired,
+            authorized_dataset=self.auth_dataset_123
+        )
+        account_dataset_123_unexpired.save()
 
         self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_off_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
         account_123_expired = ServiceAccount(google_project=self.project_123,
@@ -243,8 +257,15 @@ class TestAccessControlActionRunner(TestCase):
                                              authorized_date=eight_days_ago,
                                              active=True)
         account_123_expired.save()
+        account_dataset_123_expired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_expired,
+            authorized_dataset=self.auth_dataset_123,
+            authorized_date=eight_days_ago
+        )
+        account_dataset_123_expired.save()
 
         self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_on_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         expired_service_account_remover = ExpiredServiceAccountRemover('default')
         # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
@@ -260,6 +281,7 @@ class TestAccessControlActionRunner(TestCase):
     def test_expired_service_account_deactivated_and_removed(self):
 
         self.turn_off_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_off_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         eight_days_ago = timezone.now() + timezone.timedelta(days=-8)
         account_123_expired = ServiceAccount(google_project=self.project_123,
@@ -267,8 +289,15 @@ class TestAccessControlActionRunner(TestCase):
                                              authorized_date=eight_days_ago,
                                              active=True)
         account_123_expired.save()
+        account_dataset_123_expired = ServiceAccountAuthorizedDatasets(
+            service_account=account_123_expired,
+            authorized_dataset=self.auth_dataset_123,
+            authorized_date=eight_days_ago
+        )
+        account_dataset_123_expired.save()
 
         self.turn_on_auto_now(ServiceAccount, 'authorized_date')
+        self.turn_on_auto_now(ServiceAccountAuthorizedDatasets, 'authorized_date')
 
         expired_service_account_remover = ExpiredServiceAccountRemover('default')
         # the process function will return a DatasetUpdateResult object that has a service_account_remove_set attribute
