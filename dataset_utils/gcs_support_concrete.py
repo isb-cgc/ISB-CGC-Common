@@ -51,3 +51,8 @@ class GCSSupportConcrete(object):
         credentials = GoogleCredentials.from_stream(credentials_path).create_scoped(cls.STORAGE_SCOPES)
         return cls(credentials)
 
+    @classmethod
+    def build_from_default_credentials(cls):
+        credentials = GoogleCredentials.get_application_default()
+        return cls(credentials)
+
