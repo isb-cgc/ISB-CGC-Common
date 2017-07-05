@@ -18,9 +18,9 @@ limitations under the License.
 
 from unittest import TestCase
 
-from dataset_utils.tests.data_generators import create_csv_file_object
+from dataset_utils.tests.data_generators import create_csv_string
 from dataset_utils.dataset_config import DatasetConfiguration, DatasetAccessSupport
-from dataset_utils.gcs_support import GCSSupportSimulator
+from dataset_utils.gcs_support_simulator import GCSSupportSimulator
 
 
 class TestDatasetAccessSupportAuthLists(TestCase):
@@ -50,7 +50,7 @@ class TestDatasetAccessSupportAuthLists(TestCase):
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
-        data = create_csv_file_object(test_csv_data, include_header=True)
+        data = create_csv_string(test_csv_data, include_header=True)
         
         gcs_data_map = {
             ("bucket", "authorization_list"): data

@@ -20,7 +20,7 @@ from unittest import TestCase
 
 from jsonschema.exceptions import ValidationError
 
-from dataset_utils.tests.data_generators import create_csv_file_object
+from dataset_utils.tests.data_generators import create_csv_string
 from dataset_utils.dataset_config import DatasetConfiguration
 
 

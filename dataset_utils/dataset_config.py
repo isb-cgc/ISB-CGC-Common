@@ -27,7 +27,6 @@ from enum import Enum
 from accounts.utils import ServiceObjectBase
 
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
-from dataset_utils.gcs_support import GCSSupportConcrete
 
 
 class DatasetConfiguration(ServiceObjectBase):
@@ -113,24 +112,6 @@ class DatasetAccessSupport(object):
         self.gcs_support = gcs_support
         self.authorization_list_map = {}
 
-    @classmethod
-    def from_webapp_django_settings(cls):
-        """
-        Builds and instance from a Django settings object.
-        
-        Creates a DatasetConfiguration instance using a JSON configuration file assumed to be
-        present on the local file system in a path indicated by DATASET_CONFIGURATION_PATH.
-        
-        The above DatasetConfiguration instance and GCSSupportConcrete are then used to create
-        an instance of this class.
-        """
-        from django.conf import settings as django_settings
-        config_file_path = django_settings.DATASET_CONFIGURATION_PATH
-        dataset_config = DatasetConfiguration.from_json_file_path(config_file_path)
-        gcs_support = GCSSupportConcrete()
-
-        return cls(dataset_config, gcs_support)
-
     def get_nih_dbgap_auth_lists(self):
         result = []
         for dataset_item in self.dataset_config.authorization_list_files:
@@ -157,13 +138,20 @@ class DatasetAccessSupport(object):
         return full_gcs_path
 
     def get_auth_list_instance_for_dataset_id(self, dataset_id):
+        """
+        Returns the authorization list class instance for the given dataset identifier.
+
+        If the authorization list class instance does not already exist, the list file is
+        downloaded from GCS, and then the class instance is created from the downloaded file.
+        """
         # Has this already been loaded?
         if dataset_id in self.authorization_list_map:
             return self.authorization_list_map[dataset_id]
 
         auth_list_gcs_path = self.get_auth_list_gcs_path_for_dataset_id(dataset_id)
         auth_list_data = self.gcs_support.get_data_from_gcs_path(auth_list_gcs_path)
-        auth_list_instance = NIHDatasetAuthorizationList.from_stream(auth_list_data)
+        # The GCS API returns a string
+        auth_list_instance = NIHDatasetAuthorizationList.from_string(auth_list_data)
 
         self.authorization_list_map[dataset_id] = auth_list_instance
         return auth_list_instance

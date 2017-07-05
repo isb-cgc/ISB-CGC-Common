@@ -19,25 +19,6 @@ limitations under the License.
 from dataset_utils.gcs_utils import get_gcs_bucket_and_object_from_path
 
 
-class GCSSupportConcrete(object):
-    def __init__(self):
-        pass
-
-    @classmethod
-    def get_data_from_gcs_bucket_and_object(cls, bucket_name, object_name):
-        from google_helpers.storage_service import get_storage_resource
-        storage_service = get_storage_resource()
-        req = storage_service.objects().get_media(bucket=bucket_name,
-                                                  object=object_name)
-        object_contents = req.execute()
-        return object_contents
-
-    @classmethod
-    def get_data_from_gcs_path(cls, gcs_path):
-        bucket_name, object_name = get_gcs_bucket_and_object_from_path(gcs_path)
-        return cls.get_data_from_gcs_bucket_and_object(bucket_name, object_name)
-
-
 class GCSSupportSimulator(object):
     def __init__(self, data_map):
         self.data_map = data_map
