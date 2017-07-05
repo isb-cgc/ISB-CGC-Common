@@ -138,13 +138,20 @@ class DatasetAccessSupport(object):
         return full_gcs_path
 
     def get_auth_list_instance_for_dataset_id(self, dataset_id):
+        """
+        Returns the authorization list class instance for the given dataset identifier.
+
+        If the authorization list class instance does not already exist, the list file is
+        downloaded from GCS, and then the class instance is created from the downloaded file.
+        """
         # Has this already been loaded?
         if dataset_id in self.authorization_list_map:
             return self.authorization_list_map[dataset_id]
 
         auth_list_gcs_path = self.get_auth_list_gcs_path_for_dataset_id(dataset_id)
         auth_list_data = self.gcs_support.get_data_from_gcs_path(auth_list_gcs_path)
-        auth_list_instance = NIHDatasetAuthorizationList.from_stream(auth_list_data)
+        # The GCS API returns a string
+        auth_list_instance = NIHDatasetAuthorizationList.from_string(auth_list_data)
 
         self.authorization_list_map[dataset_id] = auth_list_instance
         return auth_list_instance
