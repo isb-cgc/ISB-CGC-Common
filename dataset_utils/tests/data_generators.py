@@ -26,10 +26,13 @@ NIH_WHITELIST_CSV_FIELDNAMES = [
 ]
 
 
-def create_csv_file_object(data_rows, include_header=False):
+def create_csv_string(data_rows, include_header=False, field_names=NIH_WHITELIST_CSV_FIELDNAMES):
+    """
+
+    """
     data = StringIO()
 
-    header_line = ' ,'.join(NIH_WHITELIST_CSV_FIELDNAMES)
+    header_line = ' ,'.join(field_names)
 
     if include_header:
         data.write(header_line)
@@ -41,4 +44,4 @@ def create_csv_file_object(data_rows, include_header=False):
         writer.writerow(row)
 
     data.seek(0)
-    return data
+    return data.getvalue()
