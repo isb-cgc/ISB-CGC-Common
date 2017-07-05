@@ -18,9 +18,9 @@ limitations under the License.
 
 from unittest import TestCase
 
-from dataset_utils.tests.data_generators import create_csv_file_object
+from dataset_utils.tests.data_generators import create_csv_string
 from dataset_utils.dataset_config import DatasetConfiguration, DatasetAccessSupport, DatasetGoogleGroupPair
-from dataset_utils.gcs_support import GCSSupportSimulator
+from dataset_utils.gcs_support_simulator import GCSSupportSimulator
 
 
 class TestDatasetAccessSupportUserDatasets(TestCase):
@@ -50,7 +50,7 @@ class TestDatasetAccessSupportUserDatasets(TestCase):
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
-        data = create_csv_file_object(test_csv_data, include_header=True)
+        data = create_csv_string(test_csv_data, include_header=True)
         
         gcs_data_map = {
             ("bucket", "authorization_list"): data
@@ -70,15 +70,16 @@ class TestDatasetAccessSupportUserDatasets(TestCase):
 
     def test_one_user_two_dataset(self):
         """
-        Test two NIH dbGaP datasets are returned for one authorized user. 
+        Test two NIH dbGaP datasets, each with an authorization list containing a line for the same user,
+        are returned for one authorized user in a call to DatasetAccessSupport.get_datasets_for_era_login().
         """
         test_config = {
             "authorization_list_files": [
                 {
                     "dataset_name": "Dev Fake Dataset",
                     "dataset_id": "phs000123",
-                    "acl_group": "test-dataset@test.org",
-                    "gcs_path": "gs://bucket/authorization_list",
+                    "acl_group": "test-dataset-123@test.org",
+                    "gcs_path": "gs://bucket/authorization_list_123",
                     "type": "nih-dbgap"
                 },
                 {
@@ -93,24 +94,36 @@ class TestDatasetAccessSupportUserDatasets(TestCase):
 
         config_instance = DatasetConfiguration.from_dict(test_config)
 
-        self.assertEquals(1, len(config_instance.authorization_list_files))
+        self.assertEquals(2, len(config_instance.authorization_list_files))
         self.assertEquals("Dev Fake Dataset", config_instance.authorization_list_files[0]['dataset_name'])
+        self.assertEquals("Dev Fake Dataset 2", config_instance.authorization_list_files[1]['dataset_name'])
 
-        test_csv_data = [
-            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs123456.v1.p1.c1',
+        # Create fake auth list for phs000123
+        test_csv_data_123 = [
+            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000123.v1.p1.c1',
              'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
         ]
 
-        data = create_csv_file_object(test_csv_data, include_header=True)
+        data_123 = create_csv_string(test_csv_data_123, include_header=True)
+
+        # Create fake auth list for phs000456
+        test_csv_data_456 = [
+            ['User McName', 'USERNAME1', 'eRA', 'PI', 'username@fake.com', '555-555-5555', 'active', 'phs000456.v1.p1.c1',
+             'General Research Use', '2013-01-01 12:34:56.789', '2014-06-01 16:00:00.100', '2017-06-11 00:00:00.000', '']
+        ]
+
+        data_456 = create_csv_string(test_csv_data_456, include_header=True)
 
         gcs_data_map = {
-            ("bucket", "authorization_list"): data
+            ("bucket", "authorization_list_123"): data_123,
+            ("bucket", "authorization_list_456"): data_456
         }
 
         gss = GCSSupportSimulator(gcs_data_map)
         dsas = DatasetAccessSupport(config_instance, gss)
 
         result = dsas.get_datasets_for_era_login("USERNAME1")
+
         self.assertEquals(2, len(result))
         self.assertEquals(DatasetGoogleGroupPair, type(result[0]))
         self.assertEquals("phs000123", result[0].dataset_id)
