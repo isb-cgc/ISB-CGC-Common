@@ -23,7 +23,7 @@ from datetime import datetime
 from json import load as json_load, loads as json_loads
 from re import compile as re_compile
 
-logger = logging
+logger = logging.getLogger(__name__)
 
 
 from auth_list import DatasetAuthorizationList
@@ -90,6 +90,7 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
         filtered_rows = []
         for row in reader:
             arglist = [row[field] for field in fieldnames]
+            logger.debug("In NIH Whitelist parser, arglist: "+str(arglist))
 
             try:
                 whitelist_item = NIHAuthorizationListRow(*arglist)

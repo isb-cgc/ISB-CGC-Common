@@ -45,4 +45,3 @@ class DatasetAccessSupportFactory(object):
         gcs_support = GCSSupportConcrete.build_from_webapp_django_settings()
 
         return DatasetAccessSupport(dataset_config, gcs_support)
-
