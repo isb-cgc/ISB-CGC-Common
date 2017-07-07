@@ -105,6 +105,9 @@ class DatasetGoogleGroupPair(object):
         self.dataset_id = dataset_id
         self.google_group_name = google_group_name
 
+    def __str__(self):
+        return 'DatasetGoogleGroupPair(dataset_id: '+self.dataset_id + ', google_group_name: '+self.google_group_name + ')'
+
 
 class DatasetAccessSupport(object):
     def __init__(self, dataset_config, gcs_support):
