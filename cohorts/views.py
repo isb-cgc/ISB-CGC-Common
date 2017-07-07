@@ -54,7 +54,7 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 USER_DATA_ON = settings.USER_DATA_ON
 

@@ -20,7 +20,7 @@ import logging
 
 from jsonschema import validate as schema_validate, ValidationError
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 
 from dataset_utils.dataset_config import DatasetConfiguration, DatasetAccessSupport
