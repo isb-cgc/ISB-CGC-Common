@@ -92,7 +92,6 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
         filtered_rows = []
         for row in reader:
             arglist = [row[field] for field in fieldnames]
-            logger.debug("In NIH Whitelist parser, arglist: "+str(arglist))
 
             try:
                 whitelist_item = NIHAuthorizationListRow(*arglist)
@@ -102,10 +101,10 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
 
         return cls(items, filtered_rows)
 
-    def is_era_login_active(self, era_login_name):
+    def is_era_login_active(self, era_email):
         found = False
         for item in self.get_active_items():
-            if era_login_name == item.login:
+            if era_email == item.email:
                 found = True
                 break
 
