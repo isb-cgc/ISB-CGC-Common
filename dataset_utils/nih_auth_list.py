@@ -23,7 +23,7 @@ from datetime import datetime
 from json import load as json_load, loads as json_loads
 from re import compile as re_compile
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 
 from auth_list import DatasetAuthorizationList
@@ -80,6 +80,8 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
             "user name", "login",  "authority", "role", "email", "phone", "status", "phsid",
             "permission set", "created", "updated", "expires", "downloader for"
         ]
+
+        logger.debug("In from_string")
 
         file_obj = StringIO(file_contents)
         file_obj.readline()
