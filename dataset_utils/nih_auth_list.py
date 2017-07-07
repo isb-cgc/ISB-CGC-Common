@@ -81,8 +81,6 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
             "permission set", "created", "updated", "expires", "downloader for"
         ]
 
-        logger.debug("In from_string")
-
         file_obj = StringIO(file_contents)
         file_obj.readline()
 
