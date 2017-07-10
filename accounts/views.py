@@ -475,7 +475,7 @@ def verify_sa(request, user_id):
             result = {'message': 'There was no Google Cloud Project provided.'}
             status = '404'
     except Exception as e:
-        logger.error("[ERROR] While verifying Service Account "+str(user_sa)+": ")
+        logger.error("[ERROR] While verifying Service Accounts: ")
         logger.exception(e)
         result = {'message': 'There was an error while trying to verify this service account. Please contact an administrator.'}
         status = '500'
