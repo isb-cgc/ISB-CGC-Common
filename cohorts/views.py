@@ -1385,7 +1385,7 @@ def cohort_filelist(request, cohort_id=0):
             for dataset in user_auth_sets:
                 if not has_access:
                     has_access = []
-                has_access.append(dataset.whitelist_id)
+                has_access.append(dataset.authorized_dataset.whitelist_id)
 
         items = cohort_files(request, cohort_id, build=build, access=has_access)
         cohort = Cohort.objects.get(id=cohort_id, active=True)
