@@ -487,81 +487,89 @@ def verify_sa(request, user_id):
 def register_sa(request, user_id):
     st_logger = StackDriverLogger.build_from_django_settings()
 
-    print request.POST
-    if request.GET.get('gcp_id'):
-        authorized_datasets = AuthorizedDataset.objects.filter(public=False)
+    try:
 
-        context = {'gcp_id': request.GET.get('gcp_id'),
-                   'authorized_datasets': authorized_datasets}
-        return render(request, 'GenespotRE/register_sa.html', context)
-    elif request.POST.get('gcp_id'):
-        user_email = request.user.email
-        gcp_id = request.POST.get('gcp_id')
-        user_sa = request.POST.get('user_sa')
-        datasets = list(request.POST.get('datasets'))
-        user_gcp = GoogleProject.objects.get(project_id=gcp_id)
+        if request.GET.get('gcp_id'):
+            authorized_datasets = AuthorizedDataset.objects.filter(public=False)
 
-        if len(datasets) == 1 and datasets[0] == '':
-            datasets = []
-        else:
-            datasets = map(int, datasets)
+            context = {'gcp_id': request.GET.get('gcp_id'),
+                       'authorized_datasets': authorized_datasets}
+            return render(request, 'GenespotRE/register_sa.html', context)
+        elif request.POST.get('gcp_id'):
+            user_email = request.user.email
+            gcp_id = request.POST.get('gcp_id')
+            user_sa = request.POST.get('user_sa')
+            datasets = list(request.POST.get('datasets'))
+            user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
-        # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-        result = verify_service_account(gcp_id, user_sa, datasets, user_email)
-        if 'message' in result.keys():
-            messages.error(request, result['message'])
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-            return redirect('user_gcp_list', user_id=user_id)
+            if len(datasets) == 1 and datasets[0] == '':
+                datasets = []
+            else:
+                datasets = map(int, datasets)
 
-        elif result['user_dataset_verified']:
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                            {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+            # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email)
+            if 'message' in result.keys():
+                messages.error(request, result['message'])
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
+                return redirect('user_gcp_list', user_id=user_id)
 
-            # Datasets verified, add service accounts to appropriate acl groups
-            protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
+            elif result['user_dataset_verified']:
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+                                {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
 
-            # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
-            public_datasets = AuthorizedDataset.objects.filter(public=True)
-            directory_service, http_auth = get_directory_resource()
-            service_account_obj, created = ServiceAccount.objects.update_or_create(
-                google_project=user_gcp, service_account=user_sa,
-                defaults={
-                    'google_project': user_gcp,
-                    'service_account': user_sa,
-                    'active': True
-                })
+                # Datasets verified, add service accounts to appropriate acl groups
+                protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
 
-            for dataset in public_datasets | protected_datasets:
-                service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.update_or_create(
-                    service_account=service_account_obj, authorized_dataset=dataset,
+                # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
+                public_datasets = AuthorizedDataset.objects.filter(public=True)
+                directory_service, http_auth = get_directory_resource()
+                service_account_obj, created = ServiceAccount.objects.update_or_create(
+                    google_project=user_gcp, service_account=user_sa,
                     defaults={
-                        'service_account': service_account_obj,
-                        'authorized_dataset': dataset
-                    }
-                )
+                        'google_project': user_gcp,
+                        'service_account': user_sa,
+                        'active': True
+                    })
 
-                try:
-                    body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
-                    directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
+                for dataset in public_datasets | protected_datasets:
+                    service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.update_or_create(
+                        service_account=service_account_obj, authorized_dataset=dataset,
+                        defaults={
+                            'service_account': service_account_obj,
+                            'authorized_dataset': dataset
+                        }
+                    )
 
-                    logger.info("Attempting to insert user {} into group {}. "
-                                "If an error message doesn't follow, they were successfully added."
-                                .format(str(service_account_obj.service_account), dataset.acl_google_group))
+                    try:
+                        body = {"email": service_account_obj.service_account, "role": "MEMBER"}
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
+                        directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
-                except HttpError as e:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
-                    logger.info(e)
+                        logger.info("Attempting to insert user {} into group {}. "
+                                    "If an error message doesn't follow, they were successfully added."
+                                    .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
-            return redirect('user_gcp_list', user_id=user_id)
+                    except HttpError as e:
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
+                        logger.info(e)
+
+                return redirect('user_gcp_list', user_id=user_id)
+            else:
+                # Somehow managed to register even though previous verification failed
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                messages.error(request, 'There was an error in processing your service account. Please try again.')
+                return redirect('user_gcp_list', user_id=user_id)
         else:
-            # Somehow managed to register even though previous verification failed
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
-            messages.error(request, 'There was an error in processing your service account. Please try again.')
+            messages.error(request, 'There was no Google Cloud Project provided.', 'warning')
             return redirect('user_gcp_list', user_id=user_id)
-    else:
-        messages.error(request, 'There was no Google Cloud Project provided.', 'warning')
+
+    except Exception as e:
+        logger.error("[ERROR] While registering a Service Account: ")
+        logger.exception(e)
+        messages.error(request,"Unable to register this Google Cloud Project - please contact the administrator.")
         return redirect('user_gcp_list', user_id=user_id)
+
 
 @login_required
 def delete_sa(request, user_id, sa_id):
