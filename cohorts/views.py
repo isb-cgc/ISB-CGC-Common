@@ -1371,41 +1371,49 @@ def save_cohort_from_plot(request):
 @csrf_protect
 def cohort_filelist(request, cohort_id=0):
     if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
         return redirect('/user_landing')
 
-    build = request.GET.get('build', 'HG19')
-    nih_user = NIH_User.objects.filter(user=request.user, active=True)
-    has_access = None
-    if len(nih_user) > 0:
-        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-        for dataset in user_auth_sets:
-            if not has_access:
-                has_access = []
-            has_access.append(dataset.whitelist_id)
+    try:
+        build = request.GET.get('build', 'HG19')
+        nih_user = NIH_User.objects.filter(user=request.user, active=True)
+        has_access = None
+        if len(nih_user) > 0:
+            user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+            for dataset in user_auth_sets:
+                if not has_access:
+                    has_access = []
+                has_access.append(dataset.whitelist_id)
 
-    items = cohort_files(request, cohort_id, build=build, access=has_access)
-    cohort = Cohort.objects.get(id=cohort_id, active=True)
+        items = cohort_files(request, cohort_id, build=build, access=has_access)
+        cohort = Cohort.objects.get(id=cohort_id, active=True)
 
-    # Check if cohort contains user data samples - return info message if it does.
-    # Get user accessed projects
-    user_projects = Project.get_user_projects(request.user)
-    cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
-    if len(cohort_sample_list):
-        messages.info(request,
-            "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
+        # Check if cohort contains user data samples - return info message if it does.
+        # Get user accessed projects
+        user_projects = Project.get_user_projects(request.user)
+        cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
+        if len(cohort_sample_list):
+            messages.info(request,
+                "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
 
-    return render(request, 'cohorts/cohort_filelist.html', {'request': request,
-                                                            'cohort': cohort,
-                                                            'base_url': settings.BASE_URL,
-                                                            'base_api_url': settings.BASE_API_URL,
-                                                            'total_files': items['total_file_count'],
-                                                            'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                                            'platform_counts': items['platform_count_list'],
-                                                            'file_list_max': MAX_FILE_LIST_ENTRIES,
-                                                            'sel_file_max': MAX_SEL_FILES,
-                                                            'build': build})
+        return render(request, 'cohorts/cohort_filelist.html', {'request': request,
+                                                                'cohort': cohort,
+                                                                'base_url': settings.BASE_URL,
+                                                                'base_api_url': settings.BASE_API_URL,
+                                                                'total_files': items['total_file_count'],
+                                                                'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                                                'platform_counts': items['platform_count_list'],
+                                                                'file_list_max': MAX_FILE_LIST_ENTRIES,
+                                                                'sel_file_max': MAX_SEL_FILES,
+                                                                'build': build})
+    except Exception as e:
+        logger.error("[ERROR] While trying to view the cohort file list: ")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
+        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
