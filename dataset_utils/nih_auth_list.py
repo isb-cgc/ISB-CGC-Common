@@ -71,6 +71,9 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
         self.items = items
         self.filtered_rows = filtered_rows
 
+    def __str__(self):
+        return "NIHDatasetAuthorizationList(items: "+str(self.items)+ ", filtered_rows: "+str(self.filtered_rows)+")"
+
     def get_active_items(self):
         return filter(lambda item: item.status == 'active', self.items)
 
