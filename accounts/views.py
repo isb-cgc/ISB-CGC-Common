@@ -533,7 +533,7 @@ def register_sa(request, user_id):
                     })
 
                 for dataset in public_datasets | protected_datasets:
-                    service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.update_or_create(
+                    service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.objects.update_or_create(
                         service_account=service_account_obj, authorized_dataset=dataset,
                         defaults={
                             'service_account': service_account_obj,
