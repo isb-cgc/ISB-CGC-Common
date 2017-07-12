@@ -53,6 +53,9 @@ class NIHAuthorizationListRow(object):
         self.expires = self.parse_datetime(expires)
         self.downloader_for = downloader_for
 
+    def __str__(self):
+        return "NIHAuthorizationListRow(user_name: "+self.user_name+", email: "+self.email+", full_phsid: "+self.full_phsid+")"
+
     def normalize_whitelist_id(self, whitelist_id):
         result = self.WHITELIST_RE.findall(whitelist_id)
 
