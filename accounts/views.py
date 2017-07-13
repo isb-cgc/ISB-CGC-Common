@@ -291,13 +291,11 @@ def user_gcp_delete(request, user_id, gcp_id):
             for saad in saads:
                 try:
                     directory_service, http_auth = get_directory_resource()
-                    for service_account in service_accounts:
-                        directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=service_account.service_account).execute(http=http_auth)
+                    directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=saad.service_account.service_account).execute(http=http_auth)
 
-
-                        logger.info("Attempting to delete user {} from group {}. "
-                                    "If an error message doesn't follow, they were successfully deleted"
-                                    .format(service_account.service_account, CONTROLLED_ACL_GOOGLE_GROUP))
+                    logger.info("Attempting to delete user {} from group {}. "
+                                "If an error message doesn't follow, they were successfully deleted"
+                                .format(saad.service_account.service_account, CONTROLLED_ACL_GOOGLE_GROUP))
                 except HttpError as e:
                     logger.info(e)
 
@@ -588,14 +586,14 @@ def delete_sa(request, user_id, sa_id):
             for saad in saads:
                 try:
                     directory_service, http_auth = get_directory_resource()
-                    directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=sa.service_account).execute(http=http_auth)
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(sa.service_account, saad.authorized_dataset.acl_google_group)})
+                    directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=saad.service_account.service_account).execute(http=http_auth)
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
                     logger.info("Attempting to delete user {} from group {}. "
                                 "If an error message doesn't follow, they were successfully deleted"
-                                .format(sa.service_account, saad.authorized_dataset.acl_google_group))
+                                .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
                 except HttpError as e:
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                        'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(sa.service_account), saad.authorized_dataset.acl_google_group)})
+                        'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
                     logger.error(e)
                     logger.exception(e)
 
