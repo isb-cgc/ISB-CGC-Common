@@ -94,6 +94,9 @@ class ServiceAccount(models.Model):
             datasets=", ".join([x[0]+' ['+x[1]+']' for x in auth_datasets])
         )
 
+    def get_auth_datasets(self):
+        return self.serviceaccountauthorizeddatasets_set.all().authorizeddataset_set.all().distinct()
+
 
 class ServiceAccountAuthorizedDatasets(models.Model):
     service_account = models.ForeignKey(ServiceAccount, null=False)
