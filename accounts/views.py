@@ -210,6 +210,7 @@ def user_gcp_list(request, user_id):
         return render(request, '403.html')
     pass
 
+
 @login_required
 def verify_gcp(request, user_id):
     try:
