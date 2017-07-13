@@ -127,6 +127,8 @@ def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
     unlinked_nih_user_list = []
     ACLDeleteAction_list = []
 
+    user_email = User.objects.get(id=user_id).email
+
     try:
         nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
         nih_account_to_unlink.linked = False
@@ -141,7 +143,7 @@ def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
             nih_account_to_unlink.save()
             unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
-    user_email = User.objects.get(id=user_id).email
+            logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
     ACLDeleteAction_list.append(ACLDeleteAction(acl_group_name, user_email))
 
@@ -312,7 +314,6 @@ def user_gcp_delete(request, user_id, gcp_id):
 def verify_service_account(gcp_id, service_account, datasets, user_email):
     # Only verify for protected datasets
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
-    dataset_obj_ids = dataset_objs.values_list('id', flat=True)
     dataset_obj_names = dataset_objs.values_list('name', flat=True)
 
     # log the reports using Cloud logging API
@@ -380,7 +381,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
 
 
         # 4. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
-        user_dataset_verified = True
+        all_user_datasets_verified = True
 
         for role, members in roles.items():
             for member in members:
@@ -397,34 +398,29 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                     if nih_user:
 
                         # FIND ALL DATASETS USER HAS ACCESS TO
-                        user_datasets = UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True)
-                        user_auth_datasets = AuthorizedDataset.objects.filter(id__in=user_datasets)
+                        user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).authorizeddataset_set.all()
                         member['datasets'] = []
-                        user_auth_dataset_ids = user_auth_datasets.values_list('id', flat=True)
 
                         # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
-                        member['datasets_valid'] = False
-                        if set(dataset_obj_ids).issubset(user_auth_dataset_ids):
-                            member['datasets_valid'] = True
+                        for dataset in dataset_objs:
+                            member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
+
+                        valid_datasets = [x.name for x in member['datasets'] if x['valid']]
+                        invalid_datasets = [x.name for x in member['datasets'] if not x['valid']]
+
+                        if len(valid_datasets) and not len(invalid_datasets):
                             if dataset_objs:
                                 st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
-
-                        for item in user_auth_datasets:
-                            member['datasets'].append(item.name)
-
-                        # IF ONE USER DOES NOT HAVE ACCESS, DO NOT ALLOW TO CONTINUE
-                        if not member['datasets_valid']:
-                            user_dataset_verified = False
+                        else:
+                            all_user_datasets_verified = False
                             if dataset_objs:
-                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(invalid_datasets))})
 
                     # IF USER HAS NO ERA COMMONS ID
                     else:
-                        member['datasets_valid'] = False
-
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
                         if dataset_objs:
-                            user_dataset_verified = False
+                            all_user_datasets_verified = False
                             st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
@@ -433,7 +429,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                     member['datasets'] = []
                     if dataset_objs:
                         st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
-                        user_dataset_verified = False
+                        all_user_datasets_verified = False
 
 
                 # 4. VERIFY PI IS ON THE PROJECT
@@ -448,7 +444,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
     '''
 
     return_obj = {'roles': roles,
-                  'user_dataset_verified': user_dataset_verified}
+                  'all_user_datasets_verified': all_user_datasets_verified}
     return return_obj
 
 
@@ -468,7 +464,7 @@ def verify_sa(request, user_id):
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-            elif result['user_dataset_verified']:
+            elif result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
             else:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
@@ -518,7 +514,7 @@ def register_sa(request, user_id):
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
                 return redirect('user_gcp_list', user_id=user_id)
 
-            elif result['user_dataset_verified']:
+            elif result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
                                 {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
 
