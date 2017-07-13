@@ -1,6 +1,5 @@
 """
-
-Copyright 2015, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,7 +12,6 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 """
 
 import logging
@@ -282,25 +280,32 @@ def gcp_detail(request, user_id, gcp_id):
 
 @login_required
 def user_gcp_delete(request, user_id, gcp_id):
-    if request.POST:
-        gcp = GoogleProject.objects.get(id=gcp_id)
 
-        # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
-        service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id)
+    try:
+        if request.POST:
+            gcp = GoogleProject.objects.get(id=gcp_id)
 
-        try:
-            directory_service, http_auth = get_directory_resource()
-            for service_account in service_accounts:
-                directory_service.members().delete(groupKey=service_account.authorized_dataset.acl_google_group, memberKey=service_account.service_account).execute(http=http_auth)
+            # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
+            service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id)
+            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account__in=service_accounts)
+            for saad in saads:
+                try:
+                    directory_service, http_auth = get_directory_resource()
+                    for service_account in service_accounts:
+                        directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=service_account.service_account).execute(http=http_auth)
 
 
-                logger.info("Attempting to delete user {} from group {}. "
-                            "If an error message doesn't follow, they were successfully deleted"
-                            .format(service_account.service_account, CONTROLLED_ACL_GOOGLE_GROUP))
-        except HttpError as e:
-            logger.info(e)
+                        logger.info("Attempting to delete user {} from group {}. "
+                                    "If an error message doesn't follow, they were successfully deleted"
+                                    .format(service_account.service_account, CONTROLLED_ACL_GOOGLE_GROUP))
+                except HttpError as e:
+                    logger.info(e)
 
-        gcp.delete()
+            gcp.delete()
+    except Exception as e:
+        logger.error("[ERROR] While deleting a GCP: ")
+        logger.exception(e)
+        messages.error(request, "Encountered an error while trying to delete this Google Cloud Project - please contact the administrator.")
 
     return redirect('user_gcp_list', user_id=request.user.id)
 
