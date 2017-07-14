@@ -225,6 +225,8 @@ def user_gcp_list(request, user_id):
             logger.warn("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
             template = '403.html'
     except Exception as e:
+        logger.error("[ERROR] While trying to view the GCP list:")
+        logger.exception(e)
         messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
         template = '500.html'
 
