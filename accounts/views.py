@@ -195,6 +195,9 @@ Returns page that has user Google Cloud Projects
 '''
 @login_required
 def user_gcp_list(request, user_id):
+    context = {}
+    template = 'GenespotRE/user_gcp_list.html'
+
     try:
 
         if int(request.user.id) == int(user_id):
@@ -217,13 +220,15 @@ def user_gcp_list(request, user_id):
                        'user_details': user_details,
                        'gcp_list': gcp_list}
 
-            return render(request, 'GenespotRE/user_gcp_list.html', context)
         else:
             messages.error(request,"You are not allowed to view that user's Google Cloud Project list.")
             logger.warn("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
-            return render(request, '403.html')
+            template = '403.html'
     except Exception as e:
         messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
+        template = '500.html'
+
+    return render(request, template, context)
 
 
 @login_required
