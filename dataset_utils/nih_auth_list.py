@@ -53,6 +53,12 @@ class NIHAuthorizationListRow(object):
         self.expires = self.parse_datetime(expires)
         self.downloader_for = downloader_for
 
+    def __str__(self):
+        return "NIHAuthorizationListRow(user_name: "+self.user_name+", email: "+self.email+", full_phsid: "+self.full_phsid+")"
+
+    def __repr__(self):
+        return self.__str__()
+
     def normalize_whitelist_id(self, whitelist_id):
         result = self.WHITELIST_RE.findall(whitelist_id)
 
@@ -70,6 +76,9 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
     def __init__(self, items, filtered_rows):
         self.items = items
         self.filtered_rows = filtered_rows
+
+    def __str__(self):
+        return "NIHDatasetAuthorizationList(items: "+str(self.items)+ ", filtered_rows: "+str(self.filtered_rows)+")"
 
     def get_active_items(self):
         return filter(lambda item: item.status == 'active', self.items)
