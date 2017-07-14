@@ -195,30 +195,35 @@ Returns page that has user Google Cloud Projects
 '''
 @login_required
 def user_gcp_list(request, user_id):
-    if int(request.user.id) == int(user_id):
+    try:
 
-        user = User.objects.get(id=user_id)
-        gcp_list = GoogleProject.objects.filter(user=user)
-        social_account = SocialAccount.objects.get(user_id=user_id)
+        if int(request.user.id) == int(user_id):
 
-        user_details = {
-            'date_joined': user.date_joined,
-            'email': user.email,
-            'extra_data': social_account.extra_data,
-            'first_name': user.first_name,
-            'id': user.id,
-            'last_login': user.last_login,
-            'last_name': user.last_name
-        }
+            user = User.objects.get(id=user_id)
+            gcp_list = GoogleProject.objects.filter(user=user)
+            social_account = SocialAccount.objects.get(user_id=user_id)
 
-        context = {'user': user,
-                   'user_details': user_details,
-                   'gcp_list': gcp_list}
+            user_details = {
+                'date_joined': user.date_joined,
+                'email': user.email,
+                'extra_data': social_account.extra_data,
+                'first_name': user.first_name,
+                'id': user.id,
+                'last_login': user.last_login,
+                'last_name': user.last_name
+            }
 
-        return render(request, 'GenespotRE/user_gcp_list.html', context)
-    else:
-        return render(request, '403.html')
-    pass
+            context = {'user': user,
+                       'user_details': user_details,
+                       'gcp_list': gcp_list}
+
+            return render(request, 'GenespotRE/user_gcp_list.html', context)
+        else:
+            messages.error(request,"You are not allowed to view that user's Google Cloud Project list.")
+            logger.warn("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
+            return render(request, '403.html')
+    except Exception as e:
+        messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
 
 
 @login_required
