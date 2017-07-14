@@ -102,7 +102,7 @@ class UnlinkAccountsResult(object):
         self.acl_delete_actions = acl_delete_actions
 
 
-def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
+def unlink_accounts_and_get_acl_tasks(user_id):
     """
     This function modifies the 'NIH_User' objects!
 
@@ -145,7 +145,10 @@ def unlink_accounts_and_get_acl_tasks(user_id, acl_group_name):
 
             logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
-    ACLDeleteAction_list.append(ACLDeleteAction(acl_group_name, user_email))
+    datasets_to_revoke = UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).authorizeddataset_set.all()
+
+    for dataset in datasets_to_revoke:
+        ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
 
     return UnlinkAccountsResult(unlinked_nih_user_list, ACLDeleteAction_list)
 
@@ -155,7 +158,7 @@ def unlink_accounts(request):
     user_id = request.user.id
 
     try:
-        unlink_accounts_result = unlink_accounts_and_get_acl_tasks(user_id, CONTROLLED_ACL_GOOGLE_GROUP)
+        unlink_accounts_result = unlink_accounts_and_get_acl_tasks(user_id)
     except ObjectDoesNotExist as e:
         user_email = User.objects.get(id=user_id).email
         logger.error("NIH_User not found for user_id {}. Error: {}".format(user_id, e))
@@ -169,11 +172,16 @@ def unlink_accounts(request):
     directory_service, http_auth = get_directory_resource()
     for action in unlink_accounts_result.acl_delete_actions:
         user_email = action.user_email
+        google_group_acl = action.google_group_acl
+
+        # If the user isn't actually in the ACL, we'll get an HttpError
         try:
-            directory_service.members().delete(groupKey=action.acl_group_name,
+            logger.info("Removing user {} from {}...".format(user_email, google_group_acl))
+            directory_service.members().delete(groupKey=google_group_acl,
                                                memberKey=user_email).execute(http=http_auth)
+
         except HttpError as e:
-            logger.error("{} could not be deleted from {}, probably because they were not a member" .format(user_email, CONTROLLED_ACL_GOOGLE_GROUP))
+            logger.info("{} could not be deleted from {}, probably because they were not a member" .format(user_email, google_group_acl))
             logger.exception(e)
 
     # redirect to user detail page
