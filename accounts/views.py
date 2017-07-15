@@ -38,7 +38,8 @@ from projects.models import User_Data_Tables
 from .utils import ServiceAccountBlacklist, is_email_in_iam_roles
 import json
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
+
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 CONTROLLED_ACL_GOOGLE_GROUP = settings.ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
@@ -195,30 +196,37 @@ Returns page that has user Google Cloud Projects
 '''
 @login_required
 def user_gcp_list(request, user_id):
+    logger.info("[STATUS] Called user_gcp_list.")
     context = {}
     template = 'GenespotRE/user_gcp_list.html'
 
     try:
-
+        logger.info("Req user ID: "+str(request.user.id))
         if int(request.user.id) == int(user_id):
 
-            user = User.objects.get(id=user_id)
-            gcp_list = GoogleProject.objects.filter(user=user)
-            social_account = SocialAccount.objects.get(user_id=user_id)
+            try:
+                user = User.objects.get(id=user_id)
+                gcp_list = GoogleProject.objects.filter(user=user)
+                social_account = SocialAccount.objects.get(user_id=user_id)
 
-            user_details = {
-                'date_joined': user.date_joined,
-                'email': user.email,
-                'extra_data': social_account.extra_data,
-                'first_name': user.first_name,
-                'id': user.id,
-                'last_login': user.last_login,
-                'last_name': user.last_name
-            }
+                user_details = {
+                    'date_joined': user.date_joined,
+                    'email': user.email,
+                    'extra_data': social_account.extra_data,
+                    'first_name': user.first_name,
+                    'id': user.id,
+                    'last_login': user.last_login,
+                    'last_name': user.last_name
+                }
 
-            context = {'user': user,
-                       'user_details': user_details,
-                       'gcp_list': gcp_list}
+                context = {'user': user,
+                           'user_details': user_details,
+                           'gcp_list': gcp_list}
+
+            except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
+                logger.error("[ERROR] While fetching user GCP list: ")
+                logger.exception(e)
+                messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
 
         else:
             messages.error(request,"You are not allowed to view that user's Google Cloud Project list.")
@@ -230,6 +238,7 @@ def user_gcp_list(request, user_id):
         messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
         template = '500.html'
 
+    logger.info("[STATUS] Leaving user_gcp_list")
     return render(request, template, context)
 
 
