@@ -227,7 +227,6 @@ def user_gcp_list(request, user_id):
                 logger.error("[ERROR] While fetching user GCP list: ")
                 logger.exception(e)
                 messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
-                context = {}
 
         else:
             messages.error(request,"You are not allowed to view that user's Google Cloud Project list.")
