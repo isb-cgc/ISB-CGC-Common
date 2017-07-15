@@ -195,11 +195,12 @@ Returns page that has user Google Cloud Projects
 '''
 @login_required
 def user_gcp_list(request, user_id):
+    logger.info("[STATUS] Called user_gcp_list.")
     context = {}
     template = 'GenespotRE/user_gcp_list.html'
 
     try:
-
+        logger.info("Req user ID: "+str(request.user.id))
         if int(request.user.id) == int(user_id):
 
             user = User.objects.get(id=user_id)
@@ -230,6 +231,7 @@ def user_gcp_list(request, user_id):
         messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
         template = '500.html'
 
+    logger.info("[STATUS] Leaving user_gcp_list")
     return render(request, template, context)
 
 
