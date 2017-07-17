@@ -18,6 +18,9 @@ limitations under the License.
 
 from django.db import models
 from django.contrib.auth.models import User
+import logging
+
+logger = logging.getLogger('main_logger')
 
 
 class NIH_User(models.Model):
@@ -95,7 +98,13 @@ class ServiceAccount(models.Model):
         )
 
     def get_auth_datasets(self):
-        return self.serviceaccountauthorizeddatasets_set.all().authorizeddataset_set.all().distinct()
+        result = None
+        try:
+            result = AuthorizedDataset.objects.filter(id__in=self.serviceaccountauthorizeddatasets_set.all().values_list('authorized_dataset', flat=True))
+        except Exception as e:
+            logger.error("[ERROR] While retrieving authorized datasets: ")
+            logger.exception(e)
+        return result
 
 
 class ServiceAccountAuthorizedDatasets(models.Model):
