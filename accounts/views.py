@@ -146,7 +146,7 @@ def unlink_accounts_and_get_acl_tasks(user_id):
 
             logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
-    datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset'))
+    datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset', flat=True))
 
     for dataset in datasets_to_revoke:
         ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
@@ -424,7 +424,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                     if nih_user:
 
                         # FIND ALL DATASETS USER HAS ACCESS TO
-                        user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset'))
+                        user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True))
                         member['datasets'] = []
 
                         # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
