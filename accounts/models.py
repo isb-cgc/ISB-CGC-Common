@@ -100,8 +100,7 @@ class ServiceAccount(models.Model):
     def get_auth_datasets(self):
         result = []
         try:
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=self)
-            result = saads.authorizeddataset_set.all().distinct()
+            result = self.serviceaccountauthorizeddatasets_set.all().select_related('authorized_dataset')
         except Exception as e:
             logger.error("[ERROR] While retrieving authorized datasets: ")
             logger.exception(e)
