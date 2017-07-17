@@ -431,8 +431,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         for dataset in dataset_objs:
                             member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
 
-                        valid_datasets = [x.name for x in member['datasets'] if x['valid']]
-                        invalid_datasets = [x.name for x in member['datasets'] if not x['valid']]
+                        valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
+                        invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
 
                         if len(valid_datasets) and not len(invalid_datasets):
                             if dataset_objs:
