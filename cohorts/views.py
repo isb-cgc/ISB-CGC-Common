@@ -241,6 +241,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         if program_id:
             data_avail_table = program_tables.sample_data_availability_table
 
+        db.autocommit(True)
+
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
         if mutation_where_clause:
@@ -1417,6 +1419,7 @@ def cohort_filelist(request, cohort_id=0):
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
+    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     if cohort_id == 0:
         response_str = '<div class="row">' \
                     '<div class="col-lg-12">' \
