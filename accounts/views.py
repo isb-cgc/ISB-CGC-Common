@@ -490,7 +490,6 @@ def verify_sa(request, user_id):
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
-                logger.info('[STATUS] Datasets requested: '+str(datasets))
                 status = '200'
         else:
             result = {'message': 'There was no Google Cloud Project provided.'}
@@ -521,6 +520,8 @@ def register_sa(request, user_id):
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
             datasets = request.POST.getlist('datasets[]')
+            datasets_get = request.POST.get('datasets').split(',')
+            logger.info('[STATUS] Datasets to register: '+str(datasets) + '; ' + str(datasets_get))
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
             if len(datasets) == 1 and datasets[0] == '':
