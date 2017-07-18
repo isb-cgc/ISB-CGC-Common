@@ -431,8 +431,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         for dataset in dataset_objs:
                             member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
 
-                        valid_datasets = [x.name for x in member['datasets'] if x['valid']]
-                        invalid_datasets = [x.name for x in member['datasets'] if not x['valid']]
+                        valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
+                        invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
 
                         if len(valid_datasets) and not len(invalid_datasets):
                             if dataset_objs:
@@ -457,17 +457,10 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
                         all_user_datasets_verified = False
 
-
                 # 4. VERIFY PI IS ON THE PROJECT
-
 
     except HttpError as e:
         return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
-
-    '''
-    RETURN THE LIST OF DATASETS AND WHETHER ALL USERS HAVE ACCESS OR NOT.
-    IF NOT ALL USERS HAVE ACCESS TO A DATASET, LIST THE USERS THAT DO NOT.
-    '''
 
     return_obj = {'roles': roles,
                   'all_user_datasets_verified': all_user_datasets_verified}
@@ -496,6 +489,7 @@ def verify_sa(request, user_id):
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
             result['user_sa'] = user_sa
             result['datasets'] = datasets
+            logger.info('[STATUS] Datasets requested: '+str(datasets))
             status = '200'
         else:
             result = {'message': 'There was no Google Cloud Project provided.'}
@@ -525,7 +519,7 @@ def register_sa(request, user_id):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
-            datasets = list(request.POST.get('datasets'))
+            datasets = request.POST.getlist('datasets[]')
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
             if len(datasets) == 1 and datasets[0] == '':
