@@ -483,14 +483,15 @@ def verify_sa(request, user_id):
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-            elif result['all_user_datasets_verified']:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
             else:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
-            result['user_sa'] = user_sa
-            result['datasets'] = datasets
-            logger.info('[STATUS] Datasets requested: '+str(datasets))
-            status = '200'
+                if result['all_user_datasets_verified']:
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+                else:
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                result['user_sa'] = user_sa
+                result['datasets'] = datasets
+                logger.info('[STATUS] Datasets requested: '+str(datasets))
+                status = '200'
         else:
             result = {'message': 'There was no Google Cloud Project provided.'}
             status = '404'
