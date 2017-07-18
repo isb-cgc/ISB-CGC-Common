@@ -457,17 +457,10 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
                         all_user_datasets_verified = False
 
-
                 # 4. VERIFY PI IS ON THE PROJECT
-
 
     except HttpError as e:
         return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
-
-    '''
-    RETURN THE LIST OF DATASETS AND WHETHER ALL USERS HAVE ACCESS OR NOT.
-    IF NOT ALL USERS HAVE ACCESS TO A DATASET, LIST THE USERS THAT DO NOT.
-    '''
 
     return_obj = {'roles': roles,
                   'all_user_datasets_verified': all_user_datasets_verified}
@@ -496,6 +489,7 @@ def verify_sa(request, user_id):
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
             result['user_sa'] = user_sa
             result['datasets'] = datasets
+            logger.info('[STATUS] Datasets requested: '+str(datasets))
             status = '200'
         else:
             result = {'message': 'There was no Google Cloud Project provided.'}
