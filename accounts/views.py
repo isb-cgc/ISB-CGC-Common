@@ -434,18 +434,19 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
                         invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
 
-                        if len(valid_datasets) and not len(invalid_datasets):
-                            if dataset_objs:
-                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                        if not len(invalid_datasets):
+                            if len(valid_datasets):
+                                if dataset_objs:
+                                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
                         else:
                             all_user_datasets_verified = False
-                            if dataset_objs:
+                            if len(dataset_objs):
                                 st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(invalid_datasets))})
 
                     # IF USER HAS NO ERA COMMONS ID
                     else:
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
-                        if dataset_objs:
+                        if len(dataset_objs):
                             all_user_datasets_verified = False
                             st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
 
@@ -483,14 +484,14 @@ def verify_sa(request, user_id):
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-            elif result['all_user_datasets_verified']:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
             else:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
-            result['user_sa'] = user_sa
-            result['datasets'] = datasets
-            logger.info('[STATUS] Datasets requested: '+str(datasets))
-            status = '200'
+                if result['all_user_datasets_verified']:
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+                else:
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                result['user_sa'] = user_sa
+                result['datasets'] = datasets
+                status = '200'
         else:
             result = {'message': 'There was no Google Cloud Project provided.'}
             status = '404'
@@ -519,7 +520,10 @@ def register_sa(request, user_id):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
-            datasets = request.POST.getlist('datasets[]')
+            logger.info('[STATUS] Datasets as get:'+str(request.POST.get('datasets')))
+            logger.info('[STATUS] Datasets as getlist:' + str(request.POST.getlist('datasets')))
+            datasets = request.POST.get('datasets').split(',')
+            logger.info('[STATUS] Datasets to register: '+str(datasets))
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
             if len(datasets) == 1 and datasets[0] == '':
@@ -527,10 +531,13 @@ def register_sa(request, user_id):
             else:
                 datasets = map(int, datasets)
 
+            logger.info('[STATUS] Datasets post map: '+str(datasets))
+
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
             result = verify_service_account(gcp_id, user_sa, datasets, user_email)
             if 'message' in result.keys():
                 messages.error(request, result['message'])
+                logger.warn(result['message'])
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
                 return redirect('user_gcp_list', user_id=user_id)
 
@@ -578,6 +585,7 @@ def register_sa(request, user_id):
             else:
                 # Somehow managed to register even though previous verification failed
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
                 messages.error(request, 'There was an error in processing your service account. Please try again.')
                 return redirect('user_gcp_list', user_id=user_id)
         else:
