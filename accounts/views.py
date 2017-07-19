@@ -519,7 +519,7 @@ def register_sa(request, user_id):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
-            datasets = request.POST.getlist('datasets[]')
+            datasets = request.POST.getlist('datasets')
             logger.info('[STATUS] Datasets to register: '+str(datasets))
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
