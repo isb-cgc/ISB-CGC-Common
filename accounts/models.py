@@ -101,6 +101,7 @@ class ServiceAccount(models.Model):
         result = None
         try:
             result = AuthorizedDataset.objects.filter(id__in=self.serviceaccountauthorizeddatasets_set.all().values_list('authorized_dataset', flat=True))
+            logger.info('[STATUS] Auth datasets for Service Account {}: {}'.format(self.service_account,str(result)))
         except Exception as e:
             logger.error("[ERROR] While retrieving authorized datasets: ")
             logger.exception(e)
