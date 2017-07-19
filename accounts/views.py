@@ -520,18 +520,13 @@ def register_sa(request, user_id):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
-            logger.info('[STATUS] Datasets as get:'+str(request.POST.get('datasets')))
-            logger.info('[STATUS] Datasets as getlist:' + str(request.POST.getlist('datasets')))
             datasets = request.POST.get('datasets').split(',')
-            logger.info('[STATUS] Datasets to register: '+str(datasets))
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
             if len(datasets) == 1 and datasets[0] == '':
                 datasets = []
             else:
                 datasets = map(int, datasets)
-
-            logger.info('[STATUS] Datasets post map: '+str(datasets))
 
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
             result = verify_service_account(gcp_id, user_sa, datasets, user_email)
