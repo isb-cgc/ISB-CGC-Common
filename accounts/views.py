@@ -434,9 +434,10 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
                         invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
 
-                        if len(valid_datasets) and not len(invalid_datasets):
-                            if dataset_objs:
-                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                        if not len(invalid_datasets):
+                            if len(valid_datasets):
+                                if dataset_objs:
+                                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
                         else:
                             all_user_datasets_verified = False
                             if dataset_objs:
@@ -534,6 +535,7 @@ def register_sa(request, user_id):
             result = verify_service_account(gcp_id, user_sa, datasets, user_email)
             if 'message' in result.keys():
                 messages.error(request, result['message'])
+                logger.warn(result['message'])
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
                 return redirect('user_gcp_list', user_id=user_id)
 
@@ -581,6 +583,7 @@ def register_sa(request, user_id):
             else:
                 # Somehow managed to register even though previous verification failed
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
                 messages.error(request, 'There was an error in processing your service account. Please try again.')
                 return redirect('user_gcp_list', user_id=user_id)
         else:
