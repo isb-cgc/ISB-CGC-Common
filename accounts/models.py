@@ -90,7 +90,6 @@ class ServiceAccount(models.Model):
             )
         ).values_list('name','whitelist_id')
 
-
         return '{service_account} of project {google_project} authorized for datasets: {datasets}'.format(
             service_account=self.service_account,
             google_project=str(self.google_project),
