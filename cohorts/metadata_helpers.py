@@ -300,8 +300,6 @@ def fetch_program_attr(program):
                 if row['value_name'] is None and row['attr_name'] in METADATA_ATTR[program]:
                     METADATA_ATTR[program][row['attr_name']]['displ_name'] = row['display_string']
 
-        logger.info("[STATUS] METADATA_ATTR for {}: {}".format(str(program), str(METADATA_ATTR[program])))
-
         return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
@@ -389,8 +387,6 @@ def fetch_metadata_value_set(program=None):
             fetch_program_attr(program)
 
         preformatted_values = get_preformatted_values(program)
-
-        logger.info('[STATUS] METADATA_ATTR for {}: {}'.format(str(program),str(METADATA_ATTR[program])))
 
         if len(METADATA_ATTR[program][METADATA_ATTR[program].keys()[0]]['values']) <= 0:
             db = get_sql_connection()
