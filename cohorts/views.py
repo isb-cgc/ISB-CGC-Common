@@ -1821,6 +1821,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                                 if whitelist in access:
                                     whitelist_found = True
 
+                        logger.info("Whitelist found is {}".format(str(whitelist_found)))
+                        logger.info("Value of user_access is {}".format(str((item['access'] != 'controlled' or whitelist_found))))
+
                         file_list.append({
                             'sample': item['sample_barcode'],
                             'program': program.name,
