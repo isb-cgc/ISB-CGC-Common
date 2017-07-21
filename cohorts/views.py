@@ -1372,7 +1372,7 @@ def save_cohort_from_plot(request):
 @login_required
 @csrf_protect
 def cohort_filelist(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
@@ -1817,11 +1817,12 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         # If this is a controlled-access entry, check for the user's access to it
                         if item['access'] == 'controlled' and access:
                             whitelists = item['acl'].split(',')
-                            logger.info("[STATUS] access: "+str(access))
-                            logger.info("[STATUS] whitelists: "+str(whitelists))
                             for whitelist in whitelists:
                                 if whitelist in access:
                                     whitelist_found = True
+
+                        logger.info("Whitelist found is {}".format(str(whitelist_found)))
+                        logger.info("Value of user_access is {}".format(str((item['access'] != 'controlled' or whitelist_found))))
 
                         file_list.append({
                             'sample': item['sample_barcode'],
