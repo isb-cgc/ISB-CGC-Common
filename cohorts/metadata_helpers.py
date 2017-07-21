@@ -389,6 +389,8 @@ def fetch_metadata_value_set(program=None):
 
         preformatted_values = get_preformatted_values(program)
 
+        logger.info('[STATUS] METADATA_ATTR for {}: {}'.format(str(program),str(METADATA_ATTR[program])))
+
         if len(METADATA_ATTR[program][METADATA_ATTR[program].keys()[0]]['values']) <= 0:
             db = get_sql_connection()
             cursor = db.cursor()
