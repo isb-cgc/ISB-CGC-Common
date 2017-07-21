@@ -1388,6 +1388,7 @@ def cohort_filelist(request, cohort_id=0):
                 if not has_access:
                     has_access = []
                 has_access.append(dataset.authorized_dataset.whitelist_id)
+            logger.info("[STATUS] User {} has access list {}".format(nih_user.NIH_username,str(has_access)))
 
         items = cohort_files(request, cohort_id, build=build, access=has_access)
         cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -1710,6 +1711,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     user = request.user
     user_email = user.email
     user_id = user.id
+
+    logger.info("[STATUS] Access for user {} is: {}".format(user_email,str(access)))
 
     resp = None
     db = None
