@@ -531,13 +531,9 @@ def register_sa(request, user_id):
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
             result = verify_service_account(gcp_id, user_sa, datasets, user_email)
             logger.info("[STATUS] result of verification: {}".format(str(result)))
-            if 'message' in result.keys():
-                messages.error(request, result['message'])
-                logger.warn(result['message'])
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-                return redirect('user_gcp_list', user_id=user_id)
 
-            elif result['all_user_datasets_verified']:
+            # If the verification was successful, finalize access
+            if result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
                                 {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
 
@@ -578,11 +574,52 @@ def register_sa(request, user_id):
                         logger.info(e)
 
                 return redirect('user_gcp_list', user_id=user_id)
+
+            # if verification was unsuccessful, report errors, and revoke current access if there is any
             else:
+                # Some sort of error when attempting to verify
+                if 'message' in result.keys():
+                    messages.error(request, result['message'])
+                    logger.warn(result['message'])
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
                 # Somehow managed to register even though previous verification failed
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
-                logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
-                messages.error(request, 'There was an error in processing your service account. Please try again.')
+                elif not result['all_user_datasets_verified']:
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                    logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
+                    messages.error(request, 'There was an error in processing your service account. Please try again.')
+
+                # Check for current access and revoke
+                try:
+                    service_account_obj = ServiceAccount.objects.get(service_account=user_sa)
+                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj)
+
+                    # We can't be too sure, so revoke it all
+                    for saad in saads:
+                        if not saad.authorized_dataset.public:
+                            try:
+                                directory_service, http_auth = get_directory_resource()
+                                directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
+                                                                   memberKey=saad.service_account.service_account).execute(
+                                    http=http_auth)
+                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                                    'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
+                                        saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
+                                logger.info("Attempting to delete user {} from group {}. "
+                                            "If an error message doesn't follow, they were successfully deleted"
+                                            .format(saad.service_account.service_account,
+                                                    saad.authorized_dataset.acl_google_group))
+                            except HttpError as e:
+                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                                    'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
+                                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+                                logger.error("[ERROR] When trying to remove a service account from a Google Group:")
+                                logger.exception(e)
+
+                            saad.delete()
+
+                except ObjectDoesNotExist:
+                    logger.info("[STATUS] Service Account {} could not be verified or failed to verify, but is not registered. No datasets to revoke.".format(user_sa))
+
                 return redirect('user_gcp_list', user_id=user_id)
         else:
             messages.error(request, 'There was no Google Cloud Project provided.', 'warning')
@@ -627,6 +664,7 @@ def delete_sa(request, user_id, sa_id):
         messages.error(request, "Encountered an error while trying to remove this service account - please contact the administrator.")
 
     return redirect('user_gcp_list', user_id=user_id)
+
 
 @login_required
 def register_bucket(request, user_id, gcp_id):
@@ -698,6 +736,7 @@ def delete_bucket(request, user_id, bucket_id):
             bucket.delete()
         return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
     return redirect('user_gcp_list', user=user_id)
+
 
 @login_required
 def register_bqdataset(request, user_id, gcp_id):
