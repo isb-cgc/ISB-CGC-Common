@@ -1711,6 +1711,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     user_email = user.email
     user_id = user.id
 
+    logger.info("[STATUS] Access for user {} is: {}".format(user_email,str(access)))
+
     resp = None
     db = None
     cursor = None
