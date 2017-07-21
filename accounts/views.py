@@ -454,7 +454,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                 else:
                     member['nih_registered'] = False
                     member['datasets'] = []
-                    if dataset_objs:
+                    if len(dataset_objs):
                         st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
                         all_user_datasets_verified = False
 
@@ -530,6 +530,7 @@ def register_sa(request, user_id):
 
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
             result = verify_service_account(gcp_id, user_sa, datasets, user_email)
+            logger.info("[STATUS] result of verification: {}".format(str(result)))
             if 'message' in result.keys():
                 messages.error(request, result['message'])
                 logger.warn(result['message'])
