@@ -35,7 +35,7 @@ from django.conf import settings
 
 debug = settings.DEBUG # RO global for this file
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 warnings.filterwarnings("ignore", "No data - zero rows fetched, selected, or processed")
 
@@ -300,12 +300,13 @@ def fetch_program_attr(program):
                 if row['value_name'] is None and row['attr_name'] in METADATA_ATTR[program]:
                     METADATA_ATTR[program][row['attr_name']]['displ_name'] = row['display_string']
 
+        logger.info("[STATUS] METADATA_ATTR for {}: {}".format(str(program), str(METADATA_ATTR[program])))
+
         return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
-        print >> sys.stdout, traceback.format_exc()
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
-        logger.error(traceback.format_exc())
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
