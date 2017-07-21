@@ -1388,7 +1388,7 @@ def cohort_filelist(request, cohort_id=0):
                 if not has_access:
                     has_access = []
                 has_access.append(dataset.authorized_dataset.whitelist_id)
-            logger.info("[STATUS] User {} has access list {}".format(str(nih_user.values_set('NIH_username',flat=True)),str(has_access)))
+            logger.info("[STATUS] User {} has access list {}".format(str(nih_user.values_list('NIH_username',flat=True)),str(has_access)))
 
         items = cohort_files(request, cohort_id, build=build, access=has_access)
         cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -1415,7 +1415,7 @@ def cohort_filelist(request, cohort_id=0):
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
-        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+        return redirect(reverse('cohort_detail', args=[cohort_id]))
 
 
 @login_required
