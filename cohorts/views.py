@@ -1443,8 +1443,17 @@ def cohort_filelist_ajax(request, cohort_id=0):
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
     build = request.GET.get('build','HG19')
-    result = cohort_files(request=request,
-                          cohort_id=cohort_id, build=build, **params)
+    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    has_access = None
+    if len(nih_user) > 0:
+        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+        for dataset in user_auth_sets:
+            if not has_access:
+                has_access = []
+            has_access.append(dataset.authorized_dataset.whitelist_id)
+        logger.info("[STATUS] User {} has access list {}".format(str(nih_user.values_list('NIH_username', flat=True)),
+                                                                 str(has_access)))
+    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, **params)
 
     return JsonResponse(result, status=200)
 
