@@ -1817,7 +1817,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         # If this is a controlled-access entry, check for the user's access to it
                         if item['access'] == 'controlled' and access:
                             whitelists = item['acl'].split(',')
+                            logger.info('Whitelists: {}'.format(str(whitelists)))
+                            logger.info('access: {}'.format(str(access)))
                             for whitelist in whitelists:
+                                logger.info('Whitelist {} in access: {}'.format(whitelist, str(whitelist in access)))
                                 if whitelist in access:
                                     whitelist_found = True
 
