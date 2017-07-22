@@ -1388,7 +1388,6 @@ def cohort_filelist(request, cohort_id=0):
                 if not has_access:
                     has_access = []
                 has_access.append(dataset.authorized_dataset.whitelist_id)
-            logger.info("[STATUS] User {} has access list {}".format(str(nih_user.values_list('NIH_username',flat=True)),str(has_access)))
 
         items = cohort_files(request, cohort_id, build=build, access=has_access)
         cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -1451,8 +1450,6 @@ def cohort_filelist_ajax(request, cohort_id=0):
             if not has_access:
                 has_access = []
             has_access.append(dataset.authorized_dataset.whitelist_id)
-        logger.info("[STATUS] User {} has access list {}".format(str(nih_user.values_list('NIH_username', flat=True)),
-                                                                 str(has_access)))
     result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, **params)
 
     return JsonResponse(result, status=200)
@@ -1721,8 +1718,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     user_email = user.email
     user_id = user.id
 
-    logger.info("[STATUS] Access for user {} is: {}".format(user_email,str(access)))
-
     resp = None
     db = None
     cursor = None
@@ -1829,22 +1824,16 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         # If this is a controlled-access entry, check for the user's access to it
                         if item['access'] == 'controlled' and access:
                             whitelists = item['acl'].split(',')
-                            logger.info('Whitelists: {}'.format(str(whitelists)))
-                            logger.info('access: {}'.format(str(access)))
                             for whitelist in whitelists:
-                                logger.info('Whitelist {} in access: {}'.format(whitelist, str(whitelist in access)))
                                 if whitelist in access:
                                     whitelist_found = True
-
-                        logger.info("Whitelist found is {}".format(str(whitelist_found)))
-                        logger.info("Value of user_access is {}".format(str((item['access'] != 'controlled' or whitelist_found))))
 
                         file_list.append({
                             'sample': item['sample_barcode'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
-                            'user_access': (item['access'] != 'controlled' or whitelist_found),
+                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
