@@ -1372,7 +1372,7 @@ def save_cohort_from_plot(request):
 @login_required
 @csrf_protect
 def cohort_filelist(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
@@ -1414,7 +1414,7 @@ def cohort_filelist(request, cohort_id=0):
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
-        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+        return redirect(reverse('cohort_detail', args=[cohort_id]))
 
 
 @login_required
@@ -1442,8 +1442,15 @@ def cohort_filelist_ajax(request, cohort_id=0):
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
     build = request.GET.get('build','HG19')
-    result = cohort_files(request=request,
-                          cohort_id=cohort_id, build=build, **params)
+    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    has_access = None
+    if len(nih_user) > 0:
+        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+        for dataset in user_auth_sets:
+            if not has_access:
+                has_access = []
+            has_access.append(dataset.authorized_dataset.whitelist_id)
+    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, **params)
 
     return JsonResponse(result, status=200)
 
@@ -1817,8 +1824,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         # If this is a controlled-access entry, check for the user's access to it
                         if item['access'] == 'controlled' and access:
                             whitelists = item['acl'].split(',')
-                            logger.info("[STATUS] access: "+str(access))
-                            logger.info("[STATUS] whitelists: "+str(whitelists))
                             for whitelist in whitelists:
                                 if whitelist in access:
                                     whitelist_found = True
@@ -1828,7 +1833,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
-                            'user_access': (item['access'] != 'controlled' or whitelist_found),
+                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
