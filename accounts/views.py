@@ -412,6 +412,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
         for role, members in roles.items():
             for member in members:
 
+                member['datasets'] = []
+
                 # IF USER IS REGISTERED
                 if member['registered_user']:
                     user = User.objects.filter(email=member['email']).first()
@@ -425,7 +427,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
 
                         # FIND ALL DATASETS USER HAS ACCESS TO
                         user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True))
-                        member['datasets'] = []
 
                         # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
                         for dataset in dataset_objs:
@@ -453,14 +454,17 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         if len(dataset_objs):
                             all_user_datasets_verified = False
                             st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                            for dataset in dataset_objs:
+                                member['datasets'].append({'name': dataset.name, 'valid': False})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
                     member['nih_registered'] = False
-                    member['datasets'] = []
                     if len(dataset_objs):
                         st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
                         all_user_datasets_verified = False
+                        for dataset in dataset_objs:
+                            member['datasets'].append({'name': dataset.name, 'valid': False})
 
                 # 4. VERIFY PI IS ON THE PROJECT
 
