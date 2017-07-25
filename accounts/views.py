@@ -453,6 +453,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         if len(dataset_objs):
                             all_user_datasets_verified = False
                             st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                            for dataset in dataset_objs:
+                                member['datasets'].append({'name': dataset.name, 'valid': False})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
