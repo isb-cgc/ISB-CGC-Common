@@ -586,7 +586,7 @@ def register_sa(request, user_id):
                 elif not result['all_user_datasets_verified']:
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
                     logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
-                    messages.error(request, 'There was an error in processing your service account. Please try again.')
+                    messages.error(request, 'We were not able to verify all users with access to this Service Account for all of the datasets requested.')
 
                 # Check for current access and revoke
                 try:
