@@ -450,6 +450,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                     # IF USER HAS NO ERA COMMONS ID
                     else:
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
+                        member['datasets'] = []
                         if len(dataset_objs):
                             all_user_datasets_verified = False
                             st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
@@ -463,6 +464,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                     if len(dataset_objs):
                         st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
                         all_user_datasets_verified = False
+                        for dataset in dataset_objs:
+                            member['datasets'].append({'name': dataset.name, 'valid': False})
 
                 # 4. VERIFY PI IS ON THE PROJECT
 
