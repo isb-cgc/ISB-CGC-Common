@@ -984,53 +984,64 @@ def share_cohort(request, cohort_id=0):
 @login_required
 @csrf_protect
 def clone_cohort(request, cohort_id):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('[STATUS] Called '+sys._getframe().f_code.co_name)
     redirect_url = 'cohort_details'
-    parent_cohort = Cohort.objects.get(id=cohort_id)
-    new_name = 'Copy of %s' % parent_cohort.name
-    cohort = Cohort.objects.create(name=new_name)
-    cohort.save()
+    return_to = None
+    try:
 
-    # If there are sample ids
-    samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_barcode', 'case_barcode', 'project_id')
-    sample_list = []
-    for sample in samples:
-        sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
-    bulk_start = time.time()
-    Samples.objects.bulk_create(sample_list)
-    bulk_stop = time.time()
-    logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+        parent_cohort = Cohort.objects.get(id=cohort_id)
+        new_name = 'Copy of %s' % parent_cohort.name
+        cohort = Cohort.objects.create(name=new_name)
+        cohort.save()
 
-    # Clone the filters
-    filters = Filters.objects.filter(resulting_cohort=parent_cohort)
-    # ...but only if there are any (there may not be)
-    if filters.__len__() > 0:
-        filters_list = []
-        for filter_pair in filters:
-            filters_list.append(Filters(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
-        Filters.objects.bulk_create(filters_list)
+        # If there are sample ids
+        samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_barcode', 'case_barcode', 'project_id')
+        sample_list = []
+        for sample in samples:
+            sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
+        bulk_start = time.time()
+        Samples.objects.bulk_create(sample_list)
+        bulk_stop = time.time()
+        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
-    # Set source
-    source = Source(parent=parent_cohort, cohort=cohort, type=Source.CLONE)
-    source.save()
+        # Clone the filters
+        filters = Filters.objects.filter(resulting_cohort=parent_cohort)
+        # ...but only if there are any (there may not be)
+        if filters.__len__() > 0:
+            filters_list = []
+            for filter_pair in filters:
+                filters_list.append(Filters(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
+            Filters.objects.bulk_create(filters_list)
 
-    # Set permissions
-    perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-    perm.save()
+        # Set source
+        source = Source(parent=parent_cohort, cohort=cohort, type=Source.CLONE)
+        source.save()
 
-    # BQ needs an explicit case-per-sample dataset; get that now
+        # Set permissions
+        perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
+        perm.save()
 
-    cohort_progs = parent_cohort.get_programs()
+        # BQ needs an explicit case-per-sample dataset; get that now
 
-    samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
+        cohort_progs = parent_cohort.get_programs()
 
-    # Store cohort to BigQuery
-    bq_project_id = settings.BQ_PROJECT_ID
-    cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-    bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
+        samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
 
-    return redirect(reverse(redirect_url,args=[cohort.id]))
+        # Store cohort to BigQuery
+        bq_project_id = settings.BQ_PROJECT_ID
+        cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+        bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+        bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
+
+        return_to = reverse(redirect_url,args=[cohort.id])
+
+    except Exception as e:
+        messages.error(request, 'There was an error while trying to clone this cohort. It may not have been properly created.')
+        logger.error('[ERROR] While trying to clone cohort {}:')
+        logger.exception(e)
+        return_to = reverse(redirect_url, args=[parent_cohort.id])
+
+    return redirect(return_to)
 
 @login_required
 @csrf_protect
