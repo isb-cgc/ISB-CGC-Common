@@ -434,6 +434,10 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
                         valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
                         invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
 
+                        logger.info("[STATUS] For user {}".format(nih_user.NIH_username))
+                        logger.info("[STATUS] valid datasets: {}".format(str(valid_datasets)))
+                        logger.info("[STATUS] invalid datasets: {}".format(str(invalid_datasets)))
+
                         if not len(invalid_datasets):
                             if len(valid_datasets):
                                 if dataset_objs:
@@ -530,7 +534,7 @@ def register_sa(request, user_id):
 
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
             result = verify_service_account(gcp_id, user_sa, datasets, user_email)
-            logger.info("[STATUS] result of verification: {}".format(str(result)))
+            logger.info("[STATUS] result of verification for {}: {}".format(user_sa,str(result)))
 
             # If the verification was successful, finalize access
             if result['all_user_datasets_verified']:
