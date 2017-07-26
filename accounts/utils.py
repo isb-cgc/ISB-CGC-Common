@@ -168,4 +168,19 @@ class ServiceAccountBlacklist(ServiceObjectBase):
         return cls(data['service_account_blacklist'])
 
 
+def is_email_in_iam_roles(roles, user_email):
+    """
+    Params:
+        roles: Dict if which each key is a GCP project role, and value is an array
+        of user email without any prefixes.
+
+    Returns: True if user_email is in any role, otherwise False.
+    """
+    found = False
+    for role, user_list in roles.iteritems():
+        if user_email in [user_item['email'] for user_item in user_list]:
+            found = True
+            break
+
+    return found
 

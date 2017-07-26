@@ -54,7 +54,6 @@ class TestPublicDatasetServiceAccount(TestCase):
         self.nih_user = NIH_User(user=self.auth_user,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()
@@ -69,8 +68,7 @@ class TestPublicDatasetServiceAccount(TestCase):
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
 
-        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
-                                          authorized_dataset=self.auth_dataset_123)
+        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123")
         self.account_123.save()
 
 
@@ -97,7 +95,6 @@ class TestUnauthorizedUser(TestCase):
         self.nih_user = NIH_User(user=self.auth_user_1,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()
@@ -116,7 +113,6 @@ class TestUnauthorizedUser(TestCase):
         self.project_123.user.add(self.auth_user_1)
         self.project_123.user.add(self.auth_user_2)
 
-        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
-                                          authorized_dataset=self.auth_dataset_123)
+        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123")
         self.account_123.save()
 

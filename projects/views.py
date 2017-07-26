@@ -489,11 +489,20 @@ def upload_files(request):
         if request.POST['program-type'] == 'new':
             program.delete()
 
-        resp = {
-            'status': "error",
-            'error': "exception",
-            'message': "There was an error processing your user data - please double check your files and try again. There must be no empty lines at the end of your files."
-        }
+        # Seeing broken pipe error when trying to access project with permissions removed, instead of no HTTP access:
+        if 'Broken pipe' in e.message:
+            resp = {
+                'status': "error",
+                'error': "exception",
+                'message': "There was an error: check that destination project still allows ISB-CGC editor permissions and that selected Cloud Bucket and BigQuery dataset still exist."
+            }
+
+        else:
+            resp = {
+                'status': "error",
+                'error': "exception",
+                'message': "There was an error processing your user data - please double check your files and project permissions and try again."
+            }
 
     return JsonResponse(resp)
 
@@ -618,7 +627,16 @@ def project_data_error(request, program_id=0, project_id=0, dataset_id=0):
     if not datatables.data_upload.key == request.GET.get('key'):
         raise Exception("Invalid data key when marking data success")
 
+    #
+    # New! We can get an error message back from the UDU server:
+    #
+
+    err_msg = request.GET.get('errmsg')
+    if err_msg:
+        datatables.data_upload.message = err_msg
+
     datatables.data_upload.status = 'Error'
+
     datatables.data_upload.save()
 
     return JsonResponse({

@@ -132,13 +132,14 @@ class Project(models.Model):
 
         return {'root': root, 'depth': depth}
 
-
-    def get_status(self):
+    def get_status_with_message(self):
         status = 'Complete'
+        message = None
         for datatable in self.user_data_tables_set.all():
             if datatable.data_upload is not None and datatable.data_upload.status is not 'Complete':
                 status = datatable.data_upload.status
-        return status
+                message = datatable.data_upload.message
+        return {'status': status, 'errmsg': message}
 
     def get_file_count(self):
         count = 0
