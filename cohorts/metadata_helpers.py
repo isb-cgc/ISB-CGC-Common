@@ -35,7 +35,7 @@ from django.conf import settings
 
 debug = settings.DEBUG # RO global for this file
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 warnings.filterwarnings("ignore", "No data - zero rows fetched, selected, or processed")
 
@@ -174,7 +174,7 @@ BQ_MOLECULAR_ATTR_TABLES = {
         'HG38': {
             'table': 'Somatic_Mutation',
             'dataset': 'TCGA_hg38_data_v0',
-            'sample_barcode_col': 'Tumor_Sample_Barcode',
+            'sample_barcode_col': 'sample_barcode_tumor',
         },
     },
     'CCLE': None,
@@ -198,7 +198,8 @@ def get_sql_connection():
             'passwd': database['PASSWORD'],
         }
 
-        if not settings.IS_DEV:
+        # Only use the socket if it's there to be used and we're not in a dev environment
+        if not settings.IS_DEV and settings.DB_SOCKET:
             connect_options['host'] = 'localhost'
             connect_options['unix_socket'] = settings.DB_SOCKET
 
@@ -301,9 +302,8 @@ def fetch_program_attr(program):
         return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
-        print >> sys.stdout, traceback.format_exc()
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
-        logger.error(traceback.format_exc())
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()

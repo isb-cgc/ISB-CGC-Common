@@ -37,7 +37,7 @@ from django.utils import formats
 from django.views.decorators.csrf import csrf_protect
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
-from accounts.models import NIH_User
+from accounts.models import NIH_User, UserAuthorizedDatasets
 from metadata_helpers import *
 from metadata_counting import *
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
@@ -54,7 +54,7 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 USER_DATA_ON = settings.USER_DATA_ON
 
@@ -870,7 +870,11 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                             project = item['project_id']
                         sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
 
+                bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
+                bulk_stop = time.time()
+                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+
 
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -980,50 +984,64 @@ def share_cohort(request, cohort_id=0):
 @login_required
 @csrf_protect
 def clone_cohort(request, cohort_id):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('[STATUS] Called '+sys._getframe().f_code.co_name)
     redirect_url = 'cohort_details'
-    parent_cohort = Cohort.objects.get(id=cohort_id)
-    new_name = 'Copy of %s' % parent_cohort.name
-    cohort = Cohort.objects.create(name=new_name)
-    cohort.save()
+    return_to = None
+    try:
 
-    # If there are sample ids
-    samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_barcode', 'case_barcode', 'project_id')
-    sample_list = []
-    for sample in samples:
-        sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
-    Samples.objects.bulk_create(sample_list)
+        parent_cohort = Cohort.objects.get(id=cohort_id)
+        new_name = 'Copy of %s' % parent_cohort.name
+        cohort = Cohort.objects.create(name=new_name)
+        cohort.save()
 
-    # Clone the filters
-    filters = Filters.objects.filter(resulting_cohort=parent_cohort)
-    # ...but only if there are any (there may not be)
-    if filters.__len__() > 0:
-        filters_list = []
-        for filter_pair in filters:
-            filters_list.append(Filters(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
-        Filters.objects.bulk_create(filters_list)
+        # If there are sample ids
+        samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_barcode', 'case_barcode', 'project_id')
+        sample_list = []
+        for sample in samples:
+            sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
+        bulk_start = time.time()
+        Samples.objects.bulk_create(sample_list)
+        bulk_stop = time.time()
+        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
-    # Set source
-    source = Source(parent=parent_cohort, cohort=cohort, type=Source.CLONE)
-    source.save()
+        # Clone the filters
+        filters = Filters.objects.filter(resulting_cohort=parent_cohort)
+        # ...but only if there are any (there may not be)
+        if filters.__len__() > 0:
+            filters_list = []
+            for filter_pair in filters:
+                filters_list.append(Filters(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
+            Filters.objects.bulk_create(filters_list)
 
-    # Set permissions
-    perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-    perm.save()
+        # Set source
+        source = Source(parent=parent_cohort, cohort=cohort, type=Source.CLONE)
+        source.save()
 
-    # BQ needs an explicit case-per-sample dataset; get that now
+        # Set permissions
+        perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
+        perm.save()
 
-    cohort_progs = parent_cohort.get_programs()
+        # BQ needs an explicit case-per-sample dataset; get that now
 
-    samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
+        cohort_progs = parent_cohort.get_programs()
 
-    # Store cohort to BigQuery
-    bq_project_id = settings.BQ_PROJECT_ID
-    cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-    bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
+        samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
 
-    return redirect(reverse(redirect_url,args=[cohort.id]))
+        # Store cohort to BigQuery
+        bq_project_id = settings.BQ_PROJECT_ID
+        cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+        bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+        bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
+
+        return_to = reverse(redirect_url,args=[cohort.id])
+
+    except Exception as e:
+        messages.error(request, 'There was an error while trying to clone this cohort. It may not have been properly created.')
+        logger.error('[ERROR] While trying to clone cohort {}:')
+        logger.exception(e)
+        return_to = reverse(redirect_url, args=[parent_cohort.id])
+
+    return redirect(return_to)
 
 @login_required
 @csrf_protect
@@ -1213,7 +1231,10 @@ def set_operation(request):
                 for sample in samples:
                     sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
 
+                bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
+                bulk_stop = time.time()
+                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
                 # get the full resulting sample and case ID set
                 samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
@@ -1339,7 +1360,10 @@ def save_cohort_from_plot(request):
         for sample in samples:
             for project in sample['project']:
                 sample_list.append(Samples(cohort=cohort, sample_barcode=sample['sample'], case_barcode=sample['case'], project_id=project))
+        bulk_start = time.time()
         Samples.objects.bulk_create(sample_list)
+        bulk_stop = time.time()
+        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
@@ -1359,41 +1383,54 @@ def save_cohort_from_plot(request):
 @login_required
 @csrf_protect
 def cohort_filelist(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
         return redirect('/user_landing')
 
-    build = request.GET.get('build', 'HG19')
-    items = cohort_files(request, cohort_id, build=build)
-    cohort = Cohort.objects.get(id=cohort_id, active=True)
-    nih_user = NIH_User.objects.filter(user=request.user, active=True, dbGaP_authorized=True)
-    has_access = False
-    if len(nih_user) > 0:
-        has_access = True
+    try:
+        build = request.GET.get('build', 'HG19')
+        nih_user = NIH_User.objects.filter(user=request.user, active=True)
+        has_access = None
+        if len(nih_user) > 0:
+            user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+            for dataset in user_auth_sets:
+                if not has_access:
+                    has_access = []
+                has_access.append(dataset.authorized_dataset.whitelist_id)
 
-    # Check if cohort contains user data samples - return info message if it does.
-    # Get user accessed projects
-    user_projects = Project.get_user_projects(request.user)
-    cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
-    if len(cohort_sample_list):
-        messages.info(request,
-            "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
+        items = cohort_files(request, cohort_id, build=build, access=has_access)
+        cohort = Cohort.objects.get(id=cohort_id, active=True)
 
-    return render(request, 'cohorts/cohort_filelist.html', {'request': request,
-                                                            'cohort': cohort,
-                                                            'base_url': settings.BASE_URL,
-                                                            'base_api_url': settings.BASE_API_URL,
-                                                            'total_files': items['total_file_count'],
-                                                            'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                                            'platform_counts': items['platform_count_list'],
-                                                            'file_list_max': MAX_FILE_LIST_ENTRIES,
-                                                            'sel_file_max': MAX_SEL_FILES,
-                                                            'has_access': has_access,
-                                                            'build': build})
+        # Check if cohort contains user data samples - return info message if it does.
+        # Get user accessed projects
+        user_projects = Project.get_user_projects(request.user)
+        cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
+        if len(cohort_sample_list):
+            messages.info(request,
+                "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
+
+        return render(request, 'cohorts/cohort_filelist.html', {'request': request,
+                                                                'cohort': cohort,
+                                                                'base_url': settings.BASE_URL,
+                                                                'base_api_url': settings.BASE_API_URL,
+                                                                'total_files': items['total_file_count'],
+                                                                'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                                                'platform_counts': items['platform_count_list'],
+                                                                'file_list_max': MAX_FILE_LIST_ENTRIES,
+                                                                'sel_file_max': MAX_SEL_FILES,
+                                                                'build': build})
+    except Exception as e:
+        logger.error("[ERROR] While trying to view the cohort file list: ")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
+        return redirect(reverse('cohort_detail', args=[cohort_id]))
+
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0):
+    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
     if cohort_id == 0:
         response_str = '<div class="row">' \
                     '<div class="col-lg-12">' \
@@ -1416,8 +1453,15 @@ def cohort_filelist_ajax(request, cohort_id=0):
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
     build = request.GET.get('build','HG19')
-    result = cohort_files(request=request,
-                          cohort_id=cohort_id, build=build, **params)
+    nih_user = NIH_User.objects.filter(user=request.user, active=True)
+    has_access = None
+    if len(nih_user) > 0:
+        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+        for dataset in user_auth_sets:
+            if not has_access:
+                has_access = []
+            has_access.append(dataset.authorized_dataset.whitelist_id)
+    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, **params)
 
     return JsonResponse(result, status=200)
 
@@ -1677,7 +1721,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
     return render(request, template, template_values)
 
 # Copied over from metadata api
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None):
 
     GET = request.GET.copy()
     platform_count_only = GET.pop('platform_count_only', None)
@@ -1706,7 +1750,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
             GROUP BY md.platform;"""
 
         query = """
-            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.access, md.platform, md.data_type, md.data_category, md.experimental_strategy
+            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category, md.experimental_strategy
             FROM {0} md
             JOIN (
                 SELECT sample_barcode
@@ -1787,11 +1831,20 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38'):
                 cursor.execute(query.format(program_data_table), params)
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
+                        whitelist_found = False
+                        # If this is a controlled-access entry, check for the user's access to it
+                        if item['access'] == 'controlled' and access:
+                            whitelists = item['acl'].split(',')
+                            for whitelist in whitelists:
+                                if whitelist in access:
+                                    whitelist_found = True
+
                         file_list.append({
                             'sample': item['sample_barcode'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
+                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
