@@ -26,6 +26,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
+from django.core.urlresolvers import reverse
 from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery_service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
@@ -128,28 +129,40 @@ def unlink_accounts_and_get_acl_tasks(user_id):
     unlinked_nih_user_list = []
     ACLDeleteAction_list = []
 
-    user_email = User.objects.get(id=user_id).email
-
     try:
-        nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
-        nih_account_to_unlink.linked = False
-        nih_account_to_unlink.save()
-        unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
-    except MultipleObjectsReturned as e:
-        nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
+        user_email = User.objects.get(id=user_id).email
 
-        for nih_account_to_unlink in nih_user_query_set:
+        try:
+            nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
             nih_account_to_unlink.linked = False
             nih_account_to_unlink.save()
             unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
-            logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
+        except (MultipleObjectsReturned,ObjectDoesNotExist) as e:
+            if type(e) is MultipleObjectsReturned:
+                logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
+                nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
 
-    datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset', flat=True))
+                for nih_account_to_unlink in nih_user_query_set:
+                    nih_account_to_unlink.linked = False
+                    nih_account_to_unlink.save()
+                    unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
-    for dataset in datasets_to_revoke:
-        ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
+                    logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
+            else:
+                logger.warn("[WARNING] User {} wasn't found as a linked NIH User in the database.".format(user_email))
+                return redirect(reverse('user_detail', args=[user_id]))
+
+        datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset', flat=True))
+
+        for dataset in datasets_to_revoke:
+            ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
+
+    except Exception as e:
+        logger.error("[ERROR] While unlinking accounts:")
+        logger.exception(e)
+        return redirect(reverse('user_detail', args=[user_id]))
 
     return UnlinkAccountsResult(unlinked_nih_user_list, ACLDeleteAction_list)
 
