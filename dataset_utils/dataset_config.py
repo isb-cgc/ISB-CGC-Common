@@ -89,6 +89,9 @@ class DatasetConfiguration(ServiceObjectBase):
 
         return result
 
+    def get_all_auth_list_dicts(self):
+        return self.authorization_list_files
+
     @classmethod
     def from_dict(cls, data):
         """
