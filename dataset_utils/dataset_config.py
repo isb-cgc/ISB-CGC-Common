@@ -81,6 +81,17 @@ class DatasetConfiguration(ServiceObjectBase):
     def __init__(self, authorization_list_files):
         self.authorization_list_files = authorization_list_files
 
+    def get_nih_dbgap_auth_lists(self):
+        result = []
+        for dataset_item in self.authorization_list_files:
+            if dataset_item['type'] == 'nih-dbgap':
+                result.append(dataset_item)
+
+        return result
+
+    def get_all_auth_list_dicts(self):
+        return self.authorization_list_files
+
     @classmethod
     def from_dict(cls, data):
         """
@@ -116,12 +127,7 @@ class DatasetAccessSupport(object):
         self.authorization_list_map = {}
 
     def get_nih_dbgap_auth_lists(self):
-        result = []
-        for dataset_item in self.dataset_config.authorization_list_files:
-            if dataset_item['type'] == 'nih-dbgap':
-                result.append(dataset_item)
-
-        return result
+        return self.dataset_config.get_nih_dbgap_auth_lists()
 
     def get_auth_list_gcs_path_for_dataset_id(self, dataset_id):
         """
