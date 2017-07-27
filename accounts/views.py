@@ -129,40 +129,29 @@ def unlink_accounts_and_get_acl_tasks(user_id):
     unlinked_nih_user_list = []
     ACLDeleteAction_list = []
 
+    user_email = User.objects.get(id=user_id).email
+
     try:
+        nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
+        nih_account_to_unlink.linked = False
+        nih_account_to_unlink.save()
+        unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
-        user_email = User.objects.get(id=user_id).email
+    except MultipleObjectsReturned as e:
+        logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
+        nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
 
-        try:
-            nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
+        for nih_account_to_unlink in nih_user_query_set:
             nih_account_to_unlink.linked = False
             nih_account_to_unlink.save()
             unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
-        except (MultipleObjectsReturned,ObjectDoesNotExist) as e:
-            if type(e) is MultipleObjectsReturned:
-                logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
-                nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
+            logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
-                for nih_account_to_unlink in nih_user_query_set:
-                    nih_account_to_unlink.linked = False
-                    nih_account_to_unlink.save()
-                    unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
+    datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset', flat=True))
 
-                    logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
-            else:
-                logger.warn("[WARNING] User {} wasn't found as a linked NIH User in the database.".format(user_email))
-                return redirect(reverse('user_detail', args=[user_id]))
-
-        datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset', flat=True))
-
-        for dataset in datasets_to_revoke:
-            ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
-
-    except Exception as e:
-        logger.error("[ERROR] While unlinking accounts:")
-        logger.exception(e)
-        return redirect(reverse('user_detail', args=[user_id]))
+    for dataset in datasets_to_revoke:
+        ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
 
     return UnlinkAccountsResult(unlinked_nih_user_list, ACLDeleteAction_list)
 
@@ -172,34 +161,36 @@ def unlink_accounts(request):
     user_id = request.user.id
 
     try:
-        unlink_accounts_result = unlink_accounts_and_get_acl_tasks(user_id)
-    except ObjectDoesNotExist as e:
-        user_email = User.objects.get(id=user_id).email
-        logger.error("NIH_User not found for user_id {}. Error: {}".format(user_id, e))
-        messages.error(request, "No linked NIH users were found for user {}.".format(user_email))
-        return redirect('/users/' + str(user_id))
-
-    num_unlinked = len(unlink_accounts_result.unlinked_nih_users)
-    if num_unlinked > 1:
-        logger.warn("Error: more than one NIH User account linked to user id %d".format(user_id))
-
-    directory_service, http_auth = get_directory_resource()
-    for action in unlink_accounts_result.acl_delete_actions:
-        user_email = action.user_email
-        google_group_acl = action.google_group_acl
-
-        # If the user isn't actually in the ACL, we'll get an HttpError
         try:
-            logger.info("Removing user {} from {}...".format(user_email, google_group_acl))
-            directory_service.members().delete(groupKey=google_group_acl,
-                                               memberKey=user_email).execute(http=http_auth)
+            unlink_accounts_result = unlink_accounts_and_get_acl_tasks(user_id)
+        except ObjectDoesNotExist as e:
+            user_email = User.objects.get(id=user_id).email
+            logger.error("[ERROR] NIH_User not found for user_id {}. Error: {}".format(user_id, e))
+            messages.error(request, "No linked NIH users were found for user {}.".format(user_email))
+            return redirect(reverse('user_detail', args=[user_id]))
 
-        except HttpError as e:
-            logger.info("{} could not be deleted from {}, probably because they were not a member" .format(user_email, google_group_acl))
-            logger.exception(e)
+        directory_service, http_auth = get_directory_resource()
+        for action in unlink_accounts_result.acl_delete_actions:
+            user_email = action.user_email
+            google_group_acl = action.google_group_acl
+
+            # If the user isn't actually in the ACL, we'll get an HttpError
+            try:
+                logger.info("Removing user {} from {}...".format(user_email, google_group_acl))
+                directory_service.members().delete(groupKey=google_group_acl,
+                                                   memberKey=user_email).execute(http=http_auth)
+
+            except HttpError as e:
+                logger.info("[STATUS] {} could not be deleted from {}, probably because they were not a member" .format(user_email, google_group_acl))
+                logger.exception(e)
+
+    except Exception as e:
+        logger.error("[ERROR] While unlinking accounts:")
+        logger.exception(e)
+        messages.error(request, 'There was an error when attempting to unlink your NIH user account - please contact the administrator.')
 
     # redirect to user detail page
-    return redirect('/users/' + str(user_id))
+    return redirect(reverse('user_detail', args=[user_id]))
 
 
 # GCP RELATED VIEWS
