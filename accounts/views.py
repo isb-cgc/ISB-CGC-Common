@@ -172,7 +172,7 @@ def unlink_accounts(request):
         directory_service, http_auth = get_directory_resource()
         for action in unlink_accounts_result.acl_delete_actions:
             user_email = action.user_email
-            google_group_acl = action.google_group_acl
+            google_group_acl = action.acl_group_name
 
             # If the user isn't actually in the ACL, we'll get an HttpError
             try:
