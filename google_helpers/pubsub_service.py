@@ -33,7 +33,7 @@ def get_pubsub_service():
     http = httplib2.Http()
     http = credentials.authorize(http)
 
-    return discovery.build('pubsub', 'v1', http=http)
+    return discovery.build('pubsub', 'v1', http=http, cache_discovery=False)
 
 
 def get_full_topic_name(topic_name):

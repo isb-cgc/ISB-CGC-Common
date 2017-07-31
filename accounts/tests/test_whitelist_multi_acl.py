@@ -23,8 +23,8 @@ from StringIO import StringIO
 from django.test import TestCase
 
 from django.contrib.auth.models import User
-from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets
-from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
+from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
+from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
 from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater
 from tasks.tests.data_generators import create_csv_file_object
@@ -70,7 +70,6 @@ class TestWhitelistMultiACL(TestCase):
         self.nih_user = NIH_User(user=self.auth_user,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()
@@ -84,8 +83,11 @@ class TestWhitelistMultiACL(TestCase):
         self.project.save()
         self.project.user.add(self.auth_user)
 
-        self.account = ServiceAccount(google_project=self.project, service_account="abc", authorized_dataset=self.auth_dataset)
+        self.account = ServiceAccount(google_project=self.project, service_account="abc")
         self.account.save()
+
+        self.account_dataset = ServiceAccountAuthorizedDatasets(service_account=self.account,authorized_dataset=self.auth_dataset)
+        self.account_dataset.save()
 
     def test_one_missing_dataset(self):
         """
@@ -156,7 +158,6 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.nih_user = NIH_User(user=self.auth_user,
                                  NIH_username='USERNAME1',
                                  NIH_assertion='012345689',
-                                 dbGaP_authorized=True,
                                  active=True)
 
         self.nih_user.save()
@@ -170,8 +171,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
 
-        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123",
-                                          authorized_dataset=self.auth_dataset_123)
+        self.account_123 = ServiceAccount(google_project=self.project_123, service_account="abc_123")
         self.account_123.save()
 
         self.auth_dataset_456 = AuthorizedDataset(name="dataset1", whitelist_id='phs000456', acl_google_group='test_acl')
@@ -183,8 +183,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.project_456.save()
         self.project_456.user.add(self.auth_user)
 
-        self.account_456 = ServiceAccount(google_project=self.project_456, service_account="abc_456",
-                                          authorized_dataset=self.auth_dataset_456)
+        self.account_456 = ServiceAccount(google_project=self.project_456, service_account="abc_456")
         self.account_456.save()
 
     def test_one_user_auth_dataset(self):
