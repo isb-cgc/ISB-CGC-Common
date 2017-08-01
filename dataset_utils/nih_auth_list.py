@@ -111,7 +111,7 @@ class NIHDatasetAuthorizationList(DatasetAuthorizationList):
     def is_era_login_active(self, era_email):
         found = False
         for item in self.get_active_items():
-            if era_email == item.email:
+            if era_email.lower() == item.email.lower():
                 found = True
                 break
 
