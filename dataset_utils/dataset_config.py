@@ -165,9 +165,13 @@ class DatasetAccessSupport(object):
         self.authorization_list_map[dataset_id] = auth_list_instance
         return auth_list_instance
 
-    def is_era_login_in_authorization_list(self, era_email, dataset_id):
+    def is_era_login_in_authorization_list(self, era_login, dataset_id):
         auth_list = self.get_auth_list_instance_for_dataset_id(dataset_id)
-        return auth_list.is_era_login_active(era_email)
+        return auth_list.is_era_login_active(era_login)
+
+    def is_era_email_in_authorization_list(self, era_email, dataset_id):
+        auth_list = self.get_auth_list_instance_for_dataset_id(dataset_id)
+        return auth_list.is_era_email_active(era_email)
 
     def get_datasets_for_era_login(self, user=None):
         """
@@ -183,6 +187,22 @@ class DatasetAccessSupport(object):
             if self.is_era_login_in_authorization_list(user, dataset_item['dataset_id']):
                 result.append(DatasetGoogleGroupPair(dataset_item['dataset_id'], dataset_item['acl_group']))
         
+        return result
+
+    def get_datasets_for_era_email(self, user=None):
+        """
+        Answer the data sets an ERA user has access to.
+
+        @user: eRA-linked email address which will be present in the dbGaP whitelist
+
+        Returns: Array of DatasetGoogleGroupPair instances.
+        """
+        result = []
+
+        for dataset_item in self.get_nih_dbgap_auth_lists():
+            if self.is_era_email_in_authorization_list(user, dataset_item['dataset_id']):
+                result.append(DatasetGoogleGroupPair(dataset_item['dataset_id'], dataset_item['acl_group']))
+
         return result
     
     def get_all_datasets_and_google_groups(self):
