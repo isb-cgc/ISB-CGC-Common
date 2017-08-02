@@ -55,7 +55,7 @@ def extended_logout_view(request):
         user = User.objects.get(id=request.user.id)
         logger.info("User found: {}".format(user.email))
         try:
-            nih_user = NIH_User.objects.get(user=user, active=True)
+            nih_user = NIH_User.objects.get(user=user, linked=True)
             nih_user.active = False
             nih_user.save()
             logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
@@ -66,7 +66,7 @@ def extended_logout_view(request):
             logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
         except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
             if type(e) is MultipleObjectsReturned:
-                logger.error("[WARNING] More than one active NIH User with user id %d - deactivating all of them." % (str(e), request.user.id))
+                logger.error("[WARNING] More than one linked NIH User with user id %d - deactivating all of them!" % (str(e), request.user.id))
                 nih_users = NIH_User.objects.filter(user=user)
                 for nih_user in nih_users:
                     nih_user.active = False
