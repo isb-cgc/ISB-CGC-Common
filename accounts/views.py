@@ -49,8 +49,10 @@ SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 @login_required
 def extended_logout_view(request):
     # deactivate NIH_username entry if exists
+    user = None
     try:
-        nih_user = NIH_User.objects.get(user_id=request.user.id)
+        user = User.objects.get(id=request.user.id)
+        nih_user = NIH_User.objects.get(user=user)
         nih_user.active = False
         nih_user.save()
         logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
@@ -61,11 +63,13 @@ def extended_logout_view(request):
         logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
     except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
         if type(e) is MultipleObjectsReturned:
-            logger.warn("Error %s on logout: more than one NIH User with user id %d" % (str(e), request.user.id))
+            logger.warn("[WARNING] More than one NIH User with user id %d" % (str(e), request.user.id))
+        else:
+            logger.error("[ERROR] User with ID {} was not found!".format(request.user.id))
 
     # remove from CONTROLLED_ACL_GOOGLE_GROUP if exists
     directory_service, http_auth = get_directory_resource()
-    user_email = User.objects.get(id=request.user.id).email
+    user_email = user.email
 
     # TODO @kleisb will need the class for this too
     authorized_datasets = []
