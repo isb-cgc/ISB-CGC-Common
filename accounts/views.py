@@ -52,10 +52,9 @@ def extended_logout_view(request):
     response = None
     try:
         # deactivate NIH_username entry if exists
-        user = None
+        user = User.objects.get(id=request.user.id)
         try:
-            user = User.objects.get(id=request.user.id)
-            nih_user = NIH_User.objects.get(user=user)
+            nih_user = NIH_User.objects.get(user=user, active=True)
             nih_user.active = False
             nih_user.save()
             logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
@@ -66,15 +65,13 @@ def extended_logout_view(request):
             logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
         except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
             if type(e) is MultipleObjectsReturned:
-                logger.error("[WARNING] More than one NIH User with user id %d - deactivating all of them." % (str(e), request.user.id))
+                logger.error("[WARNING] More than one active NIH User with user id %d - deactivating all of them." % (str(e), request.user.id))
                 nih_users = NIH_User.objects.filter(user=user)
                 for nih_user in nih_users:
                     nih_user.active = False
                     nih_user.save()
             else:
-                logger.error("[ERROR] User with ID {} was not found!".format(request.user.id))
-            messages.error(request, "There was an error while attempting to log out - please contact the administrator.")
-            return redirect(reverse('user_detail', args=[request.user.id]))
+                logger.error("[ERROR] No NIH user was found for user {}.".format(user.email))
 
         # To be safe, we remove the user from ALL controlled-access datasets
         directory_service, http_auth = get_directory_resource()
@@ -103,6 +100,11 @@ def extended_logout_view(request):
             logger.info(e)
 
         response = account_views.logout(request)
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] User with ID of {} not found!".format(str(request.user.id)))
+        logger.exception(e)
+        messages.error(request, "There was an error while attempting to log out - please contact the administrator.")
+        return redirect(reverse('landing_page'))
     except Exception as e:
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
