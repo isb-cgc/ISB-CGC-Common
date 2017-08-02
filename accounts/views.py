@@ -53,6 +53,7 @@ def extended_logout_view(request):
     try:
         # deactivate NIH_username entry if exists
         user = User.objects.get(id=request.user.id)
+        logger.info("User found: {}".format(user.email))
         try:
             nih_user = NIH_User.objects.get(user=user, active=True)
             nih_user.active = False
