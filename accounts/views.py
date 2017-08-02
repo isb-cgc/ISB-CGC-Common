@@ -97,11 +97,23 @@ class ACLDeleteAction(object):
         self.acl_group_name = acl_group_name
         self.user_email = user_email
 
+    def __str__(self):
+        return "ACLDeleteAction(acl_group_name: {}, user_email: {})".format(self.acl_group_name,self.user_email)
+
+    def __repr_(self):
+        return self.__str__()
+
 
 class UnlinkAccountsResult(object):
     def __init__(self, unlinked_nih_users, acl_delete_actions):
         self.unlinked_nih_users = unlinked_nih_users
         self.acl_delete_actions = acl_delete_actions
+
+    def __str__(self):
+        return "UnlinkAccountsResult(unlinked_nih_users: {}, acl_delete_actions: {})".format(str(self.unlinked_nih_users), str(self.acl_delete_actions))
+
+    def __repr__(self):
+        return self.__str__()
 
 
 def unlink_accounts_and_get_acl_tasks(user_id):
@@ -153,6 +165,8 @@ def unlink_accounts_and_get_acl_tasks(user_id):
     for dataset in datasets_to_revoke:
         ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
 
+    logger.info("ACLDeleteAction_list for {}: {}".format(str(ACLDeleteAction_list), user_email))
+
     return UnlinkAccountsResult(unlinked_nih_user_list, ACLDeleteAction_list)
 
 
@@ -168,6 +182,11 @@ def unlink_accounts(request):
             logger.error("[ERROR] NIH_User not found for user_id {}. Error: {}".format(user_id, e))
             messages.error(request, "No linked NIH users were found for user {}.".format(user_email))
             return redirect(reverse('user_detail', args=[user_id]))
+        except Exception as e:
+            logger.error("[ERROR] When trying to get the unlink actions:")
+            logger.exception(e)
+            messages.error(request, "Encountered an error when trying to unlink this account--please contact the administrator.")
+            return redirect(reverse('user_detail', args=[user_id]))
 
         directory_service, http_auth = get_directory_resource()
         for action in unlink_accounts_result.acl_delete_actions:
@@ -181,7 +200,7 @@ def unlink_accounts(request):
                                                    memberKey=user_email).execute(http=http_auth)
 
             except HttpError as e:
-                logger.info("[STATUS] {} could not be deleted from {}, probably because they were not a member" .format(user_email, google_group_acl))
+                logger.info("[STATUS] {} could not be deleted from {}, probably because they were not a member".format(user_email, google_group_acl))
                 logger.exception(e)
 
     except Exception as e:
