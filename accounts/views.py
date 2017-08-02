@@ -53,12 +53,10 @@ def extended_logout_view(request):
     try:
         # deactivate NIH_username entry if exists
         user = User.objects.get(id=request.user.id)
-        logger.info("User found: {}".format(user.email))
         try:
             nih_user = NIH_User.objects.get(user=user, linked=True)
             nih_user.active = False
             nih_user.save()
-            logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
 
             user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
             for dataset in user_auth_datasets:
@@ -71,24 +69,14 @@ def extended_logout_view(request):
                 for nih_user in nih_users:
                     nih_user.active = False
                     nih_user.save()
+                    user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+                    for dataset in user_auth_datasets:
+                        dataset.delete()
             else:
-                logger.error("[ERROR] No NIH user was found for user {}.".format(user.email))
+                logger.error("[ERROR] No NIH user was found for user {} - no datasets revoked.".format(user.email))
 
-        # To be safe, we remove the user from ALL controlled-access datasets
         directory_service, http_auth = get_directory_resource()
         user_email = user.email
-
-        das = DatasetAccessSupportFactory.from_webapp_django_settings()
-        all_datasets = das.get_all_datasets_and_google_groups()
-        for dataset in all_datasets:
-            try:
-                directory_service.members().delete(groupKey=dataset.google_group_name, memberKey=str(user_email)).execute(http=http_auth)
-                logger.info("Attempting to delete user {} from group {}. "
-                    "If an error message doesn't follow, they were successfully deleted"
-                    .format(str(user_email), CONTROLLED_ACL_GOOGLE_GROUP))
-            except HttpError as e:
-                logger.info("While trying to remove a user from {} saw an error, possibly because they weren't on it.".format(user_email))
-                logger.info(e)
 
         # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
         try:
@@ -101,6 +89,7 @@ def extended_logout_view(request):
             logger.info(e)
 
         response = account_views.logout(request)
+
     except ObjectDoesNotExist as e:
         logger.error("[ERROR] User with ID of {} not found!".format(str(request.user.id)))
         logger.exception(e)
@@ -182,10 +171,12 @@ def unlink_accounts_and_get_acl_tasks(user_id):
 
             logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
-    datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset', flat=True))
+    # Revoke them from all datasets, regardless of actual permission, to be safe
+    das = DatasetAccessSupportFactory.from_webapp_django_settings()
+    datasets_to_revoke = das.get_all_datasets_and_google_groups()
 
     for dataset in datasets_to_revoke:
-        ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
+        ACLDeleteAction_list.append(ACLDeleteAction(dataset.google_group_name, user_email))
 
     logger.info("ACLDeleteAction_list for {}: {}".format(str(ACLDeleteAction_list), user_email))
 
