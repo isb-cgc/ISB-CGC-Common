@@ -172,6 +172,7 @@ def unlink_accounts_and_get_acl_tasks(user_id):
 
 @login_required
 def unlink_accounts(request):
+    logger.info("[STATUS] In unlink accounts")
     user_id = request.user.id
 
     try:
@@ -202,6 +203,12 @@ def unlink_accounts(request):
             except HttpError as e:
                 logger.info("[STATUS] {} could not be deleted from {}, probably because they were not a member".format(user_email, google_group_acl))
                 logger.exception(e)
+            except Exception as e:
+                logger.error("[ERROR] When trying to remove from the Google Group:")
+                logger.exception(e)
+                messages.error(request,
+                               "Encountered an error when trying to unlink this account--please contact the administrator.")
+                return redirect(reverse('user_detail', args=[user_id]))
 
     except Exception as e:
         logger.error("[ERROR] While unlinking accounts:")
