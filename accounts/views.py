@@ -36,6 +36,7 @@ from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 
+from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
 from .utils import ServiceAccountBlacklist, is_email_in_iam_roles
 import json
 
@@ -48,47 +49,57 @@ SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 
 @login_required
 def extended_logout_view(request):
-    # deactivate NIH_username entry if exists
+    response = None
     try:
-        nih_user = NIH_User.objects.get(user_id=request.user.id)
-        nih_user.active = False
-        nih_user.save()
-        logger.info("NIH user {} inactivated".format(nih_user.NIH_username))
-
-        user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-        for dataset in user_auth_datasets:
-            dataset.delete()
-        logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
-    except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
-        if type(e) is MultipleObjectsReturned:
-            logger.warn("Error %s on logout: more than one NIH User with user id %d" % (str(e), request.user.id))
-
-    # remove from CONTROLLED_ACL_GOOGLE_GROUP if exists
-    directory_service, http_auth = get_directory_resource()
-    user_email = User.objects.get(id=request.user.id).email
-
-    # TODO @kleisb will need the class for this too
-    authorized_datasets = []
-    for dataset in authorized_datasets:
+        # deactivate NIH_username entry if exists
+        user = User.objects.get(id=request.user.id)
         try:
-            directory_service.members().delete(groupKey=dataset['google_group_acl'], memberKey=str(user_email)).execute(http=http_auth)
-            logger.info("Attempting to delete user {} from group {}. "
-                "If an error message doesn't follow, they were successfully deleted"
-                .format(str(user_email), CONTROLLED_ACL_GOOGLE_GROUP))
+            nih_user = NIH_User.objects.get(user=user, linked=True)
+            nih_user.active = False
+            nih_user.save()
+
+            user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+            for dataset in user_auth_datasets:
+                dataset.delete()
+            logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
+        except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
+            if type(e) is MultipleObjectsReturned:
+                logger.error("[WARNING] More than one linked NIH User with user id %d - deactivating all of them!" % (str(e), request.user.id))
+                nih_users = NIH_User.objects.filter(user=user)
+                for nih_user in nih_users:
+                    nih_user.active = False
+                    nih_user.save()
+                    user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+                    for dataset in user_auth_datasets:
+                        dataset.delete()
+            else:
+                logger.error("[ERROR] No NIH user was found for user {} - no datasets revoked.".format(user.email))
+
+        directory_service, http_auth = get_directory_resource()
+        user_email = user.email
+
+        # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
+        try:
+            body = {"email": user_email, "role": "MEMBER"}
+            directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
+            logger.info("Attempting to insert user {} into group {}. "
+                        "If an error message doesn't follow, they were successfully added."
+                        .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
         except HttpError as e:
             logger.info(e)
 
-    # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
-    try:
-        body = {"email": user_email, "role": "MEMBER"}
-        directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-        logger.info("Attempting to insert user {} into group {}. "
-                    "If an error message doesn't follow, they were successfully added."
-                    .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
-    except HttpError as e:
-        logger.info(e)
+        response = account_views.logout(request)
 
-    response = account_views.logout(request)
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] User with ID of {} not found!".format(str(request.user.id)))
+        logger.exception(e)
+        messages.error(request, "There was an error while attempting to log out - please contact the administrator.")
+        return redirect(reverse('landing_page'))
+    except Exception as e:
+        logger.error("[ERROR] While attempting to log out:")
+        logger.exception(e)
+        messages.error(request,"There was an error while attempting to log out - please contact the administrator.")
+        return redirect(reverse('user_detail', args=[request.user.id]))
     return response
 
 
@@ -160,10 +171,12 @@ def unlink_accounts_and_get_acl_tasks(user_id):
 
             logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
-    datasets_to_revoke = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_account_to_unlink).values_list('authorized_dataset', flat=True))
+    # Revoke them from all datasets, regardless of actual permission, to be safe
+    das = DatasetAccessSupportFactory.from_webapp_django_settings()
+    datasets_to_revoke = das.get_all_datasets_and_google_groups()
 
     for dataset in datasets_to_revoke:
-        ACLDeleteAction_list.append(ACLDeleteAction(dataset.acl_google_group, user_email))
+        ACLDeleteAction_list.append(ACLDeleteAction(dataset.google_group_name, user_email))
 
     logger.info("ACLDeleteAction_list for {}: {}".format(str(ACLDeleteAction_list), user_email))
 
@@ -202,6 +215,12 @@ def unlink_accounts(request):
             except HttpError as e:
                 logger.info("[STATUS] {} could not be deleted from {}, probably because they were not a member".format(user_email, google_group_acl))
                 logger.exception(e)
+            except Exception as e:
+                logger.error("[ERROR] When trying to remove from the Google Group:")
+                logger.exception(e)
+                messages.error(request,
+                               "Encountered an error when trying to unlink this account--please contact the administrator.")
+                return redirect(reverse('user_detail', args=[user_id]))
 
     except Exception as e:
         logger.error("[ERROR] While unlinking accounts:")
