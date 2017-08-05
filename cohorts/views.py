@@ -957,29 +957,77 @@ def delete_cohort(request):
     Cohort.objects.filter(id__in=cohort_ids).update(active=False)
     return redirect(reverse(redirect_url))
 
+
 @login_required
 @csrf_protect
 def share_cohort(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
-    redirect_url = '/cohorts/'
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    # user_ids = request.POST.getlist('users')
-    # users = User.objects.filter(id__in=user_ids)
-    #
-    # if cohort_id == 0:
-    #     redirect_url = '/cohorts/'
-    #     cohort_ids = request.POST.getlist('cohort-ids')
-    #     cohorts = Cohort.objects.filter(id__in=cohort_ids)
-    # else:
-    #     redirect_url = '/cohorts/%s' % cohort_id
-    #     cohorts = Cohort.objects.filter(id=cohort_id)
-    # for user in users:
-    #
-    #     for cohort in cohorts:
-    #         obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-    #         obj.save()
+    status = None
+    result = None
 
-    return redirect(redirect_url)
+    try:
+        emails = re.split('\s*,\s*', request.POST['share_users'].strip())
+        users_not_found = []
+        users = []
+
+        req_user = None
+
+        try:
+            req_user = User.objects.get(id=request.user.id)
+        except ObjectDoesNotExist as e:
+            raise Exception("{} is not a user ID in this database!".format(str(request.user.id)))
+
+        for email in emails:
+            try:
+                user = User.objects.get(email=email)
+                users.append(user)
+            except ObjectDoesNotExist as e:
+                users_not_found.append(email)
+
+        if len(users_not_found) > 0:
+            status = 'error'
+            result = {
+                'msg': 'The following user emails could not be found; please ask them to log into the site first: ' + ", ".join(users_not_found)
+            }
+        else:
+            if cohort_id == 0:
+                cohort_ids = request.POST.getlist('cohort-ids')
+                cohorts = Cohort.objects.filter(id__in=cohort_ids)
+            else:
+                cohorts = Cohort.objects.filter(id=cohort_id)
+
+            for user in users:
+                for cohort in cohorts:
+                    # Check to make sure this user has authority to grant sharing permission
+                    try:
+                        owner_perms = Cohort_Perms.objecrs.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+                    except ObjectDoesNotExist as e:
+                        raise Exception("User {} is not the owner of cohort ID {} and so cannot share it.".format(req_user.email, str(cohort.id)))
+
+                    obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+                    obj.save()
+
+            status = 'success'
+    except Exception as e:
+        logger.error("[ERROR] While trying to share a cohort:")
+        logger.exception(e)
+        status = 'error'
+        result = {
+            'msg': 'There was an error while trying to share this cohort.'
+        }
+    finally:
+        if not status:
+            status = 'error'
+            result = {
+                'msg': 'An unknown error has occurred while sharing this cohort.'
+            }
+
+    return JsonResponse({
+        'status': status,
+        'result': result
+    })
+
 
 @login_required
 @csrf_protect
