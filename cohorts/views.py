@@ -660,11 +660,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort_programs = [ {'id': x.id, 'name': x.name, 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
-            # Disable sharing and share-listing for now
-            # # Do not show shared users for public cohorts
-            # if not cohort.is_public():
-            #     shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
-            #     shared_with_users = User.objects.filter(id__in=shared_with_ids)
+            # Do not show shared users for public cohorts
+            if not cohort.is_public():
+                shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
+                shared_with_users = User.objects.filter(id__in=shared_with_ids)
 
             template = 'cohorts/cohort_details.html'
             template_values['cohort'] = cohort
@@ -957,29 +956,76 @@ def delete_cohort(request):
     Cohort.objects.filter(id__in=cohort_ids).update(active=False)
     return redirect(reverse(redirect_url))
 
+
 @login_required
 @csrf_protect
 def share_cohort(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
-    redirect_url = '/cohorts/'
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    # user_ids = request.POST.getlist('users')
-    # users = User.objects.filter(id__in=user_ids)
-    #
-    # if cohort_id == 0:
-    #     redirect_url = '/cohorts/'
-    #     cohort_ids = request.POST.getlist('cohort-ids')
-    #     cohorts = Cohort.objects.filter(id__in=cohort_ids)
-    # else:
-    #     redirect_url = '/cohorts/%s' % cohort_id
-    #     cohorts = Cohort.objects.filter(id=cohort_id)
-    # for user in users:
-    #
-    #     for cohort in cohorts:
-    #         obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-    #         obj.save()
+    status = None
+    result = None
 
-    return redirect(redirect_url)
+    try:
+        emails = re.split('\s*,\s*', request.POST['share_users'].strip())
+        users_not_found = []
+        users = []
+        req_user = None
+
+        try:
+            req_user = User.objects.get(id=request.user.id)
+        except ObjectDoesNotExist as e:
+            raise Exception("{} is not a user ID in this database!".format(str(request.user.id)))
+
+        for email in emails:
+            try:
+                user = User.objects.get(email=email)
+                users.append(user)
+            except ObjectDoesNotExist as e:
+                users_not_found.append(email)
+
+        if len(users_not_found) > 0:
+            status = 'error'
+            result = {
+                'msg': 'The following user emails could not be found; please ask them to log into the site first: ' + ", ".join(users_not_found)
+            }
+        else:
+            if cohort_id == 0:
+                cohort_ids = request.POST.getlist('cohort-ids')
+                cohorts = Cohort.objects.filter(id__in=cohort_ids)
+            else:
+                cohorts = Cohort.objects.filter(id=cohort_id)
+
+            for user in users:
+                for cohort in cohorts:
+                    # Check to make sure this user has authority to grant sharing permission
+                    try:
+                        owner_perms = Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+                    except ObjectDoesNotExist as e:
+                        raise Exception("User {} is not the owner of cohort ID {} and so cannot share it.".format(req_user.email, str(cohort.id)))
+
+                    obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+                    obj.save()
+
+            status = 'success'
+    except Exception as e:
+        logger.error("[ERROR] While trying to share a cohort:")
+        logger.exception(e)
+        status = 'error'
+        result = {
+            'msg': 'There was an error while trying to share this cohort.'
+        }
+    finally:
+        if not status:
+            status = 'error'
+            result = {
+                'msg': 'An unknown error has occurred while sharing this cohort.'
+            }
+
+    return JsonResponse({
+        'status': status,
+        'result': result
+    })
+
 
 @login_required
 @csrf_protect
@@ -1561,37 +1607,53 @@ def streaming_csv_view(request, cohort_id=0):
 def unshare_cohort(request, cohort_id=0):
 
     cohort_set = None
+    status = None
+    result = None
 
-    if request.POST.get('cohorts'):
-        cohort_set = json.loads(request.POST.get('cohorts'))
-    else:
-        if cohort_id == 0:
-            return JsonResponse({
-                'msg': 'No cohort IDs were provided!'
-            }, status=500)
+    try:
+        if request.POST.get('cohorts'):
+            cohort_set = json.loads(request.POST.get('cohorts'))
         else:
-            cohort_set = [cohort_id]
+            if cohort_id == 0:
+                raise "No cohort ID was provided!"
+            else:
+                cohort_set = [cohort_id]
 
-    for cohort in cohort_set:
-        owner = str(Cohort.objects.get(id=cohort).get_owner().id)
-        req_user = str(request.user.id)
-        unshare_user = str(request.POST.get('user_id'))
+        for cohort in cohort_set:
+            owner = str(Cohort.objects.get(id=cohort).get_owner().id)
+            req_user = str(request.user.id)
+            unshare_user = str(request.POST.get('user_id'))
 
-        if req_user != unshare_user and owner != req_user:
-            return JsonResponse({
-                'msg': 'Cannot unshare with another user if you are not the owner'
-            }, status=500)
+            # You can't remove someone from a cohort if you're not the owner,
+            # unless you're removing yourself from someone else's cohort
+            if req_user != owner and req_user != unshare_user:
+                raise 'Cannot make changes to sharing on a cohort if you are not the owner.'
 
-        cohort_perms = Cohort_Perms.objects.filter(cohort=cohort, user=unshare_user)
+            cohort_perms = Cohort_Perms.objects.filter(cohort=cohort, user=unshare_user)
 
-        for resc in cohort_perms:
-            # Don't try to delete your own permissions as owner
-            if str(resc.perm) != 'OWNER':
-                resc.delete()
+            for resc in cohort_perms:
+                # Don't try to delete your own permissions as owner
+                if str(resc.perm) != 'OWNER':
+                    resc.delete()
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to unshare a cohort:")
+        logger.exception(e)
+        status = 'error'
+        result = {
+            'msg': 'There was an error while attempting to unshare these cohorts.'
+        }
+    finally:
+        if not status:
+            status = 'error'
+            result = {
+                'msg': 'An unknown error has occurred while unsharing these cohorts.'
+            }
 
     return JsonResponse({
-        'status': 'success'
-    }, status=200)
+        'status': status,
+        'result': result
+    })
 
 
 @login_required
