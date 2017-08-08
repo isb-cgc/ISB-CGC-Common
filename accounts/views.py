@@ -73,7 +73,7 @@ def extended_logout_view(request):
                     for dataset in user_auth_datasets:
                         dataset.delete()
             else:
-                logger.error("[ERROR] No NIH user was found for user {} - no datasets revoked.".format(user.email))
+                logger.info("[STATUS] No NIH user was found for user {} - no datasets revoked.".format(user.email))
 
         directory_service, http_auth = get_directory_resource()
         user_email = user.email
