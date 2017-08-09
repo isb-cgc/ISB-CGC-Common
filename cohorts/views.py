@@ -1615,7 +1615,7 @@ def unshare_cohort(request, cohort_id=0):
             cohort_set = json.loads(request.POST.get('cohorts'))
         else:
             if cohort_id == 0:
-                raise "No cohort ID was provided!"
+                raise Exception("No cohort ID was provided!")
             else:
                 cohort_set = [cohort_id]
 
@@ -1627,7 +1627,7 @@ def unshare_cohort(request, cohort_id=0):
             # You can't remove someone from a cohort if you're not the owner,
             # unless you're removing yourself from someone else's cohort
             if req_user != owner and req_user != unshare_user:
-                raise 'Cannot make changes to sharing on a cohort if you are not the owner.'
+                raise Exception('Cannot make changes to sharing on a cohort if you are not the owner.')
 
             cohort_perms = Cohort_Perms.objects.filter(cohort=cohort, user=unshare_user)
 
