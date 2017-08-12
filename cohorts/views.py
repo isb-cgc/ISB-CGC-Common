@@ -544,14 +544,14 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     for item in cohorts:
         item.perm = item.get_perm(request).get_perm_display()
         item.owner = item.get_owner()
-    #     shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user', flat=True)
-    #     item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
+        shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user', flat=True)
+        item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
         if not item.owner.is_superuser:
             cohorts.has_private_cohorts = True
-    #         # if it is not a public cohort and it has been shared with other users
-    #         # append the list of shared users to the shared_users array
-    #         if item.shared_with_users:
-    #             shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
+            # if it is not a public cohort and it has been shared with other users
+            # append the list of shared users to the shared_users array
+            if item.shared_with_users:
+                shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
         # print local_zone.localize(item.last_date_saved)
 
@@ -1001,12 +1001,16 @@ def share_cohort(request, cohort_id=0):
                     try:
                         owner_perms = Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
                     except ObjectDoesNotExist as e:
-                        raise Exception("User {} is not the owner of cohort ID {} and so cannot share it.".format(req_user.email, str(cohort.id)))
+                        raise Exception("User {} is not the owner of cohort(s) {} and so cannot alter the permissions.".format(req_user.email, str(cohort.id)))
 
                     obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
                     obj.save()
 
             status = 'success'
+            result = { 'msg':
+                ('Cohort ID {} has'.format(str(cohorts[0].id)) if len(cohorts) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in cohorts.values_list('id',flat=True)]))) +
+                ' been successfully shared with the following user(s): {}'.format(", ".join(emails))
+            }
     except Exception as e:
         logger.error("[ERROR] While trying to share a cohort:")
         logger.exception(e)
@@ -1609,6 +1613,7 @@ def unshare_cohort(request, cohort_id=0):
     cohort_set = None
     status = None
     result = None
+    redirect_url = None
 
     try:
         if request.POST.get('cohorts'):
@@ -1622,7 +1627,8 @@ def unshare_cohort(request, cohort_id=0):
         for cohort in cohort_set:
             owner = str(Cohort.objects.get(id=cohort).get_owner().id)
             req_user = str(request.user.id)
-            unshare_user = str(request.POST.get('user_id'))
+            # If a user_id wasn't provided, this is a user asking to remove themselves from a cohort
+            unshare_user = str(request.POST.get('user_id') or request.user.id)
 
             # You can't remove someone from a cohort if you're not the owner,
             # unless you're removing yourself from someone else's cohort
@@ -1636,24 +1642,29 @@ def unshare_cohort(request, cohort_id=0):
                 if str(resc.perm) != 'OWNER':
                     resc.delete()
 
+            if req_user != owner and req_user == unshare_user:
+                messages.info(request, "You have been successfully removed from cohort ID {}.".format(str(cohort_id)))
+                redirect_url = 'cohort_list'
+            else:
+                unshared = User.objects.get(id=unshare_user)
+                status = 'success'
+                result = { 'msg': ('User {} was successfully removed from cohort'.format(unshared.email) +
+                   ('s' if len(cohort_set) > 1 else '') + ' {}.'.format(", ".join([str(x) for x in cohort_set])))
+                }
+
     except Exception as e:
         logger.error("[ERROR] While trying to unshare a cohort:")
         logger.exception(e)
-        status = 'error'
-        result = {
-            'msg': 'There was an error while attempting to unshare these cohorts.'
-        }
-    finally:
-        if not status:
-            status = 'error'
-            result = {
-                'msg': 'An unknown error has occurred while unsharing these cohorts.'
-            }
+        messages.error(request, 'There was an error while attempting to unshare the cohort(s).')
+        redirect_url = 'cohort_list'
 
-    return JsonResponse({
-        'status': status,
-        'result': result
-    })
+    if redirect_url:
+        return redirect(redirect_url)
+    else:
+        return JsonResponse({
+            'status': status,
+            'result': result
+        })
 
 
 @login_required
