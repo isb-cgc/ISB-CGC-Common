@@ -35,6 +35,7 @@ from django.http import StreamingHttpResponse
 from django.shortcuts import render, redirect
 from django.utils import formats
 from django.views.decorators.csrf import csrf_protect
+from django.utils.html import escape
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
 from accounts.models import NIH_User, UserAuthorizedDatasets
@@ -1441,6 +1442,7 @@ def cohort_filelist(request, cohort_id=0):
 
     try:
         build = request.GET.get('build', 'HG19')
+
         nih_user = NIH_User.objects.filter(user=request.user, active=True)
         has_access = None
         if len(nih_user) > 0:
@@ -1562,52 +1564,61 @@ class Echo(object):
 
 def streaming_csv_view(request, cohort_id=0):
     if cohort_id == 0:
-        messages.error(request, 'Cohort provided does not exist.')
-        return redirect('/user_landing')
+        messages.error(request, 'Cohort {} does not exist.'.format(str(cohort_id)))
+        return redirect('cohort_list')
 
-    total_expected = int(request.GET.get('total'))
-    limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
+    try:
 
-    keep_fetching = True
-    file_list = []
-    offset = None
+        total_expected = int(request.GET.get('total'))
+        limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
-    build = request.GET.get('build','HG19')
+        keep_fetching = True
+        file_list = []
+        offset = None
 
-    while keep_fetching:
-        items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
-        if 'file_list' in items:
-            file_list += items['file_list']
-            # offsets are counted from row 0, so setting the offset to the current number of
-            # retrieved rows will start the next request on the row we want
-            offset = file_list.__len__()
-        else:
-            if 'error' in items:
-                messages.error(request, items['error']['message'])
+        build = escape(request.GET.get('build', 'HG19'))
+
+        if not re.compile(r'[Hh][Gg](19|38)').search(build):
+            raise Exception("Invalid build supplied")
+
+        while keep_fetching:
+            items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
+            if 'file_list' in items:
+                file_list += items['file_list']
+                # offsets are counted from row 0, so setting the offset to the current number of
+                # retrieved rows will start the next request on the row we want
+                offset = file_list.__len__()
+            else:
+                if 'error' in items:
+                    messages.error(request, items['error']['message'])
+                return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+
+            keep_fetching = ((offset < total_expected) and ('file_list' in items))
+
+        if file_list.__len__() < total_expected:
+            messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
             return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
-        keep_fetching = ((offset < total_expected) and ('file_list' in items))
+        if file_list.__len__() > 0:
+            """A view that streams a large CSV file."""
+            # Generate a sequence of rows. The range is based on the maximum number of
+            # rows that can be handled by a single sheet in most spreadsheet
+            # applications.
+            rows = (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
+            for file in file_list:
+                rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
+            pseudo_buffer = Echo()
+            writer = csv.writer(pseudo_buffer)
+            response = StreamingHttpResponse((writer.writerow(row) for row in rows),
+                                             content_type="text/csv")
+            response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}.csv"'.format(str(cohort_id),build)
+            return response
 
-    if file_list.__len__() < total_expected:
-        messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
-        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+    except Exception as e:
+        logger.error("[ERROR] While downloading the list of files:")
+        logger.exception(e)
 
-    if file_list.__len__() > 0:
-        """A view that streams a large CSV file."""
-        # Generate a sequence of rows. The range is based on the maximum number of
-        # rows that can be handled by a single sheet in most spreadsheet
-        # applications.
-        rows = (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
-        for file in file_list:
-            rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
-        pseudo_buffer = Echo()
-        writer = csv.writer(pseudo_buffer)
-        response = StreamingHttpResponse((writer.writerow(row) for row in rows),
-                                         content_type="text/csv")
-        response['Content-Disposition'] = 'attachment; filename="file_list.csv"'
-        return response
-
-    return render(request)
+    return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
 
 @login_required
