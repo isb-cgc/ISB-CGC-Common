@@ -529,6 +529,7 @@ def program_delete(request, program_id=0):
         'status': 'success'
     })
 
+
 @login_required
 def program_edit(request, program_id=0):
     name = request.POST['name']
@@ -545,6 +546,7 @@ def program_edit(request, program_id=0):
     return JsonResponse({
         'status': 'success'
     })
+
 
 @login_required
 def program_share(request, program_id=0):

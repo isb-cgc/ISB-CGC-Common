@@ -1521,30 +1521,33 @@ def cohort_filelist_ajax(request, cohort_id=0):
 def cohort_samples_cases(request, cohort_id=0):
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
-        return redirect('/user_landing')
+        response = redirect('cohort_list')
 
-    cohort_name = Cohort.objects.filter(id=cohort_id).values_list('name', flat=True)[0].__str__()
+    try:
+        cohort_name = Cohort.objects.get(id=cohort_id).name
+        samples = Samples.objects.filter(cohort=cohort_id)
 
-    # Sample IDs
-    samples = Samples.objects.filter(cohort=cohort_id).values_list('sample_barcode', flat=True)
+        rows = (["Sample and Case List for Cohort '"+cohort_name+"'"],)
+        rows += (["Sample Barcode", "Case Barcode"],)
 
-    # Case IDs, may be empty!
-    cases = Samples.objects.filter(cohort=cohort_id).values_list('case_barcode', flat=True)
+        for sample in samples:
+            rows += ([sample.sample_barcode, sample.case_barcode],)
 
-    rows = (["Sample and Case List for Cohort '"+cohort_name+"'"],)
-    rows += (["ID", "Type"],)
+        pseudo_buffer = Echo()
+        writer = csv.writer(pseudo_buffer)
+        response = StreamingHttpResponse((writer.writerow(row) for row in rows),
+                                         content_type="text/csv")
+        response['Content-Disposition'] = 'attachment; filename="samples_cases_in_cohort_{}.csv"'.format(str(cohort_id))
 
-    for sample_id in samples:
-        rows += ([sample_id, "Sample"],)
+    except ObjectDoesNotExist:
+        messages.error(request, "A cohort of the ID {} was not found.".format(str(cohort_id)))
+        response = redirect('cohort_list')
+    except Exception as e:
+        logger.error("[ERROR] While trying to download a list of samples and cases for cohort {}:".format(str(cohort_id)))
+        logger.exception(e)
+        messages.error(request, "There was an error while attempting to obtain the list of samples and cases for cohort ID {}. Please contact the administrator.".format(str(cohort_id)))
+        response = redirect('cohort_list')
 
-    for case_id in cases:
-        rows += ([case_id, "Case"],)
-
-    pseudo_buffer = Echo()
-    writer = csv.writer(pseudo_buffer)
-    response = StreamingHttpResponse((writer.writerow(row) for row in rows),
-                                     content_type="text/csv")
-    response['Content-Disposition'] = 'attachment; filename="samples_cases_in_cohort.csv"'
     return response
 
 
