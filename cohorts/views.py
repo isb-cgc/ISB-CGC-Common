@@ -1568,7 +1568,7 @@ def streaming_csv_view(request, cohort_id=0):
         return redirect('cohort_list')
 
     try:
-
+        cohort = Cohort.objects.get(id=cohort_id)
         total_expected = int(request.GET.get('total'))
         limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
@@ -1604,7 +1604,8 @@ def streaming_csv_view(request, cohort_id=0):
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
-            rows = (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
+            rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
+            rows += (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
             for file in file_list:
                 rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
