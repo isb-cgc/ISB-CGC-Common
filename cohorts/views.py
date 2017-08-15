@@ -26,6 +26,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth.models import User as Django_User
+from django.conf import settings
+from django.contrib import messages
 from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.core.urlresolvers import reverse
@@ -35,6 +37,7 @@ from django.http import StreamingHttpResponse
 from django.shortcuts import render, redirect
 from django.utils import formats
 from django.views.decorators.csrf import csrf_protect
+from django.utils.html import escape
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
 from accounts.models import NIH_User, UserAuthorizedDatasets
@@ -1441,6 +1444,7 @@ def cohort_filelist(request, cohort_id=0):
 
     try:
         build = request.GET.get('build', 'HG19')
+
         nih_user = NIH_User.objects.filter(user=request.user, active=True)
         has_access = None
         if len(nih_user) > 0:
@@ -1521,30 +1525,33 @@ def cohort_filelist_ajax(request, cohort_id=0):
 def cohort_samples_cases(request, cohort_id=0):
     if cohort_id == 0:
         messages.error(request, 'Cohort provided does not exist.')
-        return redirect('/user_landing')
+        response = redirect('cohort_list')
 
-    cohort_name = Cohort.objects.filter(id=cohort_id).values_list('name', flat=True)[0].__str__()
+    try:
+        cohort_name = Cohort.objects.get(id=cohort_id).name
+        samples = Samples.objects.filter(cohort=cohort_id)
 
-    # Sample IDs
-    samples = Samples.objects.filter(cohort=cohort_id).values_list('sample_barcode', flat=True)
+        rows = (["Sample and Case List for Cohort '"+cohort_name+"'"],)
+        rows += (["Sample Barcode", "Case Barcode"],)
 
-    # Case IDs, may be empty!
-    cases = Samples.objects.filter(cohort=cohort_id).values_list('case_barcode', flat=True)
+        for sample in samples:
+            rows += ([sample.sample_barcode, sample.case_barcode],)
 
-    rows = (["Sample and Case List for Cohort '"+cohort_name+"'"],)
-    rows += (["ID", "Type"],)
+        pseudo_buffer = Echo()
+        writer = csv.writer(pseudo_buffer)
+        response = StreamingHttpResponse((writer.writerow(row) for row in rows),
+                                         content_type="text/csv")
+        response['Content-Disposition'] = 'attachment; filename="samples_cases_in_cohort_{}.csv"'.format(str(cohort_id))
 
-    for sample_id in samples:
-        rows += ([sample_id, "Sample"],)
+    except ObjectDoesNotExist:
+        messages.error(request, "A cohort of the ID {} was not found.".format(str(cohort_id)))
+        response = redirect('cohort_list')
+    except Exception as e:
+        logger.error("[ERROR] While trying to download a list of samples and cases for cohort {}:".format(str(cohort_id)))
+        logger.exception(e)
+        messages.error(request, "There was an error while attempting to obtain the list of samples and cases for cohort ID {}. Please contact the administrator.".format(str(cohort_id)))
+        response = redirect('cohort_list')
 
-    for case_id in cases:
-        rows += ([case_id, "Case"],)
-
-    pseudo_buffer = Echo()
-    writer = csv.writer(pseudo_buffer)
-    response = StreamingHttpResponse((writer.writerow(row) for row in rows),
-                                     content_type="text/csv")
-    response['Content-Disposition'] = 'attachment; filename="samples_cases_in_cohort.csv"'
     return response
 
 
@@ -1559,52 +1566,62 @@ class Echo(object):
 
 def streaming_csv_view(request, cohort_id=0):
     if cohort_id == 0:
-        messages.error(request, 'Cohort provided does not exist.')
-        return redirect('/user_landing')
+        messages.error(request, 'Cohort {} does not exist.'.format(str(cohort_id)))
+        return redirect('cohort_list')
 
-    total_expected = int(request.GET.get('total'))
-    limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
+    try:
+        cohort = Cohort.objects.get(id=cohort_id)
+        total_expected = int(request.GET.get('total'))
+        limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
-    keep_fetching = True
-    file_list = []
-    offset = None
+        keep_fetching = True
+        file_list = []
+        offset = None
 
-    build = request.GET.get('build','HG19')
+        build = escape(request.GET.get('build', 'HG19'))
 
-    while keep_fetching:
-        items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
-        if 'file_list' in items:
-            file_list += items['file_list']
-            # offsets are counted from row 0, so setting the offset to the current number of
-            # retrieved rows will start the next request on the row we want
-            offset = file_list.__len__()
-        else:
-            if 'error' in items:
-                messages.error(request, items['error']['message'])
+        if not re.compile(r'[Hh][Gg](19|38)').search(build):
+            raise Exception("Invalid build supplied")
+
+        while keep_fetching:
+            items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
+            if 'file_list' in items:
+                file_list += items['file_list']
+                # offsets are counted from row 0, so setting the offset to the current number of
+                # retrieved rows will start the next request on the row we want
+                offset = file_list.__len__()
+            else:
+                if 'error' in items:
+                    messages.error(request, items['error']['message'])
+                return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+
+            keep_fetching = ((offset < total_expected) and ('file_list' in items))
+
+        if file_list.__len__() < total_expected:
+            messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
             return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
-        keep_fetching = ((offset < total_expected) and ('file_list' in items))
+        if file_list.__len__() > 0:
+            """A view that streams a large CSV file."""
+            # Generate a sequence of rows. The range is based on the maximum number of
+            # rows that can be handled by a single sheet in most spreadsheet
+            # applications.
+            rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
+            rows += (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
+            for file in file_list:
+                rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
+            pseudo_buffer = Echo()
+            writer = csv.writer(pseudo_buffer)
+            response = StreamingHttpResponse((writer.writerow(row) for row in rows),
+                                             content_type="text/csv")
+            response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}.csv"'.format(str(cohort_id),build)
+            return response
 
-    if file_list.__len__() < total_expected:
-        messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
-        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+    except Exception as e:
+        logger.error("[ERROR] While downloading the list of files:")
+        logger.exception(e)
 
-    if file_list.__len__() > 0:
-        """A view that streams a large CSV file."""
-        # Generate a sequence of rows. The range is based on the maximum number of
-        # rows that can be handled by a single sheet in most spreadsheet
-        # applications.
-        rows = (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
-        for file in file_list:
-            rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
-        pseudo_buffer = Echo()
-        writer = csv.writer(pseudo_buffer)
-        response = StreamingHttpResponse((writer.writerow(row) for row in rows),
-                                         content_type="text/csv")
-        response['Content-Disposition'] = 'attachment; filename="file_list.csv"'
-        return response
-
-    return render(request)
+    return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
 
 @login_required
