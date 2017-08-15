@@ -43,7 +43,6 @@ import json
 logger = logging.getLogger('main_logger')
 
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
-CONTROLLED_ACL_GOOGLE_GROUP = settings.ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 
@@ -317,30 +316,39 @@ def verify_gcp(request, user_id):
 
 @login_required
 def register_gcp(request, user_id):
-    if request.POST:
-        project_id = request.POST.get('gcp_id', None)
-        project_name = project_id
 
-        register_users = request.POST.getlist('register_users')
-        if not user_id or not project_id or not project_name:
-            pass
-        else:
-            try:
-                gcp = GoogleProject.objects.get(project_name=project_name,
-                                                project_id=project_id)
-            except ObjectDoesNotExist:
-                gcp = GoogleProject.objects.create(project_name=project_name,
-                                                   project_id=project_id,
-                                                   big_query_dataset='')
+    try:
+        if request.POST:
+            project_id = request.POST.get('gcp_id', None)
+            project_name = project_id
+
+            register_users = request.POST.getlist('register_users')
+            if not user_id or not project_id or not project_name:
+                pass
+            else:
+                try:
+                    gcp = GoogleProject.objects.get(project_name=project_name,
+                                                    project_id=project_id)
+                except ObjectDoesNotExist:
+                    gcp = GoogleProject.objects.create(project_name=project_name,
+                                                       project_id=project_id,
+                                                       big_query_dataset='')
+                    gcp.save()
+
+            users = User.objects.filter(email__in=register_users)
+
+            for user in users:
+                gcp.user.add(user)
                 gcp.save()
+            return redirect('user_gcp_list', user_id=request.user.id)
 
-        users = User.objects.filter(email__in=register_users)
+    except Exception as e:
+        logger.error("[ERROR] While registering a Google Cloud Project:")
+        logger.exception(e)
+        messages.error(request, "There was an error while attempting to register this Google Cloud Project - please contact the administrator.")
 
-        for user in users:
-            gcp.user.add(user)
-            gcp.save()
-        return redirect('user_gcp_list', user_id=request.user.id)
     return render(request, 'GenespotRE/register_gcp.html', {})
+
 
 @login_required
 def gcp_detail(request, user_id, gcp_id):
@@ -367,7 +375,7 @@ def user_gcp_delete(request, user_id, gcp_id):
 
                     logger.info("Attempting to delete user {} from group {}. "
                                 "If an error message doesn't follow, they were successfully deleted"
-                                .format(saad.service_account.service_account, CONTROLLED_ACL_GOOGLE_GROUP))
+                                .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
                 except HttpError as e:
                     logger.info(e)
 
