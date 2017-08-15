@@ -38,6 +38,16 @@ class NIH_User(models.Model):
     def get_google_email(self):
         return User.objects.get(pk=self.user_id).email
 
+    def get_auth_datasets(self):
+        result = None
+        try:
+            result = AuthorizedDataset.objects.filter(
+                id__in=self.userauthorizeddatasets_set.all().values_list('authorized_dataset', flat=True))
+        except Exception as e:
+            logger.error("[ERROR] While retrieving authorized datasets: ")
+            logger.exception(e)
+        return result
+
 
 class GoogleProject(models.Model):
     user = models.ManyToManyField(User)
@@ -67,6 +77,7 @@ class AuthorizedDataset(models.Model):
     whitelist_id = models.CharField(max_length=256, null=False)
     acl_google_group = models.CharField(max_length=256, null=False)
     public = models.BooleanField(default=False)
+    duca_id = models.CharField(max_length=256, null=True)
 
     def __str__(self):
         return self.name
