@@ -553,7 +553,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
             cohorts.has_private_cohorts = True
             # if it is not a public cohort and it has been shared with other users
             # append the list of shared users to the shared_users array
-            if item.shared_with_users:
+            if item.shared_with_users and item.owner.id == request.user.id:
                 shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
         # print local_zone.localize(item.last_date_saved)
