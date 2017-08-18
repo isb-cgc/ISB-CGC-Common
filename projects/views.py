@@ -1,6 +1,5 @@
 """
-
-Copyright 2016, Institute for Systems Biology
+Copyright 2017, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -13,13 +12,12 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
 """
 
 from copy import deepcopy
 import re
 import sys
-from django.shortcuts import render
+from django.shortcuts import render, redirect
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -41,7 +39,7 @@ import json
 import requests
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 WHITELIST_RE = settings.WHITELIST_RE
 
@@ -171,6 +169,7 @@ def create_metadata_tables(user, project, columns, skipSamples=False):
 
             feature_table_sql += ")"
             cursor.execute(feature_table_sql, feature_table_args)
+
 
 @login_required
 def upload_files(request):
@@ -506,6 +505,7 @@ def upload_files(request):
 
     return JsonResponse(resp)
 
+
 @login_required
 def program_delete(request, program_id=0):
     program = Program.objects.get(id=program_id)
@@ -519,15 +519,58 @@ def program_delete(request, program_id=0):
             project.active = False
             project.save()
         program.save()
-    else:
-        # Unshare
-        shared_resource = program.shared.filter(matched_user_id=request.user.id)
-        shared_resource.delete()
-
 
     return JsonResponse({
         'status': 'success'
     })
+
+
+@login_required
+def program_unshare(request, program_id=0):
+    message = None
+    status = None
+    status_text = None
+    redirect_url = None
+
+    try:
+        program = Program.objects.get(id=program_id)
+
+        owner = str(program.owner.id)
+        req_user = str(request.user.id)
+        # If a user_id wasn't provided, this is a user asking to remove themselves from a cohort
+        unshare_user = str(request.POST.get('user_id') or request.user.id)
+
+        # You can't remove someone from a program if you're not the owner,
+        # unless you're removing yourself from someone else's program
+        if req_user != owner and req_user != unshare_user:
+            raise Exception('Cannot make changes to sharing on a program if you are not the owner.')
+
+        shared_resource = program.shared.filter(matched_user_id=unshare_user)
+        shared_resource.delete()
+        status = 200
+        status_text = 'success'
+
+        if req_user != owner and req_user == unshare_user:
+            messages.info(request, "You have been successfully removed from program ID {}.".format(str(program_id)))
+            redirect_url = 'programs'
+        else:
+            unshared = User.objects.get(id=unshare_user)
+            message = 'User {} was successfully removed from program ID {}.'.format(unshared.email, str(program_id))
+
+    except Exception as e:
+        logger.error("[ERROR] While attempting to unshare program ID {}: ".format(str(program_id)))
+        logger.exception(e)
+        status_text = 'error'
+        status = 500
+        message = 'There was an error while attempting to unshare program ID {}.'.format(str(program_id))
+
+    if redirect_url:
+        return redirect(redirect_url)
+    else:
+        return JsonResponse({
+            'status': status_text,
+            'msg': message
+        }, status=status)
 
 
 @login_required
@@ -550,14 +593,57 @@ def program_edit(request, program_id=0):
 
 @login_required
 def program_share(request, program_id=0):
-    program = request.user.program_set.get(id=program_id)
-    emails = re.split('\s*,\s*', request.POST['share_users'].strip())
+    message = None
+    status = None
+    status_text = None
 
-    create_share(request, program, emails, 'program')
+    try:
+        # Verify all emails are in our user database
+        emails = re.split('\s*,\s*', request.POST['share_users'].strip())
+        users_not_found = []
+        users = []
+        req_user = None
+
+        try:
+            req_user = User.objects.get(id=request.user.id)
+        except ObjectDoesNotExist as e:
+            raise Exception("{} is not a user ID in this database!".format(str(request.user.id)))
+
+        for email in emails:
+            try:
+                user = User.objects.get(email=email)
+                users.append(user)
+            except ObjectDoesNotExist as e:
+                users_not_found.append(email)
+
+        # If any aren't found, warn the user and don't share
+        if len(users_not_found) > 0:
+            status_text = 'error'
+            # An actual error will close the modal, so this is a '200 error' i.e. 'ok request, but can't carry it out'
+            status = 200
+            message = 'The following user emails could not be found; please ask them to log into the site first: ' + ", ".join(users_not_found)
+
+        # Otherwise, share the program
+        else:
+            program = request.user.program_set.get(id=program_id)
+
+            create_share(request, program, emails, 'program')
+            status = 200
+            status_text = 'success'
+            message = 'Program ID {} has been successfully shared with the following user(s): {}'.format(str(program_id),", ".join(emails))
+
+    except Exception as e:
+        logger.error("[ERROR] While attempting to share program ID {}: ".format(str(program_id)))
+        logger.exception(e)
+        status_text = 'error'
+        status = 500
+        message = 'There was an error while attempting to share program ID {}.'.format(str(program_id))
 
     return JsonResponse({
-        'status': 'success'
-    })
+        'status': status_text,
+        'msg': message
+    }, status=status)
+
 
 @login_required
 def project_delete(request, program_id=0, project_id=0):
@@ -569,6 +655,7 @@ def project_delete(request, program_id=0, project_id=0):
     return JsonResponse({
         'status': 'success'
     })
+
 
 @login_required
 def project_edit(request, program_id=0, project_id=0):
