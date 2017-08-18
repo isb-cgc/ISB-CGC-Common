@@ -569,7 +569,7 @@ def program_unshare(request, program_id=0):
     else:
         return JsonResponse({
             'status': status_text,
-            'msg': message
+            'result': {'msg': message}
         }, status=status)
 
 
@@ -641,7 +641,7 @@ def program_share(request, program_id=0):
 
     return JsonResponse({
         'status': status_text,
-        'msg': message
+        'result': {'msg': message}
     }, status=status)
 
 
