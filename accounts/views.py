@@ -43,7 +43,6 @@ import json
 logger = logging.getLogger('main_logger')
 
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
-CONTROLLED_ACL_GOOGLE_GROUP = settings.ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 
@@ -317,30 +316,41 @@ def verify_gcp(request, user_id):
 
 @login_required
 def register_gcp(request, user_id):
-    if request.POST:
-        project_id = request.POST.get('gcp_id', None)
-        project_name = project_id
 
-        register_users = request.POST.getlist('register_users')
-        if not user_id or not project_id or not project_name:
-            pass
-        else:
-            try:
-                gcp = GoogleProject.objects.get(project_name=project_name,
-                                                project_id=project_id)
-            except ObjectDoesNotExist:
-                gcp = GoogleProject.objects.create(project_name=project_name,
-                                                   project_id=project_id,
-                                                   big_query_dataset='')
+    try:
+        if request.POST:
+            project_id = request.POST.get('gcp_id', None)
+            project_name = project_id
+
+            register_users = request.POST.getlist('register_users')
+            if not user_id or not project_id or not project_name:
+                pass
+            else:
+                try:
+                    gcp = GoogleProject.objects.get(project_name=project_name,
+                                                    project_id=project_id)
+                    messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
+
+                except ObjectDoesNotExist:
+                    gcp = GoogleProject.objects.create(project_name=project_name,
+                                                       project_id=project_id,
+                                                       big_query_dataset='')
+                    gcp.save()
+
+            users = User.objects.filter(email__in=register_users)
+
+            for user in users:
+                gcp.user.add(user)
                 gcp.save()
+            return redirect('user_gcp_list', user_id=request.user.id)
 
-        users = User.objects.filter(email__in=register_users)
+    except Exception as e:
+        logger.error("[ERROR] While registering a Google Cloud Project:")
+        logger.exception(e)
+        messages.error(request, "There was an error while attempting to register this Google Cloud Project - please contact the administrator.")
 
-        for user in users:
-            gcp.user.add(user)
-            gcp.save()
-        return redirect('user_gcp_list', user_id=request.user.id)
     return render(request, 'GenespotRE/register_gcp.html', {})
+
 
 @login_required
 def gcp_detail(request, user_id, gcp_id):
@@ -367,7 +377,7 @@ def user_gcp_delete(request, user_id, gcp_id):
 
                     logger.info("Attempting to delete user {} from group {}. "
                                 "If an error message doesn't follow, they were successfully deleted"
-                                .format(saad.service_account.service_account, CONTROLLED_ACL_GOOGLE_GROUP))
+                                .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
                 except HttpError as e:
                     logger.info(e)
 
@@ -380,7 +390,7 @@ def user_gcp_delete(request, user_id, gcp_id):
     return redirect('user_gcp_list', user_id=request.user.id)
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email):
+def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False):
     # Only verify for protected datasets
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_names = dataset_objs.values_list('name', flat=True)
@@ -408,6 +418,17 @@ def verify_service_account(gcp_id, service_account, datasets, user_email):
     if sab.is_blacklisted(service_account):
         st_logger.write_text_log_entry(log_name, "{0}: Service account is blacklisted.".format(service_account))
         return {'message': 'This service account cannot be registered.'}
+
+
+    # Refreshes require a service account to exist, and, you cannot register an account if it already exists
+    try:
+        ServiceAccount.objects.get(service_account=service_account)
+        if not is_refresh:
+            return {'message': 'Service account {} already exists, and so cannot be registered'.format(str(service_account))}
+    except ObjectDoesNotExist:
+        if is_refresh:
+            return {'message': 'Service account {} was not found so cannot be refreshed.'.format(str(service_account))}
+
 
     # 1. GET ALL USERS ON THE PROJECT.
     try:
@@ -531,7 +552,8 @@ def verify_sa(request, user_id):
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
             datasets = request.POST.getlist('datasets')
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email)
+            is_refresh = bool(request.POST.get('is_refresh') == 'true')
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh)
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
@@ -572,6 +594,7 @@ def register_sa(request, user_id):
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
             datasets = request.POST.get('datasets').split(',')
+            is_refresh = bool(request.POST.get('is_refresh') == 'true')
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
             if len(datasets) == 1 and datasets[0] == '':
@@ -580,7 +603,7 @@ def register_sa(request, user_id):
                 datasets = map(int, datasets)
 
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email)
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh)
             logger.info("[STATUS] result of verification for {}: {}".format(user_sa,str(result)))
 
             # If the verification was successful, finalize access
