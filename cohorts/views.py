@@ -27,7 +27,6 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib.auth.models import User as Django_User
 from django.conf import settings
-from django.contrib import messages
 from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.core.urlresolvers import reverse
