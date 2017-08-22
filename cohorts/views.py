@@ -727,17 +727,25 @@ def add_cohorts_to_worksheet(request, workbook_id=0, worksheet_id=0):
 
 @login_required
 def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_id=0):
-    if request.method == 'POST':
-        workbook = request.user.workbook_set.get(id=workbook_id)
-        worksheet = workbook.worksheet_set.get(id=worksheet_id)
+    redirect_url = reverse('workbooks')
+    try:
+        if request.method == 'POST':
+            # Implies ownership of workbook - don't need to check
+            workbook = request.user.workbook_set.get(id=workbook_id)
+            worksheet = workbook.worksheet_set.get(id=worksheet_id)
 
-        cohorts = request.user.cohort_perms_set.filter(cohort__active=True,cohort__id=cohort_id, perm=Cohort_Perms.OWNER)
-        if cohorts.count() > 0:
-            for cohort in cohorts:
-                cohort_model = cohort.cohort
-                worksheet.remove_cohort(cohort_model)
+            # You are always allowed to remove a cohort from your own workbook
+            cohort_model = Cohort.objects.get(id=cohort_id)
+            worksheet.remove_cohort(cohort_model)
+            redirect_url = reverse('worksheet_display',
+                                   kwargs={'workbook_id': workbook_id, 'worksheet_id': worksheet_id})
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Workbook, worksheet, or Cohort didn't exist - couldn't remove cohort from workbook.")
+        logger.exception(e)
+    except Exception as e:
+        logger.error("[ERROR] While trying to remove cohort ID {} from workbook ID {}: ".format(str(cohort_id),str(workbook_id)))
+        logger.exception(e)
 
-    redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_id, 'worksheet_id': worksheet_id})
     return redirect(redirect_url)
 
 '''
