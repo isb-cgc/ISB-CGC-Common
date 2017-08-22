@@ -285,6 +285,12 @@ def user_gcp_list(request, user_id):
 def verify_gcp(request, user_id):
     try:
         gcp_id = request.GET.get('gcp-id', None)
+
+        gcp = GoogleProject.objects.filter(project_id=gcp_id)
+        # Can't register the same GCP twice
+        if len(gcp) > 0:
+            return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
+
         crm_service = get_special_crm_resource()
         iam_policy = crm_service.projects().getIamPolicy(
             resource=gcp_id, body={}).execute()
