@@ -434,7 +434,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         reg_change = True
             # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
             if reg_change:
-                return {'message': 'Service account {} already exists with these datasets, and so cannot be registered'.format(str(service_account))}
+                return {'message': 'Service account {} already exists with these datasets, and so does not need to be registered'.format(str(service_account))}
     except ObjectDoesNotExist:
         if is_refresh:
             return {'message': 'Service account {} was not found so cannot be refreshed.'.format(str(service_account))}
