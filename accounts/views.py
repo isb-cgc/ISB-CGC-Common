@@ -420,11 +420,21 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         return {'message': 'This service account cannot be registered.'}
 
 
-    # Refreshes require a service account to exist, and, you cannot register an account if it already exists
+    # Refreshes require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
-        ServiceAccount.objects.get(service_account=service_account)
+        sa = ServiceAccount.objects.get(service_account=service_account)
         if not is_refresh:
-            return {'message': 'Service account {} already exists, and so cannot be registered'.format(str(service_account))}
+            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
+            ads = dataset_objs.values_list('whitelist_id', flat=True)
+            reg_change = (len(saads) != len(ads))
+            # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
+            if not reg_change:
+                for saad in saads:
+                    if saad.authorized_dataset.whitelist_id not in ads:
+                        reg_change = True
+            # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
+            if reg_change:
+                return {'message': 'Service account {} already exists with these datasets, and so does not need to be registered'.format(str(service_account))}
     except ObjectDoesNotExist:
         if is_refresh:
             return {'message': 'Service account {} was not found so cannot be refreshed.'.format(str(service_account))}
