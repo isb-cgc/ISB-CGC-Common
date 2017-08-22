@@ -433,7 +433,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     if saad.authorized_dataset.whitelist_id not in ads:
                         reg_change = True
             # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
-            if not reg_change:
+            if reg_change:
                 return {'message': 'Service account {} already exists with these datasets, and so cannot be registered'.format(str(service_account))}
     except ObjectDoesNotExist:
         if is_refresh:
