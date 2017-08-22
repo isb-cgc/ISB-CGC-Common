@@ -425,12 +425,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         sa = ServiceAccount.objects.get(service_account=service_account)
         if not is_refresh:
             saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
-            ads = dataset_objs.values_list('service_account', flat=True)
+            ads = dataset_objs.values_list('whitelist_id', flat=True)
             reg_change = (len(saads) != len(ads))
             # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
             if not reg_change:
                 for saad in saads:
-                    if saad.service_account.service_account not in ads:
+                    if saad.authorized_dataset.whitelist_id not in ads:
                         reg_change = True
             # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
             if not reg_change:
