@@ -315,6 +315,8 @@ def verify_gcp(request, user_id):
                                        'registered_user': registered_user})
 
         if not user_found:
+            logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
+            logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
             message = 'You were not found on the project. You may not register a project you do not belong to.'
             status='403'
         else:
@@ -323,11 +325,11 @@ def verify_gcp(request, user_id):
     except Exception as e:
         if type(e) is HttpError:
             logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
-            message = 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            message = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '403'
         else:
             logger.error("[ERROR] While trying to verify GCP ID {}:".format(str(gcp_id)))
-            message = 'There was an error while attempting to verify your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            message = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '500'
         logger.exception(e)
 
