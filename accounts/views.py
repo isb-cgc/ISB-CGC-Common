@@ -283,11 +283,13 @@ def user_gcp_list(request, user_id):
 
 @login_required
 def verify_gcp(request, user_id):
+    message = None
+    status = None
     try:
         gcp_id = request.GET.get('gcp-id', None)
 
         gcp = GoogleProject.objects.filter(project_id=gcp_id)
-        # Can't register the same GCP twice
+        # Can't register the same GCP twice - return immediately
         if len(gcp) > 0:
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
 
@@ -313,14 +315,24 @@ def verify_gcp(request, user_id):
                                        'registered_user': registered_user})
 
         if not user_found:
-            return JsonResponse({'message': 'You were not found on the project. You may not register a project you do not belong to.'}, status='403')
+            message = 'You were not found on the project. You may not register a project you do not belong to.'
+            status='403'
         else:
             return JsonResponse({'roles': roles,
                                 'gcp_id': gcp_id}, status='200')
-    except HttpError as e:
-        logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
+    except Exception as e:
+        if type(e) is HttpError:
+            logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
+            message = 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            status = '403'
+        else:
+            logger.error("[ERROR] While trying to verify GCP ID {}:".format(str(gcp_id)))
+            message = 'There was an error while attempting to verify your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            status = '500'
         logger.exception(e)
-        return JsonResponse({'message': 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'}, status='403')
+
+    return JsonResponse({'message': message}, status=status)
+
 
 @login_required
 def register_gcp(request, user_id):
