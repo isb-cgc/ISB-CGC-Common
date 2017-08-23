@@ -317,7 +317,7 @@ def verify_gcp(request, user_id):
         if not user_found:
             logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
             logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
-            message = 'You were not found on the project. You may not register a project you do not belong to.'
+            message = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
             status='403'
         else:
             return JsonResponse({'roles': roles,
