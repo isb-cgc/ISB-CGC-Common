@@ -432,14 +432,20 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
         if not is_refresh:
-            saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id',flat=True)
-            ads = dataset_objs.values_list('whitelist_id', flat=True)
-            reg_change = (len(saads) != len(ads))
-            # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
-            if not reg_change:
-                for ad in ads:
-                    if ad not in saads:
-                        reg_change = True
+            reg_change = False
+            # If there are private datasets requested, it might not be a duplicate
+            if len(dataset_objs):
+                saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id',flat=True)
+                ads = dataset_objs.values_list('whitelist_id', flat=True)
+                reg_change = (len(saads) != len(ads))
+                # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
+                if not reg_change:
+                    for ad in ads:
+                        if ad not in saads:
+                            reg_change = True
+            # but if there are not, it's only not a duplicate if the public dataset isn't yet registered
+            else:
+                reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa),public=True)) <= 0)
             # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
             if not reg_change:
                 return {'message': 'Service account {} already exists with these datasets, and so does not need to be registered'.format(str(service_account))}
