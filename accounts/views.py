@@ -449,7 +449,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             if len(dataset_objs):
                 saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id',flat=True)
                 ads = dataset_objs.values_list('whitelist_id', flat=True)
-                reg_change = (len(saads) != len(ads))
+                logger.debug("[STATUS] Requested datasets: {}".format(str(ads)))
+                logger.debug("[STATUS] currectly registered: {}".format(str(saads)))
                 # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
                 if not reg_change:
                     for ad in ads:
