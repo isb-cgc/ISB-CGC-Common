@@ -317,7 +317,9 @@ def verify_gcp(request, user_id):
         else:
             return JsonResponse({'roles': roles,
                                 'gcp_id': gcp_id}, status='200')
-    except HttpError:
+    except HttpError as e:
+        logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
+        logger.exception(e)
         return JsonResponse({'message': 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'}, status='403')
 
 @login_required
