@@ -43,6 +43,7 @@ class CohortManager(models.Manager):
         all_isb_cohort_ids = Cohort_Perms.objects.filter(user=isb_user, perm=Cohort_Perms.OWNER).values_list('cohort_id', flat=True)
         return Cohort.objects.filter(name='All TCGA Data', id__in=all_isb_cohort_ids)[0]
 
+
 class Cohort(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.TextField(null=True)
