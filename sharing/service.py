@@ -5,12 +5,16 @@ from django.template.loader import get_template
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.urlresolvers import reverse
+from django.core.exceptions import ObjectDoesNotExist
 
 from urllib import urlencode
 
 EMAIL_SERVICE_API_URL = settings.EMAIL_SERVICE_API_URL
 EMAIL_SERVICE_API_KEY = settings.EMAIL_SERVICE_API_KEY
 NOTIFICATION_EMAIL_FROM_ADDRESS = settings.NOTIFICATION_EMAIL_FROM_ADDRESS
+
+logger = logging.getLogger('main_logger')
+
 
 def send_email_message(message_data):
     try:
@@ -48,42 +52,37 @@ def create_share(request, item, emails, type, share_user=None):
             continue
 
         # Else, check for if our email matches a user
-        user = User.objects.all().filter(email=email)
-        redeemed = False
-        template = 'sharing/email_new_user_share.html'
-        template_txt = 'sharing/email_new_user_share.txt'
+        # If they are found we mark it as redeemed and email them
+        try:
+            user = User.objects.get(email=email)
 
-        if user.count() > 0:
-            # If the email matches a user, we are going to mark it as redeemed immediately for them
-            user = user[0]
-            redeemed = True
-            template = 'sharing/email_existing_user_share.html'
-            template_txt = 'sharing/email_existing_user_share.txt'
-        else:
-            user = None
-            validate_email(email)
+            sharedResource = item.shared.create(email=email, matched_user=user, redeemed=True)
+            sharedResource.save()
 
-        sharedResource = item.shared.create(email=email,matched_user=user,redeemed=redeemed)
-        sharedResource.save()
+            email_template = get_template('sharing/email_existing_user_share.html')
+            email_text_template = get_template('sharing/email_existing_user_share.txt')
+            ctx = {
+                'shared_by': share_user,
+                'item': item,
+                'type': type,
+                'shared_url': request.build_absolute_uri(
+                        reverse('sharing_add', kwargs={
+                            'sharing_id': sharedResource.id
+                        })) + '?' + urlencode({'key':sharedResource.share_key}),
+            }
 
-        email_template = get_template(template)
-        email_text_template = get_template(template_txt)
-        ctx = {
-            'shared_by': share_user,
-            'item': item,
-            'type': type,
-            'shared_url': request.build_absolute_uri(
-                    reverse('sharing_add', kwargs={
-                        'sharing_id': sharedResource.id
-                    })) + '?' + urlencode({'key':sharedResource.share_key}),
-        }
+            message_data = {
+                'from': NOTIFICATION_EMAIL_FROM_ADDRESS,
+                'to': email,
+                'subject': 'You Were Added on a ' + type,
+                'text': email_text_template.render(ctx),
+                'html': email_template.render(ctx)
+            }
 
-        message_data = {
-            'from': NOTIFICATION_EMAIL_FROM_ADDRESS,
-            'to': email,
-            'subject': 'You Were Added on a ' + type,
-            'text': email_text_template.render(ctx),
-            'html': email_template.render(ctx)
-        }
-
-        send_email_message(message_data)
+            send_email_message(message_data)
+        # Otherwise we note that there is no such user--we shouldn't get to this point, so we just log it
+        except ObjectDoesNotExist as e:
+            logger.info("[STATUS] Cannot share {} with {} because there is no user matching this email.".format(type, email))
+        except Exception as e:
+            logger.error("[ERROR] While trying to share a {} with user email {}:".format(type, email))
+            logger.exception(e)
