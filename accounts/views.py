@@ -283,11 +283,13 @@ def user_gcp_list(request, user_id):
 
 @login_required
 def verify_gcp(request, user_id):
+    message = None
+    status = None
     try:
         gcp_id = request.GET.get('gcp-id', None)
 
         gcp = GoogleProject.objects.filter(project_id=gcp_id)
-        # Can't register the same GCP twice
+        # Can't register the same GCP twice - return immediately
         if len(gcp) > 0:
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
 
@@ -313,12 +315,26 @@ def verify_gcp(request, user_id):
                                        'registered_user': registered_user})
 
         if not user_found:
-            return JsonResponse({'message': 'You were not found on the project. You may not register a project you do not belong to.'}, status='403')
+            logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
+            logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
+            message = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
+            status='403'
         else:
             return JsonResponse({'roles': roles,
                                 'gcp_id': gcp_id}, status='200')
-    except HttpError:
-        return JsonResponse({'message': 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'}, status='403')
+    except Exception as e:
+        if type(e) is HttpError:
+            logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
+            message = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            status = '403'
+        else:
+            logger.error("[ERROR] While trying to verify GCP ID {}:".format(str(gcp_id)))
+            message = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            status = '500'
+        logger.exception(e)
+
+    return JsonResponse({'message': message}, status=status)
+
 
 @login_required
 def register_gcp(request, user_id):
@@ -430,16 +446,21 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
         if not is_refresh:
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
-            ads = dataset_objs.values_list('whitelist_id', flat=True)
-            reg_change = (len(saads) != len(ads))
-            # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
-            if not reg_change:
-                for saad in saads:
-                    if saad.authorized_dataset.whitelist_id not in ads:
-                        reg_change = True
+            reg_change = False
+            # If there are private datasets requested, it might not be a duplicate
+            if len(dataset_objs):
+                saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id',flat=True)
+                ads = dataset_objs.values_list('whitelist_id', flat=True)
+                # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
+                if not reg_change:
+                    for ad in ads:
+                        if ad not in saads:
+                            reg_change = True
+            # but if there are not, it's only not a duplicate if the public dataset isn't yet registered
+            else:
+                reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
             # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
-            if reg_change:
+            if not reg_change:
                 return {'message': 'Service account {} already exists with these datasets, and so does not need to be registered'.format(str(service_account))}
     except ObjectDoesNotExist:
         if is_refresh:
