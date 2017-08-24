@@ -11,6 +11,7 @@ urlpatterns = [
     url(r'^(?P<program_id>\d+)/delete/?$', views.program_delete, name="program_delete"),
     url(r'^(?P<program_id>\d+)/edit/?$', views.program_edit, name="program_edit"),
     url(r'^(?P<program_id>\d+)/share/?$', views.program_share, name="program_share"),
+    url(r'^(?P<program_id>\d+)/unshare/?$', views.program_unshare, name="program_unshare"),
     url(r'^data/$', views.upload_files, name='program_file_upload'),
     url(r'^system_data_dict/$', views.system_data_dict, name='system_data_dict'),
     # url(r'^request/$', views.request_program, name="program_request_result"),
