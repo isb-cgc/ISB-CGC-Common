@@ -487,22 +487,22 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                                        'registered_user': registered_user})
 
                 elif member.startswith('serviceAccount'):
-                    if member.find(':'+service_account) > 0:
+                    if member.split(':')[1] == service_account:
                         verified_sa = True
 
         # 2. Verify that the current user is a member of the GCP project
         if not is_email_in_iam_roles(roles, user_email):
-            logging.info('{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id))
+            logger.info('[STATUS] While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id))
             st_logger.write_struct_log_entry(log_name, {
-                'message': '{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
+                'message': 'While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
             })
             return {'message': 'You must be a member of a project in order to register it'}
 
         # 3. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
-            logging.info('Provided service account does not exist in project.')
+            logger.info('[STATUS] While verifying SA {0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id))
 
-            st_logger.write_struct_log_entry(log_name, {'message': '{0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
+            st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
             return {'message': 'The provided service account does not exist in the selected project'}
 
