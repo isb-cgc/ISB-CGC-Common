@@ -485,7 +485,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     registered_user = bool(User.objects.filter(email=email).first())
                     roles[role].append({'email': email,
                                        'registered_user': registered_user})
-
                 elif member.startswith('serviceAccount'):
                     if member.split(':')[1] == service_account:
                         verified_sa = True
@@ -504,7 +503,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
             st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
-            return {'message': 'The provided service account does not exist in the selected project'}
+            return {'message': "Service Account ID '{}' does not exist in Google Cloud Project {}. Please double-check the service account you have entered.".format(service_account,gcp_id)}
 
 
         # 4. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
@@ -519,8 +518,17 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 if member['registered_user']:
                     user = User.objects.filter(email=member['email']).first()
 
+                    nih_user = None
+
                     # FIND NIH_USER FOR USER
-                    nih_user = NIH_User.objects.filter(user_id=user.id).first()
+                    try:
+                        nih_user = NIH_User.objects.get(user_id=user.id, linked=True)
+                    except ObjectDoesNotExist:
+                        nih_user = None
+                    except MultipleObjectsReturned:
+                        st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True)))})
+                        raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True))))
+
                     member['nih_registered'] = bool(nih_user)
 
                     # IF USER HAS LINKED ERA COMMONS ID
@@ -570,7 +578,13 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 # 4. VERIFY PI IS ON THE PROJECT
 
     except HttpError as e:
+        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.exception(e)
         return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
+    except Exception as e:
+        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.exception(e)
+        return {'message': "There was an error while verifying this service account. Please contact the administrator."}
 
     return_obj = {'roles': roles,
                   'all_user_datasets_verified': all_user_datasets_verified}
