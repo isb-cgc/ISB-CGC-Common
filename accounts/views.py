@@ -184,7 +184,6 @@ def unlink_accounts_and_get_acl_tasks(user_id):
 
 @login_required
 def unlink_accounts(request):
-    logger.info("[STATUS] In unlink accounts")
     user_id = request.user.id
 
     try:
