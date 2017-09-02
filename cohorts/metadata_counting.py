@@ -22,6 +22,7 @@ import copy
 from time import sleep
 
 import django
+import re
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery_service import authorize_credentials_with_Google
@@ -680,8 +681,13 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                     feature['values'] = normalize_by_200(counts[attr]['counts'])
 
                 for value, count in feature['values'].items():
-
-                    val_obj = {'value': str(value), 'count': count, }
+                    # Supports #2018. This value object is the only information that gets used to
+                    # stock cohort checkboxes in the template. To support clicking on a treemap to
+                    # trigger the checkbox, we need have an id that glues the attribute name to the
+                    # value in a standard manner, and we really don't want to have to construct this
+                    # with a unwieldy template statement. So we do it here:
+                    fully_qual = (re.sub('\s+', '_', (attr + "-" + str(value)))).upper()
+                    val_obj = {'value': str(value), 'count': count, 'full_id': fully_qual}
 
                     if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None \
                             and len(metadata_attr_values[attr]['values'][value]) > 0:
