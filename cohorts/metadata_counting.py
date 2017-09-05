@@ -65,7 +65,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     project_counts = {}
 
     for program in Program.get_user_programs(user):
-        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'displ_name': program.name, 'name': program.name, 'count': 0, 'program': program.id,})
+        # Supports #2018 for the user data case:
+        fully_qual = ("PROGRAM-" + str(program.id)).upper()
+        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'full_id': fully_qual, 'displ_name': program.name, 'name': program.name, 'count': 0, 'program': program.id,})
         project_counts[program.id] = 0
 
     for project in Project.get_user_projects(user):
@@ -88,8 +90,11 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                         project_ms_table = None
 
         if project_ms_table is not None:
+            # Supports #2018 for the user data case:
+            fully_qual = ("PROJECT-" + str(project.id)).upper()
             user_data_counts['project']['values'].append({'id': project.id,
                                                           'value': project.id,
+                                                          'full_id': fully_qual,
                                                           'name': project.name,
                                                           'count': 0,
                                                           'metadata_samples': project_ms_table,
