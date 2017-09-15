@@ -260,7 +260,6 @@ def fetch_program_data_types(program, for_display=False):
         return copy.deepcopy(METADATA_DATA_TYPES[program])
 
     except Exception as e:
-        print >> sys.stdout, traceback.format_exc()
         logger.error('[ERROR] Exception while trying to get data types for program #%s:' % str(program))
         logger.exception(e)
     finally:
@@ -500,7 +499,7 @@ def get_preformatted_values(program=None):
         return copy.deepcopy(PREFORMATTED_VALUES[program])
 
     except Exception as e:
-        print >> sys.stdout, traceback.format_exc()
+        logger.error("[ERROR] When getting preformatted values:")
         logger.exception(e)
     finally:
         if cursor: cursor.close()
