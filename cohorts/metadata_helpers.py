@@ -335,7 +335,8 @@ def fetch_isbcgc_project_set():
         return copy.deepcopy(ISB_CGC_PROJECTS['list'])
 
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error('[ERROR] Exception when fetching the isb-cgc study set:')
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -382,6 +383,10 @@ def fetch_metadata_value_set(program=None):
     try:
         if not program:
             program = get_public_program_id('TCGA')
+
+        # This is only valid for public programs
+        if not Program.objects.get(id=program).is_public:
+            return {}
 
         if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
             fetch_program_attr(program)
@@ -434,6 +439,8 @@ def fetch_metadata_value_set(program=None):
         return copy.deepcopy(METADATA_ATTR[program])
 
     except Exception as e:
+        logger.error('[ERROR] Exception when fetching the metadata value set:')
+        logger.exception(e)
         print >> sys.stdout, traceback.format_exc()
         logger.error(traceback.format_exc())
     finally:
