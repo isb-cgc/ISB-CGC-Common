@@ -213,7 +213,7 @@ def get_sql_connection():
 
     except Exception as e:
         logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
-        logger.error(traceback.format_exc())
+        logger.error(e)
         if db and db.open: db.close()
 
 
@@ -262,7 +262,7 @@ def fetch_program_data_types(program, for_display=False):
     except Exception as e:
         print >> sys.stdout, traceback.format_exc()
         logger.error('[ERROR] Exception while trying to get data types for program #%s:' % str(program))
-        logger.error(traceback.format_exc())
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -353,7 +353,7 @@ def get_public_programs():
 
     except Exception as e:
         logger.error('[ERROR] Excpetion while fetching public program list:')
-        logger.error(traceback.format_exc())
+        logger.exception(e)
 
 
 # Given a public program's shorthand name, retrive its database ID for use in various queries
@@ -369,7 +369,7 @@ def get_public_program_id(program):
 
     except Exception as e:
         logger.error('[ERROR] Excpetion while fetching %s program ID:' % program)
-        logger.error(traceback.format_exc())
+        logger.exception(e)
 
 
 # Get the list of possible metadata values and their display strings for non-continuous data based on their in-use
@@ -441,8 +441,6 @@ def fetch_metadata_value_set(program=None):
     except Exception as e:
         logger.error('[ERROR] Exception when fetching the metadata value set:')
         logger.exception(e)
-        print >> sys.stdout, traceback.format_exc()
-        logger.error(traceback.format_exc())
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
