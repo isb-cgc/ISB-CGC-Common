@@ -213,7 +213,7 @@ def get_sql_connection():
 
     except Exception as e:
         logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
-        logger.error(e)
+        logger.exception(e)
         if db and db.open: db.close()
 
 
