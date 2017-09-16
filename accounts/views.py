@@ -56,11 +56,8 @@ def extended_logout_view(request):
             nih_user = NIH_User.objects.get(user=user, linked=True)
             nih_user.active = False
             nih_user.save()
+            logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
 
-            user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-            for dataset in user_auth_datasets:
-                dataset.delete()
-            logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
         except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
             if type(e) is MultipleObjectsReturned:
                 logger.error("[WARNING] More than one linked NIH User with user id %d - deactivating all of them!" % (str(e), request.user.id))
@@ -72,7 +69,7 @@ def extended_logout_view(request):
                     for dataset in user_auth_datasets:
                         dataset.delete()
             else:
-                logger.info("[STATUS] No NIH user was found for user {} - no datasets revoked.".format(user.email))
+                logger.info("[STATUS] No NIH user was found for user {} - no one set to inactive.".format(user.email))
 
         directory_service, http_auth = get_directory_resource()
         user_email = user.email
@@ -157,6 +154,7 @@ def unlink_accounts_and_get_acl_tasks(user_id):
         nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.save()
+
         unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
     except MultipleObjectsReturned as e:
@@ -515,6 +513,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                 # IF USER IS REGISTERED
                 if member['registered_user']:
+                    # TODO: This should probably be a .get() with a try/except because multiple-users-same-email is a problem
                     user = User.objects.filter(email=member['email']).first()
 
                     nih_user = None
