@@ -22,6 +22,7 @@ import copy
 from time import sleep
 
 import django
+import re
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery_service import authorize_credentials_with_Google
@@ -64,7 +65,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
     project_counts = {}
 
     for program in Program.get_user_programs(user):
-        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'displ_name': program.name, 'name': program.name, 'count': 0, 'program': program.id,})
+        # Supports #2018 for the user data case:
+        fully_qual = ("PROGRAM-" + str(program.id)).upper()
+        user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'full_id': fully_qual, 'displ_name': program.name, 'name': program.name, 'count': 0, 'program': program.id,})
         project_counts[program.id] = 0
 
     for project in Project.get_user_projects(user):
@@ -87,8 +90,11 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
                         project_ms_table = None
 
         if project_ms_table is not None:
+            # Supports #2018 for the user data case:
+            fully_qual = ("PROJECT-" + str(project.id)).upper()
             user_data_counts['project']['values'].append({'id': project.id,
                                                           'value': project.id,
+                                                          'full_id': fully_qual,
                                                           'name': project.name,
                                                           'count': 0,
                                                           'metadata_samples': project_ms_table,
@@ -680,8 +686,13 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                     feature['values'] = normalize_by_200(counts[attr]['counts'])
 
                 for value, count in feature['values'].items():
-
-                    val_obj = {'value': str(value), 'count': count, }
+                    # Supports #2018. This value object is the only information that gets used to
+                    # stock cohort checkboxes in the template. To support clicking on a treemap to
+                    # trigger the checkbox, we need have an id that glues the attribute name to the
+                    # value in a standard manner, and we really don't want to have to construct this
+                    # with a unwieldy template statement. So we do it here:
+                    fully_qual = (re.sub('\s+', '_', (attr + "-" + str(value)))).upper()
+                    val_obj = {'value': str(value), 'count': count, 'full_id': fully_qual}
 
                     if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None \
                             and len(metadata_attr_values[attr]['values'][value]) > 0:

@@ -87,6 +87,15 @@ class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
 
+    class Meta:
+        unique_together = (("nih_user", "authorized_dataset"),)
+
+    def __str__(self):
+        return "UserAuthorizedDataset({}, {})".format(self.nih_user.NIH_username,self.authorized_dataset.whitelist_id)
+
+    def __repr__(self):
+        return self.__str__()
+
 
 class ServiceAccount(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)

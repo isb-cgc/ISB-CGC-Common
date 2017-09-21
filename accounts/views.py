@@ -56,11 +56,8 @@ def extended_logout_view(request):
             nih_user = NIH_User.objects.get(user=user, linked=True)
             nih_user.active = False
             nih_user.save()
+            logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
 
-            user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-            for dataset in user_auth_datasets:
-                dataset.delete()
-            logger.info("Authorized datasets removed for NIH user {}".format(nih_user.NIH_username))
         except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
             if type(e) is MultipleObjectsReturned:
                 logger.error("[WARNING] More than one linked NIH User with user id %d - deactivating all of them!" % (str(e), request.user.id))
@@ -72,7 +69,7 @@ def extended_logout_view(request):
                     for dataset in user_auth_datasets:
                         dataset.delete()
             else:
-                logger.info("[STATUS] No NIH user was found for user {} - no datasets revoked.".format(user.email))
+                logger.info("[STATUS] No NIH user was found for user {} - no one set to inactive.".format(user.email))
 
         directory_service, http_auth = get_directory_resource()
         user_email = user.email
@@ -157,6 +154,7 @@ def unlink_accounts_and_get_acl_tasks(user_id):
         nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.save()
+
         unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
     except MultipleObjectsReturned as e:
@@ -184,7 +182,6 @@ def unlink_accounts_and_get_acl_tasks(user_id):
 
 @login_required
 def unlink_accounts(request):
-    logger.info("[STATUS] In unlink accounts")
     user_id = request.user.id
 
     try:
@@ -315,7 +312,9 @@ def verify_gcp(request, user_id):
                                        'registered_user': registered_user})
 
         if not user_found:
-            message = 'You were not found on the project. You may not register a project you do not belong to.'
+            logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
+            logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
+            message = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
             status='403'
         else:
             return JsonResponse({'roles': roles,
@@ -323,11 +322,11 @@ def verify_gcp(request, user_id):
     except Exception as e:
         if type(e) is HttpError:
             logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
-            message = 'There was an error accessing your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            message = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '403'
         else:
             logger.error("[ERROR] While trying to verify GCP ID {}:".format(str(gcp_id)))
-            message = 'There was an error while attempting to verify your project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            message = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '500'
         logger.exception(e)
 
@@ -449,7 +448,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             if len(dataset_objs):
                 saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id',flat=True)
                 ads = dataset_objs.values_list('whitelist_id', flat=True)
-                reg_change = (len(saads) != len(ads))
                 # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
                 if not reg_change:
                     for ad in ads:
@@ -457,7 +455,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                             reg_change = True
             # but if there are not, it's only not a duplicate if the public dataset isn't yet registered
             else:
-                reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa),public=True)) <= 0)
+                reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
             # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
             if not reg_change:
                 return {'message': 'Service account {} already exists with these datasets, and so does not need to be registered'.format(str(service_account))}
@@ -484,26 +482,25 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     registered_user = bool(User.objects.filter(email=email).first())
                     roles[role].append({'email': email,
                                        'registered_user': registered_user})
-
                 elif member.startswith('serviceAccount'):
-                    if member.find(':'+service_account) > 0:
+                    if member.split(':')[1] == service_account:
                         verified_sa = True
 
         # 2. Verify that the current user is a member of the GCP project
         if not is_email_in_iam_roles(roles, user_email):
-            logging.info('{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id))
+            logger.info('[STATUS] While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id))
             st_logger.write_struct_log_entry(log_name, {
-                'message': '{0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
+                'message': 'While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
             })
             return {'message': 'You must be a member of a project in order to register it'}
 
         # 3. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
-            logging.info('Provided service account does not exist in project.')
+            logger.info('[STATUS] While verifying SA {0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id))
 
-            st_logger.write_struct_log_entry(log_name, {'message': '{0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
+            st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
-            return {'message': 'The provided service account does not exist in the selected project'}
+            return {'message': "Service Account ID '{}' does not exist in Google Cloud Project {}. Please double-check the service account you have entered.".format(service_account,gcp_id)}
 
 
         # 4. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
@@ -516,10 +513,20 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                 # IF USER IS REGISTERED
                 if member['registered_user']:
+                    # TODO: This should probably be a .get() with a try/except because multiple-users-same-email is a problem
                     user = User.objects.filter(email=member['email']).first()
 
+                    nih_user = None
+
                     # FIND NIH_USER FOR USER
-                    nih_user = NIH_User.objects.filter(user_id=user.id).first()
+                    try:
+                        nih_user = NIH_User.objects.get(user_id=user.id, linked=True)
+                    except ObjectDoesNotExist:
+                        nih_user = None
+                    except MultipleObjectsReturned:
+                        st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True)))})
+                        raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True))))
+
                     member['nih_registered'] = bool(nih_user)
 
                     # IF USER HAS LINKED ERA COMMONS ID
@@ -569,7 +576,13 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 # 4. VERIFY PI IS ON THE PROJECT
 
     except HttpError as e:
+        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.exception(e)
         return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
+    except Exception as e:
+        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.exception(e)
+        return {'message': "There was an error while verifying this service account. Please contact the administrator."}
 
     return_obj = {'roles': roles,
                   'all_user_datasets_verified': all_user_datasets_verified}
