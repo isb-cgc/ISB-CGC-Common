@@ -38,6 +38,7 @@ urlpatterns = [
     url(r'^users/(?P<user_id>\d+)/verify_gcp/$', views.verify_gcp, name='verify_gcp'),
     url(r'^users/(?P<user_id>\d+)/register_sa/$', views.register_sa, name='register_sa'),
     url(r'^users/(?P<user_id>\d+)/verify_sa/$', views.verify_sa, name='verify_sa'),
+    url(r'^users/(?P<user_id>\d+)/adjust_sa/$', views.register_sa, name='adjust_sa'),
     url(r'^users/(?P<user_id>\d+)/delete_sa/(?P<sa_id>\d+)/$', views.delete_sa, name='delete_sa'),
     url(r'^users/(?P<user_id>\d+)/register_bucket/(?P<gcp_id>\d+)/$', views.register_bucket, name='register_bucket'),
     url(r'^users/(?P<user_id>\d+)/delete_bucket/(?P<bucket_id>\d+)/$', views.delete_bucket, name='delete_bucket'),
