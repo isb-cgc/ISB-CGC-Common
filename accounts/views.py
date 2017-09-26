@@ -35,6 +35,7 @@ from google_helpers.storage_service import get_storage_resource
 from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
+from django.utils.html import escape
 
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
 from .utils import ServiceAccountBlacklist, is_email_in_iam_roles
@@ -409,7 +410,7 @@ def user_gcp_delete(request, user_id, gcp_id):
     return redirect('user_gcp_list', user_id=request.user.id)
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False):
+def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False):
     # Only verify for protected datasets
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_names = dataset_objs.values_list('name', flat=True)
@@ -442,25 +443,27 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Refreshes require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
-        if not is_refresh:
+        if is_adjust or not is_refresh:
             reg_change = False
-            # If there are private datasets requested, it might not be a duplicate
-            if len(dataset_objs):
-                saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id',flat=True)
+            # Check the private datasets to see if there's a registration change
+            saads = AuthorizedDataset.objects.filter( id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
+            if len(dataset_objs) or len(saads):
                 ads = dataset_objs.values_list('whitelist_id', flat=True)
-                # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
+                # A private dataset missing from either list means this is a registration change
+                for ad in ads:
+                    if ad not in saads:
+                        reg_change = True
                 if not reg_change:
-                    for ad in ads:
-                        if ad not in saads:
+                    for saad in saads:
+                        if saad not in ads:
                             reg_change = True
-            # but if there are not, it's only not a duplicate if the public dataset isn't yet registered
             else:
                 reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
-            # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
+            # If this isn't a refresh but the requested datasets aren't changing, we don't need to do anything
             if not reg_change:
-                return {'message': 'Service account {} already exists with these datasets, and so does not need to be registered'.format(str(service_account))}
+                return {'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(str(service_account),('re-registered' if not is_adjust else 'adjusted'))}
     except ObjectDoesNotExist:
-        if is_refresh:
+        if is_refresh or is_adjust:
             return {'message': 'Service account {} was not found so cannot be refreshed.'.format(str(service_account))}
 
 
@@ -602,7 +605,8 @@ def verify_sa(request, user_id):
             user_sa = request.POST.get('user_sa')
             datasets = request.POST.getlist('datasets')
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh)
+            is_adjust = bool(request.POST.get('is_adjust') == 'true')
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
@@ -631,13 +635,25 @@ def register_sa(request, user_id):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     try:
+        # This is a Service Account dataset adjustment or an initial load of the service account registration page
+        if request.GET.get('sa_id') or request.GET.get('gcp_id'):
+            template = 'GenespotRE/register_sa.html'
+            context = {
+                'authorized_datasets': AuthorizedDataset.objects.filter(public=False)
+            }
 
-        if request.GET.get('gcp_id'):
-            authorized_datasets = AuthorizedDataset.objects.filter(public=False)
+            if request.GET.get('sa_id'):
+                template = 'GenespotRE/adjust_sa.html'
+                service_account = ServiceAccount.objects.get(id=request.GET.get('sa_id'))
+                context['gcp_id'] = service_account.google_project.project_id
+                context['sa_datasets'] = service_account.get_auth_datasets()
+                context['sa_id'] = service_account.service_account
+            else:
+                context['gcp_id'] = escape(request.GET.get('gcp_id'))
 
-            context = {'gcp_id': request.GET.get('gcp_id'),
-                       'authorized_datasets': authorized_datasets}
-            return render(request, 'GenespotRE/register_sa.html', context)
+            return render(request, template, context)
+
+        # This is an attempt to formally register the service account, post verification
         elif request.POST.get('gcp_id'):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
