@@ -607,26 +607,24 @@ def cohort_create_for_existing_workbook(request, workbook_id, worksheet_id):
     return cohort_detail(request=request, cohort_id=0, workbook_id=workbook_id, worksheet_id=worksheet_id)
 
 @login_required
+def validate_barcodes(request):
+    if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
+
+    status=200
+
+    return JsonResponse({
+        'valid_entries': [],
+        'invalid_entries': []
+    }, status=status)
+
+@login_required
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
+
     try:
         users = User.objects.filter(is_superuser=0).exclude(id=request.user.id)
 
-        cohort = None
         shared_with_users = []
-
-        data_attr = [
-            'DNA_sequencing',
-            'RNA_sequencing',
-            'miRNA_sequencing',
-            'Protein',
-            'SNP_CN',
-            'DNA_methylation',
-        ]
-
-
-        user = Django_User.objects.get(id=request.user.id)
-        filters = None
 
         isb_user = Django_User.objects.filter(username='isb').first()
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
@@ -646,6 +644,9 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['create_workbook'] = True
 
         template = 'cohorts/new_cohort.html'
+
+        if '/new_cohort/samples/' in request.path:
+            template = 'cohorts/new_cohort_samples.html'
 
         if cohort_id != 0:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -951,8 +952,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         messages.error(request, "There was an error saving your cohort; it may not have been saved correctly.")
         logger.error('[ERROR] Exception while saving a cohort:')
         logger.exception(e)
-        print >> sys.stderr, "[ERROR] Exception while saving a cohort:"
-        print >> sys.stderr, traceback.format_exc()
 
     return redirect(redirect_url)
 
