@@ -38,7 +38,7 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 USER_DATA_ON = settings.USER_DATA_ON
 BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
@@ -728,7 +728,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         return counts_and_total
 
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error("[ERROR] While counting public metadata: ")
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -823,5 +824,113 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
         logger.error('[ERROR] Exception when counting user metadata: ')
         logger.exception(e)
         logger.error(traceback.format_exc())
+
+
+def validate_and_count_barcodes(barcodes, user_id):
+
+    tmp_validation_table = 'tmp_val_table_{}_'.format(user_id) + make_id(6)
+
+    db = None
+    cursor = None
+
+    barcode_index_map = {}
+
+    TEMP_TABLE_CREATION = """
+        CREATE TEMPORARY TABLE {}
+        (
+          INDEX (sample_barcode),
+          case_barcode VARCHAR(100),
+          sample_barcode VARCHAR(100),
+          program VARCHAR(50)
+        );
+    """.format(tmp_validation_table)
+
+    insertion_stmt = """
+        INSERT INTO {} (case_barcode,sample_barcode,program) VALUES
+    """.format(tmp_validation_table)
+
+    validation_query = """
+        SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program, ms.case_barcode, ms.sample_barcode, ms.program_name
+        FROM {} ts
+        LEFT JOIN {} ms
+        ON ts.case_barcode = ms.case_barcode
+        WHERE ts.program = %s AND (ts.sample_barcode = ms.sample_barcode OR ts.sample_barcode IS NULL)
+    """
+
+    count_query = """
+        SELECT COUNT(DISTINCT ms.{}) as count
+        FROM {} ts
+        LEFT JOIN {} ms
+        ON ts.case_barcode = ms.case_barcode
+        WHERE ts.program = %s AND (ts.sample_barcode = ms.sample_barcode OR ts.sample_barcode IS NULL)
+    """
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        cursor.execute(TEMP_TABLE_CREATION)
+
+        insertion_stmt += (",".join(['(%s,%s,%s)'] * len(barcodes)))
+
+        param_vals = ()
+
+        result = {
+            'valid_barcodes': [],
+            'invalid_barcodes': [],
+            'counts': []
+        }
+
+        for barcode in barcodes:
+            param_vals += (barcode['case'], (None if not len(barcode['sample']) else barcode['sample']), barcode['program'], )
+            barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']] = []
+
+        cursor.execute(insertion_stmt, param_vals)
+
+        programs = set([x['program'] for x in barcodes])
+
+        for program in programs:
+
+            program_tables = Public_Metadata_Tables.objects.get(program=Program.objects.get(name=program))
+
+            program_query = validation_query.format(tmp_validation_table, program_tables.samples_table)
+
+            cursor.execute(program_query, (program,))
+
+            for row in cursor.fetchall():
+                if row[3]:
+                    barcode_index_map[row[0]+":"+(row[1] if row[1] else '')+":"+row[2]].append({'case':row[3], 'sample':row[4], 'program':row[5]})
+
+            count_obj = {
+                'cases': 0,
+                'samples': 0,
+                'program': program
+            }
+
+            for val in ['sample_barcode','case_barcode']:
+                cursor.execute(count_query.format(val,tmp_validation_table,program_tables.samples_table,), (program,))
+                for row in cursor.fetchall():
+                    count_obj[val.replace('_barcode','s')] = row[0]
+
+            result['counts'].append(count_obj)
+
+        for barcode in barcodes:
+            if len(barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']]):
+                result['valid_barcodes'].extend(barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']])
+            else:
+                result['invalid_barcodes'].append(barcode)
+
+        cursor.execute("""DROP TEMPORARY TABLE IF EXISTS {}""".format(tmp_validation_table))
+
+    except Exception as e:
+        logger.error("[ERROR] While validating barcodes: ")
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    logger.debug(str(result))
+
+    return result
 
 '''------------------------------------- End metadata counting methods -------------------------------------'''
