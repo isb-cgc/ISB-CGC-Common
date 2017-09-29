@@ -610,11 +610,51 @@ def cohort_create_for_existing_workbook(request, workbook_id, worksheet_id):
 def validate_barcodes(request):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
-    status=200
+    try:
+        barcodes = json.loads(request.body)['barcodes']
+
+        status = 500
+
+        valid_entries = []
+        invalid_entries = []
+        entries_to_check = []
+        valid_counts = None
+        messages = None
+
+        for entry in barcodes:
+            entry_split = entry.split(':')
+            barcode_entry = {'case': entry_split[0], 'sample': entry_split[1], 'program': entry_split[2]}
+            if barcode_entry['case'] == '' or barcode_entry['program'] == '':
+                # Case barcode is required - this entry isn't valid
+                invalid_entries.append(barcode_entry)
+            else:
+                entries_to_check.append(barcode_entry)
+
+        if len(entries_to_check):
+            result = validate_and_count_barcodes(entries_to_check,request.user.id)
+            if len(result['valid_barcodes']):
+                valid_entries = result['valid_barcodes']
+                valid_counts = result['counts']
+
+            if len(result['invalid_barcodes']):
+                invalid_entries.extend(result['invalid_barcodes'])
+
+            if len(result['messages']):
+                messages = result['messages']
+
+        # If there were any valid entries, we can call it 200, otherwise we send back 500
+        if len(valid_entries):
+            status = 200
+
+    except Exception as e:
+        logger.error("[ERROR] While validating barcodes: ")
+        logger.exception(e)
 
     return JsonResponse({
-        'valid_entries': [],
-        'invalid_entries': []
+        'valid_entries': valid_entries,
+        'invalid_entries': invalid_entries,
+        'counts': valid_counts,
+        'messages': messages
     }, status=status)
 
 @login_required
