@@ -26,6 +26,7 @@ import re
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery_service import authorize_credentials_with_Google
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
 BQ_ATTEMPT_MAX = 10
 
@@ -878,7 +879,8 @@ def validate_and_count_barcodes(barcodes, user_id):
         result = {
             'valid_barcodes': [],
             'invalid_barcodes': [],
-            'counts': []
+            'counts': [],
+            'messages': []
         }
 
         for barcode in barcodes:
@@ -891,7 +893,12 @@ def validate_and_count_barcodes(barcodes, user_id):
 
         for program in programs:
 
-            program_tables = Public_Metadata_Tables.objects.get(program=Program.objects.get(name=program))
+            try:
+                program_tables = Public_Metadata_Tables.objects.get(program=Program.objects.get(name=program))
+            except ObjectDoesNotExist:
+                logger.info("[STATUS] While validating barcodes for cohort creation, saw an invalid program: {}".format(program))
+                result['messages'].append('An invalid program was supplied: {}'.format(program))
+                continue
 
             program_query = validation_query.format(tmp_validation_table, program_tables.samples_table)
 
