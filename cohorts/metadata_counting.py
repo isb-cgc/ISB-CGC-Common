@@ -851,19 +851,30 @@ def validate_and_count_barcodes(barcodes, user_id):
     """.format(tmp_validation_table)
 
     validation_query = """
-        SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program, ms.case_barcode, ms.sample_barcode, ms.program_name
+        SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program,
+          COALESCE(msc.case_barcode, mss.case_barcode) AS found_case, COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
+          COALESCE(msc.program_name, mss.program_name) AS found_program
         FROM {} ts
-        LEFT JOIN {} ms
-        ON ts.case_barcode = ms.case_barcode
-        WHERE ts.program = %s AND (ts.sample_barcode = ms.sample_barcode OR ts.sample_barcode IS NULL)
+        LEFT JOIN {} msc
+        ON ts.case_barcode = msc.case_barcode
+        LEFT JOIN {} mss
+        ON ts.sample_barcode = mss.sample_barcode
+        WHERE ts.program = %s AND ((ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL) OR (ts.case_barcode = mss.case_barcode OR ts.case_barcode IS NULL))
     """
 
     count_query = """
-        SELECT COUNT(DISTINCT ms.{}) as count
-        FROM {} ts
-        LEFT JOIN {} ms
-        ON ts.case_barcode = ms.case_barcode
-        WHERE ts.program = %s AND (ts.sample_barcode = ms.sample_barcode OR ts.sample_barcode IS NULL)
+        SELECT COUNT(DISTINCT cs.{})
+        FROM (
+            SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program,
+              COALESCE(msc.case_barcode, mss.case_barcode) AS found_case, COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
+              COALESCE(msc.program_name, mss.program_name) AS found_program
+            FROM {} ts
+            LEFT JOIN {} msc
+            ON ts.case_barcode = msc.case_barcode
+            LEFT JOIN {} mss
+            ON ts.sample_barcode = mss.sample_barcode
+            WHERE ts.program = %s AND ((ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL) OR (ts.case_barcode = mss.case_barcode OR ts.case_barcode IS NULL))
+        ) cs
     """
 
     try:
@@ -884,7 +895,7 @@ def validate_and_count_barcodes(barcodes, user_id):
         }
 
         for barcode in barcodes:
-            param_vals += (barcode['case'], (None if not len(barcode['sample']) else barcode['sample']), barcode['program'], )
+            param_vals += ((None if not len(barcode['case']) else barcode['case']), (None if not len(barcode['sample']) else barcode['sample']), barcode['program'], )
             barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']] = []
 
         cursor.execute(insertion_stmt, param_vals)
@@ -900,13 +911,14 @@ def validate_and_count_barcodes(barcodes, user_id):
                 result['messages'].append('An invalid program was supplied: {}'.format(program))
                 continue
 
-            program_query = validation_query.format(tmp_validation_table, program_tables.samples_table)
-
+            program_query = validation_query.format(tmp_validation_table, program_tables.samples_table, program_tables.samples_table)
+            logger.debug(program_query)
             cursor.execute(program_query, (program,))
 
             for row in cursor.fetchall():
+                logger.info(str(row))
                 if row[3]:
-                    barcode_index_map[row[0]+":"+(row[1] if row[1] else '')+":"+row[2]].append({'case':row[3], 'sample':row[4], 'program':row[5]})
+                    barcode_index_map[(row[0] if row[0] else '')+":"+(row[1] if row[1] else '')+":"+row[2]].append({'case':row[3], 'sample':row[4], 'program':row[5]})
 
             count_obj = {
                 'cases': 0,
@@ -914,10 +926,10 @@ def validate_and_count_barcodes(barcodes, user_id):
                 'program': program
             }
 
-            for val in ['sample_barcode','case_barcode']:
-                cursor.execute(count_query.format(val,tmp_validation_table,program_tables.samples_table,), (program,))
+            for val in ['found_sample','found_case']:
+                cursor.execute(count_query.format(val,tmp_validation_table,program_tables.samples_table,program_tables.samples_table), (program,))
                 for row in cursor.fetchall():
-                    count_obj[val.replace('_barcode','s')] = row[0]
+                    count_obj[val.replace('found_','')+'s'] = row[0]
 
             result['counts'].append(count_obj)
 
