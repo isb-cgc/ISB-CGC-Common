@@ -880,6 +880,7 @@ def validate_and_count_barcodes(barcodes, user_id):
     try:
         db = get_sql_connection()
         cursor = db.cursor()
+        db.autocommit(True)
 
         cursor.execute(TEMP_TABLE_CREATION)
 
@@ -947,8 +948,6 @@ def validate_and_count_barcodes(barcodes, user_id):
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
-
-    logger.debug(str(result))
 
     return result
 
