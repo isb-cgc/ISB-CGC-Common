@@ -1886,7 +1886,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             GROUP BY md.platform;"""
 
         query = """
-            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category, md.experimental_strategy
+            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category, md.experimental_strategy
             FROM {0} md
             JOIN (
                 SELECT sample_barcode
@@ -1979,6 +1979,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'sample': item['sample_barcode'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
+                            'index_name': item['index_file_name'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
                             'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
