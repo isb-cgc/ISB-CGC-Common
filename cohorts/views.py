@@ -454,8 +454,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         return samples_and_cases
 
     except Exception as e:
-        print >> sys.stdout, traceback.format_exc()
-        logger.error(traceback.format_exc())
+        logger.error("[ERROR] While getting the sample and case list:")
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -590,21 +590,26 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
                                                         'from_workbook': bool(workbook),
                                                         })
 
+
 @login_required
 def cohort_select_for_new_workbook(request):
     return cohorts_list(request=request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=True)
+
 
 @login_required
 def cohort_select_for_existing_workbook(request, workbook_id, worksheet_id):
     return cohorts_list(request=request, is_public=False, workbook_id=workbook_id, worksheet_id=worksheet_id)
 
+
 @login_required
 def cohort_create_for_new_workbook(request):
     return cohort_detail(request=request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=True)
 
+
 @login_required
 def cohort_create_for_existing_workbook(request, workbook_id, worksheet_id):
     return cohort_detail(request=request, cohort_id=0, workbook_id=workbook_id, worksheet_id=worksheet_id)
+
 
 @login_required
 def validate_barcodes(request):
@@ -657,6 +662,7 @@ def validate_barcodes(request):
         'messages': messages
     }, status=status)
 
+
 @login_required
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
@@ -685,8 +691,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
         template = 'cohorts/new_cohort.html'
 
-        if '/new_cohort/samples/' in request.path:
-            template = 'cohorts/new_cohort_samples.html'
+        logger.debug(request.path)
+
+        if '/new_cohort/barcodes/' in request.path or 'create_cohort_and_create_workbook/barcodes/' in request.path or '/create/barcodes' in request.path:
+            template = 'cohorts/new_cohort_barcodes.html'
 
         if cohort_id != 0:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -789,31 +797,15 @@ def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_
 
     return redirect(redirect_url)
 
-'''
-This save view only works coming from cohort editing or creation views.
-- only ever one source coming in
-- filters optional
-'''
-# TODO: Create new view to save cohorts from visualizations - This exists below
+
 @login_required
 @csrf_protect
 def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=False):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    redirect_url = reverse('cohort_list')
-
-    samples = []
-    name = ''
-    user_id = request.user.id
     parent = None
-    filter_obj = None
-    deactivate_sources = False
-    apply_filters = False
-    apply_name = False
-
     cohort_progs = None
-
-    redirect_url = ''
+    redirect_url = reverse('cohort_list')
 
     try:
 
@@ -826,21 +818,22 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 match = whitelist.findall(unicode(name))
                 logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
                 messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
-                redirect_url = reverse('cohort_list')
                 return redirect(redirect_url)
 
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
+            barcodes = json.loads(request.POST.get('barcodes', '{}'))
+            logger.debug(str(barcodes))
             apply_filters = request.POST.getlist('apply-filters')
+            apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
-            projects = request.user.project_set.all()
 
             # we only deactivate the source if we are applying filters to a previously-existing
             # source cohort
             deactivate_sources = (len(filters) > 0) and source is not None and source != 0
 
             # If we're only changing the name, just edit the cohort and update it
-            if apply_name and not apply_filters and not deactivate_sources:
+            if apply_name and not apply_filters and not deactivate_sources and not apply_barcodes:
                 Cohort.objects.filter(id=source).update(name=name)
                 messages.info(request, 'Changes applied successfully.')
                 return redirect(reverse('cohort_details', args=[source]))
@@ -886,6 +879,13 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 for prog in cohort_progs:
                     if prog.id not in results:
                         results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
+
+            if len(barcodes) > 0:
+                for barcode in barcodes:
+                    if barcode['program'] not in results:
+                        results[barcode['program']] = {'count': 0, 'items': []}
+                    results[barcode['program']]['items'].append({'sample_barcode': barcode['sample_barcode'], 'case_barcode': barcode['case_barcode'], 'project_id': barcode['project']})
+                    results[barcode['program']]['count'] += 1
 
             found_samples = False
 
@@ -951,6 +951,17 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                             for this_filter in prog_filters:
                                 for val in prog_filters[this_filter]['values']:
                                     Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter, value=val).save()
+
+                # Create a filter applied object representing the barcodes sent
+                if barcodes:
+                    for prog in results:
+                        prog_obj = Program.objects.get(id=prog)
+                        Filters.objects.create(
+                            resulting_cohort=cohort,
+                            program=prog_obj,
+                            name='Barcodes',
+                            value="{} barcodes from {}".format(str(len(results[prog]['items'])), prog_obj.name)
+                        ).save()
 
                 # Store cohort to BigQuery
                 bq_project_id = settings.BQ_PROJECT_ID
