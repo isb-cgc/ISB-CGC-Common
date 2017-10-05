@@ -852,8 +852,10 @@ def validate_and_count_barcodes(barcodes, user_id):
 
     validation_query = """
         SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program,
-          COALESCE(msc.case_barcode, mss.case_barcode) AS found_case, COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
-          COALESCE(msc.program_name, mss.program_name) AS found_program
+          COALESCE(msc.case_barcode, mss.case_barcode) AS found_case,
+          COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
+          COALESCE(msc.program_name, mss.program_name) AS found_program,
+          COALESCE(msc.project_short_name, mss.project_short_name) AS found_project
         FROM {} ts
         LEFT JOIN {} msc
         ON ts.case_barcode = msc.case_barcode
@@ -866,7 +868,8 @@ def validate_and_count_barcodes(barcodes, user_id):
         SELECT COUNT(DISTINCT cs.{})
         FROM (
             SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program,
-              COALESCE(msc.case_barcode, mss.case_barcode) AS found_case, COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
+              COALESCE(msc.case_barcode, mss.case_barcode) AS found_case,
+              COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
               COALESCE(msc.program_name, mss.program_name) AS found_program
             FROM {} ts
             LEFT JOIN {} msc
@@ -903,23 +906,29 @@ def validate_and_count_barcodes(barcodes, user_id):
 
         programs = set([x['program'] for x in barcodes])
 
+        projects_to_lookup = {}
+
         for program in programs:
 
             try:
-                program_tables = Public_Metadata_Tables.objects.get(program=Program.objects.get(name=program))
+                prog_obj = Program.objects.get(name=program)
+                program_tables = Public_Metadata_Tables.objects.get(program=prog_obj)
             except ObjectDoesNotExist:
                 logger.info("[STATUS] While validating barcodes for cohort creation, saw an invalid program: {}".format(program))
                 result['messages'].append('An invalid program was supplied: {}'.format(program))
                 continue
 
             program_query = validation_query.format(tmp_validation_table, program_tables.samples_table, program_tables.samples_table)
-            logger.debug(program_query)
             cursor.execute(program_query, (program,))
 
             for row in cursor.fetchall():
-                logger.info(str(row))
                 if row[3]:
-                    barcode_index_map[(row[0] if row[0] else '')+":"+(row[1] if row[1] else '')+":"+row[2]].append({'case':row[3], 'sample':row[4], 'program':row[5]})
+                    barcode_index_map[(row[0] if row[0] else '')+":"+(row[1] if row[1] else '')+":"+row[2]].append(
+                        {'case': row[3], 'sample': row[4], 'program': row[5], 'program_id': prog_obj.id, 'project': row[6].split('-')[-1]}
+                    )
+                    if row[5] not in projects_to_lookup:
+                        projects_to_lookup[row[5]] = {}
+                    projects_to_lookup[row[5]][row[6].split('-')[-1]] = None
 
             count_obj = {
                 'cases': 0,
@@ -933,6 +942,19 @@ def validate_and_count_barcodes(barcodes, user_id):
                     count_obj[val.replace('found_','')+'s'] = row[0]
 
             result['counts'].append(count_obj)
+
+        # Convert the project names into project IDs
+        for prog in projects_to_lookup:
+            proj_names = projects_to_lookup[prog].keys()
+            projects = Project.objects.filter(name__in=proj_names, program=Program.objects.get(name=prog))
+            for proj in projects:
+                projects_to_lookup[prog][proj.name] = proj.id
+
+        for key in barcode_index_map:
+            entries = barcode_index_map[key]
+            for barcode in entries:
+                logger.debug(str(barcode))
+                barcode['project'] = projects_to_lookup[barcode['program']][barcode['project']]
 
         for barcode in barcodes:
             if len(barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']]):
