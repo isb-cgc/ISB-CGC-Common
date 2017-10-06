@@ -717,7 +717,7 @@ def register_sa(request, user_id):
                 if is_adjust:
                     saads = service_account_obj.get_auth_datasets()
                     for saad in saads:
-                        if saad.authorized_dataset not in datasets:
+                        if saad.authorized_dataset not in protected_datasets:
                             saad.delete()
 
                 return redirect('user_gcp_list', user_id=user_id)
