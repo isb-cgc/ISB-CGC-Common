@@ -713,9 +713,9 @@ def register_sa(request, user_id):
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
                         logger.info(e)
 
-                # If we're adjusting, check for currently authorized datasets not in the incoming set, and delete those entries.
+                # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
                 if is_adjust:
-                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj)
+                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj, public=0)
                     for saad in saads:
                         if saad.authorized_dataset not in protected_datasets:
                             try:
