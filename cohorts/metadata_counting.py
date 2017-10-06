@@ -953,7 +953,6 @@ def validate_and_count_barcodes(barcodes, user_id):
         for key in barcode_index_map:
             entries = barcode_index_map[key]
             for barcode in entries:
-                logger.debug(str(barcode))
                 barcode['project'] = projects_to_lookup[barcode['program']][barcode['project']]
 
         for barcode in barcodes:
