@@ -715,7 +715,7 @@ def register_sa(request, user_id):
 
                 # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
                 if is_adjust:
-                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj, public=0)
+                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj).filter(service_account__public=0)
                     for saad in saads:
                         if saad.authorized_dataset not in protected_datasets:
                             try:
