@@ -627,7 +627,7 @@ def validate_barcodes(request):
         messages = None
 
         for entry in barcodes:
-            entry_split = entry.split(':')
+            entry_split = entry.split('{}')
             barcode_entry = {'case': entry_split[0], 'sample': entry_split[1], 'program': entry_split[2]}
             if (barcode_entry['sample'] == '' and barcode_entry['case'] == '') or barcode_entry['program'] == '':
                 # Case barcode is required - this entry isn't valid
