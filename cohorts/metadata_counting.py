@@ -26,6 +26,7 @@ import re
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery_service import authorize_credentials_with_Google
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
 BQ_ATTEMPT_MAX = 10
 
@@ -38,7 +39,7 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 USER_DATA_ON = settings.USER_DATA_ON
 BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
@@ -728,7 +729,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         return counts_and_total
 
     except Exception as e:
-        logger.error(traceback.format_exc())
+        logger.error("[ERROR] While counting public metadata: ")
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -823,5 +825,152 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
         logger.error('[ERROR] Exception when counting user metadata: ')
         logger.exception(e)
         logger.error(traceback.format_exc())
+
+
+def validate_and_count_barcodes(barcodes, user_id):
+
+    tmp_validation_table = 'tmp_val_table_{}_'.format(user_id) + make_id(6)
+
+    db = None
+    cursor = None
+
+    barcode_index_map = {}
+
+    TEMP_TABLE_CREATION = """
+        CREATE TEMPORARY TABLE {}
+        (
+          INDEX (sample_barcode),
+          case_barcode VARCHAR(100),
+          sample_barcode VARCHAR(100),
+          program VARCHAR(50)
+        );
+    """.format(tmp_validation_table)
+
+    insertion_stmt = """
+        INSERT INTO {} (case_barcode,sample_barcode,program) VALUES
+    """.format(tmp_validation_table)
+
+    validation_query = """
+        SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program,
+          COALESCE(msc.case_barcode, mss.case_barcode) AS found_case,
+          COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
+          COALESCE(msc.program_name, mss.program_name) AS found_program,
+          COALESCE(msc.project_short_name, mss.project_short_name) AS found_project
+        FROM {} ts
+        LEFT JOIN {} msc
+        ON ts.case_barcode = msc.case_barcode
+        LEFT JOIN {} mss
+        ON ts.sample_barcode = mss.sample_barcode
+        WHERE ts.program = %s AND ((ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL) OR (ts.case_barcode = mss.case_barcode OR ts.case_barcode IS NULL))
+    """
+
+    count_query = """
+        SELECT COUNT(DISTINCT cs.{})
+        FROM (
+            SELECT ts.case_barcode AS provided_case, ts.sample_barcode AS provided_sample, ts.program AS provided_program,
+              COALESCE(msc.case_barcode, mss.case_barcode) AS found_case,
+              COALESCE(msc.sample_barcode, mss.sample_barcode) AS found_sample,
+              COALESCE(msc.program_name, mss.program_name) AS found_program
+            FROM {} ts
+            LEFT JOIN {} msc
+            ON ts.case_barcode = msc.case_barcode
+            LEFT JOIN {} mss
+            ON ts.sample_barcode = mss.sample_barcode
+            WHERE ts.program = %s AND ((ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL) OR (ts.case_barcode = mss.case_barcode OR ts.case_barcode IS NULL))
+        ) cs
+    """
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+        db.autocommit(True)
+
+        cursor.execute(TEMP_TABLE_CREATION)
+
+        insertion_stmt += (",".join(['(%s,%s,%s)'] * len(barcodes)))
+
+        param_vals = ()
+
+        result = {
+            'valid_barcodes': [],
+            'invalid_barcodes': [],
+            'counts': [],
+            'messages': []
+        }
+
+        for barcode in barcodes:
+            param_vals += ((None if not len(barcode['case']) else barcode['case']), (None if not len(barcode['sample']) else barcode['sample']), barcode['program'], )
+            barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']] = []
+
+        cursor.execute(insertion_stmt, param_vals)
+
+        programs = set([x['program'] for x in barcodes])
+
+        projects_to_lookup = {}
+
+        for program in programs:
+
+            try:
+                prog_obj = Program.objects.get(name=program)
+                program_tables = Public_Metadata_Tables.objects.get(program=prog_obj)
+            except ObjectDoesNotExist:
+                logger.info("[STATUS] While validating barcodes for cohort creation, saw an invalid program: {}".format(program))
+                result['messages'].append('An invalid program was supplied: {}'.format(program))
+                continue
+
+            program_query = validation_query.format(tmp_validation_table, program_tables.samples_table, program_tables.samples_table)
+            cursor.execute(program_query, (program,))
+
+            for row in cursor.fetchall():
+                if row[3]:
+                    barcode_index_map[(row[0] if row[0] else '')+":"+(row[1] if row[1] else '')+":"+row[2]].append(
+                        {'case': row[3], 'sample': row[4], 'program': row[5], 'program_id': prog_obj.id, 'project': row[6].split('-')[-1]}
+                    )
+                    if row[5] not in projects_to_lookup:
+                        projects_to_lookup[row[5]] = {}
+                    projects_to_lookup[row[5]][row[6].split('-')[-1]] = None
+
+            count_obj = {
+                'cases': 0,
+                'samples': 0,
+                'program': program
+            }
+
+            for val in ['found_sample','found_case']:
+                cursor.execute(count_query.format(val,tmp_validation_table,program_tables.samples_table,program_tables.samples_table), (program,))
+                for row in cursor.fetchall():
+                    count_obj[val.replace('found_','')+'s'] = row[0]
+
+            result['counts'].append(count_obj)
+
+        # Convert the project names into project IDs
+        for prog in projects_to_lookup:
+            proj_names = projects_to_lookup[prog].keys()
+            projects = Project.objects.filter(name__in=proj_names, program=Program.objects.get(name=prog))
+            for proj in projects:
+                projects_to_lookup[prog][proj.name] = proj.id
+
+        for key in barcode_index_map:
+            entries = barcode_index_map[key]
+            for barcode in entries:
+                logger.debug(str(barcode))
+                barcode['project'] = projects_to_lookup[barcode['program']][barcode['project']]
+
+        for barcode in barcodes:
+            if len(barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']]):
+                result['valid_barcodes'].extend(barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']])
+            else:
+                result['invalid_barcodes'].append(barcode)
+
+        cursor.execute("""DROP TEMPORARY TABLE IF EXISTS {}""".format(tmp_validation_table))
+
+    except Exception as e:
+        logger.error("[ERROR] While validating barcodes: ")
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return result
 
 '''------------------------------------- End metadata counting methods -------------------------------------'''
