@@ -1055,6 +1055,9 @@ def share_cohort(request, cohort_id=0):
             else:
                 cohorts = Cohort.objects.filter(id=cohort_id)
 
+            already_shared = {}
+            newly_shared = {}
+
             for user in users:
                 for cohort in cohorts:
                     # Check to make sure this user has authority to grant sharing permission
@@ -1063,26 +1066,54 @@ def share_cohort(request, cohort_id=0):
                     except ObjectDoesNotExist as e:
                         raise Exception("User {} is not the owner of cohort(s) {} and so cannot alter the permissions.".format(req_user.email, str(cohort.id)))
 
-                    obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-                    obj.save()
+                    # Check for pre-existing share for this user
+                    check = None
+                    try:
+                        check = Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+                    except ObjectDoesNotExist:
+                        obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+                        obj.save()
+                        if cohort.id not in newly_shared:
+                            newly_shared[cohort.id] = []
+                        newly_shared[cohort.id].append(user.email)
+
+                    if check:
+                        if cohort.id not in already_shared:
+                            already_shared[cohort.id] = []
+                        already_shared[cohort.id].append(user.email)
 
             status = 'success'
-            result = { 'msg':
-                ('Cohort ID {} has'.format(str(cohorts[0].id)) if len(cohorts) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in cohorts.values_list('id',flat=True)]))) +
-                ' been successfully shared with the following user(s): {}'.format(", ".join(emails))
+            success_msg = ""
+            note = ""
+            if len(newly_shared.keys()):
+                user_set = set([y for x in newly_shared for y in newly_shared[x]])
+                success_msg = ('Cohort ID {} has'.format(str(newly_shared.keys()[0])) if len(newly_shared.keys()) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in newly_shared.keys()]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
+
+            if len(already_shared):
+                user_set = set([y for x in already_shared for y in already_shared[x]])
+                note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in already_shared.keys()])) if len(already_shared.keys()) > 1 else "Cohort ID {} was".format(str(already_shared.keys()[0]))), "; ".join(user_set))
+
+            if not len(success_msg):
+                success_msg = note
+                note = None
+
+            result = {
+                'msg': success_msg,
+                'note': note
             }
+
     except Exception as e:
         logger.error("[ERROR] While trying to share a cohort:")
         logger.exception(e)
         status = 'error'
         result = {
-            'msg': 'There was an error while trying to share this cohort.'
+            'msg': 'There was an error while trying to share this cohort. Please contact the administrator.'
         }
     finally:
         if not status:
             status = 'error'
             result = {
-                'msg': 'An unknown error has occurred while sharing this cohort.'
+                'msg': 'An unknown error has occurred while sharing this cohort. Please contact the administrator.'
             }
 
     return JsonResponse({
