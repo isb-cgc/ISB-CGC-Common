@@ -589,20 +589,21 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 data_counts[row[1]]['counts'][int(row[0])] = int(row[2])
                 data_counts[row[1]]['total'] += int(row[2])
 
+            # Make sure GROUP_CONCAT has enough space--it can get big
+            cursor.execute("""
+                SET SESSION group_concat_max_len = 1000000;
+            """)
+
             if len(params) > 0:
                 cursor.execute(data_avail_query, params)
             else:
                 cursor.execute(data_avail_query)
-
-            logger.debug("[STATUS] Data availability query: {}".format(data_avail_query))
 
             sample_data_set = {}
             for row in cursor.fetchall():
                 data_types = row[1].split(',')
                 item = {}
                 for type_build in data_types:
-                    if len(type_build.split('; ')) < 2:
-                        logger.debug("[WARNING] Missing build or type: {}".format(type_build))
                     type = type_build.split('; ')[0]
                     build = type_build.split('; ')[1]
                     if type in METADATA_DATA_AVAIL_PLOT_MAP:
