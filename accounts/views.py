@@ -464,7 +464,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 return {'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(str(service_account),('re-registered' if not is_adjust else 'adjusted'))}
     except ObjectDoesNotExist:
         if is_refresh or is_adjust:
-            return {'message': 'Service account {} was not found so cannot be refreshed.'.format(str(service_account))}
+            return {'message': 'Service account {} was not found so cannot be {}.'.format(str(service_account), ("adjusted" if is_adjust else "refreshed"))}
 
 
     # 1. GET ALL USERS ON THE PROJECT.
@@ -660,6 +660,7 @@ def register_sa(request, user_id):
             user_sa = request.POST.get('user_sa')
             datasets = request.POST.get('datasets').split(',')
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
+            is_adjust = bool(request.POST.get('is_adjust') == 'true')
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
 
             if len(datasets) == 1 and datasets[0] == '':
@@ -668,7 +669,7 @@ def register_sa(request, user_id):
                 datasets = map(int, datasets)
 
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh)
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
             logger.info("[STATUS] result of verification for {}: {}".format(user_sa,str(result)))
 
             # If the verification was successful, finalize access
@@ -711,6 +712,13 @@ def register_sa(request, user_id):
                     except HttpError as e:
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
                         logger.info(e)
+
+                # If we're adjusting, check for currently authorized datasets not in the incoming set, and delete those entries.
+                if is_adjust:
+                    saads = service_account_obj.get_auth_datasets()
+                    for saad in saads:
+                        if saad.authorized_dataset not in datasets:
+                            saad.delete()
 
                 return redirect('user_gcp_list', user_id=user_id)
 
