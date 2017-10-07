@@ -589,6 +589,11 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 data_counts[row[1]]['counts'][int(row[0])] = int(row[2])
                 data_counts[row[1]]['total'] += int(row[2])
 
+            # Make sure GROUP_CONCAT has enough space--it can get big
+            cursor.execute("""
+                SET SESSION group_concat_max_len = 1000000;
+            """)
+
             if len(params) > 0:
                 cursor.execute(data_avail_query, params)
             else:
@@ -861,7 +866,7 @@ def validate_and_count_barcodes(barcodes, user_id):
         ON ts.case_barcode = msc.case_barcode
         LEFT JOIN {} mss
         ON ts.sample_barcode = mss.sample_barcode
-        WHERE ts.program = %s AND ((ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL) OR (ts.case_barcode = mss.case_barcode OR ts.case_barcode IS NULL))
+        WHERE ts.program = %s AND (ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL OR ts.case_barcode IS NULL)
     """
 
     count_query = """
@@ -876,7 +881,7 @@ def validate_and_count_barcodes(barcodes, user_id):
             ON ts.case_barcode = msc.case_barcode
             LEFT JOIN {} mss
             ON ts.sample_barcode = mss.sample_barcode
-            WHERE ts.program = %s AND ((ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL) OR (ts.case_barcode = mss.case_barcode OR ts.case_barcode IS NULL))
+            WHERE ts.program = %s AND (ts.sample_barcode = msc.sample_barcode OR ts.sample_barcode IS NULL OR ts.case_barcode IS NULL)
         ) cs
     """
 
@@ -900,7 +905,7 @@ def validate_and_count_barcodes(barcodes, user_id):
 
         for barcode in barcodes:
             param_vals += ((None if not len(barcode['case']) else barcode['case']), (None if not len(barcode['sample']) else barcode['sample']), barcode['program'], )
-            barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']] = []
+            barcode_index_map[barcode['case']+"{}"+barcode['sample']+"{}"+barcode['program']] = []
 
         cursor.execute(insertion_stmt, param_vals)
 
@@ -921,9 +926,11 @@ def validate_and_count_barcodes(barcodes, user_id):
             program_query = validation_query.format(tmp_validation_table, program_tables.samples_table, program_tables.samples_table)
             cursor.execute(program_query, (program,))
 
+            row_eval = []
+
             for row in cursor.fetchall():
                 if row[3]:
-                    barcode_index_map[(row[0] if row[0] else '')+":"+(row[1] if row[1] else '')+":"+row[2]].append(
+                    barcode_index_map[(row[0] if row[0] else '')+"{}"+(row[1] if row[1] else '')+"{}"+row[2]].append(
                         {'case': row[3], 'sample': row[4], 'program': row[5], 'program_id': prog_obj.id, 'project': row[6].split('-')[-1]}
                     )
                     if row[5] not in projects_to_lookup:
@@ -956,8 +963,10 @@ def validate_and_count_barcodes(barcodes, user_id):
                 barcode['project'] = projects_to_lookup[barcode['program']][barcode['project']]
 
         for barcode in barcodes:
-            if len(barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']]):
-                result['valid_barcodes'].extend(barcode_index_map[barcode['case']+":"+barcode['sample']+":"+barcode['program']])
+            if len(barcode_index_map[barcode['case']+"{}"+barcode['sample']+"{}"+barcode['program']]):
+                for found_barcode in barcode_index_map[barcode['case']+"{}"+barcode['sample']+"{}"+barcode['program']]:
+                    if found_barcode not in result['valid_barcodes']:
+                        result['valid_barcodes'].append(found_barcode)
             else:
                 result['invalid_barcodes'].append(barcode)
 
