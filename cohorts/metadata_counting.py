@@ -589,6 +589,11 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 data_counts[row[1]]['counts'][int(row[0])] = int(row[2])
                 data_counts[row[1]]['total'] += int(row[2])
 
+            # Make sure GROUP_CONCAT has enough space--it can get big
+            cursor.execute("""
+                SET SESSION group_concat_max_len = 1000000;
+            """)
+
             if len(params) > 0:
                 cursor.execute(data_avail_query, params)
             else:
