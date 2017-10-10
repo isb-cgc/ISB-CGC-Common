@@ -916,7 +916,7 @@ def validate_and_count_barcodes(barcodes, user_id):
         for program in programs:
 
             try:
-                prog_obj = Program.objects.get(name=program)
+                prog_obj = Program.objects.get(name=program, active=1)
                 program_tables = Public_Metadata_Tables.objects.get(program=prog_obj)
             except ObjectDoesNotExist:
                 logger.info("[STATUS] While validating barcodes for cohort creation, saw an invalid program: {}".format(program))
@@ -953,7 +953,7 @@ def validate_and_count_barcodes(barcodes, user_id):
         # Convert the project names into project IDs
         for prog in projects_to_lookup:
             proj_names = projects_to_lookup[prog].keys()
-            projects = Project.objects.filter(name__in=proj_names, program=Program.objects.get(name=prog))
+            projects = Project.objects.filter(name__in=proj_names, program=Program.objects.get(name=prog, active=1))
             for proj in projects:
                 projects_to_lookup[prog][proj.name] = proj.id
 
