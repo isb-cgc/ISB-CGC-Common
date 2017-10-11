@@ -667,9 +667,8 @@ def validate_barcodes(request):
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
-    try:
-        users = User.objects.filter(is_superuser=0).exclude(id=request.user.id)
 
+    try:
         shared_with_users = []
 
         isb_user = Django_User.objects.filter(username='isb').first()
@@ -677,7 +676,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
         template_values = {
             'request': request,
-            'users': users,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list
@@ -690,8 +688,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['create_workbook'] = True
 
         template = 'cohorts/new_cohort.html'
-
-        logger.debug(request.path)
 
         if '/new_cohort/barcodes/' in request.path or 'create_cohort_and_create_workbook/barcodes/' in request.path or '/create/barcodes' in request.path:
             template = 'cohorts/new_cohort_barcodes.html'
@@ -734,12 +730,14 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     return render(request, template, template_values)
 
+
 '''
 Saves a cohort, adds the new cohort to an existing worksheet, then redirected back to the worksheet display
 '''
 @login_required
 def save_cohort_for_existing_workbook(request):
     return save_cohort(request=request, workbook_id=request.POST.get('workbook_id'), worksheet_id=request.POST.get("worksheet_id"))
+
 
 '''
 Saves a cohort, adds the new cohort to a new worksheet, then redirected back to the worksheet display
@@ -823,7 +821,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
             barcodes = json.loads(request.POST.get('barcodes', '{}'))
-            logger.debug(str(barcodes))
             apply_filters = request.POST.getlist('apply-filters')
             apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
