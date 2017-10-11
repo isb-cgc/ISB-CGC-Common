@@ -466,10 +466,16 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
             # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
             if not reg_change:
-                return {'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(str(service_account),('re-registered' if not is_adjust else 'adjusted'))}
+                return {
+                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(str(service_account),('re-registered' if not is_adjust else 'adjusted')),
+                    'level': 'warning'
+                }
     except ObjectDoesNotExist:
         if is_refresh or is_adjust:
-            return {'message': 'Service account {} was not found so cannot be {}.'.format(str(service_account), ("adjusted" if is_adjust else "refreshed"))}
+            return {
+                'message': 'Service account {} was not found so cannot be {}.'.format(str(service_account), ("adjusted" if is_adjust else "refreshed")),
+                'level': 'error'
+            }
 
 
     # 1. GET ALL USERS ON THE PROJECT.
@@ -611,7 +617,8 @@ def verify_sa(request, user_id):
             datasets = request.POST.getlist('datasets')
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
-            remove_all = bool(request.POST.get('remove_all') == 'true')
+            remove_all = bool(request.POST.get('select-datasets') == 'remove')
+            logger.debug(str(remove_all))
 
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust, remove_all)
 
