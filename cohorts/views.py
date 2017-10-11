@@ -667,9 +667,8 @@ def validate_barcodes(request):
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
-    try:
-        users = User.objects.filter(is_superuser=0).exclude(id=request.user.id)
 
+    try:
         shared_with_users = []
 
         isb_user = Django_User.objects.filter(username='isb').first()
@@ -677,7 +676,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
         template_values = {
             'request': request,
-            'users': users,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list
