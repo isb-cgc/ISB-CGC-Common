@@ -935,7 +935,7 @@ def validate_and_count_barcodes(barcodes, user_id):
                     )
                     if row[5] not in projects_to_lookup:
                         projects_to_lookup[row[5]] = {}
-                    projects_to_lookup[row[5]][row[6].split('-')[-1]] = None
+                    projects_to_lookup[row[5]][row[6].split('-',1)[-1]] = None
 
             count_obj = {
                 'cases': 0,
