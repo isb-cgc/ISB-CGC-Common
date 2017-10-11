@@ -916,7 +916,7 @@ def validate_and_count_barcodes(barcodes, user_id):
         for program in programs:
 
             try:
-                prog_obj = Program.objects.get(name=program, active=1)
+                prog_obj = Program.objects.get(name=program, active=1, is_public=True)
                 program_tables = Public_Metadata_Tables.objects.get(program=prog_obj)
             except ObjectDoesNotExist:
                 logger.info("[STATUS] While validating barcodes for cohort creation, saw an invalid program: {}".format(program))

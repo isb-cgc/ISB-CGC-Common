@@ -361,13 +361,12 @@ def get_public_program_id(program):
         prog = Program.objects.filter(name=program, active=True, is_public=True)
 
         if len(prog) > 1:
-            print >> sys.stderr, '[WARNING] More than one program found with this short name! Using the first one.'
-            return int(prog[0].id)
+            logger.warn('[WARNING] More than one program found with this short name! Using the first one.')
 
         return int(prog[0].id)
 
     except Exception as e:
-        logger.error('[ERROR] Excpetion while fetching %s program ID:' % program)
+        logger.error('[ERROR] While fetching %s program ID:' % program)
         logger.exception(e)
 
 
