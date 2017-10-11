@@ -931,7 +931,7 @@ def validate_and_count_barcodes(barcodes, user_id):
             for row in cursor.fetchall():
                 if row[3]:
                     barcode_index_map[(row[0] if row[0] else '')+"{}"+(row[1] if row[1] else '')+"{}"+row[2]].append(
-                        {'case': row[3], 'sample': row[4], 'program': row[5], 'program_id': prog_obj.id, 'project': row[6].split('-')[-1]}
+                        {'case': row[3], 'sample': row[4], 'program': row[5], 'program_id': prog_obj.id, 'project': row[6].split('-',1)[-1]}
                     )
                     if row[5] not in projects_to_lookup:
                         projects_to_lookup[row[5]] = {}
