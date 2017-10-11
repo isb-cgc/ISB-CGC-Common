@@ -618,7 +618,10 @@ def verify_sa(request, user_id):
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('select-datasets') == 'remove')
-            logger.debug(str(remove_all))
+
+            # If we have received a 'remove all' request, there's nothing to verify, so set the datasets to empty
+            if remove_all:
+                datasets = []
 
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust, remove_all)
 
@@ -678,6 +681,10 @@ def register_sa(request, user_id):
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
+
+            # If we've received a remove-all request, ignore any provided datasets
+            if remove_all:
+                datasets = ['']
 
             if len(datasets) == 1 and datasets[0] == '':
                 datasets = []
