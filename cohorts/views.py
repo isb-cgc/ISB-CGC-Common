@@ -691,8 +691,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
         template = 'cohorts/new_cohort.html'
 
-        logger.debug(request.path)
-
         if '/new_cohort/barcodes/' in request.path or 'create_cohort_and_create_workbook/barcodes/' in request.path or '/create/barcodes' in request.path:
             template = 'cohorts/new_cohort_barcodes.html'
 
@@ -734,12 +732,14 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     return render(request, template, template_values)
 
+
 '''
 Saves a cohort, adds the new cohort to an existing worksheet, then redirected back to the worksheet display
 '''
 @login_required
 def save_cohort_for_existing_workbook(request):
     return save_cohort(request=request, workbook_id=request.POST.get('workbook_id'), worksheet_id=request.POST.get("worksheet_id"))
+
 
 '''
 Saves a cohort, adds the new cohort to a new worksheet, then redirected back to the worksheet display
@@ -823,7 +823,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
             barcodes = json.loads(request.POST.get('barcodes', '{}'))
-            logger.debug(str(barcodes))
             apply_filters = request.POST.getlist('apply-filters')
             apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
