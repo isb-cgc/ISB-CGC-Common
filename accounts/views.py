@@ -35,6 +35,7 @@ from google_helpers.storage_service import get_storage_resource
 from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
+from django.utils.html import escape
 
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
 from .utils import ServiceAccountBlacklist, is_email_in_iam_roles
@@ -409,7 +410,7 @@ def user_gcp_delete(request, user_id, gcp_id):
     return redirect('user_gcp_list', user_id=request.user.id)
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False):
+def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
     # Only verify for protected datasets
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_names = dataset_objs.values_list('name', flat=True)
@@ -442,26 +443,39 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Refreshes require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
-        if not is_refresh:
+        if is_adjust or not is_refresh:
             reg_change = False
-            # If there are private datasets requested, it might not be a duplicate
-            if len(dataset_objs):
-                saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id',flat=True)
-                ads = dataset_objs.values_list('whitelist_id', flat=True)
-                # Only if the lengthes of the 2 dataset lists are the same do we need to check them against one another
-                if not reg_change:
+            # Check the private datasets to see if there's a registration change
+            saads = AuthorizedDataset.objects.filter( id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
+
+            # If we're removing all datasets and there are 1 or more, this is automatically a registration change
+            if remove_all and len(saads):
+                reg_change = True
+            else:
+                if len(dataset_objs) or len(saads):
+                    ads = dataset_objs.values_list('whitelist_id', flat=True)
+                    # A private dataset missing from either list means this is a registration change
                     for ad in ads:
                         if ad not in saads:
                             reg_change = True
-            # but if there are not, it's only not a duplicate if the public dataset isn't yet registered
-            else:
-                reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
-            # If this isn't a refresh and the requested datasets aren't changing, we don't need to re-register
+                    if not reg_change:
+                        for saad in saads:
+                            if saad not in ads:
+                                reg_change = True
+                else:
+                    reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
+            # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
             if not reg_change:
-                return {'message': 'Service account {} already exists with these datasets, and so does not need to be registered'.format(str(service_account))}
+                return {
+                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(str(service_account),('re-registered' if not is_adjust else 'adjusted')),
+                    'level': 'warning'
+                }
     except ObjectDoesNotExist:
-        if is_refresh:
-            return {'message': 'Service account {} was not found so cannot be refreshed.'.format(str(service_account))}
+        if is_refresh or is_adjust:
+            return {
+                'message': 'Service account {} was not found so cannot be {}.'.format(str(service_account), ("adjusted" if is_adjust else "refreshed")),
+                'level': 'error'
+            }
 
 
     # 1. GET ALL USERS ON THE PROJECT.
@@ -602,7 +616,15 @@ def verify_sa(request, user_id):
             user_sa = request.POST.get('user_sa')
             datasets = request.POST.getlist('datasets')
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh)
+            is_adjust = bool(request.POST.get('is_adjust') == 'true')
+            remove_all = bool(request.POST.get('select-datasets') == 'remove')
+
+            # If we have received a 'remove all' request, there's nothing to verify, so set the datasets to empty
+            if remove_all:
+                datasets = []
+
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust, remove_all)
+
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
@@ -631,20 +653,38 @@ def register_sa(request, user_id):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     try:
+        # This is a Service Account dataset adjustment or an initial load of the service account registration page
+        if request.GET.get('sa_id') or request.GET.get('gcp_id'):
+            template = 'GenespotRE/register_sa.html'
+            context = {
+                'authorized_datasets': AuthorizedDataset.objects.filter(public=False)
+            }
 
-        if request.GET.get('gcp_id'):
-            authorized_datasets = AuthorizedDataset.objects.filter(public=False)
+            if request.GET.get('sa_id'):
+                template = 'GenespotRE/adjust_sa.html'
+                service_account = ServiceAccount.objects.get(id=request.GET.get('sa_id'))
+                context['gcp_id'] = service_account.google_project.project_id
+                context['sa_datasets'] = service_account.get_auth_datasets()
+                context['sa_id'] = service_account.service_account
+            else:
+                context['gcp_id'] = escape(request.GET.get('gcp_id'))
 
-            context = {'gcp_id': request.GET.get('gcp_id'),
-                       'authorized_datasets': authorized_datasets}
-            return render(request, 'GenespotRE/register_sa.html', context)
+            return render(request, template, context)
+
+        # This is an attempt to formally register the service account, post verification
         elif request.POST.get('gcp_id'):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
             datasets = request.POST.get('datasets').split(',')
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
+            is_adjust = bool(request.POST.get('is_adjust') == 'true')
+            remove_all = bool(request.POST.get('remove_all') == 'true')
             user_gcp = GoogleProject.objects.get(project_id=gcp_id)
+
+            # If we've received a remove-all request, ignore any provided datasets
+            if remove_all:
+                datasets = ['']
 
             if len(datasets) == 1 and datasets[0] == '':
                 datasets = []
@@ -652,8 +692,7 @@ def register_sa(request, user_id):
                 datasets = map(int, datasets)
 
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh)
-            logger.info("[STATUS] result of verification for {}: {}".format(user_sa,str(result)))
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
 
             # If the verification was successful, finalize access
             if result['all_user_datasets_verified']:
@@ -695,6 +734,32 @@ def register_sa(request, user_id):
                     except HttpError as e:
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
                         logger.info(e)
+
+                # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
+                if is_adjust:
+                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj).filter(authorized_dataset__public=0)
+                    for saad in saads:
+                        if saad.authorized_dataset not in protected_datasets or remove_all:
+                            try:
+                                directory_service, http_auth = get_directory_resource()
+                                directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
+                                                                   memberKey=saad.service_account.service_account).execute(
+                                    http=http_auth)
+                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                                    'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
+                                        saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
+                                logger.info("Attempting to delete service account {} from group {}. "
+                                            "If an error message doesn't follow, they were successfully deleted"
+                                            .format(saad.service_account.service_account,
+                                                    saad.authorized_dataset.acl_google_group))
+                            except HttpError as e:
+                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                                    'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
+                                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+                                logger.error("[ERROR] When trying to remove a service account from a Google Group:")
+                                logger.exception(e)
+
+                            saad.delete()
 
                 return redirect('user_gcp_list', user_id=user_id)
 
