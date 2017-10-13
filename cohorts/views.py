@@ -454,8 +454,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         return samples_and_cases
 
     except Exception as e:
-        print >> sys.stdout, traceback.format_exc()
-        logger.error(traceback.format_exc())
+        logger.error("[ERROR] While getting the sample and case list:")
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -590,50 +590,92 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
                                                         'from_workbook': bool(workbook),
                                                         })
 
+
 @login_required
 def cohort_select_for_new_workbook(request):
     return cohorts_list(request=request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=True)
+
 
 @login_required
 def cohort_select_for_existing_workbook(request, workbook_id, worksheet_id):
     return cohorts_list(request=request, is_public=False, workbook_id=workbook_id, worksheet_id=worksheet_id)
 
+
 @login_required
 def cohort_create_for_new_workbook(request):
     return cohort_detail(request=request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=True)
+
 
 @login_required
 def cohort_create_for_existing_workbook(request, workbook_id, worksheet_id):
     return cohort_detail(request=request, cohort_id=0, workbook_id=workbook_id, worksheet_id=worksheet_id)
 
+
+@login_required
+def validate_barcodes(request):
+    if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
+
+    try:
+        barcodes = json.loads(request.body)['barcodes']
+
+        status = 500
+
+        valid_entries = []
+        invalid_entries = []
+        entries_to_check = []
+        valid_counts = None
+        messages = None
+
+        for entry in barcodes:
+            entry_split = entry.split('{}')
+            barcode_entry = {'case': entry_split[0], 'sample': entry_split[1], 'program': entry_split[2]}
+            if (barcode_entry['sample'] == '' and barcode_entry['case'] == '') or barcode_entry['program'] == '':
+                # Case barcode is required - this entry isn't valid
+                invalid_entries.append(barcode_entry)
+            else:
+                entries_to_check.append(barcode_entry)
+
+        if len(entries_to_check):
+            result = validate_and_count_barcodes(entries_to_check,request.user.id)
+            if len(result['valid_barcodes']):
+                valid_entries = result['valid_barcodes']
+                valid_counts = result['counts']
+
+            if len(result['invalid_barcodes']):
+                invalid_entries.extend(result['invalid_barcodes'])
+
+            if len(result['messages']):
+                messages = result['messages']
+
+        # If there were any valid entries, we can call it 200, otherwise we send back 500
+        if len(valid_entries):
+            status = 200
+
+    except Exception as e:
+        logger.error("[ERROR] While validating barcodes: ")
+        logger.exception(e)
+
+    return JsonResponse({
+        'valid_entries': valid_entries,
+        'invalid_entries': invalid_entries,
+        'counts': valid_counts,
+        'messages': messages
+    }, status=status)
+
+
 @login_required
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
+
+
     try:
-        users = User.objects.filter(is_superuser=0).exclude(id=request.user.id)
-
-        cohort = None
         shared_with_users = []
-
-        data_attr = [
-            'DNA_sequencing',
-            'RNA_sequencing',
-            'miRNA_sequencing',
-            'Protein',
-            'SNP_CN',
-            'DNA_methylation',
-        ]
-
-
-        user = Django_User.objects.get(id=request.user.id)
-        filters = None
 
         isb_user = Django_User.objects.filter(username='isb').first()
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
         template_values = {
             'request': request,
-            'users': users,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list
@@ -646,6 +688,9 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['create_workbook'] = True
 
         template = 'cohorts/new_cohort.html'
+
+        if '/new_cohort/barcodes/' in request.path or 'create_cohort_and_create_workbook/barcodes/' in request.path or '/create/barcodes' in request.path:
+            template = 'cohorts/new_cohort_barcodes.html'
 
         if cohort_id != 0:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -685,12 +730,14 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
     return render(request, template, template_values)
 
+
 '''
 Saves a cohort, adds the new cohort to an existing worksheet, then redirected back to the worksheet display
 '''
 @login_required
 def save_cohort_for_existing_workbook(request):
     return save_cohort(request=request, workbook_id=request.POST.get('workbook_id'), worksheet_id=request.POST.get("worksheet_id"))
+
 
 '''
 Saves a cohort, adds the new cohort to a new worksheet, then redirected back to the worksheet display
@@ -748,31 +795,15 @@ def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_
 
     return redirect(redirect_url)
 
-'''
-This save view only works coming from cohort editing or creation views.
-- only ever one source coming in
-- filters optional
-'''
-# TODO: Create new view to save cohorts from visualizations - This exists below
+
 @login_required
 @csrf_protect
 def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=False):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    redirect_url = reverse('cohort_list')
-
-    samples = []
-    name = ''
-    user_id = request.user.id
     parent = None
-    filter_obj = None
-    deactivate_sources = False
-    apply_filters = False
-    apply_name = False
-
     cohort_progs = None
-
-    redirect_url = ''
+    redirect_url = reverse('cohort_list')
 
     try:
 
@@ -785,21 +816,21 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 match = whitelist.findall(unicode(name))
                 logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
                 messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
-                redirect_url = reverse('cohort_list')
                 return redirect(redirect_url)
 
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
+            barcodes = json.loads(request.POST.get('barcodes', '{}'))
             apply_filters = request.POST.getlist('apply-filters')
+            apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
-            projects = request.user.project_set.all()
 
             # we only deactivate the source if we are applying filters to a previously-existing
             # source cohort
             deactivate_sources = (len(filters) > 0) and source is not None and source != 0
 
             # If we're only changing the name, just edit the cohort and update it
-            if apply_name and not apply_filters and not deactivate_sources:
+            if apply_name and not apply_filters and not deactivate_sources and not apply_barcodes:
                 Cohort.objects.filter(id=source).update(name=name)
                 messages.info(request, 'Changes applied successfully.')
                 return redirect(reverse('cohort_details', args=[source]))
@@ -845,6 +876,13 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 for prog in cohort_progs:
                     if prog.id not in results:
                         results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
+
+            if len(barcodes) > 0:
+                for barcode in barcodes:
+                    if barcode['program'] not in results:
+                        results[barcode['program']] = {'count': 0, 'items': []}
+                    results[barcode['program']]['items'].append({'sample_barcode': barcode['sample_barcode'], 'case_barcode': barcode['case_barcode'], 'project_id': barcode['project']})
+                    results[barcode['program']]['count'] += 1
 
             found_samples = False
 
@@ -911,6 +949,17 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                                 for val in prog_filters[this_filter]['values']:
                                     Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter, value=val).save()
 
+                # Create a filter applied object representing the barcodes sent
+                if barcodes:
+                    for prog in results:
+                        prog_obj = Program.objects.get(id=prog)
+                        Filters.objects.create(
+                            resulting_cohort=cohort,
+                            program=prog_obj,
+                            name='Barcodes',
+                            value="{} barcodes from {}".format(str(len(results[prog]['items'])), prog_obj.name)
+                        ).save()
+
                 # Store cohort to BigQuery
                 bq_project_id = settings.BQ_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
@@ -951,8 +1000,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         messages.error(request, "There was an error saving your cohort; it may not have been saved correctly.")
         logger.error('[ERROR] Exception while saving a cohort:')
         logger.exception(e)
-        print >> sys.stderr, "[ERROR] Exception while saving a cohort:"
-        print >> sys.stderr, traceback.format_exc()
 
     return redirect(redirect_url)
 
@@ -1005,6 +1052,9 @@ def share_cohort(request, cohort_id=0):
             else:
                 cohorts = Cohort.objects.filter(id=cohort_id)
 
+            already_shared = {}
+            newly_shared = {}
+
             for user in users:
                 for cohort in cohorts:
                     # Check to make sure this user has authority to grant sharing permission
@@ -1013,26 +1063,54 @@ def share_cohort(request, cohort_id=0):
                     except ObjectDoesNotExist as e:
                         raise Exception("User {} is not the owner of cohort(s) {} and so cannot alter the permissions.".format(req_user.email, str(cohort.id)))
 
-                    obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-                    obj.save()
+                    # Check for pre-existing share for this user
+                    check = None
+                    try:
+                        check = Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+                    except ObjectDoesNotExist:
+                        obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+                        obj.save()
+                        if cohort.id not in newly_shared:
+                            newly_shared[cohort.id] = []
+                        newly_shared[cohort.id].append(user.email)
+
+                    if check:
+                        if cohort.id not in already_shared:
+                            already_shared[cohort.id] = []
+                        already_shared[cohort.id].append(user.email)
 
             status = 'success'
-            result = { 'msg':
-                ('Cohort ID {} has'.format(str(cohorts[0].id)) if len(cohorts) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in cohorts.values_list('id',flat=True)]))) +
-                ' been successfully shared with the following user(s): {}'.format(", ".join(emails))
+            success_msg = ""
+            note = ""
+            if len(newly_shared.keys()):
+                user_set = set([y for x in newly_shared for y in newly_shared[x]])
+                success_msg = ('Cohort ID {} has'.format(str(newly_shared.keys()[0])) if len(newly_shared.keys()) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in newly_shared.keys()]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
+
+            if len(already_shared):
+                user_set = set([y for x in already_shared for y in already_shared[x]])
+                note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in already_shared.keys()])) if len(already_shared.keys()) > 1 else "Cohort ID {} was".format(str(already_shared.keys()[0]))), "; ".join(user_set))
+
+            if not len(success_msg):
+                success_msg = note
+                note = None
+
+            result = {
+                'msg': success_msg,
+                'note': note
             }
+
     except Exception as e:
         logger.error("[ERROR] While trying to share a cohort:")
         logger.exception(e)
         status = 'error'
         result = {
-            'msg': 'There was an error while trying to share this cohort.'
+            'msg': 'There was an error while trying to share this cohort. Please contact the administrator.'
         }
     finally:
         if not status:
             status = 'error'
             result = {
-                'msg': 'An unknown error has occurred while sharing this cohort.'
+                'msg': 'An unknown error has occurred while sharing this cohort. Please contact the administrator.'
             }
 
     return JsonResponse({
@@ -1847,7 +1925,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             GROUP BY md.platform;"""
 
         query = """
-            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category, md.experimental_strategy
+            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category, md.experimental_strategy
             FROM {0} md
             JOIN (
                 SELECT sample_barcode
@@ -1940,6 +2018,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'sample': item['sample_barcode'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
+                            'index_name': item['index_file_name'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
                             'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
