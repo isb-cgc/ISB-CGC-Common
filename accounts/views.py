@@ -306,7 +306,7 @@ def verify_gcp(request, user_id):
             for member in members:
                 if member.startswith('user:'):
                     email = member.split(':')[1]
-                    if user.email == email:
+                    if user.email.lower() == email.lower():
                         user_found = True
                     registered_user = bool(User.objects.filter(email=email).first())
                     roles[role].append({'email': email,
