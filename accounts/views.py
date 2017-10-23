@@ -506,7 +506,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             st_logger.write_struct_log_entry(log_name, {
                 'message': 'While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
             })
-            return {'message': 'You must be a member of a project in order to register it'}
+            return {'message': 'You must be a member of a project in order to register its service accounts.'}
 
         # 3. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
