@@ -590,11 +590,11 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 # 4. VERIFY PI IS ON THE PROJECT
 
     except HttpError as e:
-        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
         return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
     except Exception as e:
-        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
         return {'message': "There was an error while verifying this service account. Please contact the administrator."}
 
@@ -695,7 +695,7 @@ def register_sa(request, user_id):
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
 
             # If the verification was successful, finalize access
-            if result['all_user_datasets_verified']:
+            if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
                                 {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
 
