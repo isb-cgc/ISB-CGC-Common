@@ -497,7 +497,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     roles[role].append({'email': email,
                                        'registered_user': registered_user})
                 elif member.startswith('serviceAccount'):
-                    if member.split(':')[1] == service_account:
+                    if member.split(':')[1].lower() == service_account.lower():
                         verified_sa = True
 
         # 2. Verify that the current user is a member of the GCP project
@@ -770,7 +770,7 @@ def register_sa(request, user_id):
                     messages.error(request, result['message'])
                     logger.warn(result['message'])
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-                # Somehow managed to register even though previous verification failed
+                # Verification passed before but failed now
                 elif not result['all_user_datasets_verified']:
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
                     logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
@@ -816,7 +816,7 @@ def register_sa(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While registering a Service Account: ")
         logger.exception(e)
-        messages.error(request,"Unable to register this Google Cloud Project - please contact the administrator.")
+        messages.error(request, "Unable to register this Service Account - please contact the administrator.")
         return redirect('user_gcp_list', user_id=user_id)
 
 
