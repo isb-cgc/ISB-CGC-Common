@@ -866,7 +866,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
         else:
             try:
-                gcp = GoogleProject.objects.get(id=proj_id)
+                gcp = GoogleProject.objects.get(project_name=proj_id)
             except ObjectDoesNotExist as e:
                 messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
                 return redirect(redirect_url)
@@ -890,7 +890,7 @@ def export_cohort_to_bq(request, cohort_id=0):
         bcs = BigQueryCohortSupport(bq_proj_id, dataset, table)
         bq_result = bcs.export_cohort_to_bq(samples)
 
-        # If BQ insertion fails, we immediately de-activate the cohort and warn the user
+        # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
             redirect_url = reverse('cohort_list')
             err_msg = ''
@@ -899,7 +899,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             else:
                 err_msg = 'There was an insertion error '
             messages.error(request,
-                           err_msg + ' when exporting your cohort to BigQuery. Creation of the BQ cohort has failed.')
+                           err_msg + ' when exporting your cohort to BigQuery table {}. Creation of the BQ cohort has failed.'.format(table))
         else:
             messages.info(request, "Cohort {} was successfully exported to {}:{}:{}.".format(bq_proj_id,dataset,table))
 
