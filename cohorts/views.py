@@ -810,28 +810,40 @@ def export_cohort_to_bq(request, cohort_id=0):
 
     req_user = User.objects.get(id=request.user.id)
 
+    # GET request receives the potential list of projects and datasets this user has available to make a table in
     if request.method == 'GET':
         result = {
-            'projects': []
+            'statuss': '',
+            'data': {
+                'projects': []
+            }
         }
         gcps = GoogleProject.objects.filter(user=req_user)
 
         if not len(gcps):
-            messages.error(request,"No Google Cloud Projects have been registered for this user. Please register at least one project before trying to export your cohort.")
-            return redirect(reverse('cohort_list'))
-        for gcp in gcps:
-            this_proj = {
-                'datasets': {},
-                'name': gcp.project_id
+            status = 503
+            result = {
+                'status': 'error',
+                'msg': "No Google Cloud Projects have been registered for this user. Please register at least one project before trying to export your cohort."
             }
-            bqs = BigQueryCohortSupport(gcp.project_id, None, None)
-            for table in bqs.get_tables():
-                if table['dataset'] not in this_proj['datasets']:
-                    this_proj['datasets'][table['dataset']] = []
-                this_proj['datasets'][table['dataset']].append(table['table_id'])
-            result['projects'].append(this_proj)
+        else:
+            for gcp in gcps:
+                this_proj = {
+                    'datasets': {},
+                    'name': gcp.project_id
+                }
+                bqs = BigQueryCohortSupport(gcp.project_id, None, None)
+                for table in bqs.get_tables():
+                    if table['dataset'] not in this_proj['datasets']:
+                        this_proj['datasets'][table['dataset']] = []
+                    this_proj['datasets'][table['dataset']].append(table['table_id'])
+                result['data']['projects'].append(this_proj)
+            status=200
+            result['status']='success'
 
-        return JsonResponse(result, status=200)
+        return JsonResponse(result, status=status)
+
+    # POST is to actually export the cohort(s) to a chosen project:dataset:table
 
     redirect_url = reverse('cohort_list')
 
@@ -841,14 +853,15 @@ def export_cohort_to_bq(request, cohort_id=0):
 
     if not cohort_id:
         messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
+        return redirect(redirect_url)
 
     try:
         cohort = Cohort.objects.get(id=cohort_id)
-        dataset = request.POST.get('dataset', None)
-        table = request.POST.get('table', None)
-        proj_id = request.POST.get('project_id', None)
+        dataset = request.POST.get('project-dataset', '').split(":")[1]
+        table = request.POST.get('table-name', None)
+        proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
-        if not proj_id:
+        if not len(proj_id):
             messages.error(request, "You must provide a Google Cloud Project to which your cohort can be exported.")
             return redirect(redirect_url)
         else:
@@ -866,7 +879,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             messages.error(request, "You must be the owner of a cohort in order to export it.")
             return redirect(redirect_url)
 
-        if not dataset:
+        if not len(dataset):
             dataset = "isb_cgc_cohort_export_dataset_{}".format(datetime.datetime.now().strftime("%Y_%m_%d_%H_%M"))
 
         if not table:
