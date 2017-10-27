@@ -24,6 +24,10 @@ from django.conf import settings
 import httplib2
 import sys
 
+import logging
+
+logger = logging.getLogger('main_logger')
+
 BIGQUERY_SCOPES = ['https://www.googleapis.com/auth/bigquery',
                    'https://www.googleapis.com/auth/bigquery.insertdata']
 
