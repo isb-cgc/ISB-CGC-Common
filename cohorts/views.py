@@ -883,7 +883,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             dataset = "isb_cgc_cohort_export_dataset_{}".format(datetime.datetime.now().strftime("%Y_%m_%d_%H_%M"))
 
         if not table:
-            table = "isb_cgc_cohort_{}_{}_{}".format(cohort_id,re.sub(r"[\s,'-]+","_",req_user.name.lower()),datetime.datetime.now().strftime("%Y_%m_%d_%H_%M"))
+            table = "isb_cgc_cohort_{}_{}_{}".format(cohort_id,re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),datetime.datetime.now().strftime("%Y_%m_%d_%H_%M"))
 
         # Store cohort to BigQuery
         samples = Samples.objects.filter(cohort=cohort)
@@ -900,8 +900,10 @@ def export_cohort_to_bq(request, cohort_id=0):
                 err_msg = 'There was an insertion error '
             messages.error(request,
                            err_msg + ' when exporting your cohort to BigQuery table {}. Creation of the BQ cohort has failed.'.format(table))
+        elif 'tableErrors' in bq_result:
+            messages.error(request,bq_result['tableErrors'])
         else:
-            messages.info(request, "Cohort {} was successfully exported to {}:{}:{}.".format(bq_proj_id,dataset,table))
+            messages.info(request, "Cohort {} was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
 
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {} to BQ:".format(str(cohort_id)))
