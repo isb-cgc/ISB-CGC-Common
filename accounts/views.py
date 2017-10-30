@@ -366,15 +366,20 @@ def register_gcp(request, user_id):
 
             if is_refresh:
                 users = users.exclude(id__in=gcp.user.all())
-                messages.info(request,"The following user{} added to GCP {}: {}".format(
-                    ("s were" if len(users) > 1 else " was"),
-                    project_id,
-                    ", ".join(users.values_list('email',flat=True)))
-                )
+                if len(users):
+                    msg = "The following user{} added to GCP {}: {}".format(
+                        ("s were" if len(users) > 1 else " was"),
+                        project_id,
+                        ", ".join(users.values_list('email',flat=True)))
+                else:
+                    msg = "There were no new users to add to GCP {}.".format(project_id)
+
+                messages.info(request, msg)
 
             for user in users:
                 gcp.user.add(user)
                 gcp.save()
+
             return redirect('user_gcp_list', user_id=request.user.id)
 
         return render(request, 'GenespotRE/register_gcp.html', {})
