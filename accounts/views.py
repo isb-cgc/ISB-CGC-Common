@@ -285,10 +285,11 @@ def verify_gcp(request, user_id):
     status = None
     try:
         gcp_id = request.GET.get('gcp-id', None)
+        is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
         gcp = GoogleProject.objects.filter(project_id=gcp_id)
         # Can't register the same GCP twice - return immediately
-        if len(gcp) > 0:
+        if len(gcp) > 0 and not is_refresh:
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
 
         crm_service = get_special_crm_resource()
@@ -340,16 +341,19 @@ def register_gcp(request, user_id):
     try:
         if request.POST:
             project_id = request.POST.get('gcp_id', None)
+            register_users = request.POST.getlist('register_users')
+            is_refresh = bool(request.POST.get('is_refresh', '') == 'true')
+
             project_name = project_id
 
-            register_users = request.POST.getlist('register_users')
             if not user_id or not project_id or not project_name:
                 pass
             else:
                 try:
                     gcp = GoogleProject.objects.get(project_name=project_name,
                                                     project_id=project_id)
-                    messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
+                    if not is_refresh:
+                        messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
 
                 except ObjectDoesNotExist:
                     gcp = GoogleProject.objects.create(project_name=project_name,
@@ -357,19 +361,31 @@ def register_gcp(request, user_id):
                                                        big_query_dataset='')
                     gcp.save()
 
+
             users = User.objects.filter(email__in=register_users)
+
+            if is_refresh:
+                users = users.exclude(id__in=gcp.user.all())
+                messages.info(request,"The following user{} added to GCP {}: {}".format(
+                    ("s were" if len(users) > 1 else " was"),
+                    project_id,
+                    ", ".join(users.values_list('email',flat=True)))
+                )
 
             for user in users:
                 gcp.user.add(user)
                 gcp.save()
             return redirect('user_gcp_list', user_id=request.user.id)
 
+        return render(request, 'GenespotRE/register_gcp.html', {})
+
     except Exception as e:
         logger.error("[ERROR] While registering a Google Cloud Project:")
         logger.exception(e)
         messages.error(request, "There was an error while attempting to register this Google Cloud Project - please contact the administrator.")
 
-    return render(request, 'GenespotRE/register_gcp.html', {})
+    return redirect('user_gcp_list', user_id=request.user.id)
+
 
 
 @login_required
