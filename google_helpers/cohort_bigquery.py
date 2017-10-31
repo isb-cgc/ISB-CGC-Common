@@ -183,9 +183,11 @@ class BigQueryCohortSupport(object):
         for dataset in datasets['datasets']:
             tables = bigquery_service.tables().list(projectId=self.project_id,datasetId=dataset['datasetReference']['datasetId']).execute()
             if 'tables' not in tables:
-                continue
-            for table in tables['tables']:
-                bq_tables.append({'dataset': dataset['datasetReference']['datasetId'], 'table_id':  table['tableReference']['tableId']})
+                bq_tables.append({'dataset': dataset['datasetReference']['datasetId'],
+                                  'table_id': None})
+            else:
+                for table in tables['tables']:
+                    bq_tables.append({'dataset': dataset['datasetReference']['datasetId'], 'table_id':  table['tableReference']['tableId']})
 
         return bq_tables
 
@@ -235,9 +237,10 @@ class BigQueryCohortSupport(object):
         tables = bigquery_service.tables().list(projectId=self.project_id,datasetId=self.dataset_id).execute()
         table_found = False
 
-        for table in tables['tables']:
-            if self.table_id == table['tableReference']['tableId']:
-                return True
+        if 'tables' in tables:
+            for table in tables['tables']:
+                if self.table_id == table['tableReference']['tableId']:
+                    return True
 
         return table_found
 

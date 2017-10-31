@@ -821,25 +821,39 @@ def export_cohort_to_bq(request, cohort_id=0):
         gcps = GoogleProject.objects.filter(user=req_user)
 
         if not len(gcps):
-            status = 503
+            status = 500
             result = {
                 'status': 'error',
-                'msg': "No Google Cloud Projects have been registered for this user. Please register at least one project before trying to export your cohort."
+                'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
             }
         else:
             for gcp in gcps:
+                bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
+
                 this_proj = {
                     'datasets': {},
                     'name': gcp.project_id
                 }
                 bqs = BigQueryCohortSupport(gcp.project_id, None, None)
-                for table in bqs.get_tables():
-                    if table['dataset'] not in this_proj['datasets']:
-                        this_proj['datasets'][table['dataset']] = []
-                    this_proj['datasets'][table['dataset']].append(table['table_id'])
-                result['data']['projects'].append(this_proj)
-            status=200
-            result['status']='success'
+                bq_tables = bqs.get_tables()
+                for table in bq_tables:
+                    if table['dataset'] in bqds:
+                        if table['dataset'] not in this_proj['datasets']:
+                            this_proj['datasets'][table['dataset']] = []
+                        if table['table_id']:
+                            this_proj['datasets'][table['dataset']].append(table['table_id'])
+                if len(this_proj['datasets']):
+                    result['data']['projects'].append(this_proj)
+
+            if not len(result['data']['projects']):
+                status=500
+                result = {
+                    'status': 'error',
+                    'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
+                }
+            else:
+                status=200
+                result['status']='success'
 
         return JsonResponse(result, status=status)
 
