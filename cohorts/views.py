@@ -858,15 +858,24 @@ def export_cohort_to_bq(request, cohort_id=0):
     try:
         cohort = Cohort.objects.get(id=cohort_id)
         dataset = request.POST.get('project-dataset', '').split(":")[1]
-        table = request.POST.get('new-table-name', None)
+        table = None
 
-        tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
+        if request.POST.get('new-table-name',None):
+            logger.debug(request.POST.get('new-table-name',''))
+        else:
+            logger.debug(request.POST.get('table-name',''))
 
-        match = tbl_whitelist.search(unicode(table))
-
-        if match:
-            messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
-            return redirect(redirect_url)
+        if request.POST.get('new-table-name', None):
+            # Check the user-provided table name against the whitelist for Google BQ table names
+            # truncate at max length regardless of what we received
+            table = request.POST.get('new-table-name', '')[0:1024]
+            tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
+            match = tbl_whitelist.search(unicode(table))
+            if match:
+                messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
+                return redirect(redirect_url)
+        else:
+            table = request.POST.get('table-name', None)
 
         proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
