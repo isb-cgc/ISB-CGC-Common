@@ -860,11 +860,6 @@ def export_cohort_to_bq(request, cohort_id=0):
         dataset = request.POST.get('project-dataset', '').split(":")[1]
         table = None
 
-        if request.POST.get('new-table-name',None):
-            logger.debug(request.POST.get('new-table-name',''))
-        else:
-            logger.debug(request.POST.get('table-name',''))
-
         if request.POST.get('new-table-name', None):
             # Check the user-provided table name against the whitelist for Google BQ table names
             # truncate at max length regardless of what we received
