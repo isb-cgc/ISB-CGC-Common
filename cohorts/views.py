@@ -858,7 +858,16 @@ def export_cohort_to_bq(request, cohort_id=0):
     try:
         cohort = Cohort.objects.get(id=cohort_id)
         dataset = request.POST.get('project-dataset', '').split(":")[1]
-        table = request.POST.get('table-name', None)
+        table = request.POST.get('new-table-name', None)
+
+        tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
+
+        match = tbl_whitelist.search(unicode(table))
+
+        if match:
+            messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
+            return redirect(redirect_url)
+
         proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
         if not len(proj_id):
