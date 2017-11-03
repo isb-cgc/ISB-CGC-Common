@@ -313,7 +313,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
             results = get_bq_job_results(bq_service, query_job['jobReference'])
 
-            if results.__len__() > 0:
+            if len(results) > 0:
                 for barcode in results:
                     barcodes.append(str(barcode['f'][0]['v']))
 
@@ -322,7 +322,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
-            tmp_mut_table = 'bq_res_table_' + user.id.__str__() + "_" + make_id(6)
+            tmp_mut_table = 'bq_res_table_' + str(user.id) + "_" + make_id(6)
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
