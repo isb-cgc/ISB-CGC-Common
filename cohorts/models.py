@@ -17,12 +17,16 @@ limitations under the License.
 import operator
 import string
 import sys
+import logging
 from django.db import models
+from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from projects.models import Project, Program, User_Feature_Definitions
 from sharing.models import Shared_Resource
 from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
+
+logger = logging.getLogger('main_logger')
 
 
 class CohortManager(models.Manager):
@@ -57,10 +61,10 @@ class Cohort(models.Model):
     count as more than one
     '''
     def sample_size(self):
-        return len(self.samples_set.all())
+        return self.samples_set.all().count()
 
     def case_size(self):
-        return len(self.samples_set.values_list('case_barcode', flat=True).distinct())
+        return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
 
     def get_programs(self):
         projects = self.samples_set.values_list('project_id', flat=True).distinct()
