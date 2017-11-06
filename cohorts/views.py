@@ -526,7 +526,7 @@ def public_cohort_list(request):
 
 @login_required
 def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=False):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     # check to see if user has read access to 'All TCGA Data' cohort
     isb_superuser = User.objects.get(username='isb')
