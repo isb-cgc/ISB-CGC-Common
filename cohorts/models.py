@@ -93,7 +93,7 @@ class Cohort(models.Model):
     def get_perm(self, request):
         perm = self.cohort_perms_set.filter(user_id=request.user.id).order_by('perm')
 
-        if len(perm) >= 1:
+        if perm.count() > 0:
             return perm[0]
         else:
             return None
