@@ -16,17 +16,21 @@ limitations under the License.
 
 """
 
-from django.conf.urls import patterns, url
+from django.conf.urls import url
 import views
 
 urlpatterns = [
     url(r'^$',                                      views.cohorts_list, name='cohort_list'),
     url(r'^public',                                 views.public_cohort_list, name='public_cohort_list'),
     url(r'^new_cohort/',                            views.cohort_detail, name='cohort'),
+    url(r'^new_cohort/barcodes/',                   views.cohort_detail, name='cohort_barcodes'),
+    url(r'^validate_barcodes/',                     views.validate_barcodes, name='validate_barcodes'),
     url(r'^(?P<cohort_id>\d+)/$',                   views.cohort_detail, name='cohort_details'),
     url(r'^filelist/(?P<cohort_id>\d+)/$',          views.cohort_filelist, name='cohort_filelist'),
     url(r'^filelist_ajax/(?P<cohort_id>\d+)/$',     views.cohort_filelist_ajax, name='cohort_filelist_ajax'),
     url(r'^save_cohort/',                           views.save_cohort, name='save_cohort'),
+    url(r'^export_cohort/$',                         views.export_cohort, name='export_cohort'),
+    url(r'^export_cohort/(?P<cohort_id>\d+)/',      views.export_cohort_to_bq, name='export_cohort_to_bq'),
     url(r'^save_cohort_from_plot/',                 views.save_cohort_from_plot, name='save_cohort_from_plot'),
     url(r'^delete_cohort/',                         views.delete_cohort, name='delete_cohort'),
     url(r'^clone_cohort/(?P<cohort_id>\d+)/',       views.clone_cohort, name='clone_cohort'),
@@ -40,14 +44,16 @@ urlpatterns = [
     url(r'^download_ids/(?P<cohort_id>\d+)/',       views.cohort_samples_cases, name='download_ids'),
 
 
-    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)$',        views.cohort_select_for_existing_workbook,  name="cohort_select_for_existing_workbook"),
-    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/create$', views.cohort_create_for_existing_workbook,  name="cohort_create_for_existing_workbook"),
-    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/add$',    views.add_cohorts_to_worksheet,             name="add_cohorts_to_worksheet"),
+    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)$',                 views.cohort_select_for_existing_workbook,  name="cohort_select_for_existing_workbook"),
+    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/create$',          views.cohort_create_for_existing_workbook,  name="cohort_create_for_existing_workbook"),
+    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/create/barcodes$', views.cohort_create_for_existing_workbook,  name="cohort_create_for_existing_workbook_barcodes"),
+    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/add$',             views.add_cohorts_to_worksheet,             name="add_cohorts_to_worksheet"),
     url(r'^(?P<cohort_id>\d+)/workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/remove$',
-                                                                                   views.remove_cohort_from_worksheet,         name="remove_cohort_from_worksheet"),
+                                                                                            views.remove_cohort_from_worksheet,         name="remove_cohort_from_worksheet"),
 
     url(r'^select_cohort_and_create_workbook/$',                                   views.cohort_select_for_new_workbook,       name="cohort_select_for_new_workbook"),
     url(r'^create_cohort_and_create_workbook/$',                                   views.cohort_create_for_new_workbook,       name="cohort_create_for_new_workbook"),
+    url(r'^create_cohort_and_create_workbook/barcodes/$',                          views.cohort_create_for_new_workbook,       name="cohort_create_for_new_workbook_barcodes"),
     url(r'^save_cohort_for_workbook/$',                                            views.save_cohort_for_existing_workbook,    name="save_cohort_for_existing_workbook"),
     url(r'^save_cohort_and_workbook/$',                                            views.save_cohort_for_new_workbook,         name="save_cohort_for_new_workbook"),
 
