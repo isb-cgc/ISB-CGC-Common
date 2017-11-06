@@ -78,7 +78,7 @@ class Cohort(models.Model):
             user = request.user
 
         last_view = self.cohort_last_view_set.filter(user=user)
-        if last_view is None or len(last_view) is 0:
+        if last_view is None or last_view.count() == 0:
             last_view = self.cohort_last_view_set.create(user=user)
         else:
             last_view = last_view[0]
@@ -119,7 +119,7 @@ class Cohort(models.Model):
         while cohort:
             filter_list.extend(Filters.objects.filter(resulting_cohort=cohort))
             sources = Source.objects.filter(cohort=cohort)
-            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
                 cohort = sources[0].parent
             else:
                 cohort = None
@@ -150,7 +150,7 @@ class Cohort(models.Model):
 
 
             sources = Source.objects.filter(cohort=cohort)
-            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
                 cohort = sources[0].parent
             else:
                 cohort = None
@@ -186,7 +186,7 @@ class Cohort(models.Model):
         while cohort:
             filter_list = Filters.objects.filter(resulting_cohort=cohort)
             sources = Source.objects.filter(cohort=cohort)
-            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
                 cohort = sources[0].parent
             else:
                 cohort = None
@@ -220,7 +220,7 @@ class Cohort(models.Model):
 
         while sources and keep_traversing:
             # single parent
-            if len(sources) == 1:
+            if sources.count() == 1:
                 source = sources[0]
                 if source.type == Source.FILTERS:
                     if filter_history is None:
@@ -253,7 +253,7 @@ class Cohort(models.Model):
 
         while sources:
             # single parent
-            if len(sources) == 1:
+            if sources.count() == 1:
                 source = sources[0]
                 if source.type == Source.FILTERS:
                     if source_filters is None:
@@ -272,7 +272,7 @@ class Cohort(models.Model):
                 sources = Source.objects.filter(cohort=source.parent)
 
             # multiple parents
-            if len(sources) > 1:
+            if sources.count() > 1:
                 if sources[0].type == Source.SET_OPS:
                     revision_list.append(sources[0].notes)
                 if sources[0].type == Source.PLOT_SEL:
