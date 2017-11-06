@@ -80,6 +80,9 @@ class BigQueryCohortSupport(object):
             },{
                 "name": "date_added",
                 "type": "TIMESTAMP"
+            },{
+                "name": "uuid",
+                "type": "STRING"
             }
         ]
     }
@@ -268,7 +271,7 @@ class BigQueryCohortSupport(object):
         return response
 
     # Export a cohort or cohorts as represented by a set of samples into the BQ table referenced by project_id:dataset_id:table_id
-    def export_cohort_to_bq(self, samples):
+    def export_cohort_to_bq(self, samples, uuids=None):
 
         # Get the dataset (make if not exists)
         if not self._dataset_exists():
@@ -289,14 +292,18 @@ class BigQueryCohortSupport(object):
 
         rows = []
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         for sample in samples:
-            rows.append({
+            sample_dict = {
                 'cohort_id': sample.cohort.id,
                 'sample_barcode': sample.sample_barcode,
                 'case_barcode': sample.case_barcode,
                 'project_short_name': sample.project.program.name + '-' + sample.project.name,
                 'date_added': date_added
-            })
+            }
+            if uuids and sample.sample_barcode in uuids:
+                sample_dict['uuid'] = uuids[sample.sample_barcode]
+            rows.append(sample_dict)
 
         response = self._streaming_insert(rows)
 
