@@ -1651,7 +1651,7 @@ def set_minus_cohort(request):
 @login_required
 @csrf_protect
 def save_comment(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     content = request.POST.get('content').encode('utf-8')
     cohort = Cohort.objects.get(id=int(request.POST.get('cohort_id')))
     obj = Cohort_Comments.objects.create(user=request.user, cohort=cohort, content=content)
@@ -1660,7 +1660,7 @@ def save_comment(request):
         'first_name': request.user.first_name,
         'last_name': request.user.last_name,
         'date_created': formats.date_format(obj.date_created, 'DATETIME_FORMAT'),
-        'content': obj.content
+        'content': escape(obj.content)
     }
     return HttpResponse(json.dumps(return_obj), status=200)
 
