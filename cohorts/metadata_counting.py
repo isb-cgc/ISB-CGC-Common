@@ -67,7 +67,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
     for program in Program.get_user_programs(user):
         # Supports #2018 for the user data case:
-        fully_qual = ("PROGRAM-" + str(program.id)).upper()
+        fully_qual = ("USER_PROGRAM-" + str(program.id)).upper()
         user_data_counts['program']['values'].append({'id': program.id, 'value': program.id, 'full_id': fully_qual, 'displ_name': program.name, 'name': program.name, 'count': 0, 'program': program.id,})
         project_counts[program.id] = 0
 
@@ -92,7 +92,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
         if project_ms_table is not None:
             # Supports #2018 for the user data case:
-            fully_qual = ("PROJECT-" + str(project.id)).upper()
+            fully_qual = ("USER_PROJECT-" + str(project.id)).upper()
             user_data_counts['project']['values'].append({'id': project.id,
                                                           'value': project.id,
                                                           'full_id': fully_qual,

@@ -24,6 +24,10 @@ from django.conf import settings
 import httplib2
 import sys
 
+import logging
+
+logger = logging.getLogger('main_logger')
+
 BIGQUERY_SCOPES = ['https://www.googleapis.com/auth/bigquery',
                    'https://www.googleapis.com/auth/bigquery.insertdata']
 
@@ -39,7 +43,7 @@ def get_bigquery_service():
 
 
 def authorize_credentials_with_Google():
-    if settings.DEBUG: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if settings.DEBUG: logger.debug('Called '+sys._getframe().f_code.co_name)
     # documentation: https://developers.google.com/accounts/docs/application-default-credentials
     SCOPES = ['https://www.googleapis.com/auth/bigquery']
     # credentials = GoogleCredentials.get_application_default().create_scoped(SCOPES)
@@ -47,5 +51,5 @@ def authorize_credentials_with_Google():
     http = httplib2.Http()
     http = credentials.authorize(http)
     service = discovery.build('bigquery', 'v2', http=http, cache_discovery=False)
-    if settings.DEBUG: print >> sys.stderr,' big query authorization '+sys._getframe().f_code.co_name
+    if settings.DEBUG: logger.debug(' big query authorization '+sys._getframe().f_code.co_name)
     return service

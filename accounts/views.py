@@ -285,10 +285,11 @@ def verify_gcp(request, user_id):
     status = None
     try:
         gcp_id = request.GET.get('gcp-id', None)
+        is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
         gcp = GoogleProject.objects.filter(project_id=gcp_id)
         # Can't register the same GCP twice - return immediately
-        if len(gcp) > 0:
+        if len(gcp) > 0 and not is_refresh:
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
 
         crm_service = get_special_crm_resource()
@@ -306,7 +307,7 @@ def verify_gcp(request, user_id):
             for member in members:
                 if member.startswith('user:'):
                     email = member.split(':')[1]
-                    if user.email == email:
+                    if user.email.lower() == email.lower():
                         user_found = True
                     registered_user = bool(User.objects.filter(email=email).first())
                     roles[role].append({'email': email,
@@ -340,16 +341,19 @@ def register_gcp(request, user_id):
     try:
         if request.POST:
             project_id = request.POST.get('gcp_id', None)
+            register_users = request.POST.getlist('register_users')
+            is_refresh = bool(request.POST.get('is_refresh', '') == 'true')
+
             project_name = project_id
 
-            register_users = request.POST.getlist('register_users')
             if not user_id or not project_id or not project_name:
                 pass
             else:
                 try:
                     gcp = GoogleProject.objects.get(project_name=project_name,
                                                     project_id=project_id)
-                    messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
+                    if not is_refresh:
+                        messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
 
                 except ObjectDoesNotExist:
                     gcp = GoogleProject.objects.create(project_name=project_name,
@@ -357,19 +361,36 @@ def register_gcp(request, user_id):
                                                        big_query_dataset='')
                     gcp.save()
 
+
             users = User.objects.filter(email__in=register_users)
+
+            if is_refresh:
+                users = users.exclude(id__in=gcp.user.all())
+                if len(users):
+                    msg = "The following user{} added to GCP {}: {}".format(
+                        ("s were" if len(users) > 1 else " was"),
+                        project_id,
+                        ", ".join(users.values_list('email',flat=True)))
+                else:
+                    msg = "There were no new users to add to GCP {}.".format(project_id)
+
+                messages.info(request, msg)
 
             for user in users:
                 gcp.user.add(user)
                 gcp.save()
+
             return redirect('user_gcp_list', user_id=request.user.id)
+
+        return render(request, 'GenespotRE/register_gcp.html', {})
 
     except Exception as e:
         logger.error("[ERROR] While registering a Google Cloud Project:")
         logger.exception(e)
         messages.error(request, "There was an error while attempting to register this Google Cloud Project - please contact the administrator.")
 
-    return render(request, 'GenespotRE/register_gcp.html', {})
+    return redirect('user_gcp_list', user_id=request.user.id)
+
 
 
 @login_required
@@ -497,7 +518,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     roles[role].append({'email': email,
                                        'registered_user': registered_user})
                 elif member.startswith('serviceAccount'):
-                    if member.split(':')[1] == service_account:
+                    if member.split(':')[1].lower() == service_account.lower():
                         verified_sa = True
 
         # 2. Verify that the current user is a member of the GCP project
@@ -506,7 +527,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             st_logger.write_struct_log_entry(log_name, {
                 'message': 'While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
             })
-            return {'message': 'You must be a member of a project in order to register it'}
+            return {'message': 'You must be a member of a project in order to register its service accounts.'}
 
         # 3. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
@@ -590,11 +611,11 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 # 4. VERIFY PI IS ON THE PROJECT
 
     except HttpError as e:
-        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
         return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
     except Exception as e:
-        logger.error("[STATUS] While verifying a service account {}: ".format(service_account))
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
         return {'message': "There was an error while verifying this service account. Please contact the administrator."}
 
@@ -667,7 +688,12 @@ def register_sa(request, user_id):
                 context['sa_datasets'] = service_account.get_auth_datasets()
                 context['sa_id'] = service_account.service_account
             else:
-                context['gcp_id'] = escape(request.GET.get('gcp_id'))
+                gcp_id = escape(request.GET.get('gcp_id'))
+                crm_service = get_special_crm_resource()
+                gcp = crm_service.projects().get(
+                    projectId=gcp_id).execute()
+                context['gcp_id'] = gcp_id
+                context['default_sa_id'] = gcp['projectNumber']+'-compute@developer.gserviceaccount.com'
 
             return render(request, template, context)
 
@@ -695,7 +721,7 @@ def register_sa(request, user_id):
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
 
             # If the verification was successful, finalize access
-            if result['all_user_datasets_verified']:
+            if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
                                 {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
 
@@ -770,7 +796,7 @@ def register_sa(request, user_id):
                     messages.error(request, result['message'])
                     logger.warn(result['message'])
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-                # Somehow managed to register even though previous verification failed
+                # Verification passed before but failed now
                 elif not result['all_user_datasets_verified']:
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
                     logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
@@ -816,7 +842,7 @@ def register_sa(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While registering a Service Account: ")
         logger.exception(e)
-        messages.error(request,"Unable to register this Google Cloud Project - please contact the administrator.")
+        messages.error(request, "Unable to register this Service Account - please contact the administrator.")
         return redirect('user_gcp_list', user_id=user_id)
 
 
