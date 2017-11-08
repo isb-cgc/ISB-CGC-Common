@@ -79,10 +79,12 @@ class BigQueryCohortSupport(object):
                 'mode': 'REQUIRED'
             },{
                 'name': 'project_short_name',
-                'type': 'STRING'
+                'type': 'STRING',
+                'mode': 'REQUIRED'
             },{
                 'name': 'date_added',
-                'type': 'TIMESTAMP'
+                'type': 'TIMESTAMP',
+                'mode': 'REQUIRED'
             },{
                 'name': 'case_gdc_uuid',
                 'type': 'STRING'
