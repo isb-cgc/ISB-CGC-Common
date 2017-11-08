@@ -688,7 +688,12 @@ def register_sa(request, user_id):
                 context['sa_datasets'] = service_account.get_auth_datasets()
                 context['sa_id'] = service_account.service_account
             else:
-                context['gcp_id'] = escape(request.GET.get('gcp_id'))
+                gcp_id = escape(request.GET.get('gcp_id'))
+                crm_service = get_special_crm_resource()
+                gcp = crm_service.projects().get(
+                    projectId=gcp_id).execute()
+                context['gcp_id'] = gcp_id
+                context['default_sa_id'] = gcp['projectNumber']+'-compute@developer.gserviceaccount.com'
 
             return render(request, template, context)
 

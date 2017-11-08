@@ -728,7 +728,6 @@ def validate_barcodes(request):
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
-
     try:
         shared_with_users = []
 
@@ -1633,25 +1632,28 @@ def union_cohort(request):
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def intersect_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
     return redirect(redirect_url)
+
 
 @login_required
 @csrf_protect
 def set_minus_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def save_comment(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     content = request.POST.get('content').encode('utf-8')
     cohort = Cohort.objects.get(id=int(request.POST.get('cohort_id')))
     obj = Cohort_Comments.objects.create(user=request.user, cohort=cohort, content=content)
@@ -1660,14 +1662,15 @@ def save_comment(request):
         'first_name': request.user.first_name,
         'last_name': request.user.last_name,
         'date_created': formats.date_format(obj.date_created, 'DATETIME_FORMAT'),
-        'content': obj.content
+        'content': escape(obj.content)
     }
     return HttpResponse(json.dumps(return_obj), status=200)
+
 
 @login_required
 @csrf_protect
 def save_cohort_from_plot(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     cohort_name = request.POST.get('cohort-name', 'Plot Selected Cohort')
     result = {}
 
