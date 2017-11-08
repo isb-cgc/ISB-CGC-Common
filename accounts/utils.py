@@ -178,7 +178,7 @@ def is_email_in_iam_roles(roles, user_email):
     """
     found = False
     for role, user_list in roles.iteritems():
-        if user_email in [user_item['email'] for user_item in user_list]:
+        if user_email.lower() in [user_item['email'].lower() for user_item in user_list]:
             found = True
             break
 

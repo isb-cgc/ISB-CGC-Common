@@ -19,6 +19,8 @@ limitations under the License.
 from django.db import models
 from django.contrib.auth.models import User
 import logging
+from datetime import datetime, timedelta
+import pytz
 
 logger = logging.getLogger('main_logger')
 
@@ -124,6 +126,10 @@ class ServiceAccount(models.Model):
             logger.error("[ERROR] While retrieving authorized datasets: ")
             logger.exception(e)
         return result
+
+    def is_expired(self):
+        expired_time = pytz.utc.localize(datetime.utcnow() + timedelta(days=-7, minutes=10))
+        return self.authorized_date < expired_time
 
 
 class ServiceAccountAuthorizedDatasets(models.Model):
