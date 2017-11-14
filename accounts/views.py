@@ -314,10 +314,10 @@ def verify_gcp(request, user_id):
                                        'registered_user': registered_user})
 
         if not user_found:
+            status='403'
             logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
             logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
             message = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
-            status='403'
         else:
             return JsonResponse({'roles': roles,
                                 'gcp_id': gcp_id}, status='200')
@@ -507,6 +507,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         bindings = iam_policy['bindings']
         roles = {}
         verified_sa = False
+        invalid_members = []
         for val in bindings:
             role = val['role']
             members = val['members']
@@ -520,6 +521,17 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 elif member.startswith('serviceAccount'):
                     if member.split(':')[1].lower() == service_account.lower():
                         verified_sa = True
+                else:
+                    invalid_members.append(member)
+
+        # If we found anything other than a user or a service account with a role in this project and the registration
+        # is for controlled data, disallow
+        if len(invalid_members) and dataset_objs.count() > 1:
+            logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the project membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
+            st_logger.write_struct_log_entry(log_name, {
+                'message': '[STATUS] While verifying SA {}, found one or more invalid members in the project membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
+            })
+            return {'message': 'Service Account {} belongs to project {}, which has one or more invalid members ({}); controlled data can only be access from projects with user and service account members.'.format(service_account,gcp_id,"; ".join(invalid_members)),}
 
         # 2. Verify that the current user is a member of the GCP project
         if not is_email_in_iam_roles(roles, user_email):
