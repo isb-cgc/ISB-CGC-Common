@@ -513,7 +513,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         # If we find an org, we reject
 
         # Get the project number so we can validate SA source projects
-        project = crm_service.projects().get(projectId=gcp_id).execute
+        project = crm_service.projects().get(projectId=gcp_id).execute()
         if project:
             projectNumber = project['projectNumber']
 
@@ -826,8 +826,7 @@ def register_sa(request, user_id):
                             try:
                                 directory_service, http_auth = get_directory_resource()
                                 directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                                                   memberKey=saad.service_account.service_account).execute(
-                                    http=http_auth)
+                                                                   memberKey=saad.service_account.service_account).execute(http=http_auth)
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                                     'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
                                         saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
@@ -870,8 +869,7 @@ def register_sa(request, user_id):
                             try:
                                 directory_service, http_auth = get_directory_resource()
                                 directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                                                   memberKey=saad.service_account.service_account).execute(
-                                    http=http_auth)
+                                                                   memberKey=saad.service_account.service_account).execute(http=http_auth)
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                                     'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
                                         saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
