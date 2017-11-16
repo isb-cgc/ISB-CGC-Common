@@ -27,7 +27,7 @@ def get_crm_resource():
     """Returns a Cloud Resource Manager service client for calling the API.
     """
     credentials = GoogleCredentials.get_application_default()
-    return build('cloudresourcemanager', 'v1', credentials=credentials, cache_discovery=False)
+    return build('cloudresourcemanager', 'v1beta1', credentials=credentials, cache_discovery=False)
 
 
 def get_special_crm_resource():
@@ -37,4 +37,4 @@ def get_special_crm_resource():
     """
     credentials = GoogleCredentials.from_stream(
         settings.USER_GCP_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
-    return build('cloudresourcemanager', 'v1', credentials=credentials, cache_discovery=False)
+    return build('cloudresourcemanager', 'v1beta1', credentials=credentials, cache_discovery=False)
