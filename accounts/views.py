@@ -38,7 +38,7 @@ from projects.models import User_Data_Tables
 from django.utils.html import escape
 
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
-from .utils import ServiceAccountBlacklist, is_email_in_iam_roles
+from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist
 import json
 
 logger = logging.getLogger('main_logger')
@@ -46,6 +46,7 @@ logger = logging.getLogger('main_logger')
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
+GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 
 @login_required
 def extended_logout_view(request):
@@ -439,6 +440,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_names = dataset_objs.values_list('name', flat=True)
     projectNumber = None
+    sab = None
+    gow = None
 
     # log the reports using Cloud logging API
     st_logger = StackDriverLogger.build_from_django_settings()
@@ -452,11 +455,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Block verification of service accounts used by the application
     try:
         sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
+        gow = GoogleOrgWhitelist.from_json_file_path(GOOGLE_ORG_WHITELIST_PATH)
     except Exception as e:
-        logger.error("[ERROR] Exception while creating ServiceAccountBlacklist instance: ")
+        logger.error("[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
         logger.exception(e)
         trace_msg = traceback.format_exc()
-        st_logger.write_text_log_entry(log_name, "[ERROR] Exception while creating ServiceAccountBlacklist instance: ")
+        st_logger.write_text_log_entry(log_name, "[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
         st_logger.write_text_log_entry(log_name, trace_msg)
         return {'message': 'An error occurred while validating the service account.'}
 
@@ -514,7 +518,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             projectNumber = project['projectNumber']
 
             # If we found an organization and this is a controlled dataset registration/adjustment, refuse registration
-            if ('parent' in project and project['parent']['type'] == 'organization') and dataset_objs.count() > 0:
+            if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and dataset_objs.count() > 0:
                 logger.info("[STATUS] While attempting to register GCP ID {}: ".format(str(gcp_id)))
                 logger.info("GCP {} was found to be in organization ID {}; its service accounts cannot be registered for use with controlled data.".format(str(gcp_id),project['parent']['id']))
                 return {
