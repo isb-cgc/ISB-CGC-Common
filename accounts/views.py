@@ -289,67 +289,39 @@ def verify_gcp(request, user_id):
 
         gcp = GoogleProject.objects.filter(project_id=gcp_id)
         # Can't register the same GCP twice - return immediately
-        if len(gcp) > 0 and not is_refresh:
+        if gcp.count() > 0 and not is_refresh:
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
 
         crm_service = get_special_crm_resource()
+        iam_policy = crm_service.projects().getIamPolicy(
+            resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        user = User.objects.get(id=user_id)
+        user_found = False
 
-        # Check for organization; if we find one, we reject
-        org_found = None
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            roles[role] = []
 
-        try:
-            ancestry = crm_service.projects().getAncestry(
-                projectId=gcp_id, body={}).execute()
-        except Exception as e:
-            logger.error("[ERROR] While attempting to retrieve ancestry information for GCP {}:".format(gcp_id))
-            logger.exception(e)
-            raise Exception("Unable to retrieve ancestry information for this project.")
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1]
+                    if user.email.lower() == email.lower():
+                        user_found = True
+                    registered_user = bool(User.objects.filter(email=email).first())
+                    roles[role].append({'email': email,
+                                       'registered_user': registered_user})
 
-        if ancestry and 'ancestor' in ancestry:
-            for ancestor in ancestry['ancestor']:
-                if ancestor['resourceId']['type'] == 'organization':
-                    org_found = ancestor['resourceId']['id']
-        else:
-            # If we received no useful response but didn't get an error, this doesn't mean there's no org--consider it an exception
-            raise Exception("No ancestry information was found for this project.")
-
-        # If we found an organization, refuse registration
-        if org_found:
+        if not user_found:
             status='403'
             logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
-            logger.error("GCP {} was found to be in organization ID {}; it cannot be registered".format(str(gcp_id), str(org_found)))
-            response['message'] = "GCP {} was found to be in organization ID {}; it cannot be registered".format(str(gcp_id), str(org_found))
-        # Otherwise, get the IAM policy
+            logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
+            response['message'] = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
         else:
-            iam_policy = crm_service.projects().getIamPolicy(
-                resource=gcp_id, body={}).execute()
-            bindings = iam_policy['bindings']
-            roles = {}
-            user = User.objects.get(id=user_id)
-            user_found = False
-
-            for val in bindings:
-                role = val['role']
-                members = val['members']
-                roles[role] = []
-
-                for member in members:
-                    if member.startswith('user:'):
-                        email = member.split(':')[1]
-                        if user.email.lower() == email.lower():
-                            user_found = True
-                        registered_user = bool(User.objects.filter(email=email).first())
-                        roles[role].append({'email': email,
-                                           'registered_user': registered_user})
-
-            if not user_found:
-                status='403'
-                logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
-                logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
-                response['message'] = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
-            else:
-                response = {'roles': roles,'gcp_id': gcp_id}
-                status='200'
+            response = {'roles': roles,'gcp_id': gcp_id}
+            status='200'
 
     except Exception as e:
         if type(e) is HttpError:
@@ -462,9 +434,11 @@ def user_gcp_delete(request, user_id, gcp_id):
 
 
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+
     # Only verify for protected datasets
     dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     dataset_obj_names = dataset_objs.values_list('name', flat=True)
+    projectNumber = None
 
     # log the reports using Cloud logging API
     st_logger = StackDriverLogger.build_from_django_settings()
@@ -487,11 +461,10 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         return {'message': 'An error occurred while validating the service account.'}
 
     if sab.is_blacklisted(service_account):
-        st_logger.write_text_log_entry(log_name, "{0}: Service account is blacklisted.".format(service_account))
+        st_logger.write_text_log_entry(log_name, "Cannot register {0}: Service account is blacklisted.".format(service_account))
         return {'message': 'This service account cannot be registered.'}
 
-
-    # Refreshes require a service account to exist, and, you cannot register an account if it already exists with the same datasets
+    # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
         if is_adjust or not is_refresh:
@@ -500,10 +473,10 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             saads = AuthorizedDataset.objects.filter( id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
 
             # If we're removing all datasets and there are 1 or more, this is automatically a registration change
-            if remove_all and len(saads):
+            if remove_all and saads.count():
                 reg_change = True
             else:
-                if len(dataset_objs) or len(saads):
+                if dataset_objs.count() or saads.count():
                     ads = dataset_objs.values_list('whitelist_id', flat=True)
                     # A private dataset missing from either list means this is a registration change
                     for ad in ads:
@@ -528,10 +501,47 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 'level': 'error'
             }
 
+    crm_service = get_special_crm_resource()
 
-    # 1. GET ALL USERS ON THE PROJECT.
+    # 0. VERIFY THE PROJECT'S ANCESTRY AND RETRIEVE THE NUMBER
     try:
-        crm_service = get_special_crm_resource()
+        # Retrieve project number and check for organization
+        # If we find an org, we reject
+
+        # Get the project number so we can validate SA source projects
+        project = crm_service.projects().get(projectId=gcp_id).execute
+        if project:
+            projectNumber = project['projectNumber']
+
+            # If we found an organization and this is a controlled dataset registration/adjustment, refuse registration
+            if ('parent' in project and project['parent']['type'] == 'organization') and dataset_objs.count() > 0:
+                logger.info("[STATUS] While attempting to register GCP ID {}: ".format(str(gcp_id)))
+                logger.info("GCP {} was found to be in organization ID {}; its service accounts cannot be registered for use with controlled data.".format(str(gcp_id),project['parent']['id']))
+                return {
+                    'message': "GCP {} was found to be in organization ID {}; its service accounts cannot be registered for use with controlled data.".format(str(gcp_id),project['parent']['id']),
+                    'level': 'error'
+                }
+        else:
+            return {
+                'message': 'Unable to retrieve project information for GCP {} when registering SA {}; the SA cannot be registered.'.format(str(gcp_id),service_account),
+                'level': 'error'
+            }
+    except Exception as e:
+        logger.error("[ERROR] While attempting to retrieve project information for GCP {}:".format(gcp_id))
+        logger.exception(e)
+        raise Exception("Unable to retrieve project information for GCP {}; its service accounts cannot be registered.".format(gcp_id))
+
+    # 1. VERIFY SA IS FROM THIS GCP
+    # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
+    if projectNumber not in service_account and gcp_id not in service_account and dataset_objs.count() > 0:
+        return {
+            'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
+                service_account, str(gcp_id),),
+            'level': 'error'
+        }
+
+    # 2. GET ALL USERS ON THE PROJECT.
+    try:
         iam_policy = crm_service.projects().getIamPolicy(
             resource=gcp_id, body={}).execute()
         bindings = iam_policy['bindings']
@@ -549,38 +559,41 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     roles[role].append({'email': email,
                                        'registered_user': registered_user})
                 elif member.startswith('serviceAccount'):
-                    if member.split(':')[1].lower() == service_account.lower():
+                    member_sa = member.split(':')[1].lower()
+                    if member_sa == service_account.lower():
                         verified_sa = True
+                    elif projectNumber not in member_sa and gcp_id not in member_sa and member_sa != settings.GCP_REG_CLIENT_EMAIL.lower() and dataset_objs.count() > 0:
+                        invalid_members.append(member)
                 else:
                     invalid_members.append(member)
 
-        # If we found anything other than a user or a service account with a role in this project and the registration
-        # is for controlled data, disallow
-        if len(invalid_members) and dataset_objs.count() > 1:
-            logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the project membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
+        # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
+        # which do not belong to this project, and the registration is for controlled data, disallow
+        if len(invalid_members) and dataset_objs.count() > 0:
+            logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
             st_logger.write_struct_log_entry(log_name, {
-                'message': '[STATUS] While verifying SA {}, found one or more invalid members in the project membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
+                'message': '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
             })
-            return {'message': 'Service Account {} belongs to project {}, which has one or more invalid members ({}); controlled data can only be access from projects with user and service account members.'.format(service_account,gcp_id,"; ".join(invalid_members)),}
+            return {'message': 'Service Account {} belongs to project {}, which has one or more invalid members ({}); controlled data can only be accessed from GCPs with users and service accounts that originate from that GCP.'.format(service_account,gcp_id,"; ".join(invalid_members)),}
 
-        # 2. Verify that the current user is a member of the GCP project
+        # 4. Verify that the current user is on the GCP project
         if not is_email_in_iam_roles(roles, user_email):
-            logger.info('[STATUS] While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id))
+            logger.info('[STATUS] While verifying SA {0}: User email {1} is not the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id))
             st_logger.write_struct_log_entry(log_name, {
-                'message': 'While verifying SA {0}: User email {1} is not the IAM policy of project {2}.'.format(service_account, user_email, gcp_id)
+                'message': 'While verifying SA {0}: User email {1} is not the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
             })
             return {'message': 'You must be a member of a project in order to register its service accounts.'}
 
-        # 3. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
+        # 5. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
-            logger.info('[STATUS] While verifying SA {0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id))
+            logger.info('[STATUS] While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id))
 
-            st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in project {1}.'.format(service_account, gcp_id)})
+            st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
             return {'message': "Service Account ID '{}' does not exist in Google Cloud Project {}. Please double-check the service account you have entered.".format(service_account,gcp_id)}
 
 
-        # 4. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
+        # 6. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
         all_user_datasets_verified = True
 
         for role, members in roles.items():
@@ -649,8 +662,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         all_user_datasets_verified = False
                         for dataset in dataset_objs:
                             member['datasets'].append({'name': dataset.name, 'valid': False})
-
-                # 4. VERIFY PI IS ON THE PROJECT
 
     except HttpError as e:
         logger.error("[STATUS] While verifying service account {}: ".format(service_account))
