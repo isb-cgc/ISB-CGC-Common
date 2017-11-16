@@ -19,9 +19,10 @@ import csv
 import json
 import traceback
 import re
+import datetime
 
 import django
-from bq_data_access.v2.cohort_bigquery import BigQueryCohortSupport
+from google_helpers.cohort_bigquery import BigQueryCohortSupport
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -39,7 +40,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.utils.html import escape
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
-from accounts.models import NIH_User, UserAuthorizedDatasets
+from accounts.models import NIH_User, UserAuthorizedDatasets, GoogleProject
 from metadata_helpers import *
 from metadata_counting import *
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
@@ -69,6 +70,66 @@ def convert(data):
         return type(data)(map(convert, data))
     else:
         return data
+
+
+# Given a cohort ID, fetches the case_gdc_id or uuid of its samples
+# As metadata_data tables are build specific, this checks all builds and coalesces the results; if more than one
+# nonnull result is found the first one is kept (though in practice all non-null values should be identical)
+def get_cohort_uuids(cohort_id):
+    if not cohort_id:
+        raise Exception("A cohort ID was not provided (value={}).".format("None" if cohort_id is None else str(cohort_id)))
+
+    cohort_progs = Cohort.objects.get(id=cohort_id).get_programs()
+
+    data_tables = Public_Data_Tables.objects.filter(program_id__in=cohort_progs)
+
+    uuid_query_base = """
+        SELECT cs.sample_barcode, COALESCE ({}) as uuid
+        FROM cohorts_samples cs
+        {}
+    """
+
+    result = {}
+
+    db = None
+    cursor = None
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        query = uuid_query_base
+
+        # Because UUIDs are stored in the data tables, which are build specific, we need to check the values
+        # in all builds for a given program. If more than one build has a case_gdc_id they should match, but some could
+        # be null, so we need to coalesce them to find a non-null value
+        for prog in cohort_progs:
+            prog_data_tables = data_tables.filter(program_id=prog)
+            count=1
+            uuid_cols = []
+            joins = []
+            for data_table in prog_data_tables:
+                uuid_cols.append("ds{}.case_gdc_id".format(str(count)))
+                joins.append("""
+                    LEFT JOIN {} ds{}
+                    ON ds{}.sample_barcode = cs.sample_barcode
+                """.format(data_table.data_table,str(count),str(count),))
+                count+=1
+
+            cursor.execute(query.format(",".join(uuid_cols)," ".join(joins)) + " WHERE cs.cohort_id = %s;", (cohort_id,))
+
+            for row in cursor.fetchall():
+                if row[0] not in result:
+                    result[row[0]] = row[1]
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching UUIDs for a cohort:")
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return result
 
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
@@ -177,7 +238,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                     logger.warn('[WARNING] No valid project tables were found!')
 
             except Exception as e:
-                logger.error(traceback.format_exc())
+                logger.exception(e)
             finally:
                 if cursor: cursor.close()
                 if db and db.open: db.close()
@@ -312,7 +373,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
             results = get_bq_job_results(bq_service, query_job['jobReference'])
 
-            if results.__len__() > 0:
+            if len(results) > 0:
                 for barcode in results:
                     barcodes.append(str(barcode['f'][0]['v']))
 
@@ -321,7 +382,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
-            tmp_mut_table = 'bq_res_table_' + user.id.__str__() + "_" + make_id(6)
+            tmp_mut_table = 'bq_res_table_' + str(user.id) + "_" + make_id(6)
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
@@ -514,7 +575,7 @@ def get_cases_by_cohort(cohort_id):
         return set(cases)
 
     except (Exception) as e:
-        logger.error(traceback.format_exc())
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -525,7 +586,7 @@ def public_cohort_list(request):
 
 @login_required
 def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=False):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     # check to see if user has read access to 'All TCGA Data' cohort
     isb_superuser = User.objects.get(username='isb')
@@ -667,7 +728,6 @@ def validate_barcodes(request):
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
-
     try:
         shared_with_users = []
 
@@ -794,6 +854,154 @@ def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_
         logger.exception(e)
 
     return redirect(redirect_url)
+
+
+@login_required
+@csrf_protect
+def export_cohort(request):
+    return export_cohort_to_bq(request)
+
+
+@login_required
+@csrf_protect
+def export_cohort_to_bq(request, cohort_id=0):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+
+    try:
+
+        req_user = User.objects.get(id=request.user.id)
+
+        # GET request receives the potential list of projects and datasets this user has available to make a table in
+        if request.method == 'GET':
+            result = {
+                'status': '',
+                'data': {
+                    'projects': []
+                }
+            }
+            gcps = GoogleProject.objects.filter(user=req_user)
+
+            if not gcps.count():
+                status = 500
+                result = {
+                    'status': 'error',
+                    'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
+                }
+            else:
+                for gcp in gcps:
+                    bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
+
+                    this_proj = {
+                        'datasets': {},
+                        'name': gcp.project_id
+                    }
+                    bqs = BigQueryCohortSupport(gcp.project_id, None, None)
+                    bq_tables = bqs.get_tables()
+                    for table in bq_tables:
+                        if table['dataset'] in bqds:
+                            if table['dataset'] not in this_proj['datasets']:
+                                this_proj['datasets'][table['dataset']] = []
+                            if table['table_id']:
+                                this_proj['datasets'][table['dataset']].append(table['table_id'])
+                    if len(this_proj['datasets']):
+                        result['data']['projects'].append(this_proj)
+
+                if not len(result['data']['projects']):
+                    status=500
+                    result = {
+                        'status': 'error',
+                        'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
+                    }
+                else:
+                    status=200
+                    result['status']='success'
+
+            return JsonResponse(result, status=status)
+
+        # POST is to actually export the cohort(s) to a chosen project:dataset:table
+
+        redirect_url = reverse('cohort_list')
+
+        dataset = None
+        table = None
+        bq_proj_id = None
+
+        if not cohort_id:
+            messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
+            return redirect(redirect_url)
+
+        cohort = Cohort.objects.get(id=cohort_id)
+        dataset = request.POST.get('project-dataset', '').split(":")[1]
+        table = None
+
+        if request.POST.get('table-type', '') == 'new':
+            table = request.POST.get('new-table-name', None)
+            if table:
+                # Check the user-provided table name against the whitelist for Google BQ table names
+                # truncate at max length regardless of what we received
+                table = request.POST.get('new-table-name', '')[0:1024]
+                tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
+                match = tbl_whitelist.search(unicode(table))
+                if match:
+                    messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
+                    return redirect(redirect_url)
+        else:
+            table = request.POST.get('table-name', None)
+
+        proj_id = request.POST.get('project-dataset', '').split(":")[0]
+
+        if not len(proj_id):
+            messages.error(request, "You must provide a Google Cloud Project to which your cohort can be exported.")
+            return redirect(redirect_url)
+        else:
+            try:
+                gcp = GoogleProject.objects.get(project_name=proj_id)
+            except ObjectDoesNotExist as e:
+                messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+                return redirect(redirect_url)
+
+        bq_proj_id = gcp.project_id
+
+        try:
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        except ObjectDoesNotExist as e:
+            messages.error(request, "You must be the owner of a cohort in order to export it.")
+            return redirect(redirect_url)
+
+        if not len(dataset):
+            dataset = "isb_cgc_cohort_export_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
+        if not table:
+            table = "isb_cgc_cohort_{}_{}_{}".format(cohort_id,re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
+        # Store cohort to BigQuery
+        samples = Samples.objects.filter(cohort=cohort)
+        uuids = get_cohort_uuids(cohort_id)
+        bcs = BigQueryCohortSupport(bq_proj_id, dataset, table)
+        bq_result = bcs.export_cohort_to_bq(samples, uuids)
+
+        # If BQ insertion fails, we warn the user
+        if 'insertErrors' in bq_result:
+            redirect_url = reverse('cohort_list')
+            err_msg = ''
+            if len(bq_result['insertErrors']) > 1:
+                err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
+            else:
+                err_msg = 'There was an insertion error '
+            messages.error(request,
+                           err_msg + ' when exporting your cohort to BigQuery table {}. Creation of the BQ cohort has failed.'.format(table))
+        elif 'tableErrors' in bq_result:
+            messages.error(request,bq_result['tableErrors'])
+        else:
+            messages.info(request, "Cohort {} was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to export cohort {} to BQ:".format(str(cohort_id)))
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to export your cohort - please contact the administrator.")
+
+    return redirect(redirect_url)
+
 
 
 @login_required
@@ -1405,7 +1613,7 @@ def set_operation(request):
 
     except Exception as e:
         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
-        logger.error(traceback.format_exc())
+        logger.exception(e)
         redirect_url = 'cohort_list'
         message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % name) if name else '')
         messages.error(request, message)
@@ -1424,25 +1632,28 @@ def union_cohort(request):
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def intersect_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
     return redirect(redirect_url)
+
 
 @login_required
 @csrf_protect
 def set_minus_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def save_comment(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     content = request.POST.get('content').encode('utf-8')
     cohort = Cohort.objects.get(id=int(request.POST.get('cohort_id')))
     obj = Cohort_Comments.objects.create(user=request.user, cohort=cohort, content=content)
@@ -1451,14 +1662,15 @@ def save_comment(request):
         'first_name': request.user.first_name,
         'last_name': request.user.last_name,
         'date_created': formats.date_format(obj.date_created, 'DATETIME_FORMAT'),
-        'content': obj.content
+        'content': escape(obj.content)
     }
     return HttpResponse(json.dumps(return_obj), status=200)
+
 
 @login_required
 @csrf_protect
 def save_cohort_from_plot(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     cohort_name = request.POST.get('cohort-name', 'Plot Selected Cohort')
     result = {}
 
@@ -2040,9 +2252,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             'programs_no_files': progs_without_files
         }
 
-    except (IndexError, TypeError):
+    except (IndexError, TypeError) as e:
         logger.error("Error obtaining list of samples in cohort file list")
-        logger.error(traceback.format_exc())
+        logger.exception(e)
         resp = {'error': 'Error obtaining list of samples in cohort file list'}
 
     except (ObjectDoesNotExist, MultipleObjectsReturned), e:
@@ -2052,7 +2264,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
     except Exception as e:
         logger.error("[ERROR] Exception obtaining file list and platform counts:")
-        logger.error(traceback.format_exc())
+        logger.exception(e)
         resp = {'error': 'Error getting counts'}
 
     finally:

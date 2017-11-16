@@ -17,12 +17,16 @@ limitations under the License.
 import operator
 import string
 import sys
+import logging
 from django.db import models
+from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from projects.models import Project, Program, User_Feature_Definitions
 from sharing.models import Shared_Resource
 from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
+
+logger = logging.getLogger('main_logger')
 
 
 class CohortManager(models.Manager):
@@ -57,10 +61,10 @@ class Cohort(models.Model):
     count as more than one
     '''
     def sample_size(self):
-        return len(self.samples_set.all())
+        return self.samples_set.all().count()
 
     def case_size(self):
-        return len(self.samples_set.values_list('case_barcode', flat=True).distinct())
+        return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
 
     def get_programs(self):
         projects = self.samples_set.values_list('project_id', flat=True).distinct()
@@ -74,7 +78,7 @@ class Cohort(models.Model):
             user = request.user
 
         last_view = self.cohort_last_view_set.filter(user=user)
-        if last_view is None or len(last_view) is 0:
+        if last_view is None or last_view.count() == 0:
             last_view = self.cohort_last_view_set.create(user=user)
         else:
             last_view = last_view[0]
@@ -89,7 +93,7 @@ class Cohort(models.Model):
     def get_perm(self, request):
         perm = self.cohort_perms_set.filter(user_id=request.user.id).order_by('perm')
 
-        if len(perm) >= 1:
+        if perm.count() > 0:
             return perm[0]
         else:
             return None
@@ -115,7 +119,7 @@ class Cohort(models.Model):
         while cohort:
             filter_list.extend(Filters.objects.filter(resulting_cohort=cohort))
             sources = Source.objects.filter(cohort=cohort)
-            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
                 cohort = sources[0].parent
             else:
                 cohort = None
@@ -146,7 +150,7 @@ class Cohort(models.Model):
 
 
             sources = Source.objects.filter(cohort=cohort)
-            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
                 cohort = sources[0].parent
             else:
                 cohort = None
@@ -182,7 +186,7 @@ class Cohort(models.Model):
         while cohort:
             filter_list = Filters.objects.filter(resulting_cohort=cohort)
             sources = Source.objects.filter(cohort=cohort)
-            if sources and len(sources) == 1 and sources[0].type == Source.FILTERS:
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
                 cohort = sources[0].parent
             else:
                 cohort = None
@@ -216,7 +220,7 @@ class Cohort(models.Model):
 
         while sources and keep_traversing:
             # single parent
-            if len(sources) == 1:
+            if sources.count() == 1:
                 source = sources[0]
                 if source.type == Source.FILTERS:
                     if filter_history is None:
@@ -249,7 +253,7 @@ class Cohort(models.Model):
 
         while sources:
             # single parent
-            if len(sources) == 1:
+            if sources.count() == 1:
                 source = sources[0]
                 if source.type == Source.FILTERS:
                     if source_filters is None:
@@ -268,7 +272,7 @@ class Cohort(models.Model):
                 sources = Source.objects.filter(cohort=source.parent)
 
             # multiple parents
-            if len(sources) > 1:
+            if sources.count() > 1:
                 if sources[0].type == Source.SET_OPS:
                     revision_list.append(sources[0].notes)
                 if sources[0].type == Source.PLOT_SEL:
