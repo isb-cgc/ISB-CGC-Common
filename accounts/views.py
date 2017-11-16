@@ -281,8 +281,8 @@ def user_gcp_list(request, user_id):
 
 @login_required
 def verify_gcp(request, user_id):
-    message = None
     status = None
+    response = {}
     try:
         gcp_id = request.GET.get('gcp-id', None)
         is_refresh = bool(request.GET.get('is_refresh', '')=='true')
@@ -293,46 +293,76 @@ def verify_gcp(request, user_id):
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
 
         crm_service = get_special_crm_resource()
-        iam_policy = crm_service.projects().getIamPolicy(
-            resource=gcp_id, body={}).execute()
-        bindings = iam_policy['bindings']
-        roles = {}
-        user = User.objects.get(id=user_id)
-        user_found = False
-        for val in bindings:
-            role = val['role']
-            members = val['members']
-            roles[role] = []
 
-            for member in members:
-                if member.startswith('user:'):
-                    email = member.split(':')[1]
-                    if user.email.lower() == email.lower():
-                        user_found = True
-                    registered_user = bool(User.objects.filter(email=email).first())
-                    roles[role].append({'email': email,
-                                       'registered_user': registered_user})
+        # Check for organization; if we find one, we reject
+        org_found = None
 
-        if not user_found:
+        try:
+            ancestry = crm_service.projects().getAncestry(
+                projectId=gcp_id, body={}).execute()
+        except Exception as e:
+            logger.error("[ERROR] While attempting to retrieve ancestry information for GCP {}:".format(gcp_id))
+            logger.exception(e)
+            raise Exception("Unable to retrieve ancestry information for this project.")
+
+        if ancestry and 'ancestor' in ancestry:
+            for ancestor in ancestry['ancestor']:
+                if ancestor['resourceId']['type'] == 'organization':
+                    org_found = ancestor['resourceId']['id']
+        else:
+            # If we received no useful response but didn't get an error, this doesn't mean there's no org--consider it an exception
+            raise Exception("No ancestry information was found for this project.")
+
+        # If we found an organization, refuse registration
+        if org_found:
             status='403'
             logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
-            logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
-            message = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
+            logger.error("GCP {} was found to be in organization ID {}; it cannot be registered".format(str(gcp_id), str(org_found)))
+            response['message'] = "GCP {} was found to be in organization ID {}; it cannot be registered".format(str(gcp_id), str(org_found))
+        # Otherwise, get the IAM policy
         else:
-            return JsonResponse({'roles': roles,
-                                'gcp_id': gcp_id}, status='200')
+            iam_policy = crm_service.projects().getIamPolicy(
+                resource=gcp_id, body={}).execute()
+            bindings = iam_policy['bindings']
+            roles = {}
+            user = User.objects.get(id=user_id)
+            user_found = False
+
+            for val in bindings:
+                role = val['role']
+                members = val['members']
+                roles[role] = []
+
+                for member in members:
+                    if member.startswith('user:'):
+                        email = member.split(':')[1]
+                        if user.email.lower() == email.lower():
+                            user_found = True
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[role].append({'email': email,
+                                           'registered_user': registered_user})
+
+            if not user_found:
+                status='403'
+                logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
+                logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
+                response['message'] = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
+            else:
+                response = {'roles': roles,'gcp_id': gcp_id}
+                status='200'
+
     except Exception as e:
         if type(e) is HttpError:
             logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
-            message = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            response['message'] = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '403'
         else:
             logger.error("[ERROR] While trying to verify GCP ID {}:".format(str(gcp_id)))
-            message = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '500'
         logger.exception(e)
 
-    return JsonResponse({'message': message}, status=status)
+    return JsonResponse(response, status=status)
 
 
 @login_required
