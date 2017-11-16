@@ -118,6 +118,41 @@ class ServiceObjectBase(object):
             return cls.from_local_json_file(config_file_path)
 
 
+# Object for fetching the organization whitelist and confirming that a given org is in it
+class GoogleOrgWhitelist(ServiceObjectBase):
+    SCHEMA = {
+        'type': 'object',
+        'properties': {
+            'google_org_whitelist': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                }
+            }
+        },
+        'required': [
+            'google_org_whitelist'
+        ]
+    }
+
+    def __init__(self, google_org_whitelist):
+        self.google_org_whitelist = set(google_org_whitelist)
+
+    def is_whitelisted(self, org_id_number):
+        return org_id_number in self.google_org_whitelist
+
+    @classmethod
+    def from_dict(cls, data):
+        """
+
+        Throws:
+            ValidationError if the data object does not match the required schema.
+        """
+        schema_validate(data, cls.SCHEMA)
+        return cls(data['google_org_whitelist'])
+
+
+# Object for fetching the service account blacklist and confirming that a given service account is not in it
 class ServiceAccountBlacklist(ServiceObjectBase):
     SCHEMA = {
         'type': 'object',
