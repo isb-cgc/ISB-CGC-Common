@@ -471,6 +471,11 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
+        if not is_adjust and not is_refresh:
+            return {
+                'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(str(service_account)),
+                'level': 'error'
+            }
         if is_adjust or not is_refresh:
             reg_change = False
             # Check the private datasets to see if there's a registration change
