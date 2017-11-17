@@ -24,17 +24,29 @@ CRM_SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
 
 
 def get_crm_resource():
-    """Returns a Cloud Resource Manager service client for calling the API.
+    """
+    Returns: a Cloud Resource Manager service client for calling the API.
     """
     credentials = GoogleCredentials.get_application_default()
     return build('cloudresourcemanager', 'v1beta1', credentials=credentials, cache_discovery=False)
 
 
 def get_special_crm_resource():
-    """Returns a Cloud Resource Manager service client for calling the API on other projects.
+    """
+    Returns: a Cloud Resource Manager service client for calling the API on other projects.
         This service client will be authorized on other projects only if one of our service accounts
         has the Browser (or Viewer, Editor, Owner) role on the other project.
     """
     credentials = GoogleCredentials.from_stream(
         settings.USER_GCP_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
     return build('cloudresourcemanager', 'v1beta1', credentials=credentials, cache_discovery=False)
+
+
+def get_iam_resource():
+    """
+    Returns: a Google Identity and Access Management service for use in querying specific kinds of IAM policies
+    not available to the Cloud Resource Manager (eg. Service Account IAM policies)
+    """
+    credentials = GoogleCredentials.from_stream(
+        settings.USER_GCP_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
+    return build('iam', 'v1', credentials=credentials, cache_discovery=False)
