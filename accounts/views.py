@@ -471,6 +471,11 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
+        if not is_adjust and not is_refresh:
+            return {
+                'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(str(service_account)),
+                'level': 'error'
+            }
         if is_adjust or not is_refresh:
             reg_change = False
             # Check the private datasets to see if there's a registration change
@@ -546,8 +551,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # 2. GET ALL USERS ON THE PROJECT.
     try:
-        iam_policy = crm_service.projects().getIamPolicy(
-            resource=gcp_id, body={}).execute()
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
         bindings = iam_policy['bindings']
         roles = {}
         verified_sa = False
@@ -560,13 +564,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 if member.startswith('user:'):
                     email = member.split(':')[1]
                     registered_user = bool(User.objects.filter(email=email).first())
-                    roles[role].append({'email': email,
-                                       'registered_user': registered_user})
+                    roles[role].append({'email': email,'registered_user': registered_user})
                 elif member.startswith('serviceAccount'):
                     member_sa = member.split(':')[1].lower()
                     if member_sa == service_account.lower():
                         verified_sa = True
-                    elif projectNumber not in member_sa and gcp_id not in member_sa and member_sa != settings.GCP_REG_CLIENT_EMAIL.lower() and dataset_objs.count() > 0:
+                    elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
                         invalid_members.append(member)
                 else:
                     invalid_members.append(member)
