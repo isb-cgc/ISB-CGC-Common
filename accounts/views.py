@@ -443,6 +443,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     sab = None
     gow = None
 
+    is_compute = False
+
     # log the reports using Cloud logging API
     st_logger = StackDriverLogger.build_from_django_settings()
 
@@ -522,6 +524,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         if project:
             projectNumber = project['projectNumber']
 
+            is_compute = (projectNumber+'-compute@') in service_account
+
             # If we found an organization and this is a controlled dataset registration/adjustment, refuse registration
             if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and dataset_objs.count() > 0:
                 logger.info("[STATUS] While attempting to register GCP ID {}: ".format(str(gcp_id)))
@@ -597,7 +601,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
             st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
-            return {'message': "Service Account ID '{}' does not exist in Google Cloud Project {}. Please double-check the service account you have entered.".format(service_account,gcp_id)}
+            return {'message':
+                "Service Account ID '{}' wasn't found in Google Cloud Project {}. Please double-check the service account ID, and {}.".format(
+                    service_account,gcp_id,
+                    ("be sure that Compute Engine has been enabled for this project" if is_compute else "be sure it has been given at least one Role in the project")
+                )
+            }
 
 
         # 6. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
