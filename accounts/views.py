@@ -443,6 +443,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     sab = None
     gow = None
 
+    is_compute = False
+
     # log the reports using Cloud logging API
     st_logger = StackDriverLogger.build_from_django_settings()
 
@@ -471,6 +473,11 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
         sa = ServiceAccount.objects.get(service_account=service_account)
+        if not is_adjust and not is_refresh:
+            return {
+                'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(str(service_account)),
+                'level': 'error'
+            }
         if is_adjust or not is_refresh:
             reg_change = False
             # Check the private datasets to see if there's a registration change
@@ -517,6 +524,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         if project:
             projectNumber = project['projectNumber']
 
+            is_compute = (projectNumber+'-compute@') in service_account
+
             # If we found an organization and this is a controlled dataset registration/adjustment, refuse registration
             if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and dataset_objs.count() > 0:
                 logger.info("[STATUS] While attempting to register GCP ID {}: ".format(str(gcp_id)))
@@ -546,8 +555,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # 2. GET ALL USERS ON THE PROJECT.
     try:
-        iam_policy = crm_service.projects().getIamPolicy(
-            resource=gcp_id, body={}).execute()
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
         bindings = iam_policy['bindings']
         roles = {}
         verified_sa = False
@@ -560,13 +568,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 if member.startswith('user:'):
                     email = member.split(':')[1]
                     registered_user = bool(User.objects.filter(email=email).first())
-                    roles[role].append({'email': email,
-                                       'registered_user': registered_user})
+                    roles[role].append({'email': email,'registered_user': registered_user})
                 elif member.startswith('serviceAccount'):
                     member_sa = member.split(':')[1].lower()
                     if member_sa == service_account.lower():
                         verified_sa = True
-                    elif projectNumber not in member_sa and gcp_id not in member_sa and member_sa != settings.GCP_REG_CLIENT_EMAIL.lower() and dataset_objs.count() > 0:
+                    elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
                         invalid_members.append(member)
                 else:
                     invalid_members.append(member)
@@ -594,7 +601,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
             st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
-            return {'message': "Service Account ID '{}' does not exist in Google Cloud Project {}. Please double-check the service account you have entered.".format(service_account,gcp_id)}
+            return {'message':
+                "Service Account ID '{}' wasn't found in Google Cloud Project {}. Please double-check the service account ID, and {}.".format(
+                    service_account,gcp_id,
+                    ("be sure that Compute Engine has been enabled for this project" if is_compute else "be sure it has been given at least one Role in the project")
+                )
+            }
 
 
         # 6. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS

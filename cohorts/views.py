@@ -887,6 +887,7 @@ def export_cohort_to_bq(request, cohort_id=0):
                     'status': 'error',
                     'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
                 }
+                logger.info("[STATUS] No registered GCPs found - cannot export cohort ID {}.".format(str(cohort_id)))
             else:
                 for gcp in gcps:
                     bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
@@ -912,6 +913,7 @@ def export_cohort_to_bq(request, cohort_id=0):
                         'status': 'error',
                         'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
                     }
+                    logger.info("[STATUS] No registered datasets were found - cannot export cohort ID {}.".format(str(cohort_id)))
                 else:
                     status=200
                     result['status']='success'
