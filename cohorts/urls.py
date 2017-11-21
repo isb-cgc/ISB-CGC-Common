@@ -16,7 +16,7 @@ limitations under the License.
 
 """
 
-from django.conf.urls import patterns, url
+from django.conf.urls import url
 import views
 
 urlpatterns = [
@@ -29,6 +29,8 @@ urlpatterns = [
     url(r'^filelist/(?P<cohort_id>\d+)/$',          views.cohort_filelist, name='cohort_filelist'),
     url(r'^filelist_ajax/(?P<cohort_id>\d+)/$',     views.cohort_filelist_ajax, name='cohort_filelist_ajax'),
     url(r'^save_cohort/',                           views.save_cohort, name='save_cohort'),
+    url(r'^export_cohort/$',                         views.export_cohort, name='export_cohort'),
+    url(r'^export_cohort/(?P<cohort_id>\d+)/',      views.export_cohort_to_bq, name='export_cohort_to_bq'),
     url(r'^save_cohort_from_plot/',                 views.save_cohort_from_plot, name='save_cohort_from_plot'),
     url(r'^delete_cohort/',                         views.delete_cohort, name='delete_cohort'),
     url(r'^clone_cohort/(?P<cohort_id>\d+)/',       views.clone_cohort, name='clone_cohort'),

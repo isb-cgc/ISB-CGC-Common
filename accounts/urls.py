@@ -16,7 +16,7 @@ limitations under the License.
 
 """
 
-from django.conf.urls import patterns, url, include
+from django.conf.urls import url, include
 from allauth.socialaccount.providers.google import urls as google_urls, views as google_views
 
 from . import views
