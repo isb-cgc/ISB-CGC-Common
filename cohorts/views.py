@@ -867,6 +867,8 @@ def export_cohort(request):
 def export_cohort_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
+
     try:
 
         req_user = User.objects.get(id=request.user.id)
@@ -921,8 +923,6 @@ def export_cohort_to_bq(request, cohort_id=0):
             return JsonResponse(result, status=status)
 
         # POST is to actually export the cohort(s) to a chosen project:dataset:table
-
-        redirect_url = reverse('cohort_list')
 
         dataset = None
         table = None
@@ -984,7 +984,6 @@ def export_cohort_to_bq(request, cohort_id=0):
 
         # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
-            redirect_url = reverse('cohort_list')
             err_msg = ''
             if len(bq_result['insertErrors']) > 1:
                 err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
