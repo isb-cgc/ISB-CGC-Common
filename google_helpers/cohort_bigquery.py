@@ -188,7 +188,7 @@ class BigQueryCohortSupport(object):
         bigquery_service = get_bigquery_service()
         datasets = bigquery_service.datasets().list(projectId=self.project_id).execute()
 
-        if 'datasets' in datasets:
+        if datasets and 'datasets' in datasets:
             for dataset in datasets['datasets']:
                 tables = bigquery_service.tables().list(projectId=self.project_id,datasetId=dataset['datasetReference']['datasetId']).execute()
                 if 'tables' not in tables:
