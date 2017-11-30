@@ -589,10 +589,9 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         # If we haven't already invalidated the SA for being from outside the project or having
                         # an unallowed role, check its key status
                         if member_sa not in invalid_members:
-                            keys = iam_service.projects().serviceAcconts().keys(
-                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa))
+                            keys = iam_service.projects().serviceAcconts().keys(resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),keyTypes="USER_MANAGED")
 
-                            # Keys are not allowed
+                            # User-managed keys are not allowed
                             if keys and 'keys' in keys:
                                 logger.info('[STATUS] Keys found on SA {}: {}'.format(member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])))
                                 st_logger.write_struct_log_entry(log_name, {
