@@ -31,6 +31,7 @@ from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery_service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
+from google_helpers.iam_service import get_iam_resource
 from google_helpers.storage_service import get_storage_resource
 from googleapiclient.errors import HttpError
 from models import *
@@ -513,6 +514,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             }
 
     crm_service = get_special_crm_resource()
+    iam_service = get_iam_resource()
 
     # 0. VERIFY THE PROJECT'S ANCESTRY AND RETRIEVE THE NUMBER
     try:
@@ -553,7 +555,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             'level': 'error'
         }
 
-    # 2. GET ALL USERS ON THE PROJECT.
+    # 2. VALIDATE ALL MEMBERS ON THE PROJECT.
     try:
         iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
         bindings = iam_policy['bindings']
@@ -575,6 +577,30 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         verified_sa = True
                     elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
                         invalid_members.append(member)
+
+                    # If we haven't already invalidated the SA for being from outside the project, check to see if anyone
+                    # has been given roles on this service account--this could mean non-project members have access from
+                    # outside the project
+                    if member_sa not in invalid_members:
+                        sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa))
+                        if sa_iam_pol and 'bindings' in sa_iam_pol:
+                            invalid_members.append(member_sa)
+
+                        # If we haven't already invalidated the SA for being from outside the project or having
+                        # an unallowed role, check its key status
+                        if member_sa not in invalid_members:
+                            keys = iam_service.projects().serviceAcconts().keys(
+                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa))
+
+                            # Keys are not allowed
+                            if keys and 'keys' in keys:
+                                logger.info('[STATUS] Keys found on SA {}: {}'.format(member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])))
+                                st_logger.write_struct_log_entry(log_name, {
+                                    'message': '[STATUS] Keys found on SA {}: {}'.format(member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
+                                })
+                                # invalid_members.append(member_sa)
+
+                # Anything not an SA or a user is invalid
                 else:
                     invalid_members.append(member)
 
