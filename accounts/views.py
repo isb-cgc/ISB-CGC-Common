@@ -49,6 +49,40 @@ SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 
+
+def unregister_sa(user_id,sa_id):
+    st_logger = StackDriverLogger.build_from_django_settings()
+
+    sa = ServiceAccount.objects.get(service_account=sa_id, active=1)
+    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
+
+    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME,"User {} is unregistering SA {}".format(User.objects.get(id=user_id).email,sa_id))
+
+    for saad in saads:
+        try:
+            directory_service, http_auth = get_directory_resource()
+            directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
+                                               memberKey=saad.service_account.service_account).execute(http=http_auth)
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
+                    saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
+            logger.info("Attempting to delete user {} from group {}. "
+                        "If an error message doesn't follow, they were successfully deleted"
+                        .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
+        except HttpError as e:
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
+                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+            logger.error(e)
+            logger.exception(e)
+
+    for saad in saads:
+        saad.delete()
+    sa.active = False
+    sa.save()
+
+
+
 @login_required
 def extended_logout_view(request):
     response = None
@@ -341,6 +375,10 @@ def verify_gcp(request, user_id):
 def register_gcp(request, user_id):
 
     try:
+        # log the reports using Cloud logging API
+        st_logger = StackDriverLogger.build_from_django_settings()
+        log_name = SERVICE_ACCOUNT_LOG_NAME
+
         if request.POST:
             project_id = request.POST.get('gcp_id', None)
             register_users = request.POST.getlist('register_users')
@@ -359,12 +397,18 @@ def register_gcp(request, user_id):
                         messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
 
                 except ObjectDoesNotExist:
-                    gcp = GoogleProject.objects.create(project_name=project_name,
-                                                       project_id=project_id,
-                                                       big_query_dataset='',
-                                                       active=1)
+                    gcp,created = GoogleProject.objects.update_or_create(
+                        project_name=project_name,project_id=project_id,
+                        defaults={
+                           'big_query_dataset': '',
+                           'active': 1
+                        }
+                    )
                     gcp.save()
-
+                    if not created:
+                        msg="[STATUS] User {} has re-registered GCP {}".format(User.objects.get(id=user_id).email,project_id)
+                        logger.info(msg)
+                        st_logger.write_text_log_entry(log_name,msg)
 
             users = User.objects.filter(email__in=register_users)
 
@@ -414,17 +458,8 @@ def user_gcp_delete(request, user_id, gcp_id):
 
             # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
             service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id, active=1)
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account__in=service_accounts)
-            for saad in saads:
-                try:
-                    directory_service, http_auth = get_directory_resource()
-                    directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=saad.service_account.service_account).execute(http=http_auth)
-
-                    logger.info("Attempting to delete user {} from group {}. "
-                                "If an error message doesn't follow, they were successfully deleted"
-                                .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
-                except HttpError as e:
-                    logger.info(e)
+            for service_account in service_accounts:
+                unregister_sa(user_id,service_account.service_account)
 
             gcp.active=False
             gcp.save()
@@ -444,7 +479,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     projectNumber = None
     sab = None
     gow = None
-
+    sa = None
     is_compute = False
 
     # log the reports using Cloud logging API
@@ -480,6 +515,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(str(service_account)),
                 'level': 'error'
             }
+
         if is_adjust or not is_refresh:
             reg_change = False
             # Check the private datasets to see if there's a registration change
@@ -513,6 +549,14 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 'message': 'Service account {} was not found so cannot be {}.'.format(str(service_account), ("adjusted" if is_adjust else "refreshed")),
                 'level': 'error'
             }
+
+        try:
+            # determine if this is a re-registratio, or a brand-new one
+            sa = ServiceAccount.objects.get(service_account=service_account, active=0)
+            logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,user_email))
+            st_logger.write_text_log_entry(log_name,"[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,user_email))
+        except ObjectDoesNotExist:
+            pass
 
     crm_service = get_special_crm_resource()
     iam_service = get_iam_resource()
@@ -835,6 +879,7 @@ def register_sa(request, user_id):
                 # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
                 public_datasets = AuthorizedDataset.objects.filter(public=True)
                 directory_service, http_auth = get_directory_resource()
+
                 service_account_obj, created = ServiceAccount.objects.update_or_create(
                     google_project=user_gcp, service_account=user_sa,
                     defaults={
@@ -843,6 +888,9 @@ def register_sa(request, user_id):
                         'active': True
                     })
 
+                if not created:
+                    logger.info("[STATUS] User {} re-registered service account {}".format(user_email, user_sa))
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': "[STATUS] User {} re-registered service account {}".format(user_email, user_sa)})
                 for dataset in public_datasets | protected_datasets:
                     service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.objects.update_or_create(
                         service_account=service_account_obj, authorized_dataset=dataset,
@@ -950,33 +998,11 @@ def register_sa(request, user_id):
 
 @login_required
 def delete_sa(request, user_id, sa_id):
-    st_logger = StackDriverLogger.build_from_django_settings()
-
     try:
         if request.POST:
-            sa = ServiceAccount.objects.get(id=sa_id, active=1)
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
-
-            for saad in saads:
-                try:
-                    directory_service, http_auth = get_directory_resource()
-                    directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=saad.service_account.service_account).execute(http=http_auth)
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                    logger.info("Attempting to delete user {} from group {}. "
-                                "If an error message doesn't follow, they were successfully deleted"
-                                .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
-                except HttpError as e:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                        'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                    logger.error(e)
-                    logger.exception(e)
-
-            for saad in saads:
-                saad.delete()
-            sa.active=False
-            sa.save()
+            unregister_sa(user_id,sa_id)
     except Exception as e:
-        logger.error("[ERROR] While trying to delete a Service Account: ")
+        logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_id))
         logger.exception(e)
         messages.error(request, "Encountered an error while trying to remove this service account - please contact the administrator.")
 
