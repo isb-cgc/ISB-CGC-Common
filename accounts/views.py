@@ -246,7 +246,7 @@ def user_gcp_list(request, user_id):
 
             try:
                 user = User.objects.get(id=user_id)
-                gcp_list = GoogleProject.objects.filter(user=user)
+                gcp_list = GoogleProject.objects.filter(user=user, active=1)
                 social_account = SocialAccount.objects.get(user_id=user_id)
 
                 user_details = {
@@ -259,9 +259,7 @@ def user_gcp_list(request, user_id):
                     'last_name': user.last_name
                 }
 
-                context = {'user': user,
-                           'user_details': user_details,
-                           'gcp_list': gcp_list}
+                context = {'user': user, 'user_details': user_details, 'gcp_list': gcp_list}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
@@ -289,7 +287,7 @@ def verify_gcp(request, user_id):
         gcp_id = request.GET.get('gcp-id', None)
         is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
-        gcp = GoogleProject.objects.filter(project_id=gcp_id)
+        gcp = GoogleProject.objects.filter(project_id=gcp_id, active=1)
         # Can't register the same GCP twice - return immediately
         if gcp.count() > 0 and not is_refresh:
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
@@ -355,14 +353,16 @@ def register_gcp(request, user_id):
             else:
                 try:
                     gcp = GoogleProject.objects.get(project_name=project_name,
-                                                    project_id=project_id)
+                                                    project_id=project_id,
+                                                    active=1)
                     if not is_refresh:
                         messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
 
                 except ObjectDoesNotExist:
                     gcp = GoogleProject.objects.create(project_name=project_name,
                                                        project_id=project_id,
-                                                       big_query_dataset='')
+                                                       big_query_dataset='',
+                                                       active=1)
                     gcp.save()
 
 
@@ -400,7 +400,7 @@ def register_gcp(request, user_id):
 @login_required
 def gcp_detail(request, user_id, gcp_id):
     context = {}
-    context['gcp'] = GoogleProject.objects.get(id=gcp_id)
+    context['gcp'] = GoogleProject.objects.get(id=gcp_id,active=1)
 
     return render(request, 'GenespotRE/gcp_detail.html', context)
 
@@ -410,10 +410,10 @@ def user_gcp_delete(request, user_id, gcp_id):
 
     try:
         if request.POST:
-            gcp = GoogleProject.objects.get(id=gcp_id)
+            gcp = GoogleProject.objects.get(id=gcp_id,active=1)
 
             # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
-            service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id)
+            service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id, active=1)
             saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account__in=service_accounts)
             for saad in saads:
                 try:
@@ -426,7 +426,8 @@ def user_gcp_delete(request, user_id, gcp_id):
                 except HttpError as e:
                     logger.info(e)
 
-            gcp.delete()
+            gcp.active=False
+            gcp.save()
     except Exception as e:
         logger.error("[ERROR] While deleting a GCP: ")
         logger.exception(e)
@@ -473,7 +474,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
-        sa = ServiceAccount.objects.get(service_account=service_account)
+        sa = ServiceAccount.objects.get(service_account=service_account, active=1)
         if not is_adjust and not is_refresh:
             return {
                 'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(str(service_account)),
@@ -581,7 +582,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     # If we haven't already invalidated the SA for being from outside the project, check to see if anyone
                     # has been given roles on this service account--this could mean non-project members have access from
                     # outside the project
-                    if member_sa not in invalid_members:
+                    if member_sa not in invalid_members and not sab.is_blacklisted(member_sa):
                         sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa))
                         if sa_iam_pol and 'bindings' in sa_iam_pol:
                             invalid_members.append(member_sa)
@@ -589,13 +590,20 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         # If we haven't already invalidated the SA for being from outside the project or having
                         # an unallowed role, check its key status
                         if member_sa not in invalid_members:
-                            keys = iam_service.projects().serviceAcconts().keys(resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),keyTypes="USER_MANAGED")
+                            keys = iam_service.projects().serviceAcconts().keys(
+                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
+                                keyTypes="USER_MANAGED"
+                            )
 
                             # User-managed keys are not allowed
                             if keys and 'keys' in keys:
-                                logger.info('[STATUS] Keys found on SA {}: {}'.format(member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])))
+                                logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
+                                    member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
+                                )
                                 st_logger.write_struct_log_entry(log_name, {
-                                    'message': '[STATUS] Keys found on SA {}: {}'.format(member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
+                                    'message': '[STATUS] User-managed keys found on SA {}: {}'.format(
+                                        member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
+                                    )
                                 })
                                 # invalid_members.append(member_sa)
 
@@ -777,7 +785,7 @@ def register_sa(request, user_id):
 
             if request.GET.get('sa_id'):
                 template = 'GenespotRE/adjust_sa.html'
-                service_account = ServiceAccount.objects.get(id=request.GET.get('sa_id'))
+                service_account = ServiceAccount.objects.get(id=request.GET.get('sa_id'), active=1)
                 context['gcp_id'] = service_account.google_project.project_id
                 context['sa_datasets'] = service_account.get_auth_datasets()
                 context['sa_id'] = service_account.service_account
@@ -800,7 +808,7 @@ def register_sa(request, user_id):
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
-            user_gcp = GoogleProject.objects.get(project_id=gcp_id)
+            user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
 
             # If we've received a remove-all request, ignore any provided datasets
             if remove_all:
@@ -897,7 +905,7 @@ def register_sa(request, user_id):
 
                 # Check for current access and revoke
                 try:
-                    service_account_obj = ServiceAccount.objects.get(service_account=user_sa)
+                    service_account_obj = ServiceAccount.objects.get(service_account=user_sa, active=1)
                     saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj)
 
                     # We can't be too sure, so revoke it all
@@ -944,7 +952,7 @@ def delete_sa(request, user_id, sa_id):
 
     try:
         if request.POST:
-            sa = ServiceAccount.objects.get(id=sa_id)
+            sa = ServiceAccount.objects.get(id=sa_id, active=1)
             saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
 
             for saad in saads:
@@ -963,7 +971,8 @@ def delete_sa(request, user_id, sa_id):
 
             for saad in saads:
                 saad.delete()
-            sa.delete()
+            sa.active=False
+            sa.save()
     except Exception as e:
         logger.error("[ERROR] While trying to delete a Service Account: ")
         logger.exception(e)
@@ -978,7 +987,7 @@ def register_bucket(request, user_id, gcp_id):
 
     if request.POST:
         bucket_name = request.POST.get('bucket_name', None)
-        gcp = GoogleProject.objects.get(id=gcp_id)
+        gcp = GoogleProject.objects.get(id=gcp_id, active=1)
         found_bucket = False
 
         # Check bucketname not null
@@ -1048,7 +1057,7 @@ def delete_bucket(request, user_id, bucket_id):
 def register_bqdataset(request, user_id, gcp_id):
     if request.POST:
         bqdataset_name = request.POST.get('bqdataset_name', None)
-        gcp = GoogleProject.objects.get(id=gcp_id)
+        gcp = GoogleProject.objects.get(id=gcp_id, active=1)
         found_dataset = False
 
         # Check bqdatasetname not null
