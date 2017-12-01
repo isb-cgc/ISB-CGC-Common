@@ -574,7 +574,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     roles[role].append({'email': email,'registered_user': registered_user})
                 elif member.startswith('serviceAccount'):
                     member_sa = member.split(':')[1].lower()
-                    print "{} {}: {}".format(member_sa,service_account.lower(),str(member_sa == service_account.lower()))
                     if member_sa == service_account.lower():
                         verified_sa = True
                     elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
