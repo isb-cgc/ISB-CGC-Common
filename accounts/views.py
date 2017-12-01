@@ -574,6 +574,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     roles[role].append({'email': email,'registered_user': registered_user})
                 elif member.startswith('serviceAccount'):
                     member_sa = member.split(':')[1].lower()
+                    print "{} {}: {}".format(member_sa,service_account.lower(),str(member_sa == service_account.lower()))
                     if member_sa == service_account.lower():
                         verified_sa = True
                     elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
@@ -583,17 +584,19 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     # has been given roles on this service account--this could mean non-project members have access from
                     # outside the project
                     if member_sa not in invalid_members and not sab.is_blacklisted(member_sa):
-                        sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa))
+                        sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
+                            resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
+                        ).execute()
                         if sa_iam_pol and 'bindings' in sa_iam_pol:
                             invalid_members.append(member_sa)
 
                         # If we haven't already invalidated the SA for being from outside the project or having
                         # an unallowed role, check its key status
                         if member_sa not in invalid_members:
-                            keys = iam_service.projects().serviceAcconts().keys(
-                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
+                            keys = iam_service.projects().serviceAccounts().keys().list(
+                                name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
                                 keyTypes="USER_MANAGED"
-                            )
+                            ).execute()
 
                             # User-managed keys are not allowed
                             if keys and 'keys' in keys:
@@ -605,7 +608,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                                         member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
                                     )
                                 })
-                                # invalid_members.append(member_sa)
+                                invalid_members.append(member_sa)
 
                 # Anything not an SA or a user is invalid
                 else:
