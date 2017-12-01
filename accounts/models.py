@@ -56,9 +56,13 @@ class GoogleProject(models.Model):
     project_name = models.CharField(max_length=150)
     project_id = models.CharField(max_length=150)
     big_query_dataset = models.CharField(max_length=150, null=True)
+    active = models.BooleanField(default=False, null=False)
 
     def __str__(self):
         return self.project_name
+
+    def active_service_accounts(self):
+        return self.serviceaccount_set.filter(active=1)
 
 
 class Bucket(models.Model):

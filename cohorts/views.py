@@ -881,7 +881,7 @@ def export_cohort_to_bq(request, cohort_id=0):
                     'projects': []
                 }
             }
-            gcps = GoogleProject.objects.filter(user=req_user)
+            gcps = GoogleProject.objects.filter(user=req_user, active=1)
 
             if not gcps.count():
                 status = 500
@@ -957,7 +957,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
         else:
             try:
-                gcp = GoogleProject.objects.get(project_name=proj_id)
+                gcp = GoogleProject.objects.get(project_name=proj_id, active=1)
             except ObjectDoesNotExist as e:
                 messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
                 return redirect(redirect_url)
