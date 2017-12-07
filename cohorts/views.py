@@ -867,6 +867,8 @@ def export_cohort(request):
 def export_cohort_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
+
     try:
 
         req_user = User.objects.get(id=request.user.id)
@@ -879,7 +881,7 @@ def export_cohort_to_bq(request, cohort_id=0):
                     'projects': []
                 }
             }
-            gcps = GoogleProject.objects.filter(user=req_user)
+            gcps = GoogleProject.objects.filter(user=req_user, active=1)
 
             if not gcps.count():
                 status = 500
@@ -922,8 +924,6 @@ def export_cohort_to_bq(request, cohort_id=0):
 
         # POST is to actually export the cohort(s) to a chosen project:dataset:table
 
-        redirect_url = reverse('cohort_list')
-
         dataset = None
         table = None
         bq_proj_id = None
@@ -957,7 +957,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
         else:
             try:
-                gcp = GoogleProject.objects.get(project_name=proj_id)
+                gcp = GoogleProject.objects.get(project_name=proj_id, active=1)
             except ObjectDoesNotExist as e:
                 messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
                 return redirect(redirect_url)
@@ -984,7 +984,6 @@ def export_cohort_to_bq(request, cohort_id=0):
 
         # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
-            redirect_url = reverse('cohort_list')
             err_msg = ''
             if len(bq_result['insertErrors']) > 1:
                 err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '

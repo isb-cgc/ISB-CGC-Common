@@ -11,7 +11,7 @@ def public_program_count():
 def user_program_count(context):
     user = context['user']
 
-    userPrograms = user.program_set.all().filter(active=True)
+    userPrograms = user.program_set.filter(active=True)
     sharedPrograms = Program.objects.filter(shared__matched_user=user, shared__active=True, active=True)
     programs = userPrograms | sharedPrograms
 
