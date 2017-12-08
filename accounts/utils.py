@@ -119,6 +119,40 @@ class ServiceObjectBase(object):
 
 
 # Object for fetching the organization whitelist and confirming that a given org is in it
+class ManagedServiceAccounts(ServiceObjectBase):
+    SCHEMA = {
+        'type': 'object',
+        'properties': {
+            'managed_service_accounts': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                }
+            }
+        },
+        'required': [
+            'managed_service_accounts'
+        ]
+    }
+
+    def __init__(self, managed_service_accounts):
+        self.managed_service_accounts = set(managed_service_accounts)
+
+    def is_managed(self, service_account):
+        return service_account.split('@')[-1] in self.managed_service_accounts
+
+    @classmethod
+    def from_dict(cls, data):
+        """
+
+        Throws:
+            ValidationError if the data object does not match the required schema.
+        """
+        schema_validate(data, cls.SCHEMA)
+        return cls(data['managed_service_accounts'])
+
+
+# Object for fetching the organization whitelist and confirming that a given org is in it
 class GoogleOrgWhitelist(ServiceObjectBase):
     SCHEMA = {
         'type': 'object',

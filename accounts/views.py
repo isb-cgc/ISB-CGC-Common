@@ -39,7 +39,7 @@ from projects.models import User_Data_Tables
 from django.utils.html import escape
 
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
-from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist
+from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist, ManagedServiceAccounts
 import json
 
 logger = logging.getLogger('main_logger')
@@ -48,6 +48,7 @@ OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
+MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 
 def unregister_sa(user_id,sa_id):
@@ -494,6 +495,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Block verification of service accounts used by the application
     try:
         sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
+        msa = ManagedServiceAccounts.from_json_file_path(MANAGED_SERVICE_ACCOUNTS_PATH)
         gow = GoogleOrgWhitelist.from_json_file_path(GOOGLE_ORG_WHITELIST_PATH)
     except Exception as e:
         logger.error("[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
@@ -623,10 +625,10 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
                         invalid_members.append(member)
 
-                    # If we haven't already invalidated the SA for being from outside the project, check to see if anyone
-                    # has been given roles on this service account--this could mean non-project members have access from
-                    # outside the project
-                    if member_sa not in invalid_members and not sab.is_blacklisted(member_sa):
+                    # If we haven't already invalidated the SA for being from outside the project, check to see if this is
+                    # a managed service account, or if anyone has been given roles on this service account--this could
+                    # mean non-project members have access from outside the project
+                    if member_sa not in invalid_members and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
                         sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
                             resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
                         ).execute()
