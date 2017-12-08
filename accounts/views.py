@@ -462,6 +462,8 @@ def user_gcp_delete(request, user_id, gcp_id):
             for service_account in service_accounts:
                 unregister_sa(user_id,service_account.service_account)
 
+            gcp.user_set.clear()
+
             gcp.active=False
             gcp.save()
     except Exception as e:
