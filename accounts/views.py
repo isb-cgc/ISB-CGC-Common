@@ -51,7 +51,7 @@ GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 
-def unregister_sa(user_id,sa_id):
+def unregister_sa(user_id, sa_id):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     sa = ServiceAccount.objects.get(service_account=sa_id, active=1)
@@ -1004,7 +1004,7 @@ def register_sa(request, user_id):
 def delete_sa(request, user_id, sa_id):
     try:
         if request.POST:
-            unregister_sa(user_id,sa_id)
+            unregister_sa(user_id, sa_id)
     except Exception as e:
         logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_id))
         logger.exception(e)
