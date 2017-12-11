@@ -51,7 +51,7 @@ GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 
-def unregister_sa(user_id,sa_id):
+def unregister_sa(user_id, sa_id):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     sa = ServiceAccount.objects.get(service_account=sa_id, active=1)
@@ -445,7 +445,7 @@ def register_gcp(request, user_id):
 @login_required
 def gcp_detail(request, user_id, gcp_id):
     context = {}
-    context['gcp'] = GoogleProject.objects.get(id=gcp_id,active=1)
+    context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
 
     return render(request, 'GenespotRE/gcp_detail.html', context)
 
@@ -455,14 +455,14 @@ def user_gcp_delete(request, user_id, gcp_id):
 
     try:
         if request.POST:
-            gcp = GoogleProject.objects.get(id=gcp_id,active=1)
+            gcp = GoogleProject.objects.get(id=gcp_id, active=1)
 
             # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
             service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id, active=1)
             for service_account in service_accounts:
                 unregister_sa(user_id,service_account.service_account)
 
-            gcp.user_set.clear()
+            gcp.user.clear()
 
             gcp.active=False
             gcp.save()
@@ -1004,7 +1004,7 @@ def register_sa(request, user_id):
 def delete_sa(request, user_id, sa_id):
     try:
         if request.POST:
-            unregister_sa(user_id,sa_id)
+            unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
     except Exception as e:
         logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_id))
         logger.exception(e)
