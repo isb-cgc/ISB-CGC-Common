@@ -1004,7 +1004,7 @@ def register_sa(request, user_id):
 def delete_sa(request, user_id, sa_id):
     try:
         if request.POST:
-            unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id))
+            unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
     except Exception as e:
         logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_id))
         logger.exception(e)
