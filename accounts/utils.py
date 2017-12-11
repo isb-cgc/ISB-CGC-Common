@@ -22,7 +22,7 @@ from re import compile as re_compile
 
 from jsonschema import validate as schema_validate, ValidationError
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 
 class ServiceObjectBase(object):
@@ -139,7 +139,7 @@ class ManagedServiceAccounts(ServiceObjectBase):
         self.managed_service_accounts = set(managed_service_accounts)
 
     def is_managed(self, service_account):
-        return service_account.split('@')[-1] in self.managed_service_accounts
+        return '@{}'.format(service_account.split('@')[-1]) in self.managed_service_accounts
 
     @classmethod
     def from_dict(cls, data):
