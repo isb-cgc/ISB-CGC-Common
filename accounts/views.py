@@ -422,14 +422,14 @@ def register_gcp(request, user_id):
                         project_id,
                         ", ".join(users_to_add.values_list('email',flat=True)))
                 else:
-                    msg += ". There were no new users to add to GCP {}.".format(project_id)
+                    msg = "There were no new users to add to GCP {}.".format(project_id)
                 if len(users_to_remove):
-                    msg = "The following user{} removed from GCP {}: {}".format(
+                    msg += ". The following user{} removed from GCP {}: {}".format(
                         ("s were" if len(users_to_remove) > 1 else " was"),
                         project_id,
                         ", ".join(users_to_remove.values_list('email',flat=True)))
                 else:
-                    msg = ". There were no users to remove from GCP {}.".format(project_id)
+                    msg += ". There were no users to remove from GCP {}.".format(project_id)
 
                 messages.info(request, msg)
 
