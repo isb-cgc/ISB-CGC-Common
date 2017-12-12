@@ -623,7 +623,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             'keys_found': [],
             'sa_roles': [],
             'external_sa': [],
-            'bad_members': []
+            'other_members': []
         }
         for val in bindings:
             role = val['role']
@@ -638,43 +638,50 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     member_sa = member.split(':')[1].lower()
                     if member_sa == service_account.lower():
                         verified_sa = True
-                    elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
-                        invalid_members['external_sa'].append(member_sa)
 
-                    # If we haven't already invalidated the SA for being from outside the project, check to see if this is
-                    # a managed service account, or if anyone has been given roles on this service account--this could
-                    # mean non-project members have access from outside the project
-                    if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
-                        sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
-                            resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
-                        ).execute()
-                        if sa_iam_pol and 'bindings' in sa_iam_pol:
-                            invalid_members['sa_roles'].append(member_sa)
+                    # If controlled-access data is involved, all SAs must be heavily vetted
+                    if dataset_objs.count() > 0:
 
-                        # If we haven't already invalidated the SA for being from outside the project or having
-                        # an unallowed role, check its key status
-                        if member_sa not in [x for b in invalid_members.values() for x in b]:
-                            keys = iam_service.projects().serviceAccounts().keys().list(
-                                name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
-                                keyTypes="USER_MANAGED"
+                        # Check to see if this SA is internal (the SA being registered will always pass this if it
+                        # made it this far, since it is pre-validated for GCP sourcing)
+                        if projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa):
+                            invalid_members['external_sa'].append(member_sa)
+
+                        # If we haven't already invalidated this member SA for being from outside the project, check to see if this is
+                        # a managed service account, or if anyone has been given roles on this service account--this could
+                        # mean non-project members have access from outside the project
+                        if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
+                            sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
+                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
                             ).execute()
+                            if sa_iam_pol and 'bindings' in sa_iam_pol:
+                                invalid_members['sa_roles'].append(member_sa)
 
-                            # User-managed keys are not allowed
-                            if keys and 'keys' in keys:
-                                keys_found = True
-                                logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
-                                    member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
-                                )
-                                st_logger.write_struct_log_entry(log_name, {
-                                    'message': '[STATUS] User-managed keys found on SA {}: {}'.format(
-                                        member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
+                            # If we haven't already invalidated this member SA for being from outside the project or having
+                            # an unallowed role, check its key status
+                            if member_sa not in [x for b in invalid_members.values() for x in b]:
+                                keys = iam_service.projects().serviceAccounts().keys().list(
+                                    name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
+                                    keyTypes="USER_MANAGED"
+                                ).execute()
+
+                                # User-managed keys are not allowed
+                                if keys and 'keys' in keys:
+                                    keys_found = True
+                                    logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
+                                        member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
                                     )
-                                })
-                                invalid_members['keys_found'].append(member_sa)
+                                    st_logger.write_struct_log_entry(log_name, {
+                                        'message': '[STATUS] User-managed keys found on SA {}: {}'.format(
+                                            member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
+                                        )
+                                    })
+                                    invalid_members['keys_found'].append(member_sa)
 
-                # Anything not an SA or a user is invalid
+                # Anything not an SA or a user is invalid if controlled data is involved
                 else:
-                    invalid_members['bad_members'].append(member)
+                    if dataset_objs.count() > 0:
+                        invalid_members['other_members'].append(member)
 
         # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
         # which do not belong to this project, and the registration is for controlled data, disallow
@@ -690,8 +697,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 msg += " Roles were found applied to service accounts ({}). Roles cannot be assigned to service accounts.".format("; ".join(invalid_members['sa_roles']))
             if len(invalid_members['external_sa']):
                 msg += " External service accounts from other projects were found ({}). External service accounts are not permitted.".format("; ".join(invalid_members['external_sa']))
-            if len(invalid_members['bad_members']):
-                msg += " Non-user and non-Service Account members were found ({}). Only users and service accounts are permitted.".format("; ".join(invalid_members['bad_members']))
+            if len(invalid_members['other_members']):
+                msg += " Non-user and non-Service Account members were found ({}). Only users and service accounts are permitted.".format("; ".join(invalid_members['other_members']))
 
             return {'message': msg}
 
