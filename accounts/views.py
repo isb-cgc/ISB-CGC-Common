@@ -484,8 +484,8 @@ def user_gcp_delete(request, user_id, gcp_id):
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
 
     # Only verify for protected datasets
-    dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
-    dataset_obj_names = dataset_objs.values_list('name', flat=True)
+    controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
+    controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
     projectNumber = None
     sab = None
     gow = None
@@ -536,8 +536,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             if remove_all and saads.count():
                 reg_change = True
             else:
-                if dataset_objs.count() or saads.count():
-                    ads = dataset_objs.values_list('whitelist_id', flat=True)
+                if controlled_datasets.count() or saads.count():
+                    ads = controlled_datasets.values_list('whitelist_id', flat=True)
                     # A private dataset missing from either list means this is a registration change
                     for ad in ads:
                         if ad not in saads:
@@ -585,7 +585,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             is_compute = (projectNumber+'-compute@') in service_account
 
             # If we found an organization and this is a controlled dataset registration/adjustment, refuse registration
-            if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and dataset_objs.count() > 0:
+            if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and controlled_datasets.count() > 0:
                 logger.info("[STATUS] While attempting to register GCP ID {}: ".format(str(gcp_id)))
                 logger.info("GCP {} was found to be in organization ID {}; its service accounts cannot be registered for use with controlled data.".format(str(gcp_id),project['parent']['id']))
                 return {
@@ -606,7 +606,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
     logger.info("{}:{}:{}".format(projectNumber,service_account,gcp_id))
     logger.info("{}:{}".format(str(projectNumber not in service_account),str(gcp_id not in service_account)))
-    if projectNumber not in service_account and gcp_id not in service_account and dataset_objs.count() > 0:
+    if projectNumber not in service_account and gcp_id not in service_account and controlled_datasets.count() > 0:
         return {
             'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
                 service_account, str(gcp_id),),
@@ -623,7 +623,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             'keys_found': [],
             'sa_roles': [],
             'external_sa': [],
-            'bad_members': []
+            'other_members': []
         }
         for val in bindings:
             role = val['role']
@@ -638,47 +638,54 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     member_sa = member.split(':')[1].lower()
                     if member_sa == service_account.lower():
                         verified_sa = True
-                    elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
-                        invalid_members['external_sa'].append(member_sa)
 
-                    # If we haven't already invalidated the SA for being from outside the project, check to see if this is
-                    # a managed service account, or if anyone has been given roles on this service account--this could
-                    # mean non-project members have access from outside the project
-                    if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
-                        sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
-                            resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
-                        ).execute()
-                        if sa_iam_pol and 'bindings' in sa_iam_pol:
-                            invalid_members['sa_roles'].append(member_sa)
+                    # If controlled-access data is involved, all SAs must be heavily vetted
+                    if controlled_datasets.count() > 0:
 
-                        # If we haven't already invalidated the SA for being from outside the project or having
-                        # an unallowed role, check its key status
-                        if member_sa not in [x for b in invalid_members.values() for x in b]:
-                            keys = iam_service.projects().serviceAccounts().keys().list(
-                                name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
-                                keyTypes="USER_MANAGED"
+                        # Check to see if this SA is internal (the SA being registered will always pass this if it
+                        # made it this far, since it is pre-validated for GCP sourcing)
+                        if projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa):
+                            invalid_members['external_sa'].append(member_sa)
+
+                        # If we haven't already invalidated this member SA for being from outside the project, check to see if this is
+                        # a managed service account, or if anyone has been given roles on this service account--this could
+                        # mean non-project members have access from outside the project
+                        if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
+                            sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
+                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
                             ).execute()
+                            if sa_iam_pol and 'bindings' in sa_iam_pol:
+                                invalid_members['sa_roles'].append(member_sa)
 
-                            # User-managed keys are not allowed
-                            if keys and 'keys' in keys:
-                                keys_found = True
-                                logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
-                                    member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
-                                )
-                                st_logger.write_struct_log_entry(log_name, {
-                                    'message': '[STATUS] User-managed keys found on SA {}: {}'.format(
-                                        member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
+                            # If we haven't already invalidated this member SA for being from outside the project or having
+                            # an unallowed role, check its key status
+                            if member_sa not in [x for b in invalid_members.values() for x in b]:
+                                keys = iam_service.projects().serviceAccounts().keys().list(
+                                    name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
+                                    keyTypes="USER_MANAGED"
+                                ).execute()
+
+                                # User-managed keys are not allowed
+                                if keys and 'keys' in keys:
+                                    keys_found = True
+                                    logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
+                                        member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
                                     )
-                                })
-                                invalid_members['keys_found'].append(member_sa)
+                                    st_logger.write_struct_log_entry(log_name, {
+                                        'message': '[STATUS] User-managed keys found on SA {}: {}'.format(
+                                            member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
+                                        )
+                                    })
+                                    invalid_members['keys_found'].append(member_sa)
 
-                # Anything not an SA or a user is invalid
+                # Anything not an SA or a user is invalid if controlled data is involved
                 else:
-                    invalid_members['bad_members'].append(member)
+                    if controlled_datasets.count() > 0:
+                        invalid_members['other_members'].append(member)
 
         # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
         # which do not belong to this project, and the registration is for controlled data, disallow
-        if sum([len(x) for x in invalid_members.values()]) and dataset_objs.count() > 0:
+        if sum([len(x) for x in invalid_members.values()]) and controlled_datasets.count() > 0:
             logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
             st_logger.write_struct_log_entry(log_name, {
                 'message': '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
@@ -690,8 +697,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 msg += " Roles were found applied to service accounts ({}). Roles cannot be assigned to service accounts.".format("; ".join(invalid_members['sa_roles']))
             if len(invalid_members['external_sa']):
                 msg += " External service accounts from other projects were found ({}). External service accounts are not permitted.".format("; ".join(invalid_members['external_sa']))
-            if len(invalid_members['bad_members']):
-                msg += " Non-user and non-Service Account members were found ({}). Only users and service accounts are permitted.".format("; ".join(invalid_members['bad_members']))
+            if len(invalid_members['other_members']):
+                msg += " Non-user and non-Service Account members were found ({}). Only users and service accounts are permitted.".format("; ".join(invalid_members['other_members']))
 
             return {'message': msg}
 
@@ -750,7 +757,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True))
 
                         # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
-                        for dataset in dataset_objs:
+                        for dataset in controlled_datasets:
                             member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
 
                         valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
@@ -762,29 +769,29 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                         if not len(invalid_datasets):
                             if len(valid_datasets):
-                                if dataset_objs:
-                                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                                if controlled_datasets:
+                                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
                         else:
                             all_user_datasets_verified = False
-                            if len(dataset_objs):
+                            if len(controlled_datasets):
                                 st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(invalid_datasets))})
 
                     # IF USER HAS NO ERA COMMONS ID
                     else:
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
-                        if len(dataset_objs):
+                        if len(controlled_datasets):
                             all_user_datasets_verified = False
-                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
-                            for dataset in dataset_objs:
+                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
+                            for dataset in controlled_datasets:
                                 member['datasets'].append({'name': dataset.name, 'valid': False})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
                     member['nih_registered'] = False
-                    if len(dataset_objs):
-                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
+                    if len(controlled_datasets):
+                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(controlled_dataset_names))})
                         all_user_datasets_verified = False
-                        for dataset in dataset_objs:
+                        for dataset in controlled_datasets:
                             member['datasets'].append({'name': dataset.name, 'valid': False})
 
     except HttpError as e:
