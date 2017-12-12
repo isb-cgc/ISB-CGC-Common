@@ -625,7 +625,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     if member_sa == service_account.lower():
                         verified_sa = True
                     elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
-                        invalid_members.append(member)
+                        invalid_members.append(member_sa)
 
                     # If we haven't already invalidated the SA for being from outside the project, check to see if this is
                     # a managed service account, or if anyone has been given roles on this service account--this could
