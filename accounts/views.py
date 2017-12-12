@@ -414,20 +414,27 @@ def register_gcp(request, user_id):
             users = User.objects.filter(email__in=register_users)
 
             if is_refresh:
-                users = users.exclude(id__in=gcp.user.all())
-                if len(users):
+                users_to_add = users.exclude(id__in=gcp.user.all())
+                users_to_remove = gcp.user.all().exclude(id__in=users)
+                if len(users_to_add):
                     msg = "The following user{} added to GCP {}: {}".format(
-                        ("s were" if len(users) > 1 else " was"),
+                        ("s were" if len(users_to_add) > 1 else " was"),
                         project_id,
-                        ", ".join(users.values_list('email',flat=True)))
+                        ", ".join(users_to_add.values_list('email',flat=True)))
                 else:
                     msg = "There were no new users to add to GCP {}.".format(project_id)
+                if len(users_to_remove):
+                    msg += ". The following user{} removed from GCP {}: {}".format(
+                        ("s were" if len(users_to_remove) > 1 else " was"),
+                        project_id,
+                        ", ".join(users_to_remove.values_list('email',flat=True)))
+                else:
+                    msg += ". There were no users to remove from GCP {}.".format(project_id)
 
                 messages.info(request, msg)
 
-            for user in users:
-                gcp.user.add(user)
-                gcp.save()
+            gcp.user.set(users)
+            gcp.save()
 
             return redirect('user_gcp_list', user_id=request.user.id)
 
@@ -597,6 +604,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # 1. VERIFY SA IS FROM THIS GCP
     # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
+    logger.info("{}:{}:{}".format(projectNumber,service_account,gcp_id))
+    logger.info("{}:{}".format(str(projectNumber not in service_account),str(gcp_id not in service_account)))
     if projectNumber not in service_account and gcp_id not in service_account and dataset_objs.count() > 0:
         return {
             'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
