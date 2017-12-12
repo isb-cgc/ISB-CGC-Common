@@ -604,6 +604,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # 1. VERIFY SA IS FROM THIS GCP
     # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
+    logger.info("{}:{}:{}".format(projectNumber,service_account,gcp_id))
+    logger.info("{}:{}".format(str(projectNumber not in service_account),str(gcp_id not in service_account)))
     if projectNumber not in service_account and gcp_id not in service_account and dataset_objs.count() > 0:
         return {
             'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
