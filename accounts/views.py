@@ -619,7 +619,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         bindings = iam_policy['bindings']
         roles = {}
         verified_sa = False
-        invalid_members = []
+        invalid_members = {
+            'keys_found': [],
+            'sa_roles': [],
+            'external_sa': [],
+            'bad_members': []
+        }
         for val in bindings:
             role = val['role']
             members = val['members']
@@ -634,21 +639,21 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     if member_sa == service_account.lower():
                         verified_sa = True
                     elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
-                        invalid_members.append(member_sa)
+                        invalid_members['external_sa'].append(member_sa)
 
                     # If we haven't already invalidated the SA for being from outside the project, check to see if this is
                     # a managed service account, or if anyone has been given roles on this service account--this could
                     # mean non-project members have access from outside the project
-                    if member_sa not in invalid_members and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
+                    if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
                         sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
                             resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
                         ).execute()
                         if sa_iam_pol and 'bindings' in sa_iam_pol:
-                            invalid_members.append(member_sa)
+                            invalid_members['sa_roles'].append(member_sa)
 
                         # If we haven't already invalidated the SA for being from outside the project or having
                         # an unallowed role, check its key status
-                        if member_sa not in invalid_members:
+                        if member_sa not in [x for b in invalid_members.values() for x in b]:
                             keys = iam_service.projects().serviceAccounts().keys().list(
                                 name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
                                 keyTypes="USER_MANAGED"
@@ -656,6 +661,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                             # User-managed keys are not allowed
                             if keys and 'keys' in keys:
+                                keys_found = True
                                 logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
                                     member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
                                 )
@@ -664,20 +670,30 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                                         member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
                                     )
                                 })
-                                invalid_members.append(member_sa)
+                                invalid_members['keys_found'].append(member_sa)
 
                 # Anything not an SA or a user is invalid
                 else:
-                    invalid_members.append(member)
+                    invalid_members['bad_members'].append(member)
 
         # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
         # which do not belong to this project, and the registration is for controlled data, disallow
-        if len(invalid_members) and dataset_objs.count() > 0:
+        if sum([len(x) for x in invalid_members.values()]) and dataset_objs.count() > 0:
             logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
             st_logger.write_struct_log_entry(log_name, {
                 'message': '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
             })
-            return {'message': 'Service Account {} belongs to project {}, which has one or more invalid members ({}); controlled data can only be accessed from GCPs with users and service accounts that originate from that GCP.'.format(service_account,gcp_id,"; ".join(invalid_members)),}
+            msg = 'Service Account {} belongs to project {}, which has one or more invalid members. Controlled data can only be accessed from GCPs with valid members. Members were invalid for the following reasons: '.format(service_account,gcp_id,"; ".join(invalid_members))
+            if len(invalid_members['keys_found']):
+                msg += " User-managed keys were found on service accounts ({}). User-managed keys on service accounts are not permitted.".format("; ".join(invalid_members['keys_found']))
+            if len(invalid_members['sa_roles']):
+                msg += " Roles were found applied to service accounts ({}). Roles cannot be assigned to service accounts.".format("; ".join(invalid_members['sa_roles']))
+            if len(invalid_members['external_sa']):
+                msg += " External service accounts from other projects were found ({}). External service accounts are not permitted.".format("; ".join(invalid_members['external_sa']))
+            if len(invalid_members['bad_members']):
+                msg += " Non-user and non-Service Account members were found ({}). Only users and service accounts are permitted.".format("; ".join(invalid_members['bad_members']))
+
+            return {'message': msg}
 
         # 4. Verify that the current user is on the GCP project
         if not is_email_in_iam_roles(roles, user_email):
