@@ -37,6 +37,7 @@ from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
+import re
 
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
 from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist, ManagedServiceAccounts
@@ -486,6 +487,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Only verify for protected datasets
     controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
+    project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
     sab = None
     gow = None
@@ -604,9 +606,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # 1. VERIFY SA IS FROM THIS GCP
     # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
-    logger.info("{}:{}:{}".format(projectNumber,service_account,gcp_id))
-    logger.info("{}:{}".format(str(projectNumber not in service_account),str(gcp_id not in service_account)))
-    if projectNumber not in service_account and gcp_id not in service_account and controlled_datasets.count() > 0:
+    if not service_account.startswith(projectNumber+'-') and not project_id_re.search(service_account) and not msa.is_managed_this_project(service_account,projectNumber) and controlled_datasets.count() > 0:
         return {
             'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
                 service_account, str(gcp_id),),
@@ -644,12 +644,13 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                         # Check to see if this SA is internal (the SA being registered will always pass this if it
                         # made it this far, since it is pre-validated for GCP sourcing)
-                        if projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa):
+                        if not member_sa.startswith(projectNumber+'-') and not project_id_re.search(member_sa) and not (msa.is_managed_this_project(member_sa, projectNumber)) and not sab.is_blacklisted(member_sa):
                             invalid_members['external_sa'].append(member_sa)
 
-                        # If we haven't already invalidated this member SA for being from outside the project, check to see if this is
-                        # a managed service account, or if anyone has been given roles on this service account--this could
-                        # mean non-project members have access from outside the project
+                        # If we haven't already invalidated this member SA for being from outside the project, check to see if anyone
+                        # has been given roles on this service account--this could mean non-project members have access from outside the project
+                        # Note we exclude our own SAs from these checks, because they're ours, and we exclude managed SAs, because they will
+                        # 404 when being searched this way
                         if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
                             sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
                                 resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
@@ -667,7 +668,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                                 # User-managed keys are not allowed
                                 if keys and 'keys' in keys:
-                                    keys_found = True
                                     logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
                                         member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
                                     )
