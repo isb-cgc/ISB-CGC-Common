@@ -487,7 +487,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Only verify for protected datasets
     controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
     controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
-    project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'+\.)', re.UNICODE)
+    project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
     sab = None
     gow = None
