@@ -606,7 +606,9 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # 1. VERIFY SA IS FROM THIS GCP
     # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
-    if not service_account.startswith(projectNumber+'-') and not project_id_re.search(service_account) and not msa.is_managed_this_project(service_account,projectNumber) and controlled_datasets.count() > 0:
+    if not service_account.startswith(projectNumber+'-') and not project_id_re.search(service_account) \
+            and not msa.is_managed_this_project(service_account,projectNumber,gcp_id) \
+            and controlled_datasets.count() > 0:
         return {
             'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
                 service_account, str(gcp_id),),
@@ -644,7 +646,9 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                         # Check to see if this SA is internal (the SA being registered will always pass this if it
                         # made it this far, since it is pre-validated for GCP sourcing)
-                        if not member_sa.startswith(projectNumber+'-') and not project_id_re.search(member_sa) and not (msa.is_managed_this_project(member_sa, projectNumber)) and not sab.is_blacklisted(member_sa):
+                        if not member_sa.startswith(projectNumber+'-') and not project_id_re.search(member_sa) and \
+                                not (msa.is_managed_this_project(member_sa, projectNumber, gcp_id)) and \
+                                not sab.is_blacklisted(member_sa):
                             invalid_members['external_sa'].append(member_sa)
 
                         # If we haven't already invalidated this member SA for being from outside the project, check to see if anyone
