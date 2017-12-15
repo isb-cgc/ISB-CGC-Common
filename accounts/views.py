@@ -690,10 +690,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
         # which do not belong to this project, and the registration is for controlled data, disallow
         if sum([len(x) for x in invalid_members.values()]) and controlled_datasets.count() > 0:
-            logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
-            st_logger.write_struct_log_entry(log_name, {
-                'message': '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
-            })
+            log_msg = '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(
+                service_account,gcp_id,"; ".join([x for b in invalid_members.values() for x in b])
+            )
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {'message': log_msg})
+            
             msg = 'Service Account {} belongs to project {}, which has one or more invalid members. Controlled data can only be accessed from GCPs with valid members. Members were invalid for the following reasons: '.format(service_account,gcp_id,"; ".join(invalid_members))
             if len(invalid_members['keys_found']):
                 msg += " User-managed keys were found on service accounts ({}). User-managed keys on service accounts are not permitted.".format("; ".join(invalid_members['keys_found']))
