@@ -690,10 +690,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
         # which do not belong to this project, and the registration is for controlled data, disallow
         if sum([len(x) for x in invalid_members.values()]) and controlled_datasets.count() > 0:
-            logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
-            st_logger.write_struct_log_entry(log_name, {
-                'message': '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
-            })
+            log_msg = '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(
+                service_account,gcp_id,"; ".join([x for b in invalid_members.values() for x in b])
+            )
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {'message': log_msg})
+
             msg = 'Service Account {} belongs to project {}, which has one or more invalid members. Controlled data can only be accessed from GCPs with valid members. Members were invalid for the following reasons: '.format(service_account,gcp_id,"; ".join(invalid_members))
             if len(invalid_members['keys_found']):
                 msg += " User-managed keys were found on service accounts ({}). User-managed keys on service accounts are not permitted.".format("; ".join(invalid_members['keys_found']))
@@ -708,17 +710,20 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
         # 4. Verify that the current user is on the GCP project
         if not is_email_in_iam_roles(roles, user_email):
-            logger.info('[STATUS] While verifying SA {0}: User email {1} is not the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id))
+            log_msg = '[STATUS] While verifying SA {0}: User email {1} is not in the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
+            logger.info(log_msg)
             st_logger.write_struct_log_entry(log_name, {
-                'message': 'While verifying SA {0}: User email {1} is not the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
+                'message': log_msg
             })
+
             return {'message': 'You must be a member of a project in order to register its service accounts.'}
 
         # 5. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
-            logger.info('[STATUS] While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id))
+            log_msg = '[STATUS] While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {'message': log_msg})
 
-            st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
             return {'message':
                 "Service Account ID '{}' wasn't found in Google Cloud Project {}. Please double-check the service account ID, and {}.".format(
@@ -726,7 +731,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     ("be sure that Compute Engine has been enabled for this project" if is_compute else "be sure it has been given at least one Role in the project")
                 )
             }
-
 
         # 6. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
         all_user_datasets_verified = True
