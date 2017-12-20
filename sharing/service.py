@@ -40,7 +40,7 @@ def create_share(request, item, emails, type, share_user=None):
             continue
 
         # Check for an existing item
-        sharedAlready = item.shared.all().filter(email=email)
+        sharedAlready = item.shared.filter(email=email)
 
         if sharedAlready.count() > 0:
             sharedAlready = sharedAlready.first()

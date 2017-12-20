@@ -67,22 +67,27 @@ class BigQueryCohortSupport(object):
         'fields': [
             {
                 'name': 'cohort_id',
-                'type': 'INTEGER'
+                'type': 'INTEGER',
+                'mode': 'REQUIRED'
             },{
-                "name": "case_barcode",
-                "type": "STRING"
+                'name': 'case_barcode',
+                'type': 'STRING',
+                'mode': 'REQUIRED'
             },{
-                "name": "sample_barcode",
-                "type": "STRING"
+                'name': 'sample_barcode',
+                'type': 'STRING',
+                'mode': 'REQUIRED'
             },{
-                "name": "project_short_name",
-                "type": "STRING"
+                'name': 'project_short_name',
+                'type': 'STRING',
+                'mode': 'REQUIRED'
             },{
-                "name": "date_added",
-                "type": "TIMESTAMP"
+                'name': 'date_added',
+                'type': 'TIMESTAMP',
+                'mode': 'REQUIRED'
             },{
-                "name": "uuid",
-                "type": "STRING"
+                'name': 'case_gdc_uuid',
+                'type': 'STRING'
             }
         ]
     }
@@ -183,14 +188,15 @@ class BigQueryCohortSupport(object):
         bigquery_service = get_bigquery_service()
         datasets = bigquery_service.datasets().list(projectId=self.project_id).execute()
 
-        for dataset in datasets['datasets']:
-            tables = bigquery_service.tables().list(projectId=self.project_id,datasetId=dataset['datasetReference']['datasetId']).execute()
-            if 'tables' not in tables:
-                bq_tables.append({'dataset': dataset['datasetReference']['datasetId'],
-                                  'table_id': None})
-            else:
-                for table in tables['tables']:
-                    bq_tables.append({'dataset': dataset['datasetReference']['datasetId'], 'table_id':  table['tableReference']['tableId']})
+        if datasets and 'datasets' in datasets:
+            for dataset in datasets['datasets']:
+                tables = bigquery_service.tables().list(projectId=self.project_id,datasetId=dataset['datasetReference']['datasetId']).execute()
+                if 'tables' not in tables:
+                    bq_tables.append({'dataset': dataset['datasetReference']['datasetId'],
+                                      'table_id': None})
+                else:
+                    for table in tables['tables']:
+                        bq_tables.append({'dataset': dataset['datasetReference']['datasetId'], 'table_id':  table['tableReference']['tableId']})
 
         return bq_tables
 
@@ -302,7 +308,7 @@ class BigQueryCohortSupport(object):
                 'date_added': date_added
             }
             if uuids and sample.sample_barcode in uuids:
-                sample_dict['uuid'] = uuids[sample.sample_barcode]
+                sample_dict['case_gdc_uuid'] = uuids[sample.sample_barcode]
             rows.append(sample_dict)
 
         response = self._streaming_insert(rows)
