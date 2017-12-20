@@ -52,7 +52,7 @@ class Program(models.Model):
 
     @classmethod
     def get_user_programs(cls, user, includeShared=True, includePublic=False):
-        programs = user.program_set.all().filter(active=True)
+        programs = user.program_set.filter(active=True)
         if includeShared:
             sharedPrograms = cls.objects.filter(shared__matched_user=user, shared__active=True, active=True)
             programs = programs | sharedPrograms
@@ -90,7 +90,7 @@ class Project(models.Model):
 
     @classmethod
     def get_user_projects(cls, user, includeShared=True):
-        programs = user.program_set.all().filter(active=True)
+        programs = user.program_set.filter(active=True)
         if includeShared:
             sharedPrograms = Program.objects.filter(shared__matched_user=user, shared__active=True, active=True)
             programs = programs | sharedPrograms

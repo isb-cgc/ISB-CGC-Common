@@ -31,14 +31,16 @@ from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery_service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
+from google_helpers.iam_service import get_iam_resource
 from google_helpers.storage_service import get_storage_resource
 from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
+import re
 
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
-from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist
+from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist, ManagedServiceAccounts
 import json
 
 logger = logging.getLogger('main_logger')
@@ -47,6 +49,41 @@ OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
+MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
+
+
+def unregister_sa(user_id, sa_id):
+    st_logger = StackDriverLogger.build_from_django_settings()
+
+    sa = ServiceAccount.objects.get(service_account=sa_id, active=1)
+    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
+
+    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME,"User {} is unregistering SA {}".format(User.objects.get(id=user_id).email,sa_id))
+
+    for saad in saads:
+        try:
+            directory_service, http_auth = get_directory_resource()
+            directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
+                                               memberKey=saad.service_account.service_account).execute(http=http_auth)
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
+                    saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
+            logger.info("Attempting to delete user {} from group {}. "
+                        "If an error message doesn't follow, they were successfully deleted"
+                        .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
+        except HttpError as e:
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
+                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+            logger.error(e)
+            logger.exception(e)
+
+    for saad in saads:
+        saad.delete()
+    sa.active = False
+    sa.save()
+
+
 
 @login_required
 def extended_logout_view(request):
@@ -245,7 +282,7 @@ def user_gcp_list(request, user_id):
 
             try:
                 user = User.objects.get(id=user_id)
-                gcp_list = GoogleProject.objects.filter(user=user)
+                gcp_list = GoogleProject.objects.filter(user=user, active=1)
                 social_account = SocialAccount.objects.get(user_id=user_id)
 
                 user_details = {
@@ -258,9 +295,7 @@ def user_gcp_list(request, user_id):
                     'last_name': user.last_name
                 }
 
-                context = {'user': user,
-                           'user_details': user_details,
-                           'gcp_list': gcp_list}
+                context = {'user': user, 'user_details': user_details, 'gcp_list': gcp_list}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
@@ -288,7 +323,7 @@ def verify_gcp(request, user_id):
         gcp_id = request.GET.get('gcp-id', None)
         is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
-        gcp = GoogleProject.objects.filter(project_id=gcp_id)
+        gcp = GoogleProject.objects.filter(project_id=gcp_id, active=1)
         # Can't register the same GCP twice - return immediately
         if gcp.count() > 0 and not is_refresh:
             return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
@@ -342,6 +377,10 @@ def verify_gcp(request, user_id):
 def register_gcp(request, user_id):
 
     try:
+        # log the reports using Cloud logging API
+        st_logger = StackDriverLogger.build_from_django_settings()
+        log_name = SERVICE_ACCOUNT_LOG_NAME
+
         if request.POST:
             project_id = request.POST.get('gcp_id', None)
             register_users = request.POST.getlist('register_users')
@@ -354,34 +393,49 @@ def register_gcp(request, user_id):
             else:
                 try:
                     gcp = GoogleProject.objects.get(project_name=project_name,
-                                                    project_id=project_id)
+                                                    project_id=project_id,
+                                                    active=1)
                     if not is_refresh:
                         messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
 
                 except ObjectDoesNotExist:
-                    gcp = GoogleProject.objects.create(project_name=project_name,
-                                                       project_id=project_id,
-                                                       big_query_dataset='')
+                    gcp,created = GoogleProject.objects.update_or_create(
+                        project_name=project_name,project_id=project_id,
+                        defaults={
+                           'big_query_dataset': '',
+                           'active': 1
+                        }
+                    )
                     gcp.save()
-
+                    if not created:
+                        msg="[STATUS] User {} has re-registered GCP {}".format(User.objects.get(id=user_id).email,project_id)
+                        logger.info(msg)
+                        st_logger.write_text_log_entry(log_name,msg)
 
             users = User.objects.filter(email__in=register_users)
 
             if is_refresh:
-                users = users.exclude(id__in=gcp.user.all())
-                if len(users):
+                users_to_add = users.exclude(id__in=gcp.user.all())
+                users_to_remove = gcp.user.all().exclude(id__in=users)
+                if len(users_to_add):
                     msg = "The following user{} added to GCP {}: {}".format(
-                        ("s were" if len(users) > 1 else " was"),
+                        ("s were" if len(users_to_add) > 1 else " was"),
                         project_id,
-                        ", ".join(users.values_list('email',flat=True)))
+                        ", ".join(users_to_add.values_list('email',flat=True)))
                 else:
                     msg = "There were no new users to add to GCP {}.".format(project_id)
+                if len(users_to_remove):
+                    msg += ". The following user{} removed from GCP {}: {}".format(
+                        ("s were" if len(users_to_remove) > 1 else " was"),
+                        project_id,
+                        ", ".join(users_to_remove.values_list('email',flat=True)))
+                else:
+                    msg += ". There were no users to remove from GCP {}.".format(project_id)
 
                 messages.info(request, msg)
 
-            for user in users:
-                gcp.user.add(user)
-                gcp.save()
+            gcp.user.set(users)
+            gcp.save()
 
             return redirect('user_gcp_list', user_id=request.user.id)
 
@@ -399,7 +453,7 @@ def register_gcp(request, user_id):
 @login_required
 def gcp_detail(request, user_id, gcp_id):
     context = {}
-    context['gcp'] = GoogleProject.objects.get(id=gcp_id)
+    context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
 
     return render(request, 'GenespotRE/gcp_detail.html', context)
 
@@ -409,23 +463,17 @@ def user_gcp_delete(request, user_id, gcp_id):
 
     try:
         if request.POST:
-            gcp = GoogleProject.objects.get(id=gcp_id)
+            gcp = GoogleProject.objects.get(id=gcp_id, active=1)
 
             # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
-            service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id)
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account__in=service_accounts)
-            for saad in saads:
-                try:
-                    directory_service, http_auth = get_directory_resource()
-                    directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=saad.service_account.service_account).execute(http=http_auth)
+            service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id, active=1)
+            for service_account in service_accounts:
+                unregister_sa(user_id,service_account.service_account)
 
-                    logger.info("Attempting to delete user {} from group {}. "
-                                "If an error message doesn't follow, they were successfully deleted"
-                                .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
-                except HttpError as e:
-                    logger.info(e)
+            gcp.user.clear()
 
-            gcp.delete()
+            gcp.active=False
+            gcp.save()
     except Exception as e:
         logger.error("[ERROR] While deleting a GCP: ")
         logger.exception(e)
@@ -437,12 +485,13 @@ def user_gcp_delete(request, user_id, gcp_id):
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
 
     # Only verify for protected datasets
-    dataset_objs = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
-    dataset_obj_names = dataset_objs.values_list('name', flat=True)
+    controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
+    controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
+    project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
     sab = None
     gow = None
-
+    sa = None
     is_compute = False
 
     # log the reports using Cloud logging API
@@ -457,6 +506,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     # Block verification of service accounts used by the application
     try:
         sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
+        msa = ManagedServiceAccounts.from_json_file_path(MANAGED_SERVICE_ACCOUNTS_PATH)
         gow = GoogleOrgWhitelist.from_json_file_path(GOOGLE_ORG_WHITELIST_PATH)
     except Exception as e:
         logger.error("[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
@@ -472,12 +522,13 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already exists with the same datasets
     try:
-        sa = ServiceAccount.objects.get(service_account=service_account)
+        sa = ServiceAccount.objects.get(service_account=service_account, active=1)
         if not is_adjust and not is_refresh:
             return {
                 'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(str(service_account)),
                 'level': 'error'
             }
+
         if is_adjust or not is_refresh:
             reg_change = False
             # Check the private datasets to see if there's a registration change
@@ -487,8 +538,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             if remove_all and saads.count():
                 reg_change = True
             else:
-                if dataset_objs.count() or saads.count():
-                    ads = dataset_objs.values_list('whitelist_id', flat=True)
+                if controlled_datasets.count() or saads.count():
+                    ads = controlled_datasets.values_list('whitelist_id', flat=True)
                     # A private dataset missing from either list means this is a registration change
                     for ad in ads:
                         if ad not in saads:
@@ -512,7 +563,16 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 'level': 'error'
             }
 
+        try:
+            # determine if this is a re-registratio, or a brand-new one
+            sa = ServiceAccount.objects.get(service_account=service_account, active=0)
+            logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,user_email))
+            st_logger.write_text_log_entry(log_name,"[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,user_email))
+        except ObjectDoesNotExist:
+            pass
+
     crm_service = get_special_crm_resource()
+    iam_service = get_iam_resource()
 
     # 0. VERIFY THE PROJECT'S ANCESTRY AND RETRIEVE THE NUMBER
     try:
@@ -527,7 +587,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             is_compute = (projectNumber+'-compute@') in service_account
 
             # If we found an organization and this is a controlled dataset registration/adjustment, refuse registration
-            if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and dataset_objs.count() > 0:
+            if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and controlled_datasets.count() > 0:
                 logger.info("[STATUS] While attempting to register GCP ID {}: ".format(str(gcp_id)))
                 logger.info("GCP {} was found to be in organization ID {}; its service accounts cannot be registered for use with controlled data.".format(str(gcp_id),project['parent']['id']))
                 return {
@@ -546,20 +606,27 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     # 1. VERIFY SA IS FROM THIS GCP
     # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
-    if projectNumber not in service_account and gcp_id not in service_account and dataset_objs.count() > 0:
+    if not service_account.startswith(projectNumber+'-') and not project_id_re.search(service_account) \
+            and not msa.is_managed_this_project(service_account,projectNumber,gcp_id) \
+            and controlled_datasets.count() > 0:
         return {
             'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
                 service_account, str(gcp_id),),
             'level': 'error'
         }
 
-    # 2. GET ALL USERS ON THE PROJECT.
+    # 2. VALIDATE ALL MEMBERS ON THE PROJECT.
     try:
         iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
         bindings = iam_policy['bindings']
         roles = {}
         verified_sa = False
-        invalid_members = []
+        invalid_members = {
+            'keys_found': [],
+            'sa_roles': [],
+            'external_sa': [],
+            'other_members': []
+        }
         for val in bindings:
             role = val['role']
             members = val['members']
@@ -573,33 +640,90 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     member_sa = member.split(':')[1].lower()
                     if member_sa == service_account.lower():
                         verified_sa = True
-                    elif projectNumber not in member_sa and gcp_id not in member_sa and not sab.is_blacklisted(member_sa) and dataset_objs.count() > 0:
-                        invalid_members.append(member)
+
+                    # If controlled-access data is involved, all SAs must be heavily vetted
+                    if controlled_datasets.count() > 0:
+
+                        # Check to see if this SA is internal (the SA being registered will always pass this if it
+                        # made it this far, since it is pre-validated for GCP sourcing)
+                        if not member_sa.startswith(projectNumber+'-') and not project_id_re.search(member_sa) and \
+                                not (msa.is_managed_this_project(member_sa, projectNumber, gcp_id)) and \
+                                not sab.is_blacklisted(member_sa):
+                            invalid_members['external_sa'].append(member_sa)
+
+                        # If we haven't already invalidated this member SA for being from outside the project, check to see if anyone
+                        # has been given roles on this service account--this could mean non-project members have access from outside the project
+                        # Note we exclude our own SAs from these checks, because they're ours, and we exclude managed SAs, because they will
+                        # 404 when being searched this way
+                        if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
+                            sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
+                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
+                            ).execute()
+                            if sa_iam_pol and 'bindings' in sa_iam_pol:
+                                invalid_members['sa_roles'].append(member_sa)
+
+                            # If we haven't already invalidated this member SA for being from outside the project or having
+                            # an unallowed role, check its key status
+                            if member_sa not in [x for b in invalid_members.values() for x in b]:
+                                keys = iam_service.projects().serviceAccounts().keys().list(
+                                    name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
+                                    keyTypes="USER_MANAGED"
+                                ).execute()
+
+                                # User-managed keys are not allowed
+                                if keys and 'keys' in keys:
+                                    logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
+                                        member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
+                                    )
+                                    st_logger.write_struct_log_entry(log_name, {
+                                        'message': '[STATUS] User-managed keys found on SA {}: {}'.format(
+                                            member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
+                                        )
+                                    })
+                                    invalid_members['keys_found'].append(member_sa)
+
+                # Anything not an SA or a user is invalid if controlled data is involved
                 else:
-                    invalid_members.append(member)
+                    if controlled_datasets.count() > 0:
+                        invalid_members['other_members'].append(member)
 
         # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
         # which do not belong to this project, and the registration is for controlled data, disallow
-        if len(invalid_members) and dataset_objs.count() > 0:
-            logger.info('[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members)))
-            st_logger.write_struct_log_entry(log_name, {
-                'message': '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(service_account,gcp_id,"; ".join(invalid_members))
-            })
-            return {'message': 'Service Account {} belongs to project {}, which has one or more invalid members ({}); controlled data can only be accessed from GCPs with users and service accounts that originate from that GCP.'.format(service_account,gcp_id,"; ".join(invalid_members)),}
+        if sum([len(x) for x in invalid_members.values()]) and controlled_datasets.count() > 0:
+            log_msg = '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(
+                service_account,gcp_id,"; ".join([x for b in invalid_members.values() for x in b])
+            )
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {'message': log_msg})
+
+            msg = 'Service Account {} belongs to project {}, which has one or more invalid members. Controlled data can only be accessed from GCPs with valid members. Members were invalid for the following reasons: '.format(service_account,gcp_id,"; ".join(invalid_members))
+            if len(invalid_members['keys_found']):
+                msg += " User-managed keys were found on service accounts ({}). User-managed keys on service accounts are not permitted.".format("; ".join(invalid_members['keys_found']))
+            if len(invalid_members['sa_roles']):
+                msg += " Roles were found applied to service accounts ({}). Roles cannot be assigned to service accounts.".format("; ".join(invalid_members['sa_roles']))
+            if len(invalid_members['external_sa']):
+                msg += " External service accounts from other projects were found ({}). External service accounts are not permitted.".format("; ".join(invalid_members['external_sa']))
+            if len(invalid_members['other_members']):
+                msg += " Non-user and non-Service Account members were found ({}). Only users and service accounts are permitted.".format("; ".join(invalid_members['other_members']))
+
+            return {'message': msg}
 
         # 4. Verify that the current user is on the GCP project
         if not is_email_in_iam_roles(roles, user_email):
-            logger.info('[STATUS] While verifying SA {0}: User email {1} is not the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id))
+            log_msg = '[STATUS] While verifying SA {0}: User email {1} is not in the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
+            logger.info(log_msg)
             st_logger.write_struct_log_entry(log_name, {
-                'message': 'While verifying SA {0}: User email {1} is not the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
+                'message': log_msg
             })
+
             return {'message': 'You must be a member of a project in order to register its service accounts.'}
 
         # 5. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:
-            logger.info('[STATUS] While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id))
+            log_msg = '[STATUS] While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {'message': log_msg})
 
-            st_logger.write_struct_log_entry(log_name, {'message': 'While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)})
             # return error that the service account doesn't exist in this project
             return {'message':
                 "Service Account ID '{}' wasn't found in Google Cloud Project {}. Please double-check the service account ID, and {}.".format(
@@ -607,7 +731,6 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                     ("be sure that Compute Engine has been enabled for this project" if is_compute else "be sure it has been given at least one Role in the project")
                 )
             }
-
 
         # 6. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
         all_user_datasets_verified = True
@@ -642,7 +765,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True))
 
                         # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
-                        for dataset in dataset_objs:
+                        for dataset in controlled_datasets:
                             member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
 
                         valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
@@ -654,29 +777,29 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                         if not len(invalid_datasets):
                             if len(valid_datasets):
-                                if dataset_objs:
-                                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
+                                if controlled_datasets:
+                                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
                         else:
                             all_user_datasets_verified = False
-                            if len(dataset_objs):
+                            if len(controlled_datasets):
                                 st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(invalid_datasets))})
 
                     # IF USER HAS NO ERA COMMONS ID
                     else:
                         # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
-                        if len(dataset_objs):
+                        if len(controlled_datasets):
                             all_user_datasets_verified = False
-                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(dataset_obj_names))})
-                            for dataset in dataset_objs:
+                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
+                            for dataset in controlled_datasets:
                                 member['datasets'].append({'name': dataset.name, 'valid': False})
 
                 # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
                 else:
                     member['nih_registered'] = False
-                    if len(dataset_objs):
-                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(dataset_obj_names))})
+                    if len(controlled_datasets):
+                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(controlled_dataset_names))})
                         all_user_datasets_verified = False
-                        for dataset in dataset_objs:
+                        for dataset in controlled_datasets:
                             member['datasets'].append({'name': dataset.name, 'valid': False})
 
     except HttpError as e:
@@ -752,7 +875,7 @@ def register_sa(request, user_id):
 
             if request.GET.get('sa_id'):
                 template = 'GenespotRE/adjust_sa.html'
-                service_account = ServiceAccount.objects.get(id=request.GET.get('sa_id'))
+                service_account = ServiceAccount.objects.get(id=request.GET.get('sa_id'), active=1)
                 context['gcp_id'] = service_account.google_project.project_id
                 context['sa_datasets'] = service_account.get_auth_datasets()
                 context['sa_id'] = service_account.service_account
@@ -775,7 +898,7 @@ def register_sa(request, user_id):
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
-            user_gcp = GoogleProject.objects.get(project_id=gcp_id)
+            user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
 
             # If we've received a remove-all request, ignore any provided datasets
             if remove_all:
@@ -800,6 +923,7 @@ def register_sa(request, user_id):
                 # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
                 public_datasets = AuthorizedDataset.objects.filter(public=True)
                 directory_service, http_auth = get_directory_resource()
+
                 service_account_obj, created = ServiceAccount.objects.update_or_create(
                     google_project=user_gcp, service_account=user_sa,
                     defaults={
@@ -808,6 +932,9 @@ def register_sa(request, user_id):
                         'active': True
                     })
 
+                if not created:
+                    logger.info("[STATUS] User {} re-registered service account {}".format(user_email, user_sa))
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': "[STATUS] User {} re-registered service account {}".format(user_email, user_sa)})
                 for dataset in public_datasets | protected_datasets:
                     service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.objects.update_or_create(
                         service_account=service_account_obj, authorized_dataset=dataset,
@@ -872,7 +999,7 @@ def register_sa(request, user_id):
 
                 # Check for current access and revoke
                 try:
-                    service_account_obj = ServiceAccount.objects.get(service_account=user_sa)
+                    service_account_obj = ServiceAccount.objects.get(service_account=user_sa, active=1)
                     saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj)
 
                     # We can't be too sure, so revoke it all
@@ -915,32 +1042,11 @@ def register_sa(request, user_id):
 
 @login_required
 def delete_sa(request, user_id, sa_id):
-    st_logger = StackDriverLogger.build_from_django_settings()
-
     try:
         if request.POST:
-            sa = ServiceAccount.objects.get(id=sa_id)
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
-
-            for saad in saads:
-                try:
-                    directory_service, http_auth = get_directory_resource()
-                    directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group, memberKey=saad.service_account.service_account).execute(http=http_auth)
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                    logger.info("Attempting to delete user {} from group {}. "
-                                "If an error message doesn't follow, they were successfully deleted"
-                                .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
-                except HttpError as e:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                        'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                    logger.error(e)
-                    logger.exception(e)
-
-            for saad in saads:
-                saad.delete()
-            sa.delete()
+            unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
     except Exception as e:
-        logger.error("[ERROR] While trying to delete a Service Account: ")
+        logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_id))
         logger.exception(e)
         messages.error(request, "Encountered an error while trying to remove this service account - please contact the administrator.")
 
@@ -953,7 +1059,7 @@ def register_bucket(request, user_id, gcp_id):
 
     if request.POST:
         bucket_name = request.POST.get('bucket_name', None)
-        gcp = GoogleProject.objects.get(id=gcp_id)
+        gcp = GoogleProject.objects.get(id=gcp_id, active=1)
         found_bucket = False
 
         # Check bucketname not null
@@ -1023,7 +1129,7 @@ def delete_bucket(request, user_id, bucket_id):
 def register_bqdataset(request, user_id, gcp_id):
     if request.POST:
         bqdataset_name = request.POST.get('bqdataset_name', None)
-        gcp = GoogleProject.objects.get(id=gcp_id)
+        gcp = GoogleProject.objects.get(id=gcp_id, active=1)
         found_dataset = False
 
         # Check bqdatasetname not null
