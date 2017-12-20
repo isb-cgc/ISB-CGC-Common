@@ -40,13 +40,3 @@ def get_special_crm_resource():
     credentials = GoogleCredentials.from_stream(
         settings.USER_GCP_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
     return build('cloudresourcemanager', 'v1beta1', credentials=credentials, cache_discovery=False)
-
-
-def get_iam_resource():
-    """
-    Returns: a Google Identity and Access Management service for use in querying specific kinds of IAM policies
-    not available to the Cloud Resource Manager (eg. Service Account IAM policies)
-    """
-    credentials = GoogleCredentials.from_stream(
-        settings.USER_GCP_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
-    return build('iam', 'v1', credentials=credentials, cache_discovery=False)
