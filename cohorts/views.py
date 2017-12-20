@@ -728,7 +728,6 @@ def validate_barcodes(request):
 def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
-
     try:
         shared_with_users = []
 
@@ -868,68 +867,71 @@ def export_cohort(request):
 def export_cohort_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
-    req_user = User.objects.get(id=request.user.id)
-
-    # GET request receives the potential list of projects and datasets this user has available to make a table in
-    if request.method == 'GET':
-        result = {
-            'status': '',
-            'data': {
-                'projects': []
-            }
-        }
-        gcps = GoogleProject.objects.filter(user=req_user)
-
-        if not len(gcps):
-            status = 500
-            result = {
-                'status': 'error',
-                'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
-            }
-        else:
-            for gcp in gcps:
-                bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
-
-                this_proj = {
-                    'datasets': {},
-                    'name': gcp.project_id
-                }
-                bqs = BigQueryCohortSupport(gcp.project_id, None, None)
-                bq_tables = bqs.get_tables()
-                for table in bq_tables:
-                    if table['dataset'] in bqds:
-                        if table['dataset'] not in this_proj['datasets']:
-                            this_proj['datasets'][table['dataset']] = []
-                        if table['table_id']:
-                            this_proj['datasets'][table['dataset']].append(table['table_id'])
-                if len(this_proj['datasets']):
-                    result['data']['projects'].append(this_proj)
-
-            if not len(result['data']['projects']):
-                status=500
-                result = {
-                    'status': 'error',
-                    'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
-                }
-            else:
-                status=200
-                result['status']='success'
-
-        return JsonResponse(result, status=status)
-
-    # POST is to actually export the cohort(s) to a chosen project:dataset:table
-
-    redirect_url = reverse('cohort_list')
-
-    dataset = None
-    table = None
-    bq_proj_id = None
-
-    if not cohort_id:
-        messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
-        return redirect(redirect_url)
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
 
     try:
+
+        req_user = User.objects.get(id=request.user.id)
+
+        # GET request receives the potential list of projects and datasets this user has available to make a table in
+        if request.method == 'GET':
+            result = {
+                'status': '',
+                'data': {
+                    'projects': []
+                }
+            }
+            gcps = GoogleProject.objects.filter(user=req_user, active=1)
+
+            if not gcps.count():
+                status = 500
+                result = {
+                    'status': 'error',
+                    'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
+                }
+                logger.info("[STATUS] No registered GCPs found - cannot export cohort ID {}.".format(str(cohort_id)))
+            else:
+                for gcp in gcps:
+                    bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
+
+                    this_proj = {
+                        'datasets': {},
+                        'name': gcp.project_id
+                    }
+                    bqs = BigQueryCohortSupport(gcp.project_id, None, None)
+                    bq_tables = bqs.get_tables()
+                    for table in bq_tables:
+                        if table['dataset'] in bqds:
+                            if table['dataset'] not in this_proj['datasets']:
+                                this_proj['datasets'][table['dataset']] = []
+                            if table['table_id']:
+                                this_proj['datasets'][table['dataset']].append(table['table_id'])
+                    if len(this_proj['datasets']):
+                        result['data']['projects'].append(this_proj)
+
+                if not len(result['data']['projects']):
+                    status=500
+                    result = {
+                        'status': 'error',
+                        'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
+                    }
+                    logger.info("[STATUS] No registered datasets were found - cannot export cohort ID {}.".format(str(cohort_id)))
+                else:
+                    status=200
+                    result['status']='success'
+
+            return JsonResponse(result, status=status)
+
+        # POST is to actually export the cohort(s) to a chosen project:dataset:table
+
+        dataset = None
+        table = None
+        bq_proj_id = None
+
+        if not cohort_id:
+            messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
+            return redirect(redirect_url)
+
         cohort = Cohort.objects.get(id=cohort_id)
         dataset = request.POST.get('project-dataset', '').split(":")[1]
         table = None
@@ -955,7 +957,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
         else:
             try:
-                gcp = GoogleProject.objects.get(project_name=proj_id)
+                gcp = GoogleProject.objects.get(project_name=proj_id, active=1)
             except ObjectDoesNotExist as e:
                 messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
                 return redirect(redirect_url)
@@ -982,7 +984,6 @@ def export_cohort_to_bq(request, cohort_id=0):
 
         # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
-            redirect_url = reverse('cohort_list')
             err_msg = ''
             if len(bq_result['insertErrors']) > 1:
                 err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
@@ -1632,25 +1633,28 @@ def union_cohort(request):
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def intersect_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
     return redirect(redirect_url)
+
 
 @login_required
 @csrf_protect
 def set_minus_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def save_comment(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     content = request.POST.get('content').encode('utf-8')
     cohort = Cohort.objects.get(id=int(request.POST.get('cohort_id')))
     obj = Cohort_Comments.objects.create(user=request.user, cohort=cohort, content=content)
@@ -1659,14 +1663,15 @@ def save_comment(request):
         'first_name': request.user.first_name,
         'last_name': request.user.last_name,
         'date_created': formats.date_format(obj.date_created, 'DATETIME_FORMAT'),
-        'content': obj.content
+        'content': escape(obj.content)
     }
     return HttpResponse(json.dumps(return_obj), status=200)
+
 
 @login_required
 @csrf_protect
 def save_cohort_from_plot(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     cohort_name = request.POST.get('cohort-name', 'Plot Selected Cohort')
     result = {}
 

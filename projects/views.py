@@ -51,7 +51,7 @@ def public_program_list(request):
 def program_list(request, is_public=False):
     template = 'projects/program_list.html'
 
-    ownedPrograms = request.user.program_set.all().filter(active=True)
+    ownedPrograms = request.user.program_set.filter(active=True)
     sharedPrograms = Program.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
 
     programs = ownedPrograms | sharedPrograms
@@ -59,7 +59,7 @@ def program_list(request, is_public=False):
 
     context = {
         'programs': programs,
-        'public_programs': Program.objects.all().filter(is_public=True, active=True),
+        'public_programs': Program.objects.filter(is_public=True, active=True),
         'is_public': is_public
     }
     return render(request, template, context)
@@ -69,9 +69,9 @@ def program_detail(request, program_id=0):
     # """ if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name """
     template = 'projects/program_detail.html'
 
-    ownedPrograms = request.user.program_set.all().filter(active=True)
+    ownedPrograms = request.user.program_set.filter(active=True)
     sharedPrograms = Program.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
-    publicPrograms = Program.objects.all().filter(is_public=True, active=True)
+    publicPrograms = Program.objects.filter(is_public=True, active=True)
 
     programs = ownedPrograms | sharedPrograms | publicPrograms
     programs = programs.distinct()
@@ -85,7 +85,7 @@ def program_detail(request, program_id=0):
     program.mark_viewed(request)
     context = {
         'program': program,
-        'projects': program.project_set.all().filter(active=True),
+        'projects': program.project_set.filter(active=True),
         'shared': shared
     }
     return render(request, template, context)
@@ -98,7 +98,7 @@ def program_upload_existing(request):
 @login_required
 def program_upload(request, existing_proj=False):
     # Check for user' GoogleProject
-    google_projects = GoogleProject.objects.filter(user=request.user)
+    google_projects = GoogleProject.objects.filter(user=request.user, active=1)
 
     if len(google_projects) == 0:
         template = 'GenespotRE/register_gcp.html'

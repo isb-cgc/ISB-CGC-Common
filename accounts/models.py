@@ -19,6 +19,8 @@ limitations under the License.
 from django.db import models
 from django.contrib.auth.models import User
 import logging
+from datetime import datetime, timedelta
+import pytz
 
 logger = logging.getLogger('main_logger')
 
@@ -54,9 +56,13 @@ class GoogleProject(models.Model):
     project_name = models.CharField(max_length=150)
     project_id = models.CharField(max_length=150)
     big_query_dataset = models.CharField(max_length=150, null=True)
+    active = models.BooleanField(default=False, null=False)
 
     def __str__(self):
         return self.project_name
+
+    def active_service_accounts(self):
+        return self.serviceaccount_set.filter(active=1)
 
 
 class Bucket(models.Model):
@@ -124,6 +130,10 @@ class ServiceAccount(models.Model):
             logger.error("[ERROR] While retrieving authorized datasets: ")
             logger.exception(e)
         return result
+
+    def is_expired(self):
+        expired_time = pytz.utc.localize(datetime.utcnow() + timedelta(days=-7, minutes=10))
+        return self.authorized_date < expired_time
 
 
 class ServiceAccountAuthorizedDatasets(models.Model):

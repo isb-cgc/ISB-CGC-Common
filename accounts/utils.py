@@ -22,7 +22,7 @@ from re import compile as re_compile
 
 from jsonschema import validate as schema_validate, ValidationError
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('main_logger')
 
 
 class ServiceObjectBase(object):
@@ -118,6 +118,80 @@ class ServiceObjectBase(object):
             return cls.from_local_json_file(config_file_path)
 
 
+# Object for fetching the organization whitelist and confirming that a given org is in it
+class ManagedServiceAccounts(ServiceObjectBase):
+    SCHEMA = {
+        'type': 'object',
+        'properties': {
+            'managed_service_accounts': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                }
+            }
+        },
+        'required': [
+            'managed_service_accounts'
+        ]
+    }
+
+    def __init__(self, managed_service_accounts):
+        self.managed_service_accounts = set(managed_service_accounts)
+
+    def is_managed(self, service_account):
+        return '@{}'.format(service_account.split('@')[-1]) in self.managed_service_accounts
+
+    def is_managed_this_project(self, service_account, projectNumber, projectId):
+        return '@{}'.format(service_account.split('@')[-1]) in self.managed_service_accounts \
+               and (service_account.split('@')[0] == 'service-{}'.format(projectNumber) or \
+                    service_account.split('@')[0] == projectNumber or service_account.split('@')[0] == projectId)
+
+    @classmethod
+    def from_dict(cls, data):
+        """
+
+        Throws:
+            ValidationError if the data object does not match the required schema.
+        """
+        schema_validate(data, cls.SCHEMA)
+        return cls(data['managed_service_accounts'])
+
+
+# Object for fetching the organization whitelist and confirming that a given org is in it
+class GoogleOrgWhitelist(ServiceObjectBase):
+    SCHEMA = {
+        'type': 'object',
+        'properties': {
+            'google_org_whitelist': {
+                'type': 'array',
+                'items': {
+                    'type': 'string'
+                }
+            }
+        },
+        'required': [
+            'google_org_whitelist'
+        ]
+    }
+
+    def __init__(self, google_org_whitelist):
+        self.google_org_whitelist = set(google_org_whitelist)
+
+    def is_whitelisted(self, org_id_number):
+        return org_id_number in self.google_org_whitelist
+
+    @classmethod
+    def from_dict(cls, data):
+        """
+
+        Throws:
+            ValidationError if the data object does not match the required schema.
+        """
+        schema_validate(data, cls.SCHEMA)
+        return cls(data['google_org_whitelist'])
+
+
+# Object for fetching the service account blacklist and confirming that a given service account is not in it
 class ServiceAccountBlacklist(ServiceObjectBase):
     SCHEMA = {
         'type': 'object',
