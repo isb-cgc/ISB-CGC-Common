@@ -609,9 +609,13 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     if controlled_datasets.count() > 0 and \
             (not (service_account.startswith(projectNumber+'-') or project_id_re.search(service_account))
              or msa.is_managed(service_account)):
+        msg = "Service Account {} is ".format(service_account,)
+        if msa.is_managed(service_account):
+            msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
+        else:
+            msg += "not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
         return {
-            'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
-                service_account, str(gcp_id),),
+            'message': msg,
             'level': 'error'
         }
 
