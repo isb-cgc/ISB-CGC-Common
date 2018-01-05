@@ -1733,11 +1733,13 @@ def save_cohort_from_plot(request):
 
 @login_required
 @csrf_protect
-def cohort_filelist(request, cohort_id=0):
+def cohort_filelist(request, cohort_id=0, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
+    template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+
     if cohort_id == 0:
-        messages.error(request, 'Cohort provided does not exist.')
+        messages.error(request, 'Cohort requested does not exist.')
         return redirect('/user_landing')
 
     try:
@@ -1752,7 +1754,7 @@ def cohort_filelist(request, cohort_id=0):
                     has_access = []
                 has_access.append(dataset.authorized_dataset.whitelist_id)
 
-        items = cohort_files(request, cohort_id, build=build, access=has_access)
+        items = cohort_files(request, cohort_id, build=build, access=has_access, type=panel_type)
         cohort = Cohort.objects.get(id=cohort_id, active=True)
 
         # Check if cohort contains user data samples - return info message if it does.
@@ -1760,10 +1762,13 @@ def cohort_filelist(request, cohort_id=0):
         user_projects = Project.get_user_projects(request.user)
         cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
         if len(cohort_sample_list):
-            messages.info(request,
-                "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
+            messages.info(
+                request,
+                "File listing is not available for cohort samples that come from a user uploaded project. " +
+                "This functionality is currently being worked on and will become available in a future release."
+            )
 
-        return render(request, 'cohorts/cohort_filelist.html', {'request': request,
+        return render(request, template, {'request': request,
                                                                 'cohort': cohort,
                                                                 'base_url': settings.BASE_URL,
                                                                 'base_api_url': settings.BASE_API_URL,
@@ -1777,12 +1782,12 @@ def cohort_filelist(request, cohort_id=0):
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
-        return redirect(reverse('cohort_detail', args=[cohort_id]))
+        return redirect(reverse('cohort_details', args=[cohort_id]))
 
 
 @login_required
-def cohort_filelist_ajax(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     if cohort_id == 0:
         response_str = '<div class="row">' \
                     '<div class="col-lg-12">' \
@@ -1804,7 +1809,9 @@ def cohort_filelist_ajax(request, cohort_id=0):
     if request.GET.get('limit', None) is not None:
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
+
     build = request.GET.get('build','HG19')
+
     nih_user = NIH_User.objects.filter(user=request.user, active=True)
     has_access = None
     if len(nih_user) > 0:
@@ -1813,7 +1820,7 @@ def cohort_filelist_ajax(request, cohort_id=0):
             if not has_access:
                 has_access = []
             has_access.append(dataset.authorized_dataset.whitelist_id)
-    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, **params)
+    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, **params)
 
     return JsonResponse(result, status=200)
 
@@ -2109,7 +2116,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
     return render(request, template, template_values)
 
 # Copied over from metadata api
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
 
     GET = request.GET.copy()
     platform_count_only = GET.pop('platform_count_only', None)
@@ -2138,7 +2145,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             GROUP BY md.platform;"""
 
         query = """
-            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category, md.experimental_strategy
+            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
+              md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
             FROM {0} md
             JOIN (
                 SELECT sample_barcode
@@ -2148,6 +2156,11 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             ON cs.sample_barcode = md.sample_barcode
             WHERE md.file_uploaded='true'
         """
+
+        if type == 'igv':
+            query += " AND md.data_format='BAM'"
+        elif type == 'camic':
+            query += " AND md.data_format='SVS'"
 
         params = (cohort_id,)
 
@@ -2239,6 +2252,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'platform': item['platform'] or 'N/A',
                             'datacat': item['data_category'] or 'N/A',
                             'datatype': (item['data_type'] or 'N/A'),
+                            'dataformat': (item['data_format'] or 'N/A'),
                             'program': program.name
                         })
 
