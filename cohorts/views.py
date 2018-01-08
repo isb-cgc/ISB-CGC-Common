@@ -2145,7 +2145,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             GROUP BY md.platform;"""
 
         file_list_query = """
-            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
+            SELECT md.sample_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
               md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
             FROM {metadata_table} md
             JOIN (
@@ -2242,6 +2242,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
                         file_list.append({
                             'sample': item['sample_barcode'],
+                            'disease_code': item['disease_code'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
                             'index_name': item['index_file_name'] or 'N/A',
