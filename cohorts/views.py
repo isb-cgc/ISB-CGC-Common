@@ -1770,13 +1770,12 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
 
         return render(request, template, {'request': request,
                                                                 'cohort': cohort,
-                                                                'base_url': settings.BASE_URL,
-                                                                'base_api_url': settings.BASE_API_URL,
                                                                 'total_files': items['total_file_count'],
                                                                 'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
                                                                 'platform_counts': items['platform_count_list'],
                                                                 'file_list_max': MAX_FILE_LIST_ENTRIES,
                                                                 'sel_file_max': MAX_SEL_FILES,
+                                                                'img_thumbs_url': settings.IMG_THUMBS_URL,
                                                                 'build': build})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -2127,6 +2126,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     resp = None
     db = None
     cursor = None
+    type_clause = ""
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
@@ -2144,23 +2144,23 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             WHERE md.file_uploaded='true'
             GROUP BY md.platform;"""
 
-        query = """
+        file_list_query = """
             SELECT md.sample_barcode, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
               md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
-            FROM {0} md
+            FROM {metadata_table} md
             JOIN (
                 SELECT sample_barcode
                 FROM cohorts_samples
                 WHERE cohort_id = %s
             ) cs
             ON cs.sample_barcode = md.sample_barcode
-            WHERE md.file_uploaded='true'
+            WHERE md.file_uploaded='true' {type_clause}
         """
 
         if type == 'igv':
-            query += " AND md.data_format='BAM'"
+            type_clause = "AND md.data_format='BAM'"
         elif type == 'camic':
-            query += " AND md.data_format='SVS'"
+            type_clause = "AND md.data_format='SVS'"
 
         params = (cohort_id,)
 
@@ -2176,21 +2176,21 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 platform_selector_list.append(key)
 
         if none_in_filters:
-            query += ' AND platform IS NULL'
+            file_list_query += ' AND platform IS NULL'
 
         if len(platform_selector_list):
-            query += ((' OR' if none_in_filters else ' AND') + ' platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1]))
+            file_list_query += ((' OR' if none_in_filters else ' AND') + ' platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1]))
             params += tuple(x for x in platform_selector_list)
 
         if limit > 0:
-            query += ' LIMIT %s'
+            file_list_query += ' LIMIT %s'
             params += (limit,)
             # Offset is only valid when there is a limit
             if offset > 0:
-                query += ' OFFSET %s'
+                file_list_query += ' OFFSET %s'
                 params += (offset,)
 
-        query += ';'
+                file_list_query += ';'
 
         db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -2229,7 +2229,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 progs_without_files.append(program.name)
 
             if not platform_count_only:
-                cursor.execute(query.format(program_data_table), params)
+                cursor.execute(file_list_query.format(metadata_table=program_data_table,type_clause=type_clause), params)
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
                         whitelist_found = False
