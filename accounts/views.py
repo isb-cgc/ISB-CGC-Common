@@ -604,14 +604,18 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         logger.exception(e)
         raise Exception("Unable to retrieve project information for GCP {}; its service accounts cannot be registered.".format(gcp_id))
 
-    # 1. VERIFY SA IS FROM THIS GCP
-    # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
-    if not service_account.startswith(projectNumber+'-') and not project_id_re.search(service_account) \
-            and not msa.is_managed_this_project(service_account,projectNumber,gcp_id) \
-            and controlled_datasets.count() > 0:
+    # 1. VERIFY SA IS NOT A GOOGLE-MANAGED SA AND IS FROM THIS GCP
+    # If this SA is a Google-Managed SA or is not from the GCP, and this is a controlled data registration/refresh, deny
+    if controlled_datasets.count() > 0 and \
+            (not (service_account.startswith(projectNumber+'-') or project_id_re.search(service_account))
+             or msa.is_managed(service_account)):
+        msg = "Service Account {} is ".format(service_account,)
+        if msa.is_managed(service_account):
+            msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
+        else:
+            msg += "not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
         return {
-            'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
-                service_account, str(gcp_id),),
+            'message': msg,
             'level': 'error'
         }
 
