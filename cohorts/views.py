@@ -2127,6 +2127,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     db = None
     cursor = None
     type_clause = ""
+    limit_clause = ""
+    offset_clause = ""
+    filter_clause = ""
+
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
@@ -2154,7 +2158,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 WHERE cohort_id = %s
             ) cs
             ON cs.sample_barcode = md.sample_barcode
-            WHERE md.file_uploaded='true' {type_clause}
+            WHERE md.file_uploaded='true' {type_clause} {filter_clause}
+            {limit_clause}
+            {offset_clause}
+            ;
         """
 
         if type == 'igv':
@@ -2176,21 +2183,20 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 platform_selector_list.append(key)
 
         if none_in_filters:
-            file_list_query += ' AND platform IS NULL'
+            filter_clause += ' AND platform IS NULL'
 
         if len(platform_selector_list):
-            file_list_query += ((' OR' if none_in_filters else ' AND') + ' platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1]))
+            filter_clause += ((' OR' if none_in_filters else ' AND') + ' platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1]))
             params += tuple(x for x in platform_selector_list)
 
         if limit > 0:
-            file_list_query += ' LIMIT %s'
+            limit_clause = ' LIMIT %s'
             params += (limit,)
             # Offset is only valid when there is a limit
             if offset > 0:
-                file_list_query += ' OFFSET %s'
+                offset_clause = ' OFFSET %s'
                 params += (offset,)
 
-                file_list_query += ';'
 
         db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -2229,7 +2235,12 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 progs_without_files.append(program.name)
 
             if not platform_count_only:
-                cursor.execute(file_list_query.format(metadata_table=program_data_table,type_clause=type_clause), params)
+                cursor.execute(file_list_query.format(
+                    metadata_table=program_data_table,
+                    type_clause=type_clause,
+                    limit_clause=limit_clause,
+                    offset_clause=offset_clause,
+                    filter_clause=filter_clause), params)
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
                         whitelist_found = False
