@@ -1772,7 +1772,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                                                 'cohort': cohort,
                                                                 'total_files': items['total_file_count'],
                                                                 'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                                                'platform_counts': items['platform_count_list'],
+                                                                'platform_counts': items['count_list'],
                                                                 'file_list_max': MAX_FILE_LIST_ENTRIES,
                                                                 'sel_file_max': MAX_SEL_FILES,
                                                                 'img_thumbs_url': settings.IMG_THUMBS_URL,
@@ -2136,17 +2136,17 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        platform_count_query = """
-            SELECT md.platform, count(*) as platform_count
-            FROM {0} md
+        count_query = """
+            SELECT md.{count_col}, count(*) as col_count
+            FROM {metadata_table} md
             JOIN (
               SELECT sample_barcode
               FROM cohorts_samples
               WHERE cohort_id = %s
             ) cs
             ON cs.sample_barcode = md.sample_barcode
-            WHERE md.file_uploaded='true'
-            GROUP BY md.platform;"""
+            WHERE md.file_uploaded='true' {filter_clause}
+            GROUP BY md.{count_col};"""
 
         file_list_query = """
             SELECT md.sample_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
@@ -2205,7 +2205,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
         progs_without_files = []
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
 
-        platform_counts = {}
+        counts = {}
 
         total_file_count = 0
 
@@ -2221,16 +2221,16 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
             program_data_table = program_data_tables[0].data_table
 
-            cursor.execute(platform_count_query.format(program_data_table), (cohort_id,))
+            cursor.execute(count_query.format(metadata_table=program_data_table,count_col="platform",filter_clause=""), (cohort_id,))
 
             if cursor.rowcount > 0:
                 for row in cursor.fetchall():
                     platform = row['platform'] or 'None'
                     if (len(platform_selector_list) <= 0 and not none_in_filters) or platform in platform_selector_list or (none_in_filters and platform == 'None'):
-                        total_file_count += int(row['platform_count'])
-                        if platform not in platform_counts:
-                            platform_counts[platform] = 0
-                        platform_counts[platform] += int(row['platform_count'])
+                        total_file_count += int(row['col_count'])
+                        if platform not in counts:
+                            counts[platform] = 0
+                        counts[platform] += int(row['col_count'])
             else:
                 progs_without_files.append(program.name)
 
@@ -2268,12 +2268,12 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'program': program.name
                         })
 
-        platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]
+        count_list = [{'platform': x, 'count': y} for x,y in counts.items()]
 
         resp = {
             'total_file_count': total_file_count,
             'page': page,
-            'platform_count_list': platform_count_list,
+            'count_list': count_list,
             'file_list': file_list,
             'build': build,
             'programs_no_files': progs_without_files
