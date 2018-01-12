@@ -918,6 +918,8 @@ def register_sa(request, user_id):
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
 
+            err_msgs = []
+
             # If the verification was successful, finalize access
             if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
@@ -955,13 +957,22 @@ def register_sa(request, user_id):
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
                         directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
-                        logger.info("Attempting to insert user {} into group {}. "
+                        logger.info("Attempting to insert service account {} into Google Group {}. "
                                     "If an error message doesn't follow, they were successfully added."
                                     .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
                     except HttpError as e:
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
-                        logger.info(e)
+                        logger.warn(e)
+                        err_msgs.append(
+                           "There was an error while registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
+                               str(service_account_obj.service_account),
+                                dataset.name
+                           ))
+                        # If there was an error, the SA isn't on the Google Group, so we should remove it's
+                        # ServiceAccountAuthorizedDataset entry
+                        service_account_auth_dataset.delete()
+
 
                 # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
                 if is_adjust:
@@ -973,9 +984,9 @@ def register_sa(request, user_id):
                                 directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
                                                                    memberKey=saad.service_account.service_account).execute(http=http_auth)
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                                    'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
+                                    'message': '{0}: Attempting to remove service account from Google Group {1}.'.format(
                                         saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                                logger.info("Attempting to delete service account {} from group {}. "
+                                logger.info("Attempting to remove service account {} from group {}. "
                                             "If an error message doesn't follow, they were successfully deleted"
                                             .format(saad.service_account.service_account,
                                                     saad.authorized_dataset.acl_google_group))
@@ -983,11 +994,13 @@ def register_sa(request, user_id):
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                                     'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
                                         str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                                logger.error("[ERROR] When trying to remove a service account from a Google Group:")
+                                logger.error("[ERROR] When trying to remove SA {} from a Google Group:".format(str(saad.service_account.service_account)))
                                 logger.exception(e)
 
                             saad.delete()
 
+                if len(err_msgs):
+                    messages.error(request,"The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format("\n".join(err_msgs)))
                 return redirect('user_gcp_list', user_id=user_id)
 
             # if verification was unsuccessful, report errors, and revoke current access if there is any
