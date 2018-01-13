@@ -1000,7 +1000,9 @@ def register_sa(request, user_id):
                             saad.delete()
 
                 if len(err_msgs):
-                    messages.error(request,"The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format("\n".join(err_msgs)))
+                    messages.error(
+                        request,"The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format("\n".join(err_msgs))
+                    )
                 return redirect('user_gcp_list', user_id=user_id)
 
             # if verification was unsuccessful, report errors, and revoke current access if there is any
