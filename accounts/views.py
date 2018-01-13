@@ -963,15 +963,20 @@ def register_sa(request, user_id):
 
                     except HttpError as e:
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
-                        logger.warn(e)
-                        err_msgs.append(
-                           "There was an error while registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
-                               str(service_account_obj.service_account),
-                                dataset.name
-                           ))
-                        # If there was an error, the SA isn't on the Google Group, so we should remove it's
-                        # ServiceAccountAuthorizedDataset entry
-                        service_account_auth_dataset.delete()
+                        # We're not too concerned with 'Member already exists.' errors
+                        if e.resp.status == 409 and e._get_reason() == 'Member already exists.':
+                            logger.info(e)
+                        # ...but we are with others
+                        else:
+                            logger.warn(e)
+                            err_msgs.append(
+                               "There was an error while registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
+                                   str(service_account_obj.service_account),
+                                    dataset.name
+                               ))
+                            # If there was an error, the SA isn't on the Google Group, so we should remove it's
+                            # ServiceAccountAuthorizedDataset entry
+                            service_account_auth_dataset.delete()
 
 
                 # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
