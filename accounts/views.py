@@ -1009,9 +1009,14 @@ def register_sa(request, user_id):
                             except HttpError as e:
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                                     'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
-                                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                                logger.error("[ERROR] When trying to remove SA {} from a Google Group:".format(str(saad.service_account.service_account)))
-                                logger.exception(e)
+                                        str(saad.service_account.service_account),
+                                        saad.authorized_dataset.acl_google_group)})
+                                # We're not concerned with 'user doesn't exist' errors
+                                if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
+                                    logger.info(e)
+                                else:
+                                    logger.error("[ERROR] When trying to remove SA {} from a Google Group:".format(str(saad.service_account.service_account)))
+                                    logger.exception(e)
 
                             saad.delete()
 
@@ -1057,8 +1062,11 @@ def register_sa(request, user_id):
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                                     'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
                                         str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                                logger.error("[ERROR] When trying to remove a service account from a Google Group:")
-                                logger.exception(e)
+                                if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
+                                    logger.info(e)
+                                else:
+                                    logger.error("[ERROR] When trying to remove a service account from a Google Group:")
+                                    logger.exception(e)
 
                             saad.delete()
 
