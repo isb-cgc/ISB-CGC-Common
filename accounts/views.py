@@ -72,14 +72,25 @@ def unregister_sa(user_id, sa_id):
                         "If an error message doesn't follow, they were successfully deleted"
                         .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
         except HttpError as e:
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '[WARNING] There was an error in removing SA {0} from Google Group {1}.'.format(
-                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '[WARNING] {}}.'.format(str(e))})
-            logger.warn('[WARNING] There was an error in removing SA {0} from Google Group {1}: {2}'.format(
-                str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
-            logger.exception(e)
+            # We're not concerned with 'user doesn't exist' errors
+            if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[WARNING] While removing SA {0} from Google Group {1}.'.format(
+                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[WARNING] {}}.'.format(str(e))})
+                logger.warn('[WARNING] While removing SA {0} from Google Group {1}: {2}'.format(
+                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
+            # ...but we are concerned with anything else
+            else:
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[ERROR] There was an error in removing SA {0} from Google Group {1}.'.format(
+                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[ERROR] {}}.'.format(str(e))})
+                logger.error('[ERROR] There was an error in removing SA {0} from Google Group {1}: {2}'.format(
+                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
+                logger.exception(e)
 
     for saad in saads:
         saad.delete()
