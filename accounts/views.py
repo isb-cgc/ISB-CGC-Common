@@ -388,6 +388,7 @@ def verify_gcp(request, user_id):
 
 @login_required
 def register_gcp(request, user_id):
+    is_refresh = False
 
     try:
         # log the reports using Cloud logging API
@@ -401,8 +402,20 @@ def register_gcp(request, user_id):
 
             project_name = project_id
 
-            if not user_id or not project_id or not project_name:
-                pass
+            users = User.objects.filter(email__in=register_users)
+
+            if not user_id:
+                raise Exception("User ID not provided.")
+            elif not project_id or not project_name:
+                raise Exception("Project ID not provided.")
+            elif not len(register_users) or not users.count():
+                # A set of users to register or refresh is required
+                msg = "[STATUS] No registered user set found for GCP {} of project {}; {} aborted.".format(
+                    "refresh" if is_refresh else "registration",project_id,"refresh" if is_refresh else "registration")
+                logger.warn(msg)
+                st_logger.write_text_log_entry(log_name,msg)
+                messages.error(request, "The registered user set was empty, so the project could not be {}.".format("refreshed" if is_refresh else "registered"))
+                return redirect('user_gcp_list', user_id=request.user.id)
             else:
                 try:
                     gcp = GoogleProject.objects.get(project_name=project_name,
@@ -425,8 +438,6 @@ def register_gcp(request, user_id):
                         logger.info(msg)
                         st_logger.write_text_log_entry(log_name,msg)
 
-            users = User.objects.filter(email__in=register_users)
-
             if is_refresh:
                 users_to_add = users.exclude(id__in=gcp.user.all())
                 users_to_remove = gcp.user.all().exclude(id__in=users)
@@ -438,26 +449,29 @@ def register_gcp(request, user_id):
                 else:
                     msg = "There were no new users to add to GCP {}.".format(project_id)
                 if len(users_to_remove):
-                    msg += ". The following user{} removed from GCP {}: {}".format(
+                    msg += " The following user{} removed from GCP {}: {}".format(
                         ("s were" if len(users_to_remove) > 1 else " was"),
                         project_id,
                         ", ".join(users_to_remove.values_list('email',flat=True)))
                 else:
-                    msg += ". There were no users to remove from GCP {}.".format(project_id)
+                    msg += " There were no users to remove from GCP {}.".format(project_id)
 
                 messages.info(request, msg)
 
             gcp.user.set(users)
             gcp.save()
 
+            if not gcp.user.all().count():
+                raise Exception("GCP {} has no users!".format(project_id))
+
             return redirect('user_gcp_list', user_id=request.user.id)
 
         return render(request, 'GenespotRE/register_gcp.html', {})
 
     except Exception as e:
-        logger.error("[ERROR] While registering a Google Cloud Project:")
+        logger.error("[ERROR] While {} a Google Cloud Project:".format("refreshing" if is_refresh else "registering"))
         logger.exception(e)
-        messages.error(request, "There was an error while attempting to register this Google Cloud Project - please contact the administrator.")
+        messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact the administrator.")
 
     return redirect('user_gcp_list', user_id=request.user.id)
 
@@ -476,6 +490,8 @@ def user_gcp_delete(request, user_id, gcp_id):
 
     try:
         if request.POST:
+            user = User.objects.get(id=user_id)
+            logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
             gcp = GoogleProject.objects.get(id=gcp_id, active=1)
 
             # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
