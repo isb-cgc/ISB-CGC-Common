@@ -27,7 +27,7 @@ import warnings
 import copy
 import MySQLdb
 import string
-from projects.models import Program
+from projects.models import Program, Public_Data_Tables
 
 from uuid import uuid4
 from django.conf import settings
@@ -149,6 +149,13 @@ METADATA_DATA_TYPES = {}
 # The data is stored to prevent excessive retrieval
 METADATA_DATA_TYPES_DISPLAY = {}
 
+# The set of possible values for metadata_data values
+METADATA_DATA_ATTR = {
+    'HG19': {},
+    'HG38': {}
+}
+
+
 METADATA_DATA_AVAIL_PLOT_MAP = {
     'Aligned_Reads': 'DNAseq_data',
     'Copy_Number_Segment_Masked': 'cnvrPlatform',
@@ -215,6 +222,48 @@ def get_sql_connection():
         logger.error("[ERROR] Exception in get_sql_connection(): "+e.message)
         logger.exception(e)
         if db and db.open: db.close()
+
+
+def fetch_build_data_attr(build):
+    db = None
+    cursor = None
+
+    # TODO: make this progrmmatic
+    metadata_data_attrs = ['data_type', 'data_category','experimental_strategy','data_format','platform', 'disease_code',]
+
+    try:
+
+        if not len(METADATA_DATA_ATTR[build]):
+            db = get_sql_connection()
+            cursor = db.cursor()
+
+            data_table = Public_Data_Tables.objects.filter(program=Program.objects.get(is_public=True,active=True,name='TCGA'), build=build)[0].data_table
+
+            for attr in metadata_data_attrs:
+                METADATA_DATA_ATTR[build][attr] = {
+                    'displ_name': format_for_display(attr),
+                    'values': {}
+                }
+
+                query = """
+                    SELECT DISTINCT {attr}
+                    FROM {data_table};
+                """.format(attr=attr,data_table=data_table)
+
+                cursor.execute(query)
+
+                for row in cursor.fetchall():
+                    METADATA_DATA_ATTR[build][attr]['values'][row[0]] = {'displ_value': row[0]}
+
+        return METADATA_DATA_ATTR[build]
+
+    except Exception as e:
+        logger.error('[ERROR] Exception while trying to get metadata_data attributes for build #%s:' % str(build))
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
 
 
 def fetch_program_data_types(program, for_display=False):

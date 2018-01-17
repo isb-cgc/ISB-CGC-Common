@@ -2117,6 +2117,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 # Copied over from metadata api
 def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
 
+    inc_filters = json.loads(request.GET.get('filters', '{}'))
     GET = request.GET.copy()
     platform_count_only = GET.pop('platform_count_only', None)
     user = request.user
@@ -2130,7 +2131,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     limit_clause = ""
     offset_clause = ""
     filter_clause = ""
-
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
@@ -2166,8 +2166,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
         if type == 'igv':
             type_clause = "AND md.data_format='BAM'"
+            inc_filters['data_format'] = ['BAM']
         elif type == 'camic':
             type_clause = "AND md.data_format='SVS'"
+            inc_filters['data_format'] = ['SVS']
 
         params = (cohort_id,)
 
@@ -2220,6 +2222,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 continue
 
             program_data_table = program_data_tables[0].data_table
+
+            count_public_data_types(request.user, cohort_id, program, {}, build)
 
             cursor.execute(count_query.format(metadata_table=program_data_table,count_col="platform",filter_clause=""), (cohort_id,))
 

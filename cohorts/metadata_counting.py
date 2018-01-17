@@ -166,6 +166,80 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
+def count_public_data_types(user, cohort_id, program, inc_filters, build='HG19'):
+
+    db = None
+    cursor = None
+
+    counts = {}
+
+    QUERY_BASE = """
+        SELECT {attr}, COUNT(*) AS count
+        FROM {metadata_table} md
+        JOIN (
+          SELECT DISTINCT sample_barcode
+          FROM cohorts_samples
+          WHERE cohort_id = %s
+        ) cs
+        ON cs.sample_barcode = md.sample_barcode
+        WHERE md.file_uploaded='true' {where_clause}
+        GROUP BY {attr};
+    """
+
+    filter_clauses = {}
+
+    try:
+
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        metadata_data_attr = fetch_build_data_attr(build)
+
+        program_data_table = Public_Data_Tables.objects.filter(program=program, build=build)[0].data_table
+
+        # Make our where clauses
+        for filter in inc_filters:
+            filter_clauses[filter] = {'where_clause': None, 'parameters': None}
+
+            subfilter = {}
+            subfilter[filter] = inc_filters[filter]
+
+            built_clause = build_where_clause(subfilter)
+
+            filter_clauses[filter]['where_clause'] = built_clause['query_str']
+            filter_clauses[filter]['parameters'] = built_clause['value_tuple']
+
+
+        for attr in metadata_data_attr:
+
+            counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
+
+            where_clause = ""
+            filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr])
+
+            if len(filter_clause):
+                where_clause = "AND ( {} )".format(filter_clause)
+
+            paramter_tuple = (cohort_id,) + tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr)
+
+            query = QUERY_BASE.format(metadata_table=program_data_table, where_clause=where_clause, attr=attr)
+
+            cursor.execute(query,paramter_tuple)
+
+            for row in cursor.fetchall():
+                counts[attr][row[0]] = row[1]
+
+        return counts
+
+    except Exception as e:
+        logger.error('[ERROR] Exception while counting metadata data attributes:')
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+
+
 # Tally counts for metadata filters of public programs
 def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19'):
 
