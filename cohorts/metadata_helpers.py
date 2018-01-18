@@ -27,6 +27,7 @@ import warnings
 import copy
 import MySQLdb
 import string
+import re
 from projects.models import Program, Public_Data_Tables
 
 from uuid import uuid4
@@ -242,6 +243,7 @@ def fetch_build_data_attr(build):
             for attr in metadata_data_attrs:
                 METADATA_DATA_ATTR[build][attr] = {
                     'displ_name': format_for_display(attr),
+                    'name': attr,
                     'values': {}
                 }
 
@@ -253,9 +255,14 @@ def fetch_build_data_attr(build):
                 cursor.execute(query)
 
                 for row in cursor.fetchall():
-                    METADATA_DATA_ATTR[build][attr]['values'][row[0]] = {'displ_value': row[0]}
+                    val = "None" if not row[0] else row[0]
+                    METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                        'displ_value': val,
+                        'value': re.sub(r"^[A-Za-z0-9.:_\-]","",re.sub(r"\s+","-", val)),
+                        'name': val
+                    }
 
-        return METADATA_DATA_ATTR[build]
+        return copy.deepcopy(METADATA_DATA_ATTR[build])
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get metadata_data attributes for build #%s:' % str(build))
@@ -589,7 +596,7 @@ def format_for_display(item):
 # Construct WHERE clauses for BigQuery and CloudSQL based on a set of filters
 # If the names of the columns differ across the 2 platforms, the alt_key_map can be
 # used to map a filter 'key' to a different column name
-def build_where_clause(filters, alt_key_map=False, program=None):
+def build_where_clause(filters, alt_key_map=False, program=None, for_files=False):
     first = True
     query_str = ''
     big_query_str = ''  # todo: make this work for non-string values -- use {}.format
@@ -610,7 +617,7 @@ def build_where_clause(filters, alt_key_map=False, program=None):
         if alt_key_map and key in alt_key_map:
             key = alt_key_map[key]
 
-        if key == 'data_type':
+        if key == 'data_type' and not for_files:
             key = 'metadata_data_type_availability_id'
 
         # Multitable where's will come in with : in the name. Only grab the column piece for now

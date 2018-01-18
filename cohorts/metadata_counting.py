@@ -166,7 +166,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_public_data_types(user, cohort_id, program, inc_filters, build='HG19'):
+def count_public_data_types(user, cohort_id, program, inc_filters, filter_format=False, build='HG19'):
 
     db = None
     cursor = None
@@ -204,7 +204,7 @@ def count_public_data_types(user, cohort_id, program, inc_filters, build='HG19')
             subfilter = {}
             subfilter[filter] = inc_filters[filter]
 
-            built_clause = build_where_clause(subfilter)
+            built_clause = build_where_clause(subfilter, for_files=True)
 
             filter_clauses[filter]['where_clause'] = built_clause['query_str']
             filter_clauses[filter]['parameters'] = built_clause['value_tuple']
@@ -215,19 +215,20 @@ def count_public_data_types(user, cohort_id, program, inc_filters, build='HG19')
             counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
 
             where_clause = ""
-            filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr])
+            filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
 
             if len(filter_clause):
                 where_clause = "AND ( {} )".format(filter_clause)
 
-            paramter_tuple = (cohort_id,) + tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr)
+            paramter_tuple = (cohort_id,) + tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format'))
 
             query = QUERY_BASE.format(metadata_table=program_data_table, where_clause=where_clause, attr=attr)
 
             cursor.execute(query,paramter_tuple)
 
             for row in cursor.fetchall():
-                counts[attr][row[0]] = row[1]
+                val = "None" if not row[0] else row[0]
+                counts[attr][val] = row[1]
 
         return counts
 
