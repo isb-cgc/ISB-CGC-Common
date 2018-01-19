@@ -238,29 +238,37 @@ def fetch_build_data_attr(build):
             db = get_sql_connection()
             cursor = db.cursor()
 
-            data_table = Public_Data_Tables.objects.filter(program=Program.objects.get(is_public=True,active=True,name='TCGA'), build=build)[0].data_table
+            for program in Program.objects.filter(is_public=True,active=True):
 
-            for attr in metadata_data_attrs:
-                METADATA_DATA_ATTR[build][attr] = {
-                    'displ_name': format_for_display(attr),
-                    'name': attr,
-                    'values': {}
-                }
+                program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
 
-                query = """
-                    SELECT DISTINCT {attr}
-                    FROM {data_table};
-                """.format(attr=attr,data_table=data_table)
+                # If a program+build combination has no data table, no need to worry about it
+                if program_data_tables.count():
+                    data_table = program_data_tables[0].data_table
 
-                cursor.execute(query)
+                    for attr in metadata_data_attrs:
+                        if attr not in METADATA_DATA_ATTR[build]:
+                            METADATA_DATA_ATTR[build][attr] = {
+                                'displ_name': format_for_display(attr),
+                                'name': attr,
+                                'values': {}
+                            }
 
-                for row in cursor.fetchall():
-                    val = "None" if not row[0] else row[0]
-                    METADATA_DATA_ATTR[build][attr]['values'][val] = {
-                        'displ_value': val,
-                        'value': re.sub(r"[^A-Za-z0-9.:_\-]","",re.sub(r"\s+","-", val)),
-                        'name': val
-                    }
+                        query = """
+                            SELECT DISTINCT {attr}
+                            FROM {data_table};
+                        """.format(attr=attr,data_table=data_table)
+
+                        cursor.execute(query)
+
+                        for row in cursor.fetchall():
+                            val = "None" if not row[0] else row[0]
+                            if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                                METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                                    'displ_value': val,
+                                    'value': re.sub(r"[^A-Za-z0-9.:_\-]","",re.sub(r"\s+","-", val)),
+                                    'name': val
+                                }
 
         return copy.deepcopy(METADATA_DATA_ATTR[build])
 
