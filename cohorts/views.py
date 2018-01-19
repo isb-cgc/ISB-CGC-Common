@@ -1743,9 +1743,14 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
         return redirect('/user_landing')
 
     try:
+        metadata_data_attr_builds = {
+            'HG19': fetch_build_data_attr('HG19'),
+            'HG38': fetch_build_data_attr('HG38')
+        }
+
         build = request.GET.get('build', 'HG19')
 
-        metadata_data_attr = fetch_build_data_attr(build)
+        metadata_data_attr = metadata_data_attr_builds[build]
 
         nih_user = NIH_User.objects.filter(user=request.user, active=True)
         has_access = None
@@ -1766,6 +1771,15 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                     metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
                 metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in metadata_data_attr[attr]['values']]
 
+        for attr_build in metadata_data_attr_builds:
+            if attr_build != build:
+                for attr in metadata_data_attr_builds[attr_build]:
+                    for val in metadata_data_attr_builds[attr_build][attr]['values']:
+                        metadata_data_attr_builds[attr_build][attr]['values'][val]['count'] = 0
+                    metadata_data_attr_builds[attr_build][attr]['values'] = [metadata_data_attr_builds[attr_build][attr]['values'][x] for x in
+                                                                             metadata_data_attr_builds[attr_build][attr]['values']]
+            metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
+
         cohort = Cohort.objects.get(id=cohort_id, active=True)
 
         # Check if cohort contains user data samples - return info message if it does.
@@ -1779,11 +1793,12 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                 "This functionality is currently being worked on and will become available in a future release."
             )
 
+
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                            'metadata_data_attr': [metadata_data_attr[x] for x in metadata_data_attr],
+                                            'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
@@ -2159,8 +2174,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     offset_clause = ""
     filter_clause = ""
 
-    data_type_counts = {}
-
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
@@ -2233,12 +2246,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             files_counted = False
 
             for attr in filter_counts:
-                if attr not in data_type_counts:
-                    data_type_counts[attr] = {}
+                if files_counted:
+                    continue
                 for val in filter_counts[attr]:
-                    if val not in data_type_counts[attr]:
-                        data_type_counts[attr][val] = 0
-                    data_type_counts[attr][val] += filter_counts[attr][val]
                     if not files_counted:
                         total_file_count += int(filter_counts[attr][val])
                 files_counted = True

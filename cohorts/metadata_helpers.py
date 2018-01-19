@@ -258,7 +258,7 @@ def fetch_build_data_attr(build):
                     val = "None" if not row[0] else row[0]
                     METADATA_DATA_ATTR[build][attr]['values'][val] = {
                         'displ_value': val,
-                        'value': re.sub(r"^[A-Za-z0-9.:_\-]","",re.sub(r"\s+","-", val)),
+                        'value': re.sub(r"[^A-Za-z0-9.:_\-]","",re.sub(r"\s+","-", val)),
                         'name': val
                     }
 
