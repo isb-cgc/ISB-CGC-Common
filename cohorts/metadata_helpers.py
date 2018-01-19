@@ -229,6 +229,9 @@ def fetch_build_data_attr(build):
     db = None
     cursor = None
 
+    # Our methods and templates use HG and not hg casing; try to be consistent
+    build = build.upper()
+
     # TODO: make this progrmmatic
     metadata_data_attrs = ['data_type', 'data_category','experimental_strategy','data_format','platform', 'disease_code',]
 
@@ -240,6 +243,8 @@ def fetch_build_data_attr(build):
 
             for program in Program.objects.filter(is_public=True,active=True):
 
+                # MySQL text searches are case-insensitive, so even if our database has 'hg' and not 'HG' this will
+                # return the right tables, should they exist
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
 
                 # If a program+build combination has no data table, no need to worry about it

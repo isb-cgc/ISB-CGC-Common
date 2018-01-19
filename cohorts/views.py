@@ -1943,11 +1943,11 @@ def streaming_csv_view(request, cohort_id=0):
 
             keep_fetching = ((offset < total_expected) and ('file_list' in items))
 
-        if file_list.__len__() < total_expected:
+        if len(file_list) < total_expected:
             messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
             return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
-        if file_list.__len__() > 0:
+        if len(file_list) > 0:
             """A view that streams a large CSV file."""
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
@@ -2176,6 +2176,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     offset_clause = ""
     filter_clause = ""
 
+    filter_counts = None
+
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
@@ -2210,13 +2212,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
         progs_without_files = []
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
 
-        counts = {}
-
         total_file_count = 0
 
         for program in cohort_programs:
 
-            program_data_table = None
             program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
 
             if len(program_data_tables) <= 0:
@@ -2243,17 +2242,22 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     offset_clause = ' OFFSET %s'
                     params += (offset,)
 
-            filter_counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+            counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
 
-            files_counted = False
-
-            for attr in filter_counts:
-                if files_counted:
-                    continue
-                for val in filter_counts[attr]:
-                    if not files_counted:
-                        total_file_count += int(filter_counts[attr][val])
-                files_counted = True
+            # Group up our program-speciic filter counts
+            # If this is our first program, just assign it to the result
+            if not filter_counts:
+                filter_counts = counts
+            # Otherwise loop through and add in the new values
+            else:
+                for attr in counts:
+                    if attr not in filter_counts:
+                        filter_counts[attr] = {}
+                    for val in counts[attr]:
+                        if val not in filter_counts[attr]:
+                            filter_counts[attr][val] = counts[attr][val]
+                        else:
+                            filter_counts[attr][val] += counts[attr][val]
 
             if not counts_only:
                 cursor.execute(file_list_query.format(
@@ -2289,12 +2293,20 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'program': program.name
                         })
 
-        count_list = [{'platform': x, 'count': y} for x,y in counts.items()]
+        files_counted = False
+
+        # Add to the file total
+        for attr in filter_counts:
+            if files_counted:
+                continue
+            for val in filter_counts[attr]:
+                if not files_counted:
+                    total_file_count += int(filter_counts[attr][val])
+            files_counted = True
 
         resp = {
             'total_file_count': total_file_count,
             'page': page,
-            'count_list': count_list,
             'file_list': file_list,
             'build': build,
             'programs_no_files': progs_without_files,
