@@ -118,7 +118,7 @@ class ServiceObjectBase(object):
             return cls.from_local_json_file(config_file_path)
 
 
-# Object for fetching the organization whitelist and confirming that a given org is in it
+# Object for confirming that a given service account is a google system managed service account
 class ManagedServiceAccounts(ServiceObjectBase):
     SCHEMA = {
         'type': 'object',
@@ -157,7 +157,7 @@ class ManagedServiceAccounts(ServiceObjectBase):
         return cls(data['managed_service_accounts'])
 
 
-# Object for fetching the organization whitelist and confirming that a given org is in it
+# Object for confirming that a given org is whitelisted
 class GoogleOrgWhitelist(ServiceObjectBase):
     SCHEMA = {
         'type': 'object',
@@ -191,7 +191,7 @@ class GoogleOrgWhitelist(ServiceObjectBase):
         return cls(data['google_org_whitelist'])
 
 
-# Object for fetching the service account blacklist and confirming that a given service account is not in it
+# Object confirming that a given service account is black/whitelited
 class ServiceAccountBlacklist(ServiceObjectBase):
     SCHEMA = {
         'type': 'object',
