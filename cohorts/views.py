@@ -2162,8 +2162,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
     inc_filters = json.loads(request.GET.get('filters', '{}'))
     logger.debug(str(inc_filters))
-    GET = request.GET.copy()
-    counts_only = GET.pop('counts_only', None)
     user = request.user
     user_email = user.email
     user_id = user.id
@@ -2174,7 +2172,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     type_clause = ""
     limit_clause = ""
     offset_clause = ""
-    filter_clause = ""
 
     filter_counts = None
 
@@ -2234,15 +2231,11 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 filter_clause = 'AND ' + built_clause['query_str']
                 params += built_clause['value_tuple']
 
-            if limit > 0:
-                limit_clause = ' LIMIT %s'
-                params += (limit,)
-                # Offset is only valid when there is a limit
-                if offset > 0:
-                    offset_clause = ' OFFSET %s'
-                    params += (offset,)
-
+            start = time.time()
             counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+            stop = time.time()
+
+            logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
 
             # Group up our program-speciic filter counts
             # If this is our first program, just assign it to the result
@@ -2259,13 +2252,27 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         else:
                             filter_counts[attr][val] += counts[attr][val]
 
-            if not counts_only:
+            # If we have room in the file list, we'll file-query this program, otherwise there's no point
+            if len(file_list) < limit:
+                if limit > 0:
+                    limit_clause = ' LIMIT %s'
+                    params += (limit,)
+                    # Offset is only valid when there is a limit
+                    if offset > 0:
+                        offset_clause = ' OFFSET %s'
+                        params += (offset,)
+
+                start = time.time()
                 cursor.execute(file_list_query.format(
                     metadata_table=program_data_table,
                     type_clause=type_clause,
                     limit_clause=limit_clause,
                     offset_clause=offset_clause,
                     filter_clause=filter_clause), params)
+                stop = time.time()
+
+                logger.info("[STATUS] Time to get file-list for program {}: {}s".format(program.name,str((stop-start)/1000)))
+
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
                         whitelist_found = False
@@ -2292,6 +2299,12 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'dataformat': (item['data_format'] or 'N/A'),
                             'program': program.name
                         })
+
+                # if we didn't get enough file listings from this program to max out the list,
+                # we should move the offset to 0 and change the limit to finish filling the list
+                if cursor.rowcount < (limit-len(file_list)):
+                    limit = (limit-len(file_list))
+                    offset = 0
 
         files_counted = False
 
