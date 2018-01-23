@@ -78,7 +78,7 @@ def unregister_sa(user_id, sa_id):
                     'message': '[STATUS] While removing SA {0} from Google Group {1}.'.format(
                         str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[STATUS] {}}.'.format(str(e))})
+                    'message': '[STATUS] {}.'.format(str(e))})
                 logger.info('[WARNING] While removing SA {0} from Google Group {1}: {2}'.format(
                     str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
             # ...but we are concerned with anything else
