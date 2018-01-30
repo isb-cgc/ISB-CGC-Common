@@ -528,7 +528,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     log_name = SERVICE_ACCOUNT_LOG_NAME
     resp = {
-        'message': '{0}: Begin verification of service account, registered by user {}.'.format(service_account, user_email)
+        'message': '{}: Begin verification of service account, registered by user {}.'.format(service_account, user_email)
     }
     st_logger.write_struct_log_entry(log_name, resp)
 
