@@ -528,7 +528,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     log_name = SERVICE_ACCOUNT_LOG_NAME
     resp = {
-        'message': '{0}: Begin verification of service account.'.format(service_account)
+        'message': '{0}: Begin verification of service account, registered by user {}.'.format(service_account, user_email)
     }
     st_logger.write_struct_log_entry(log_name, resp)
 
@@ -950,7 +950,7 @@ def register_sa(request, user_id):
             # If the verification was successful, finalize access
             if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+                                {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa, user_email)})
 
                 # Datasets verified, add service accounts to appropriate acl groups
                 protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
@@ -981,7 +981,9 @@ def register_sa(request, user_id):
 
                     try:
                         body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+                             {'message': '{}: Attempting to add service account to Google Group {} for user {}.'.format(
+                                 str(service_account_obj.service_account), dataset.acl_google_group, user_email)})
                         directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
                         logger.info("Attempting to insert service account {} into Google Group {}. "
@@ -989,7 +991,9 @@ def register_sa(request, user_id):
                                     .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
                     except HttpError as e:
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+                            {'message': '{}: There was an error in adding the service account to Google Group {} for user {}. {}'.format(
+                                str(service_account_obj.service_account), dataset.acl_google_group, user_email, e)})
                         # We're not too concerned with 'Member already exists.' errors
                         if e.resp.status == 409 and e._get_reason() == 'Member already exists.':
                             logger.info(e)
@@ -997,7 +1001,8 @@ def register_sa(request, user_id):
                         else:
                             logger.warn(e)
                             err_msgs.append(
-                               "There was an error while registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
+                               "There was an error while user {} was registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
+                                   user_email,
                                    str(service_account_obj.service_account),
                                     dataset.name
                                ))
