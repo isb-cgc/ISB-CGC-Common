@@ -50,6 +50,19 @@ class NIH_User(models.Model):
             logger.exception(e)
         return result
 
+    def delete_all_auth_datasets(self):
+        result = None
+        try:
+            result = self.get_auth_datasets().values_list('whitelist_id',flat=True)
+            user_datasets = self.userauthorizeddatasets_set.all()
+            for dataset in user_datasets:
+                dataset.delete()
+
+        except Exception as e:
+            logger.error("[ERROR] While deleted user authorized datasets: ")
+            logger.exception(e)
+        return result
+
 
 class GoogleProject(models.Model):
     user = models.ManyToManyField(User)

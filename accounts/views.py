@@ -109,6 +109,10 @@ def extended_logout_view(request):
             nih_user.active = False
             nih_user.save()
             logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
+            deleted_datasets = nih_user.delete_all_auth_datasets()
+            logger.info("[STATUS] NIH user {} has had the following dataset(s) removed: {}".format(
+                nih_user.NIH_username, "; ".join(deleted_datasets)
+            ))
 
         except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
             if type(e) is MultipleObjectsReturned:
@@ -402,13 +406,13 @@ def register_gcp(request, user_id):
 
             project_name = project_id
 
-            users = User.objects.filter(email__in=register_users)
+            gcp_users = User.objects.filter(email__in=register_users)
 
             if not user_id:
                 raise Exception("User ID not provided.")
             elif not project_id or not project_name:
                 raise Exception("Project ID not provided.")
-            elif not len(register_users) or not users.count():
+            elif not len(register_users) or not gcp_users.count():
                 # A set of users to register or refresh is required
                 msg = "[STATUS] No registered user set found for GCP {} of project {}; {} aborted.".format(
                     "refresh" if is_refresh else "registration",project_id,"refresh" if is_refresh else "registration")
@@ -439,8 +443,8 @@ def register_gcp(request, user_id):
                         st_logger.write_text_log_entry(log_name,msg)
 
             if is_refresh:
-                users_to_add = users.exclude(id__in=gcp.user.all())
-                users_to_remove = gcp.user.all().exclude(id__in=users)
+                users_to_add = gcp_users.exclude(id__in=gcp.user.all())
+                users_to_remove = gcp.user.all().exclude(id__in=gcp_users)
                 if len(users_to_add):
                     msg = "The following user{} added to GCP {}: {}".format(
                         ("s were" if len(users_to_add) > 1 else " was"),
@@ -458,7 +462,7 @@ def register_gcp(request, user_id):
 
                 messages.info(request, msg)
 
-            gcp.user.set(users)
+            gcp.user.set(gcp_users)
             gcp.save()
 
             if not gcp.user.all().count():
