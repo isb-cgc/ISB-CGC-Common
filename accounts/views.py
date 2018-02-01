@@ -58,7 +58,7 @@ def unregister_sa(user_id, sa_id):
     sa = ServiceAccount.objects.get(service_account=sa_id, active=1)
     saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
 
-    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME,"User {} is unregistering SA {}".format(User.objects.get(id=user_id).email,sa_id))
+    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME,"[STATUS] User {} is unregistering SA {}".format(User.objects.get(id=user_id).email,sa_id))
 
     for saad in saads:
         try:
@@ -66,23 +66,36 @@ def unregister_sa(user_id, sa_id):
             directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
                                                memberKey=saad.service_account.service_account).execute(http=http_auth)
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
+                'message': '[STATUS] Attempting to delete SA {0} from Google Group {1}.'.format(
                     saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-            logger.info("Attempting to delete user {} from group {}. "
+            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}. " +
                         "If an error message doesn't follow, they were successfully deleted"
                         .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
         except HttpError as e:
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
-                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-            logger.error(e)
-            logger.exception(e)
+            # We're not concerned with 'user doesn't exist' errors
+            if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[STATUS] While removing SA {0} from Google Group {1}.'.format(
+                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[STATUS] {}.'.format(str(e))})
+                logger.info('[WARNING] While removing SA {0} from Google Group {1}: {2}'.format(
+                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
+            # ...but we are concerned with anything else
+            else:
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[ERROR] There was an error in removing SA {0} from Google Group {1}.'.format(
+                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '[ERROR] {}}.'.format(str(e))})
+                logger.error('[ERROR] There was an error in removing SA {0} from Google Group {1}: {2}'.format(
+                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
+                logger.exception(e)
 
     for saad in saads:
         saad.delete()
     sa.active = False
     sa.save()
-
 
 
 @login_required
@@ -375,6 +388,7 @@ def verify_gcp(request, user_id):
 
 @login_required
 def register_gcp(request, user_id):
+    is_refresh = False
 
     try:
         # log the reports using Cloud logging API
@@ -388,8 +402,20 @@ def register_gcp(request, user_id):
 
             project_name = project_id
 
-            if not user_id or not project_id or not project_name:
-                pass
+            users = User.objects.filter(email__in=register_users)
+
+            if not user_id:
+                raise Exception("User ID not provided.")
+            elif not project_id or not project_name:
+                raise Exception("Project ID not provided.")
+            elif not len(register_users) or not users.count():
+                # A set of users to register or refresh is required
+                msg = "[STATUS] No registered user set found for GCP {} of project {}; {} aborted.".format(
+                    "refresh" if is_refresh else "registration",project_id,"refresh" if is_refresh else "registration")
+                logger.warn(msg)
+                st_logger.write_text_log_entry(log_name,msg)
+                messages.error(request, "The registered user set was empty, so the project could not be {}.".format("refreshed" if is_refresh else "registered"))
+                return redirect('user_gcp_list', user_id=request.user.id)
             else:
                 try:
                     gcp = GoogleProject.objects.get(project_name=project_name,
@@ -412,8 +438,6 @@ def register_gcp(request, user_id):
                         logger.info(msg)
                         st_logger.write_text_log_entry(log_name,msg)
 
-            users = User.objects.filter(email__in=register_users)
-
             if is_refresh:
                 users_to_add = users.exclude(id__in=gcp.user.all())
                 users_to_remove = gcp.user.all().exclude(id__in=users)
@@ -425,26 +449,29 @@ def register_gcp(request, user_id):
                 else:
                     msg = "There were no new users to add to GCP {}.".format(project_id)
                 if len(users_to_remove):
-                    msg += ". The following user{} removed from GCP {}: {}".format(
+                    msg += " The following user{} removed from GCP {}: {}".format(
                         ("s were" if len(users_to_remove) > 1 else " was"),
                         project_id,
                         ", ".join(users_to_remove.values_list('email',flat=True)))
                 else:
-                    msg += ". There were no users to remove from GCP {}.".format(project_id)
+                    msg += " There were no users to remove from GCP {}.".format(project_id)
 
                 messages.info(request, msg)
 
             gcp.user.set(users)
             gcp.save()
 
+            if not gcp.user.all().count():
+                raise Exception("GCP {} has no users!".format(project_id))
+
             return redirect('user_gcp_list', user_id=request.user.id)
 
         return render(request, 'GenespotRE/register_gcp.html', {})
 
     except Exception as e:
-        logger.error("[ERROR] While registering a Google Cloud Project:")
+        logger.error("[ERROR] While {} a Google Cloud Project:".format("refreshing" if is_refresh else "registering"))
         logger.exception(e)
-        messages.error(request, "There was an error while attempting to register this Google Cloud Project - please contact the administrator.")
+        messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact the administrator.")
 
     return redirect('user_gcp_list', user_id=request.user.id)
 
@@ -463,6 +490,8 @@ def user_gcp_delete(request, user_id, gcp_id):
 
     try:
         if request.POST:
+            user = User.objects.get(id=user_id)
+            logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
             gcp = GoogleProject.objects.get(id=gcp_id, active=1)
 
             # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
@@ -499,7 +528,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
     log_name = SERVICE_ACCOUNT_LOG_NAME
     resp = {
-        'message': '{0}: Begin verification of service account.'.format(service_account)
+        'message': '{}: Begin verification of service account, registered by user {}.'.format(service_account, user_email)
     }
     st_logger.write_struct_log_entry(log_name, resp)
 
@@ -604,14 +633,18 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         logger.exception(e)
         raise Exception("Unable to retrieve project information for GCP {}; its service accounts cannot be registered.".format(gcp_id))
 
-    # 1. VERIFY SA IS FROM THIS GCP
-    # If this SA is not from the GCP and this is a controlled data registration/refresh, deny
-    if not service_account.startswith(projectNumber+'-') and not project_id_re.search(service_account) \
-            and not msa.is_managed_this_project(service_account,projectNumber,gcp_id) \
-            and controlled_datasets.count() > 0:
+    # 1. VERIFY SA IS NOT A GOOGLE-MANAGED SA AND IS FROM THIS GCP
+    # If this SA is a Google-Managed SA or is not from the GCP, and this is a controlled data registration/refresh, deny
+    if controlled_datasets.count() > 0 and \
+            (not (service_account.startswith(projectNumber+'-') or project_id_re.search(service_account))
+             or msa.is_managed(service_account)):
+        msg = "Service Account {} is ".format(service_account,)
+        if msa.is_managed(service_account):
+            msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
+        else:
+            msg += "not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
         return {
-            'message': "Service Account {} is not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(
-                service_account, str(gcp_id),),
+            'message': msg,
             'level': 'error'
         }
 
@@ -840,12 +873,12 @@ def verify_sa(request, user_id):
 
             if 'message' in result.keys():
                 status = '400'
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
             else:
                 if result['all_user_datasets_verified']:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
                 else:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
                 status = '200'
@@ -912,10 +945,12 @@ def register_sa(request, user_id):
             # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
 
+            err_msgs = []
+
             # If the verification was successful, finalize access
             if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+                                {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa, user_email)})
 
                 # Datasets verified, add service accounts to appropriate acl groups
                 protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
@@ -946,16 +981,35 @@ def register_sa(request, user_id):
 
                     try:
                         body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+                             {'message': '{}: Attempting to add service account to Google Group {} for user {}.'.format(
+                                 str(service_account_obj.service_account), dataset.acl_google_group, user_email)})
                         directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
-                        logger.info("Attempting to insert user {} into group {}. "
+                        logger.info("Attempting to insert service account {} into Google Group {}. "
                                     "If an error message doesn't follow, they were successfully added."
                                     .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
                     except HttpError as e:
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
-                        logger.info(e)
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+                            {'message': '{}: There was an error in adding the service account to Google Group {} for user {}. {}'.format(
+                                str(service_account_obj.service_account), dataset.acl_google_group, user_email, e)})
+                        # We're not too concerned with 'Member already exists.' errors
+                        if e.resp.status == 409 and e._get_reason() == 'Member already exists.':
+                            logger.info(e)
+                        # ...but we are with others
+                        else:
+                            logger.warn(e)
+                            err_msgs.append(
+                               "There was an error while user {} was registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
+                                   user_email,
+                                   str(service_account_obj.service_account),
+                                    dataset.name
+                               ))
+                            # If there was an error, the SA isn't on the Google Group, so we should remove it's
+                            # ServiceAccountAuthorizedDataset entry
+                            service_account_auth_dataset.delete()
+
 
                 # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
                 if is_adjust:
@@ -967,21 +1021,30 @@ def register_sa(request, user_id):
                                 directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
                                                                    memberKey=saad.service_account.service_account).execute(http=http_auth)
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                                    'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
+                                    'message': '{0}: Attempting to remove service account from Google Group {1}.'.format(
                                         saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                                logger.info("Attempting to delete service account {} from group {}. "
+                                logger.info("Attempting to remove service account {} from group {}. "
                                             "If an error message doesn't follow, they were successfully deleted"
                                             .format(saad.service_account.service_account,
                                                     saad.authorized_dataset.acl_google_group))
                             except HttpError as e:
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                                     'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
-                                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                                logger.error("[ERROR] When trying to remove a service account from a Google Group:")
-                                logger.exception(e)
+                                        str(saad.service_account.service_account),
+                                        saad.authorized_dataset.acl_google_group)})
+                                # We're not concerned with 'user doesn't exist' errors
+                                if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
+                                    logger.info(e)
+                                else:
+                                    logger.error("[ERROR] When trying to remove SA {} from a Google Group:".format(str(saad.service_account.service_account)))
+                                    logger.exception(e)
 
                             saad.delete()
 
+                if len(err_msgs):
+                    messages.error(
+                        request,"The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format("\n".join(err_msgs))
+                    )
                 return redirect('user_gcp_list', user_id=user_id)
 
             # if verification was unsuccessful, report errors, and revoke current access if there is any
@@ -1020,8 +1083,11 @@ def register_sa(request, user_id):
                                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                                     'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
                                         str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                                logger.error("[ERROR] When trying to remove a service account from a Google Group:")
-                                logger.exception(e)
+                                if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
+                                    logger.info(e)
+                                else:
+                                    logger.error("[ERROR] When trying to remove a service account from a Google Group:")
+                                    logger.exception(e)
 
                             saad.delete()
 
