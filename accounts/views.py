@@ -109,23 +109,17 @@ def extended_logout_view(request):
             nih_user.active = False
             nih_user.save()
             logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
-            deleted_datasets = nih_user.delete_all_auth_datasets()
-            logger.info("[STATUS] NIH user {} has had the following dataset(s) removed: {}".format(
-                nih_user.NIH_username, "; ".join(deleted_datasets)
-            ))
 
         except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
             if type(e) is MultipleObjectsReturned:
-                logger.error("[WARNING] More than one linked NIH User with user id %d - deactivating all of them!" % (str(e), request.user.id))
+                logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), request.user.id))
                 nih_users = NIH_User.objects.filter(user=user)
                 for nih_user in nih_users:
                     nih_user.active = False
                     nih_user.save()
-                    user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-                    for dataset in user_auth_datasets:
-                        dataset.delete()
+                    nih_user.delete_all_auth_datasets()
             else:
-                logger.info("[STATUS] No NIH user was found for user {} - no one set to inactive.".format(user.email))
+                logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user.email))
 
         directory_service, http_auth = get_directory_resource()
         user_email = user.email
@@ -134,7 +128,7 @@ def extended_logout_view(request):
         try:
             body = {"email": user_email, "role": "MEMBER"}
             directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-            logger.info("Attempting to insert user {} into group {}. "
+            logger.info("[STATUS] Attempting to insert user {} into group {}. "
                         "If an error message doesn't follow, they were successfully added."
                         .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
         except HttpError as e:
@@ -261,7 +255,7 @@ def unlink_accounts(request):
 
             # If the user isn't actually in the ACL, we'll get an HttpError
             try:
-                logger.info("Removing user {} from {}...".format(user_email, google_group_acl))
+                logger.info("[STATUS] Removing user {} from {}...".format(user_email, google_group_acl))
                 directory_service.members().delete(groupKey=google_group_acl,
                                                    memberKey=user_email).execute(http=http_auth)
 
