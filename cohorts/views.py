@@ -20,6 +20,7 @@ import json
 import traceback
 import re
 import datetime
+import time
 
 import django
 from google_helpers.cohort_bigquery import BigQueryCohortSupport
@@ -1733,15 +1734,24 @@ def save_cohort_from_plot(request):
 
 @login_required
 @csrf_protect
-def cohort_filelist(request, cohort_id=0):
+def cohort_filelist(request, cohort_id=0, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
+    template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+
     if cohort_id == 0:
-        messages.error(request, 'Cohort provided does not exist.')
+        messages.error(request, 'Cohort requested does not exist.')
         return redirect('/user_landing')
 
     try:
+        metadata_data_attr_builds = {
+            'HG19': fetch_build_data_attr('HG19'),
+            'HG38': fetch_build_data_attr('HG38')
+        }
+
         build = request.GET.get('build', 'HG19')
+
+        metadata_data_attr = metadata_data_attr_builds[build]
 
         nih_user = NIH_User.objects.filter(user=request.user, active=True)
         has_access = None
@@ -1752,7 +1762,25 @@ def cohort_filelist(request, cohort_id=0):
                     has_access = []
                 has_access.append(dataset.authorized_dataset.whitelist_id)
 
-        items = cohort_files(request, cohort_id, build=build, access=has_access)
+        items = None
+
+        if panel_type:
+            items = cohort_files(request, cohort_id, build=build, access=has_access, type=panel_type)
+
+            for attr in items['metadata_data_counts']:
+                for val in items['metadata_data_counts'][attr]:
+                    metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
+                metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in metadata_data_attr[attr]['values']]
+
+        for attr_build in metadata_data_attr_builds:
+            if attr_build != build:
+                for attr in metadata_data_attr_builds[attr_build]:
+                    for val in metadata_data_attr_builds[attr_build][attr]['values']:
+                        metadata_data_attr_builds[attr_build][attr]['values'][val]['count'] = 0
+                    metadata_data_attr_builds[attr_build][attr]['values'] = [metadata_data_attr_builds[attr_build][attr]['values'][x] for x in
+                                                                             metadata_data_attr_builds[attr_build][attr]['values']]
+            metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
+
         cohort = Cohort.objects.get(id=cohort_id, active=True)
 
         # Check if cohort contains user data samples - return info message if it does.
@@ -1760,29 +1788,33 @@ def cohort_filelist(request, cohort_id=0):
         user_projects = Project.get_user_projects(request.user)
         cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
         if len(cohort_sample_list):
-            messages.info(request,
-                "File listing is not available for cohort samples that come from a user uploaded project. This functionality is currently being worked on and will become available in a future release.")
+            messages.info(
+                request,
+                "File listing is not available for cohort samples that come from a user uploaded project. " +
+                "This functionality is currently being worked on and will become available in a future release."
+            )
 
-        return render(request, 'cohorts/cohort_filelist.html', {'request': request,
-                                                                'cohort': cohort,
-                                                                'base_url': settings.BASE_URL,
-                                                                'base_api_url': settings.BASE_API_URL,
-                                                                'total_files': items['total_file_count'],
-                                                                'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                                                'platform_counts': items['platform_count_list'],
-                                                                'file_list_max': MAX_FILE_LIST_ENTRIES,
-                                                                'sel_file_max': MAX_SEL_FILES,
-                                                                'build': build})
+
+        return render(request, template, {'request': request,
+                                            'cohort': cohort,
+                                            'total_file_count': (items['total_file_count'] if items else 0),
+                                            'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                            'metadata_data_attr': metadata_data_attr_builds,
+                                            'file_list': (items['file_list'] if items else []),
+                                            'file_list_max': MAX_FILE_LIST_ENTRIES,
+                                            'sel_file_max': MAX_SEL_FILES,
+                                            'img_thumbs_url': settings.IMG_THUMBS_URL,
+                                            'build': build})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
-        return redirect(reverse('cohort_detail', args=[cohort_id]))
+        return redirect(reverse('cohort_details', args=[cohort_id]))
 
 
 @login_required
-def cohort_filelist_ajax(request, cohort_id=0):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     if cohort_id == 0:
         response_str = '<div class="row">' \
                     '<div class="col-lg-12">' \
@@ -1804,16 +1836,32 @@ def cohort_filelist_ajax(request, cohort_id=0):
     if request.GET.get('limit', None) is not None:
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
+
     build = request.GET.get('build','HG19')
+
+    metadata_data_attr = fetch_build_data_attr(build)
+
     nih_user = NIH_User.objects.filter(user=request.user, active=True)
     has_access = None
+
     if len(nih_user) > 0:
         user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
         for dataset in user_auth_sets:
             if not has_access:
                 has_access = []
             has_access.append(dataset.authorized_dataset.whitelist_id)
-    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, **params)
+
+    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, **params)
+
+    for attr in result['metadata_data_counts']:
+        for val in result['metadata_data_counts'][attr]:
+            metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+        metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
+                                              metadata_data_attr[attr]['values']]
+
+    del result['metadata_data_counts']
+
+    result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
 
     return JsonResponse(result, status=200)
 
@@ -1895,24 +1943,25 @@ def streaming_csv_view(request, cohort_id=0):
 
             keep_fetching = ((offset < total_expected) and ('file_list' in items))
 
-        if file_list.__len__() < total_expected:
+        if len(file_list) < total_expected:
             messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
             return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
-        if file_list.__len__() > 0:
+        if len(file_list) > 0:
             """A view that streams a large CSV file."""
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
-            rows += (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Cloud Storage Location", "Access Type"],)
+            rows += (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "Access Type"],)
             for file in file_list:
-                rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
+                rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['dataformat'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
                                              content_type="text/csv")
-            response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}.csv"'.format(str(cohort_id),build)
+            timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+            response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}_{}.csv"'.format(str(cohort_id),build,timestamp)
             return response
 
     except Exception as e:
@@ -2109,10 +2158,10 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
     return render(request, template, template_values)
 
 # Copied over from metadata api
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
 
-    GET = request.GET.copy()
-    platform_count_only = GET.pop('platform_count_only', None)
+    inc_filters = json.loads(request.GET.get('filters', '{}'))
+    logger.debug(str(inc_filters))
     user = request.user
     user_email = user.email
     user_id = user.id
@@ -2120,64 +2169,38 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     resp = None
     db = None
     cursor = None
+    type_clause = ""
+    limit_clause = ""
+    offset_clause = ""
+
+    filter_counts = None
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        platform_count_query = """
-            SELECT md.platform, count(*) as platform_count
-            FROM {0} md
-            JOIN (
-              SELECT sample_barcode
-              FROM cohorts_samples
-              WHERE cohort_id = %s
-            ) cs
-            ON cs.sample_barcode = md.sample_barcode
-            WHERE md.file_uploaded='true'
-            GROUP BY md.platform;"""
-
-        query = """
-            SELECT md.sample_barcode, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category, md.experimental_strategy
-            FROM {0} md
+        file_list_query = """
+            SELECT md.sample_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
+              md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
+            FROM {metadata_table} md
             JOIN (
                 SELECT sample_barcode
                 FROM cohorts_samples
                 WHERE cohort_id = %s
             ) cs
             ON cs.sample_barcode = md.sample_barcode
-            WHERE md.file_uploaded='true'
+            WHERE md.file_uploaded='true' {type_clause} {filter_clause}
+            {limit_clause}
+            {offset_clause}
+            ;
         """
 
-        params = (cohort_id,)
-
-        none_in_filters = False
-
-        # Check for incoming platform selectors
-        platform_selector_list = []
-        for key, value in GET.items():
-            if key == 'None':
-                if GET.get(key, None) is not None and GET.get(key) == 'True':
-                    none_in_filters = True
-            elif GET.get(key, None) is not None and GET.get(key) == 'True':
-                platform_selector_list.append(key)
-
-        if none_in_filters:
-            query += ' AND platform IS NULL'
-
-        if len(platform_selector_list):
-            query += ((' OR' if none_in_filters else ' AND') + ' platform in ({0})'.format(('%s,'*len(platform_selector_list))[:-1]))
-            params += tuple(x for x in platform_selector_list)
-
-        if limit > 0:
-            query += ' LIMIT %s'
-            params += (limit,)
-            # Offset is only valid when there is a limit
-            if offset > 0:
-                query += ' OFFSET %s'
-                params += (offset,)
-
-        query += ';'
+        if type == 'igv':
+            type_clause = "AND md.data_format='BAM'"
+            inc_filters['data_format'] = ['BAM']
+        elif type == 'camic':
+            type_clause = "AND md.data_format='SVS'"
+            inc_filters['data_format'] = ['SVS']
 
         db = get_sql_connection()
         cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -2186,13 +2209,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
         progs_without_files = []
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
 
-        platform_counts = {}
-
         total_file_count = 0
 
         for program in cohort_programs:
 
-            program_data_table = None
             program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
 
             if len(program_data_tables) <= 0:
@@ -2202,21 +2222,57 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
             program_data_table = program_data_tables[0].data_table
 
-            cursor.execute(platform_count_query.format(program_data_table), (cohort_id,))
+            params = (cohort_id,)
 
-            if cursor.rowcount > 0:
-                for row in cursor.fetchall():
-                    platform = row['platform'] or 'None'
-                    if (len(platform_selector_list) <= 0 and not none_in_filters) or platform in platform_selector_list or (none_in_filters and platform == 'None'):
-                        total_file_count += int(row['platform_count'])
-                        if platform not in platform_counts:
-                            platform_counts[platform] = 0
-                        platform_counts[platform] += int(row['platform_count'])
+            filter_clause = ''
+
+            if len(inc_filters):
+                built_clause = build_where_clause(inc_filters, for_files=True)
+                filter_clause = 'AND ' + built_clause['query_str']
+                params += built_clause['value_tuple']
+
+            start = time.time()
+            counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+            stop = time.time()
+
+            logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
+
+            # Group up our program-speciic filter counts
+            # If this is our first program, just assign it to the result
+            if not filter_counts:
+                filter_counts = counts
+            # Otherwise loop through and add in the new values
             else:
-                progs_without_files.append(program.name)
+                for attr in counts:
+                    if attr not in filter_counts:
+                        filter_counts[attr] = {}
+                    for val in counts[attr]:
+                        if val not in filter_counts[attr]:
+                            filter_counts[attr][val] = counts[attr][val]
+                        else:
+                            filter_counts[attr][val] += counts[attr][val]
 
-            if not platform_count_only:
-                cursor.execute(query.format(program_data_table), params)
+            # If we have room in the file list, we'll file-query this program, otherwise there's no point
+            if len(file_list) < limit:
+                if limit > 0:
+                    limit_clause = ' LIMIT %s'
+                    params += (limit,)
+                    # Offset is only valid when there is a limit
+                    if offset > 0:
+                        offset_clause = ' OFFSET %s'
+                        params += (offset,)
+
+                start = time.time()
+                cursor.execute(file_list_query.format(
+                    metadata_table=program_data_table,
+                    type_clause=type_clause,
+                    limit_clause=limit_clause,
+                    offset_clause=offset_clause,
+                    filter_clause=filter_clause), params)
+                stop = time.time()
+
+                logger.info("[STATUS] Time to get file-list for program {}: {}s".format(program.name,str((stop-start)/1000)))
+
                 if cursor.rowcount > 0:
                     for item in cursor.fetchall():
                         whitelist_found = False
@@ -2229,6 +2285,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
                         file_list.append({
                             'sample': item['sample_barcode'],
+                            'disease_code': item['disease_code'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
                             'index_name': item['index_file_name'] or 'N/A',
@@ -2239,18 +2296,34 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                             'platform': item['platform'] or 'N/A',
                             'datacat': item['data_category'] or 'N/A',
                             'datatype': (item['data_type'] or 'N/A'),
+                            'dataformat': (item['data_format'] or 'N/A'),
                             'program': program.name
                         })
 
-        platform_count_list = [{'platform': x, 'count': y} for x,y in platform_counts.items()]
+                # if we didn't get enough file listings from this program to max out the list,
+                # we should move the offset to 0 and change the limit to finish filling the list
+                if cursor.rowcount < (limit-len(file_list)):
+                    limit = (limit-len(file_list))
+                    offset = 0
+
+        files_counted = False
+
+        # Add to the file total
+        for attr in filter_counts:
+            if files_counted:
+                continue
+            for val in filter_counts[attr]:
+                if not files_counted:
+                    total_file_count += int(filter_counts[attr][val])
+            files_counted = True
 
         resp = {
             'total_file_count': total_file_count,
             'page': page,
-            'platform_count_list': platform_count_list,
             'file_list': file_list,
             'build': build,
-            'programs_no_files': progs_without_files
+            'programs_no_files': progs_without_files,
+            'metadata_data_counts': filter_counts
         }
 
     except (IndexError, TypeError) as e:
