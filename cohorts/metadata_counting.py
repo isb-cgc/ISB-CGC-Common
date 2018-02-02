@@ -199,16 +199,18 @@ def count_public_data_types(user, cohort_id, program, inc_filters, filter_format
 
         # Make our where clauses
         for filter in inc_filters:
-            filter_clauses[filter] = {'where_clause': None, 'parameters': None}
+            if validate_filter_key(filter, program.id, build):
+                filter_clauses[filter] = {'where_clause': None, 'parameters': None}
 
-            subfilter = {}
-            subfilter[filter] = inc_filters[filter]
+                subfilter = {}
+                subfilter[filter] = inc_filters[filter]
 
-            built_clause = build_where_clause(subfilter, for_files=True)
+                built_clause = build_where_clause(subfilter, for_files=True)
 
-            filter_clauses[filter]['where_clause'] = built_clause['query_str']
-            filter_clauses[filter]['parameters'] = built_clause['value_tuple']
-
+                filter_clauses[filter]['where_clause'] = built_clause['query_str']
+                filter_clauses[filter]['parameters'] = built_clause['value_tuple']
+            else:
+                raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
 
         for attr in metadata_data_attr:
 
