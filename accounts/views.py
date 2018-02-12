@@ -203,6 +203,12 @@ def unlink_accounts_and_get_acl_tasks(user_id):
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.save()
 
+        controlled_data = nih_account_to_unlink.userauthorizeddatasets_set.filter(authorized_dataset__in=nih_account_to_unlink.get_auth_datasets.filter(public=False))
+        for uad in controlled_data:
+            # uad.delete()
+            logger.info("Deleting UAD {}".format(str(uad)))
+
+
         unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
     except MultipleObjectsReturned as e:
@@ -363,7 +369,7 @@ def verify_gcp(request, user_id):
             status='403'
             logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
             logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
-            response['message'] = 'Your user email {} was not found in GCP {}. You may not register a project you do not belong to.'.format(user.email,str(gcp_id))
+            response['message'] = 'Your user email {} was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,str(gcp_id),"register" if not is_refresh else "refresh")
         else:
             response = {'roles': roles,'gcp_id': gcp_id}
             status='200'
