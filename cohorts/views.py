@@ -2313,7 +2313,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             if files_counted:
                 continue
             for val in filter_counts[attr]:
-                if not files_counted:
+                if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
                     total_file_count += int(filter_counts[attr][val])
             files_counted = True
 
