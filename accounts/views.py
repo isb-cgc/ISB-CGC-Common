@@ -201,11 +201,11 @@ def unlink_accounts_and_get_acl_tasks(user_id):
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.save()
 
-        controlled_data = nih_account_to_unlink.userauthorizeddatasets_set.filter(authorized_dataset__in=nih_account_to_unlink.get_auth_datasets.filter(public=False))
-        for uad in controlled_data:
-            # uad.delete()
-            logger.info("Deleting UAD {}".format(str(uad)))
+        removed_datasets = nih_account_to_unlink.delete_all_auth_datasets()
 
+        logger.info("[STATUS] Removed the following datasets from {}: {}".format(
+            user_email, "; ".join(removed_datasets.values_list('whitelist_id',flat=True)))
+        )
 
         unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
@@ -216,6 +216,7 @@ def unlink_accounts_and_get_acl_tasks(user_id):
         for nih_account_to_unlink in nih_user_query_set:
             nih_account_to_unlink.linked = False
             nih_account_to_unlink.save()
+            nih_account_to_unlink.delete_all_auth_datasets()
             unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
 
             logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
