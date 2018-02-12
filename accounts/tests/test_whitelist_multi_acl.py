@@ -26,7 +26,7 @@ from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
-from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater
+from cgc_cron.django_utils import AccessControlAnalyzer
 from tasks.tests.data_generators import create_csv_file_object
 
 logging.basicConfig(
@@ -100,7 +100,7 @@ class TestWhitelistMultiACL(TestCase):
         ]
 
         whitelist = NIHDatasetAuthorizationList.from_stream(create_csv_file_object(test_csv_data, include_header=True))
-        dsu = AccessControlUpdater(whitelist, database_alias='default')
+        dsu = AccessControlAnalyzer(whitelist, database_alias='default')
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)

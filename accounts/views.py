@@ -108,16 +108,14 @@ def extended_logout_view(request):
 
         except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
             if type(e) is MultipleObjectsReturned:
-                logger.error("[WARNING] More than one linked NIH User with user id %d - deactivating all of them!" % (str(e), request.user.id))
+                logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), request.user.id))
                 nih_users = NIH_User.objects.filter(user=user)
                 for nih_user in nih_users:
                     nih_user.active = False
                     nih_user.save()
-                    user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-                    for dataset in user_auth_datasets:
-                        dataset.delete()
+                    nih_user.delete_all_auth_datasets()
             else:
-                logger.info("[STATUS] No NIH user was found for user {} - no one set to inactive.".format(user.email))
+                logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user.email))
 
         directory_service, http_auth = get_directory_resource()
         user_email = user.email
@@ -126,7 +124,7 @@ def extended_logout_view(request):
         try:
             body = {"email": user_email, "role": "MEMBER"}
             directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-            logger.info("Attempting to insert user {} into group {}. "
+            logger.info("[STATUS] Attempting to insert user {} into group {}. "
                         "If an error message doesn't follow, they were successfully added."
                         .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
         except HttpError as e:
@@ -259,7 +257,7 @@ def unlink_accounts(request):
 
             # If the user isn't actually in the ACL, we'll get an HttpError
             try:
-                logger.info("Removing user {} from {}...".format(user_email, google_group_acl))
+                logger.info("[STATUS] Removing user {} from {}...".format(user_email, google_group_acl))
                 directory_service.members().delete(groupKey=google_group_acl,
                                                    memberKey=user_email).execute(http=http_auth)
 
@@ -404,13 +402,13 @@ def register_gcp(request, user_id):
 
             project_name = project_id
 
-            users = User.objects.filter(email__in=register_users)
+            gcp_users = User.objects.filter(email__in=register_users)
 
             if not user_id:
                 raise Exception("User ID not provided.")
             elif not project_id or not project_name:
                 raise Exception("Project ID not provided.")
-            elif not len(register_users) or not users.count():
+            elif not len(register_users) or not gcp_users.count():
                 # A set of users to register or refresh is required
                 msg = "[STATUS] No registered user set found for GCP {} of project {}; {} aborted.".format(
                     "refresh" if is_refresh else "registration",project_id,"refresh" if is_refresh else "registration")
@@ -441,8 +439,8 @@ def register_gcp(request, user_id):
                         st_logger.write_text_log_entry(log_name,msg)
 
             if is_refresh:
-                users_to_add = users.exclude(id__in=gcp.user.all())
-                users_to_remove = gcp.user.all().exclude(id__in=users)
+                users_to_add = gcp_users.exclude(id__in=gcp.user.all())
+                users_to_remove = gcp.user.all().exclude(id__in=gcp_users)
                 if len(users_to_add):
                     msg = "The following user{} added to GCP {}: {}".format(
                         ("s were" if len(users_to_add) > 1 else " was"),
@@ -460,7 +458,7 @@ def register_gcp(request, user_id):
 
                 messages.info(request, msg)
 
-            gcp.user.set(users)
+            gcp.user.set(gcp_users)
             gcp.save()
 
             if not gcp.user.all().count():
@@ -537,12 +535,12 @@ def verify_sa(request, user_id):
 
             if 'message' in result.keys():
                 status = '400'
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
             else:
                 if result['all_user_datasets_verified']:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
                 else:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
                 status = '200'
@@ -614,7 +612,7 @@ def register_sa(request, user_id):
             # If the verification was successful, finalize access
             if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                {'message': '{0}: Service account was successfully verified.'.format(user_sa)})
+                                {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa, user_email)})
 
                 # Datasets verified, add service accounts to appropriate acl groups
                 protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
@@ -645,7 +643,9 @@ def register_sa(request, user_id):
 
                     try:
                         body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Attempting to add service account to Google Group {1}.'.format(str(service_account_obj.service_account), dataset.acl_google_group)})
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+                             {'message': '{}: Attempting to add service account to Google Group {} for user {}.'.format(
+                                 str(service_account_obj.service_account), dataset.acl_google_group, user_email)})
                         directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
                         logger.info("Attempting to insert service account {} into Google Group {}. "
@@ -653,7 +653,9 @@ def register_sa(request, user_id):
                                     .format(str(service_account_obj.service_account), dataset.acl_google_group))
 
                     except HttpError as e:
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: There was an error in adding the service account to Google Group {1}. {2}'.format(str(service_account_obj.service_account), dataset.acl_google_group, e)})
+                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
+                            {'message': '{}: There was an error in adding the service account to Google Group {} for user {}. {}'.format(
+                                str(service_account_obj.service_account), dataset.acl_google_group, user_email, e)})
                         # We're not too concerned with 'Member already exists.' errors
                         if e.resp.status == 409 and e._get_reason() == 'Member already exists.':
                             logger.info(e)
@@ -661,7 +663,8 @@ def register_sa(request, user_id):
                         else:
                             logger.warn(e)
                             err_msgs.append(
-                               "There was an error while registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
+                               "There was an error while user {} was registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
+                                   user_email,
                                    str(service_account_obj.service_account),
                                     dataset.name
                                ))

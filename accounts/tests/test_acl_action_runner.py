@@ -25,11 +25,10 @@ from django.utils import timezone
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
-#from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
-from tasks.nih_whitelist_processor.acl_group_util import ACLGroupSupportSimulator
-from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater, \
+from cgc_cron.acl_group_util import ACLGroupSupportSimulator
+from cgc_cron.django_utils import AccessControlUpdater, \
     AccessControlActionRunner, ExpiredServiceAccountRemover, ServiceAccountDeactivateAction, ServiceAccountRemoveAction
 from tasks.tests.data_generators import create_csv_file_object
 
