@@ -444,6 +444,9 @@ def register_gcp(request, user_id):
                         st_logger.write_text_log_entry(log_name,msg)
 
             if is_refresh:
+                if project_name != gcp.project_name:
+                    gcp.project_name = project_name
+ 
                 users_to_add = gcp_users.exclude(id__in=gcp.user.all())
                 users_to_remove = gcp.user.all().exclude(id__in=gcp_users)
                 if len(users_to_add):
