@@ -78,7 +78,7 @@ class TestWhitelistMultiACL(TestCase):
         self.auth_dataset.save()
 
         self.project = GoogleProject(project_name="project1",
-                                     project_id="123",
+                                     project_id="a-123",
                                      big_query_dataset="bq_dataset1")
         self.project.save()
         self.project.user.add(self.auth_user)
@@ -166,7 +166,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.auth_dataset_123.save()
 
         self.project_123 = GoogleProject(project_name="project1",
-                                         project_id="123",
+                                         project_id="a-123",
                                          big_query_dataset="bq_dataset1")
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
@@ -178,7 +178,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.auth_dataset_456.save()
 
         self.project_456 = GoogleProject(project_name="project1",
-                                         project_id="456",
+                                         project_id="a-456",
                                          big_query_dataset="bq_dataset2")
         self.project_456.save()
         self.project_456.user.add(self.auth_user)

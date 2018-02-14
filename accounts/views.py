@@ -397,17 +397,21 @@ def register_gcp(request, user_id):
         log_name = SERVICE_ACCOUNT_LOG_NAME
 
         if request.POST:
+            crm_service = get_special_crm_resource()
+
             project_id = request.POST.get('gcp_id', None)
             register_users = request.POST.getlist('register_users')
             is_refresh = bool(request.POST.get('is_refresh', '') == 'true')
 
-            project_name = project_id
+            project = crm_service.projects().get(projectId=project_id).execute()
+
+            project_name = project['name']
 
             gcp_users = User.objects.filter(email__in=register_users)
 
             if not user_id:
                 raise Exception("User ID not provided.")
-            elif not project_id or not project_name:
+            elif not project_id:
                 raise Exception("Project ID not provided.")
             elif not len(register_users) or not gcp_users.count():
                 # A set of users to register or refresh is required

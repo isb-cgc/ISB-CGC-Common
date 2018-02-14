@@ -76,7 +76,7 @@ class GoogleProject(models.Model):
     active = models.BooleanField(default=False, null=False)
 
     def __str__(self):
-        return self.project_name
+        return "{} ({})".format(self.project_name, self.project_id)
 
     def active_service_accounts(self):
         return self.serviceaccount_set.filter(active=1)

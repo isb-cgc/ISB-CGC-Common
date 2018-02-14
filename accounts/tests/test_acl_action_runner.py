@@ -82,7 +82,7 @@ class TestAccessControlActionRunner(TestCase):
         self.auth_dataset_123.save()
 
         self.project_123 = GoogleProject(project_name="project123",
-                                         project_id="123",
+                                         project_id="a-123",
                                          big_query_dataset="bq_dataset1")
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
@@ -98,7 +98,7 @@ class TestAccessControlActionRunner(TestCase):
         self.auth_dataset_456.save()
 
         self.project_456 = GoogleProject(project_name="project456",
-                                         project_id="456",
+                                         project_id="b-456",
                                          big_query_dataset="bq_dataset2")
         self.project_456.save()
         self.project_456.user.add(self.auth_user)
