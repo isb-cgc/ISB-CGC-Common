@@ -739,7 +739,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
-            'programs': program_list
+            'programs': program_list,
+            'program_prefixes': {x.name: True for x in program_list}
         }
 
         if workbook_id and worksheet_id :
