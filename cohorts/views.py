@@ -314,7 +314,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             cohort_where_str = ''
             bq_cohort_table = ''
             bq_cohort_dataset = ''
-            bq_cohort_project_name = ''
+            bq_cohort_project_id = ''
             cohort = ''
             query_template = None
 
@@ -322,16 +322,16 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             sample_barcode_col = bq_table_info['sample_barcode_col']
             bq_dataset = bq_table_info['dataset']
             bq_table = bq_table_info['table']
-            bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
+            bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
 
             query_template = None
 
             if cohort_id is not None:
                 query_template = \
                     ("SELECT ct.sample_barcode"
-                     " FROM [{project_name}:{cohort_dataset}.{cohort_table}] ct"
+                     " FROM [{project_id}:{cohort_dataset}.{cohort_table}] ct"
                      " JOIN (SELECT sample_barcode_tumor AS barcode "
-                     " FROM [{data_project_name}:{dataset_name}.{table_name}]"
+                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY barcode) mt"
                      " ON mt.barcode = ct.sample_barcode"
@@ -340,21 +340,21 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
                 bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
                 bq_cohort_dataset = settings.COHORT_DATASET_ID
-                bq_cohort_project_name = settings.BIGQUERY_PROJECT_NAME
+                bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
                 cohort = cohort_id
 
             else:
                 query_template = \
                     ("SELECT {barcode_col}"
-                     " FROM [{data_project_name}:{dataset_name}.{table_name}]"
+                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY {barcode_col}; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
             query = query_template.format(
-                dataset_name=bq_dataset, project_name=bq_cohort_project_name, table_name=bq_table, barcode_col=sample_barcode_col,
-                hugo_symbol=str(params['gene']), data_project_name=bq_data_project_name,  var_class=params['var_class'],
+                dataset_name=bq_dataset, project_id=bq_cohort_project_id, table_name=bq_table, barcode_col=sample_barcode_col,
+                hugo_symbol=str(params['gene']), data_project_id=bq_data_project_id,  var_class=params['var_class'],
                 cohort_dataset=bq_cohort_dataset,cohort_table=bq_cohort_table, cohort=cohort
             )
 
@@ -739,7 +739,8 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
-            'programs': program_list
+            'programs': program_list,
+            'program_prefixes': {x.name: True for x in program_list}
         }
 
         if workbook_id and worksheet_id :
@@ -958,7 +959,7 @@ def export_cohort_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
         else:
             try:
-                gcp = GoogleProject.objects.get(project_name=proj_id, active=1)
+                gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
             except ObjectDoesNotExist as e:
                 messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
                 return redirect(redirect_url)
@@ -2313,7 +2314,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             if files_counted:
                 continue
             for val in filter_counts[attr]:
-                if not files_counted:
+                if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
                     total_file_count += int(filter_counts[attr][val])
             files_counted = True
 

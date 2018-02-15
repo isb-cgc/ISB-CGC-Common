@@ -575,7 +575,7 @@ def get_preformatted_values(program=None):
 
 
 # Confirm that a filter key is a valid column in the attribute and data type sets or a valid mutation filter
-def validate_filter_key(col,program):
+def validate_filter_key(col, program, build='HG19'):
 
     if not program in METADATA_ATTR:
         fetch_program_attr(program)
@@ -583,13 +583,16 @@ def validate_filter_key(col,program):
     if not program in METADATA_DATA_TYPES:
         fetch_program_data_types(program)
 
+    if not build in METADATA_DATA_ATTR:
+        fetch_build_data_attr(build)
+
     if 'MUT:' in col:
         return (':category' in col or ':specific' in col)
 
     if ':' in col:
         col = col.split(':')[1]
 
-    return col in METADATA_ATTR[program] or METADATA_DATA_TYPES[program]
+    return col in METADATA_ATTR[program] or METADATA_DATA_TYPES[program] or col in METADATA_DATA_ATTR[build]
 
 
 # Make standard adjustments to a string for display: replace _ with ' ', title case (except for 'to')

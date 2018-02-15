@@ -40,13 +40,30 @@ class NIH_User(models.Model):
     def get_google_email(self):
         return User.objects.get(pk=self.user_id).email
 
+    # Returns a QuerySet of AuthorizedDatasets for which this NIH User is authorized
     def get_auth_datasets(self):
         result = None
         try:
             result = AuthorizedDataset.objects.filter(
                 id__in=self.userauthorizeddatasets_set.all().values_list('authorized_dataset', flat=True))
         except Exception as e:
-            logger.error("[ERROR] While retrieving authorized datasets: ")
+            logger.error("[ERROR] While retrieving authorized datasets for {}: ".format(self.NIH_username))
+            logger.exception(e)
+        return result
+
+    # Deletes all UserAuthorizedDataset entries for this NIH User and
+    # returns a list of the whitelist_id values for the AuthorizedDatasets
+    # matching those delete UserAuthorizedDataset entries
+    def delete_all_auth_datasets(self):
+        result = None
+        try:
+            result = self.get_auth_datasets().values_list('whitelist_id',flat=True)
+            user_datasets = self.userauthorizeddatasets_set.all()
+            for dataset in user_datasets:
+                dataset.delete()
+
+        except Exception as e:
+            logger.error("[ERROR] While deleting user authorized datasets for {}: ".format(self.NIH_username))
             logger.exception(e)
         return result
 
@@ -59,7 +76,7 @@ class GoogleProject(models.Model):
     active = models.BooleanField(default=False, null=False)
 
     def __str__(self):
-        return self.project_name
+        return "{} ({})".format(self.project_name, self.project_id)
 
     def active_service_accounts(self):
         return self.serviceaccount_set.filter(active=1)
