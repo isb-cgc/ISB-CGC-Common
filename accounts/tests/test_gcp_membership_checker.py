@@ -63,7 +63,7 @@ class TestPublicDatasetServiceAccount(TestCase):
         self.auth_dataset_123.save()
 
         self.project_123 = GoogleProject(project_name="project1",
-                                         project_id="123",
+                                         project_id="a-123",
                                          big_query_dataset="bq_dataset1")
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
@@ -107,7 +107,7 @@ class TestUnauthorizedUser(TestCase):
         self.auth_dataset_123.save()
 
         self.project_123 = GoogleProject(project_name="project1",
-                                         project_id="123",
+                                         project_id="a-123",
                                          big_query_dataset="bq_dataset1")
         self.project_123.save()
         self.project_123.user.add(self.auth_user_1)

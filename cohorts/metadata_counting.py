@@ -199,16 +199,18 @@ def count_public_data_types(user, cohort_id, program, inc_filters, filter_format
 
         # Make our where clauses
         for filter in inc_filters:
-            filter_clauses[filter] = {'where_clause': None, 'parameters': None}
+            if validate_filter_key(filter, program.id, build):
+                filter_clauses[filter] = {'where_clause': None, 'parameters': None}
 
-            subfilter = {}
-            subfilter[filter] = inc_filters[filter]
+                subfilter = {}
+                subfilter[filter] = inc_filters[filter]
 
-            built_clause = build_where_clause(subfilter, for_files=True)
+                built_clause = build_where_clause(subfilter, for_files=True)
 
-            filter_clauses[filter]['where_clause'] = built_clause['query_str']
-            filter_clauses[filter]['parameters'] = built_clause['value_tuple']
-
+                filter_clauses[filter]['where_clause'] = built_clause['query_str']
+                filter_clauses[filter]['parameters'] = built_clause['value_tuple']
+            else:
+                raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
 
         for attr in metadata_data_attr:
 
@@ -353,23 +355,23 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             cohort_where_str = ''
             bq_cohort_table = ''
             bq_cohort_dataset = ''
-            bq_cohort_project_name = ''
+            bq_cohort_project_id = ''
             cohort = ''
 
             bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
             sample_barcode_col = bq_table_info['sample_barcode_col']
             bq_dataset = bq_table_info['dataset']
             bq_table = bq_table_info['table']
-            bq_data_project_name = settings.BIGQUERY_DATA_PROJECT_NAME
+            bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
 
             query_template = None
 
             if cohort_id is not None:
                 query_template = \
                     ("SELECT ct.sample_barcode"
-                     " FROM [{cohort_project_name}:{cohort_dataset}.{cohort_table}] ct"
+                     " FROM [{cohort_project_id}:{cohort_dataset}.{cohort_table}] ct"
                      " JOIN (SELECT sample_barcode_tumor AS barcode "
-                     " FROM [{data_project_name}:{dataset_name}.{table_name}]"
+                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY barcode) mt"
                      " ON mt.barcode = ct.sample_barcode"
@@ -377,20 +379,20 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                 bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
                 bq_cohort_dataset = settings.COHORT_DATASET_ID
-                bq_cohort_project_name = settings.BIGQUERY_PROJECT_NAME
+                bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
 
                 cohort = cohort_id
             else:
                 query_template = \
                     ("SELECT {barcode_col}"
-                     " FROM [{data_project_name}:{dataset_name}.{table_name}]"
+                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
                      " WHERE " + mutation_where_clause['big_query_str'] +
                      " GROUP BY {barcode_col}; ")
 
             params = mutation_where_clause['value_tuple'][0]
 
-            query = query_template.format(dataset_name=bq_dataset, cohort_project_name=bq_cohort_project_name,
-                                          data_project_name=bq_data_project_name, table_name=bq_table, barcode_col=sample_barcode_col,
+            query = query_template.format(dataset_name=bq_dataset, cohort_project_id=bq_cohort_project_id,
+                                          data_project_id=bq_data_project_id, table_name=bq_table, barcode_col=sample_barcode_col,
                                           hugo_symbol=str(params['gene']), var_class=params['var_class'],
                                           cohort_dataset=bq_cohort_dataset, cohort_table=bq_cohort_table, cohort=cohort)
 

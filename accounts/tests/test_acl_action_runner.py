@@ -25,11 +25,10 @@ from django.utils import timezone
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
-#from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
-from tasks.nih_whitelist_processor.acl_group_util import ACLGroupSupportSimulator
-from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater, \
+from cgc_cron.acl_group_util import ACLGroupSupportSimulator
+from cgc_cron.django_utils import AccessControlUpdater, \
     AccessControlActionRunner, ExpiredServiceAccountRemover, ServiceAccountDeactivateAction, ServiceAccountRemoveAction
 from tasks.tests.data_generators import create_csv_file_object
 
@@ -83,7 +82,7 @@ class TestAccessControlActionRunner(TestCase):
         self.auth_dataset_123.save()
 
         self.project_123 = GoogleProject(project_name="project123",
-                                         project_id="123",
+                                         project_id="a-123",
                                          big_query_dataset="bq_dataset1")
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
@@ -99,7 +98,7 @@ class TestAccessControlActionRunner(TestCase):
         self.auth_dataset_456.save()
 
         self.project_456 = GoogleProject(project_name="project456",
-                                         project_id="456",
+                                         project_id="b-456",
                                          big_query_dataset="bq_dataset2")
         self.project_456.save()
         self.project_456.user.add(self.auth_user)
