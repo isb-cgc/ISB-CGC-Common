@@ -340,11 +340,11 @@ def verify_gcp(request, user_id):
         gcp = GoogleProject.objects.filter(project_id=gcp_id, active=1)
         # Can't register the same GCP twice - return immediately
         if gcp.count() > 0 and not is_refresh:
-            return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp_id))}, status='500')
+            return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp.project_id))}, status='500')
 
         crm_service = get_special_crm_resource()
         iam_policy = crm_service.projects().getIamPolicy(
-            resource=gcp_id, body={}).execute()
+            resource=gcp.project_id, body={}).execute()
         bindings = iam_policy['bindings']
         roles = {}
         user = User.objects.get(id=user_id)
@@ -366,20 +366,20 @@ def verify_gcp(request, user_id):
 
         if not user_found:
             status='403'
-            logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp_id)))
-            logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp_id)))
-            response['message'] = 'Your user email {} was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,str(gcp_id),"register" if not is_refresh else "refresh")
+            logger.error("[ERROR] While attempting to register GCP ID {}: ".format(str(gcp.project_id)))
+            logger.error("User {} was not found on GCP {}.".format(user.email,str(gcp.project_id)))
+            response['message'] = 'Your user email {} was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,str(gcp.project_id),"register" if not is_refresh else "refresh")
         else:
-            response = {'roles': roles,'gcp_id': gcp_id}
+            response = {'roles': roles,'gcp_id': gcp.project_id}
             status='200'
 
     except Exception as e:
         if type(e) is HttpError:
-            logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp_id)))
+            logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(str(gcp.project_id)))
             response['message'] = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '403'
         else:
-            logger.error("[ERROR] While trying to verify GCP ID {}:".format(str(gcp_id)))
+            logger.error("[ERROR] While trying to verify GCP ID {}:".format(str(gcp.project_id)))
             response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
             status = '500'
         logger.exception(e)
