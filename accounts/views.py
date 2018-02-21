@@ -337,10 +337,14 @@ def verify_gcp(request, user_id):
         gcp_id = request.GET.get('gcp-id', None)
         is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
-        gcp = GoogleProject.objects.filter(project_id=gcp_id, active=1)
-        # Can't register the same GCP twice - return immediately
-        if gcp.count() > 0 and not is_refresh:
-            return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp.project_id))}, status='500')
+        try:
+            gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+            # Can't register the same GCP twice - return immediately
+            if not is_refresh:
+                return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(str(gcp.project_id))}, status='500')
+        except ObjectDoesNotExist:
+            if is_refresh:
+                return JsonResponse({'message': 'GCP ID {} does not exist and so cannot be refreshed'.format(str(gcp_id))}, status='500')
 
         crm_service = get_special_crm_resource()
         iam_policy = crm_service.projects().getIamPolicy(
