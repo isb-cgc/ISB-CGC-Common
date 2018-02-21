@@ -268,13 +268,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     data_avail_table = None
     data_type_subquery = None
 
-    # Fetch the possible value set of all non-continuous attr columns
-    # (also fetches the display strings for all attributes and values which have them)
-    metadata_attr_values = fetch_metadata_value_set(program_id)
-
-    # Fetch the possible value set of all data types
-    metadata_data_type_values = fetch_program_data_types(program_id)
-
     db = None
     cursor = None
 
@@ -478,6 +471,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
             cursor.execute(make_tmp_table_str)
             db.commit()
+        elif cohort_id:
+            filter_table = 'cohorts_samples'
         else:
             filter_table = base_table
 
