@@ -27,7 +27,6 @@ from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
-from cgc_cron.acl_group_util import ACLGroupSupportSimulator
 from cgc_cron.django_utils import AccessControlUpdater, \
     AccessControlActionRunner, ExpiredServiceAccountRemover, ServiceAccountDeactivateAction, ServiceAccountRemoveAction
 from tasks.tests.data_generators import create_csv_file_object
@@ -325,3 +324,20 @@ class TestAccessControlActionRunner(TestCase):
 
         # there should be no ServiceAccountAuthorizedDatasets for service account 123
         self.assertEquals(len(ServiceAccountAuthorizedDatasets.objects.filter(service_account=account_123_expired)), 0)
+
+
+class ACLGroupSupportSimulator(object):
+    def __init__(self, initial_acls):
+        self.acls = {}
+
+        for acl_name, items in initial_acls.iteritems():
+            self.acls[acl_name] = set(items)
+
+    def add_group_member(self, acl_group_name, user_email):
+        self.acls[acl_group_name].add(user_email)
+
+    def get_group_members(self, acl_group_name):
+        return self.acls[acl_group_name]
+
+    def remove_email_from_group(self, acl_group_name, email_to_remove):
+        self.acls[acl_group_name].remove(email_to_remove)
