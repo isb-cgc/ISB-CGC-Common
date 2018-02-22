@@ -427,8 +427,7 @@ def register_gcp(request, user_id):
                 return redirect('user_gcp_list', user_id=request.user.id)
             else:
                 try:
-                    gcp = GoogleProject.objects.get(project_name=project_name,
-                                                    project_id=project_id,
+                    gcp = GoogleProject.objects.get(project_id=project_id,
                                                     active=1)
                     if not is_refresh:
                         messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
