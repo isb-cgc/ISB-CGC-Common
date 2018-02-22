@@ -1920,31 +1920,25 @@ def streaming_csv_view(request, cohort_id=0):
         total_expected = int(request.GET.get('total'))
         limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
-        keep_fetching = True
-        file_list = []
-        offset = None
+        file_list = None
 
         build = escape(request.GET.get('build', 'HG19'))
 
         if not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
 
-        while keep_fetching:
-            items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
-            if 'file_list' in items:
-                file_list += items['file_list']
-                # offsets are counted from row 0, so setting the offset to the current number of
-                # retrieved rows will start the next request on the row we want
-                offset = file_list.__len__()
+        items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
+        if 'file_list' in items:
+            file_list = items['file_list']
+        else:
+            if 'error' in items:
+                messages.error(request, items['error']['message'])
             else:
-                if 'error' in items:
-                    messages.error(request, items['error']['message'])
-                return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
-
-            keep_fetching = ((offset < total_expected) and ('file_list' in items))
+                messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
+            return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
         if len(file_list) < total_expected:
-            messages.error(request, 'Only %d files found out of %d expected!' % (file_list.__len__(), total_expected))
+            messages.error(request, 'Only %d files found out of %d expected!' % (len(file_list), total_expected))
             return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
         if len(file_list) > 0:
@@ -2161,7 +2155,6 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
 
     inc_filters = json.loads(request.GET.get('filters', '{}'))
-    logger.debug(str(inc_filters))
     user = request.user
     user_email = user.email
     user_id = user.id
@@ -2180,7 +2173,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
         file_list_query = """
-            SELECT md.sample_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
+            SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
               md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
             FROM {metadata_table} md
             JOIN (
@@ -2252,8 +2245,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         else:
                             filter_counts[attr][val] += counts[attr][val]
 
-            # If we have room in the file list, we'll file-query this program, otherwise there's no point
-            if len(file_list) < limit:
+            # If we have room in the file list, or if there's no limit, we'll file-query this program, otherwise there's no point
+            if len(file_list) < limit or limit < 0:
                 if limit > 0:
                     limit_clause = ' LIMIT %s'
                     params += (limit,)
@@ -2285,6 +2278,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
                         file_list.append({
                             'sample': item['sample_barcode'],
+                            'case': item['case_barcode'],
                             'disease_code': item['disease_code'],
                             'program': program.name,
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
