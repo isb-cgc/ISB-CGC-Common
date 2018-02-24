@@ -1084,11 +1084,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                         results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
 
             if len(barcodes) > 0:
-                for barcode in barcodes:
-                    if barcode['program'] not in results:
-                        results[barcode['program']] = {'count': 0, 'items': []}
-                    results[barcode['program']]['items'].append({'sample_barcode': barcode['sample_barcode'], 'case_barcode': barcode['case_barcode'], 'project_id': barcode['project']})
-                    results[barcode['program']]['count'] += 1
+                for program in barcodes:
+                    if program not in results:
+                        results[program] = {'count': 0, 'items': []}
+                    for barcode in barcodes[program]:
+                        results[program]['items'].append({'sample_barcode': barcode[0], 'case_barcode': barcode[1], 'project_id': barcode[2]})
+                        results[program]['count'] += 1
 
             found_samples = False
 
