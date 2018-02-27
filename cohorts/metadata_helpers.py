@@ -1375,7 +1375,7 @@ def get_sample_metadata(sample_barcode):
     db = None
     cursor = None
 
-    program_samples_table = Program.objects.get(name=('TCGA' if 'TCGA-' in sample_barcode else 'TARGET' if 'TARGET-' in sample_barcode else 'CCLE')).get_metadata_tables().samples_table
+    program_samples_table = Program.objects.get(name=('TCGA' if 'TCGA-' in sample_barcode else 'TARGET' if 'TARGET-' in sample_barcode else 'CCLE'),active=True,is_public=True).get_metadata_tables().samples_table
 
     try:
         db = get_sql_connection()
