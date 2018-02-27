@@ -380,11 +380,11 @@ def verify_gcp(request, user_id):
     except Exception as e:
         if type(e) is HttpError:
             logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(gcp_id))
-            response['message'] = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            response['message'] = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
             status = '403'
         else:
             logger.error("[ERROR] While trying to verify GCP ID {}:".format(gcp_id))
-            response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID and set the permissions correctly.'
+            response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
             status = '500'
         logger.exception(e)
 
