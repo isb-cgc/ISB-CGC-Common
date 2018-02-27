@@ -1340,7 +1340,7 @@ def normalize_negative_days(days):
 
 # TODO: Convert to slider
 def normalize_by_200(values):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     new_value_list = {'0 to 200': 0, '200.01 to 400': 0, '400.01 to 600': 0, '600.01 to 800': 0, '800.01 to 1000': 0,
                     '1000.01 to 1200': 0, '1200.01 to 1400': 0, '1400.01+': 0, 'None': 0}
     for value, count in values.items():
@@ -1368,3 +1368,37 @@ def normalize_by_200(values):
 
     return new_value_list
 
+
+def get_sample_metadata(sample_barcode):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+    result = {}
+    db = None
+    cursor = None
+
+    program_samples_table = Program.objects.get(name=('TCGA' if 'TCGA-' in sample_barcode else 'TARGET' if 'TARGET-' in sample_barcode else 'CCLE')).get_metadata_tables().samples_table
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        cursor.execute("""
+            SELECT case_barcode, sample_barcode, disease_code, project_short_name, program_name
+            FROM {}
+            WHERE sample_barcode = {}
+        """.format(program_samples_table, "%s"), (sample_barcode,))
+
+        for row in cursor.fetchall():
+            result['case_barcode'] = row[0]
+            result['sample_barcode'] = row[1]
+            result['disease_code'] = row[2]
+            result['project'] = row[3]
+            result['program'] = row[4]
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching sample metadata for {}:".format(sample_barcode))
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return result
