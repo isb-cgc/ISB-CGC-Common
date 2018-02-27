@@ -50,6 +50,9 @@ class Program(models.Model):
 
         return last_view
 
+    def get_metadata_tables(self):
+        return self.public_metadata_tables_set.first()
+
     @classmethod
     def get_user_programs(cls, user, includeShared=True, includePublic=False):
         programs = user.program_set.filter(active=True)
