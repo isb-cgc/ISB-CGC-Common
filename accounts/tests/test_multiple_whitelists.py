@@ -26,7 +26,7 @@ from accounts.models import NIH_User, AuthorizedDataset, UserAuthorizedDatasets
 #from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
-from tasks.nih_whitelist_processor.django_utils import ERAUserAuthDatasetUpdater, NIHDatasetAdder
+from cgc_cron.django_utils import ERAUserAuthDatasetAnalyzer, NIHDatasetAdder
 from tasks.tests.data_generators import create_csv_file_object
 
 logging.basicConfig(
