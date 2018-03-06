@@ -56,6 +56,11 @@ FILE_LIST_EXPORT_SCHEMA = {
 COHORT_EXPORT_SCHEMA = {
     'fields': [
         {
+            'name': 'cohort_id',
+            'type': 'INTEGER',
+            'mode': 'REQUIRED'
+        },
+        {
             'name': 'case_barcode',
             'type': 'STRING',
             'mode': 'REQUIRED'
@@ -164,10 +169,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         table_fields = table['schema']['fields']
 
         proposed_schema = {x['name']: x['type'] for x in table_fields}
-        expected_schema = {x['name']: x['type'] for x in self.file_list_export_schema['fields']}
+        expected_schema = {x['name']: x['type'] for x in self.table_schema['fields']}
 
         # Check for expected fields
-        for field in self.file_list_export_schema['fields']:
+        for field in self.table_schema['fields']:
             if field['name'] not in proposed_schema or proposed_schema[field['name']] != field['type']:
                 return False
 
@@ -201,7 +206,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             'friendlyName': self.table_id,
             'description': desc,
             'kind': 'bigquery#table',
-            'schema': self.file_list_export_schema,
+            'schema': self.table_schema,
             'tableReference': {
                 'datasetId': self.dataset_id,
                 'projectId': self.project_id,
