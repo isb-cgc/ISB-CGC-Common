@@ -290,14 +290,14 @@ class BigQueryExportCohort(BigQueryExport):
 
         for sample in samples:
             entry_dict = {
-                'cohort_id': sample.cohort.id,
-                'sample_barcode': sample.sample_barcode,
-                'case_barcode': sample.case_barcode,
-                'project_short_name': sample.project.program.name + '-' + sample.project.name,
+                'cohort_id': sample['cohort_id'],
+                'sample_barcode': sample['sample_barcode'],
+                'case_barcode': sample['case_barcode'],
+                'project_short_name': sample['project_short_name'],
                 'date_added': date_added
             }
-            if self._uuids and sample.sample_barcode in self._uuids:
-                entry_dict['case_gdc_uuid'] = self._uuids[sample.sample_barcode]
+            if self._uuids and sample['sample_barcode'] in self._uuids:
+                entry_dict['case_gdc_uuid'] = self._uuids[sample['sample_barcode']]
             rows.append(entry_dict)
 
         return rows
@@ -306,7 +306,7 @@ class BigQueryExportCohort(BigQueryExport):
     def export_cohort_to_bq(self, samples):
         desc = ""
         if not self._table_exists():
-            cohorts = samples.values_list('cohort_id', flat=True).distinct()
+            cohorts = set([x['cohort_id'] for x in samples])
             desc = "BQ Export table from ISB-CGC"
             if len(cohorts):
                 desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""),
