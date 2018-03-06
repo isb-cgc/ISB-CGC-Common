@@ -25,7 +25,7 @@ import django
 import re
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
-from google_helpers.bigquery_service import authorize_credentials_with_Google
+from google_helpers.bigquery.service import authorize_credentials_with_Google
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
 BQ_ATTEMPT_MAX = 10

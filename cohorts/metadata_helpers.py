@@ -22,7 +22,6 @@ import sys
 import random
 import string
 import logging
-import traceback
 import warnings
 import copy
 import MySQLdb

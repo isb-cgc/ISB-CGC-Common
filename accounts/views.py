@@ -26,7 +26,7 @@ from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.core.urlresolvers import reverse
 from google_helpers.stackdriver import StackDriverLogger
-from google_helpers.bigquery_service import get_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource

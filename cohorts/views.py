@@ -23,7 +23,8 @@ import datetime
 import time
 
 import django
-from google_helpers.cohort_bigquery import BigQueryCohortSupport
+from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
+from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -895,7 +896,7 @@ def export_cohort_to_bq(request, cohort_id=0):
                         'datasets': {},
                         'name': gcp.project_id
                     }
-                    bqs = BigQueryCohortSupport(gcp.project_id, None, None)
+                    bqs = BigQueryExportCohort(gcp.project_id, None, None)
                     bq_tables = bqs.get_tables()
                     for table in bq_tables:
                         if table['dataset'] in bqds:
@@ -976,9 +977,10 @@ def export_cohort_to_bq(request, cohort_id=0):
         # Store cohort to BigQuery
         samples = Samples.objects.filter(cohort=cohort)
         uuids = get_cohort_uuids(cohort_id)
-        bcs = BigQueryCohortSupport(bq_proj_id, dataset, table)
-        bq_result = bcs.export_cohort_to_bq(samples, uuids)
+        bcs = BigQueryExportCohort(bq_proj_id, dataset, table, uuids)
+        bq_result = bcs.export_cohort_to_bq(samples)
 
+        logger.debug("Result is {}".format(str(bq_result)))
         # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
             err_msg = ''
@@ -999,7 +1001,6 @@ def export_cohort_to_bq(request, cohort_id=0):
         messages.error(request, "There was an error while trying to export your cohort - please contact the administrator.")
 
     return redirect(redirect_url)
-
 
 
 @login_required
