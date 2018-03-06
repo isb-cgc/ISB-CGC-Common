@@ -134,6 +134,50 @@ def get_cohort_uuids(cohort_id):
     return result
 
 
+def get_cohort_samples_for_export(cohort_id):
+    if not cohort_id:
+        raise Exception("A cohort ID was not provided (value={}).".format("None" if cohort_id is None else str(cohort_id)))
+
+    cohort_progs = Cohort.objects.get(id=cohort_id).get_programs()
+
+    query_base = """
+        SELECT cs.sample_barcode, cs.case_barcode, CONCAT(pp.name,'-',ps.name), cs.cohort_id
+        FROM cohorts_samples cs
+        JOIN {} ms
+        ON ms.sample_barcode = cs.sample_barcode
+        JOIN projects_project ps
+        ON ps.id = cs.project_id
+        JOIN projects_program pp
+        ON pp.id = ps.program_id
+    """
+
+    result = []
+
+    db = None
+    cursor = None
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        for prog in cohort_progs:
+            samples_table = Public_Metadata_Tables.objects.get(program=prog).samples_table
+
+            cursor.execute(query_base.format(samples_table) + " WHERE cs.cohort_id = %s;", (cohort_id,))
+
+            for row in cursor.fetchall():
+                result.append({'sample_barcode': row[0], 'case_barcode': row[1], 'project_short_name': row[2], 'cohort_id': row[3]})
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching export information for a cohort:")
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return result
+
+
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
 
     if program_id is None and cohort_id is None:
@@ -975,12 +1019,11 @@ def export_cohort_to_bq(request, cohort_id=0):
             table = "isb_cgc_cohort_{}_{}_{}".format(cohort_id,re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),datetime.datetime.now().strftime("%Y%m%d_%H%M"))
 
         # Store cohort to BigQuery
-        samples = Samples.objects.filter(cohort=cohort)
+        samples = get_cohort_samples_for_export(cohort_id)
         uuids = get_cohort_uuids(cohort_id)
         bcs = BigQueryExportCohort(bq_proj_id, dataset, table, uuids)
         bq_result = bcs.export_cohort_to_bq(samples)
 
-        logger.debug("Result is {}".format(str(bq_result)))
         # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
             err_msg = ''
