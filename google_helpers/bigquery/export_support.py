@@ -1,6 +1,6 @@
 """
 
-Copyright 2017, Institute for Systems Biology
+Copyright 2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,93 +17,77 @@ limitations under the License.
 """
 
 from copy import deepcopy
-import sys
 import logging
 import datetime
 from django.conf import settings
-from google_helpers.bigquery_service import get_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
+from abstract import BigQueryExportABC
+from cohort_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
 MAX_INSERT = settings.MAX_BQ_INSERT
 
-COHORT_DATASETS = {
-    'prod': 'cloud_deployment_cohorts',
-    'staging': 'cloud_deployment_cohorts',
-    'dev': 'dev_deployment_cohorts'
-}
-
-COHORT_TABLES = {
-    'prod': 'prod_cohorts',
-    'staging': 'staging_cohorts'
-}
-
-class BigQueryCohortSupport(object):
-    cohort_schema = [
+FILE_LIST_EXPORT_SCHEMA = {
+    'fields': [
         {
-            "name": "cohort_id",
-            "type": "INTEGER",
-            "mode": "REQUIRED"
-        },
-        {
-            "name": "case_barcode",
-            "type": "STRING"
-        },
-        {
-            "name": "sample_barcode",
-            "type": "STRING"
-        },
-        {
-            "name": "aliquot_barcode",
-            "type": "STRING"
-        },
-        {
-            "name": "project_id",
-            "type": "INTEGER"
+            'name': 'case_barcode',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'sample_barcode',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'project_short_name',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'date_added',
+            'type': 'TIMESTAMP',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'case_gdc_uuid',
+            'type': 'STRING'
         }
     ]
+}
 
-    cohort_export_schema = {
-        'fields': [
-            {
-                'name': 'cohort_id',
-                'type': 'INTEGER',
-                'mode': 'REQUIRED'
-            },{
-                'name': 'case_barcode',
-                'type': 'STRING',
-                'mode': 'REQUIRED'
-            },{
-                'name': 'sample_barcode',
-                'type': 'STRING',
-                'mode': 'REQUIRED'
-            },{
-                'name': 'project_short_name',
-                'type': 'STRING',
-                'mode': 'REQUIRED'
-            },{
-                'name': 'date_added',
-                'type': 'TIMESTAMP',
-                'mode': 'REQUIRED'
-            },{
-                'name': 'case_gdc_uuid',
-                'type': 'STRING'
-            }
-        ]
-    }
+COHORT_EXPORT_SCHEMA = {
+    'fields': [
+        {
+            'name': 'cohort_id',
+            'type': 'INTEGER',
+            'mode': 'REQUIRED'
+        },
+        {
+            'name': 'case_barcode',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'sample_barcode',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'project_short_name',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'date_added',
+            'type': 'TIMESTAMP',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'case_gdc_uuid',
+            'type': 'STRING'
+        }
+    ]
+}
 
-    patient_type = 'patient'
-    sample_type = 'sample'
-    aliquot_type = 'aliquot'
+class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
-    @classmethod
-    def get_schema(cls):
-        return deepcopy(cls.cohort_schema)
-
-    def __init__(self, project_id, dataset_id, table_id):
-        self.project_id = project_id
-        self.dataset_id = dataset_id
-        self.table_id = table_id
+    def __init__(self, project_id, dataset_id, table_id, table_schema):
+        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id)
+        self.table_schema = table_schema
 
     def _build_request_body_from_rows(self, rows):
         insertable_rows = []
@@ -140,49 +124,7 @@ class BigQueryCohortSupport(object):
 
         return response
 
-    def _build_cohort_row(self, cohort_id,
-                          case_barcode=None, sample_barcode=None, aliquot_barcode=None, project_id=None):
-        return {
-            'cohort_id': cohort_id,
-            'case_barcode': case_barcode,
-            'sample_barcode': sample_barcode,
-            'aliquot_barcode': aliquot_barcode,
-            'project_id': project_id
-        }
-
-    # Create a cohort based on a dictionary of sample, patient/case/participant, and project IDs
-    def add_cohort_to_bq(self, cohort_id, samples):
-        rows = []
-        for sample in samples:
-            rows.append(self._build_cohort_row(cohort_id, case_barcode=sample['case_barcode'], sample_barcode=sample['sample_barcode'], project_id=sample['project_id']))
-
-        response = self._streaming_insert(rows)
-
-        return response
-
-    # Create a cohort based only on sample and optionally project IDs (patient/participant/case ID is NOT added)
-    def add_cohort_with_sample_barcodes(self, cohort_id, samples):
-        rows = []
-        for sample in samples:
-            # TODO This is REALLY specific to TCGA. This needs to be changed
-            # patient_barcode = sample_barcode[:12]
-            barcode = sample
-            project_id = None
-            if isinstance(sample, tuple):
-                barcode = sample[0]
-                if len(sample) > 1:
-                    project_id = sample[1]
-            elif isinstance(sample, dict):
-                barcode = sample['sample_id']
-                if 'project_id' in sample:
-                    project_id = sample['project_id']
-
-            rows.append(self._build_cohort_row(cohort_id, sample_barcode=barcode, project_id=project_id))
-
-        response = self._streaming_insert(rows)
-        return response
-
-    # Get all the tables for this BigQueryCohortSupport object's project ID
+    # Get all the tables for this object's project ID
     def get_tables(self):
         bq_tables = []
         bigquery_service = get_bigquery_service()
@@ -212,24 +154,25 @@ class BigQueryCohortSupport(object):
 
         return dataset_found
 
+    # Unimplemented due to dataset creation requiring high privileges than we prefer to ask of our users
     def _insert_dataset(self):
         response = {}
 
         return response
 
-    # Compare the schema of the table referenced in table_id with the cohort-export table schema
-    # Note this only confirms that fields required by cohort_export_schema are found in the proposed table
-    # with the appropriate type, and that no 'required' fields in the proposed table are absent from cohort_export_schema
+    # Compare the schema of the table referenced in table_id with the table schema
+    # Note this only confirms that fields required by table_schema are found in the proposed table with the appropriate
+    # type, and that no 'required' fields in the proposed table are absent from table_schema
     def _confirm_table_schema(self):
         bigquery_service = get_bigquery_service()
         table = bigquery_service.tables().get(projectId=self.project_id, datasetId=self.dataset_id,tableId=self.table_id).execute()
         table_fields = table['schema']['fields']
 
         proposed_schema = {x['name']: x['type'] for x in table_fields}
-        expected_schema = {x['name']: x['type'] for x in self.cohort_export_schema['fields']}
+        expected_schema = {x['name']: x['type'] for x in self.table_schema['fields']}
 
         # Check for expected fields
-        for field in self.cohort_export_schema['fields']:
+        for field in self.table_schema['fields']:
             if field['name'] not in proposed_schema or proposed_schema[field['name']] != field['type']:
                 return False
 
@@ -240,7 +183,8 @@ class BigQueryCohortSupport(object):
 
         return True
 
-    # Check if the table referened by table_id exists in the dataset referenced by dataset_id and the project referenced by project_id
+    # Check if the table referenced by table_id exists in the dataset referenced by dataset_id and the
+    # project referenced by project_id
     def _table_exists(self):
         bigquery_service = get_bigquery_service()
         tables = bigquery_service.tables().list(projectId=self.project_id,datasetId=self.dataset_id).execute()
@@ -253,20 +197,16 @@ class BigQueryCohortSupport(object):
 
         return table_found
 
-    # Insert a cohort-export table, optionally providing a list of cohort IDs to include in the description
-    def _insert_table(self,cohorts):
+    # Insert an table, optionally providing a list of cohort IDs to include in the description
+    def _insert_table(self, desc):
         bigquery_service = get_bigquery_service()
         tables = bigquery_service.tables()
-
-        desc = "BQ Export table from ISB-CGC"
-        if len(cohorts):
-            desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""), ", ".join([str(x) for x in cohorts]))
 
         response = tables.insert(projectId=self.project_id, datasetId=self.dataset_id, body={
             'friendlyName': self.table_id,
             'description': desc,
             'kind': 'bigquery#table',
-            'schema': self.cohort_export_schema,
+            'schema': self.table_schema,
             'tableReference': {
                 'datasetId': self.dataset_id,
                 'projectId': self.project_id,
@@ -276,42 +216,100 @@ class BigQueryCohortSupport(object):
 
         return response
 
-    # Export a cohort or cohorts as represented by a set of samples into the BQ table referenced by project_id:dataset_id:table_id
-    def export_cohort_to_bq(self, samples, uuids=None):
-
+    # Export data to the BQ table referenced by project_id:dataset_id:table_id
+    def export_to_bq(self, desc, rows):
+        logger.debug("Called export_to_bq")
         # Get the dataset (make if not exists)
         if not self._dataset_exists():
             self._insert_dataset()
 
         # Get the table (make if not exists)
         if not self._table_exists():
-            table_result = self._insert_table(samples.values_list('cohort_id',flat=True).distinct())
+            table_result = self._insert_table(desc)
             if 'tableReference' not in table_result:
                 return {
                     'tableErrors': "Unable to create table {} in project {} and dataset {} - please double-check your project's permissions for the ISB-CGC service account.".format(
-                        self.table_id,self.project_id,self.dataset_id)
+                        self.table_id, self.project_id, self.dataset_id)
                 }
         elif not self._confirm_table_schema():
             return {
-                'tableErrors': "The table schema of {} does not match the required schema for cohort export. Please make a new table, or adjust this table's schema.".format(self.table_id)
+                'tableErrors': "The table schema of {} does not match the required schema for cohort export. Please make a new table, or adjust this table's schema.".format(
+                    self.table_id)
             }
 
-        rows = []
+        return self._streaming_insert(rows)
+
+    def get_schema(self):
+        return deepcopy(self.table_schema)
+
+
+class BigQueryExportFileList(BigQueryExport):
+
+    def __init__(self, project_id, dataset_id, table_id):
+        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, FILE_LIST_EXPORT_SCHEMA)
+
+    def _build_rows(self, files):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rows = []
+
+        for data in files:
+            entry_dict = {
+                'sample_barcode': data['sample_barcode'],
+                'case_barcode': data['case_barcode'],
+                'project_short_name': data['project_short_name'],
+                'case_gdc_uuid': data['case_gdc_uuid'],
+                'date_added': date_added
+            }
+            rows.append(entry_dict)
+
+        return rows
+
+    # Export a file list into the BQ table referenced by project_id:dataset_id:table_id
+    def export_file_list_to_bq(self, files):
+        desc = ""
+
+        if not self._table_exists():
+            cohorts = files.values_list('cohort_id', flat=True).distinct()
+            desc = "BQ Export file list table from ISB-CGC"
+            if len(cohorts):
+                desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""),
+                                                  ", ".join([str(x) for x in cohorts]))
+
+        return self.export_to_bq(desc, self._build_rows(files))
+
+
+class BigQueryExportCohort(BigQueryExport):
+
+    def __init__(self, project_id, dataset_id, table_id, uuids=None):
+        self._uuids = uuids
+        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, COHORT_EXPORT_SCHEMA)
+
+    def _build_rows(self, samples):
+        date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        rows = []
 
         for sample in samples:
-            sample_dict = {
+            entry_dict = {
                 'cohort_id': sample.cohort.id,
                 'sample_barcode': sample.sample_barcode,
                 'case_barcode': sample.case_barcode,
                 'project_short_name': sample.project.program.name + '-' + sample.project.name,
                 'date_added': date_added
             }
-            if uuids and sample.sample_barcode in uuids:
-                sample_dict['case_gdc_uuid'] = uuids[sample.sample_barcode]
-            rows.append(sample_dict)
+            if self._uuids and sample.sample_barcode in self._uuids:
+                entry_dict['case_gdc_uuid'] = self._uuids[sample.sample_barcode]
+            rows.append(entry_dict)
 
-        response = self._streaming_insert(rows)
+        return rows
 
-        return response
+    # Export a cohort into the BQ table referenced by project_id:dataset_id:table_id
+    def export_cohort_to_bq(self, samples):
+        desc = ""
+        if not self._table_exists():
+            cohorts = samples.values_list('cohort_id', flat=True).distinct()
+            desc = "BQ Export table from ISB-CGC"
+            if len(cohorts):
+                desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""),
+                                                  ", ".join([str(x) for x in cohorts]))
 
+        return self.export_to_bq(desc, self._build_rows(samples))
