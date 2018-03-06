@@ -62,6 +62,10 @@ class BigQueryExportABC(BigQueryABC):
         pass
 
     @abstractmethod
+    def get_schema(self):
+        pass
+
+    @abstractmethod
     def export_to_bq(self, desc, rows):
         pass
 
