@@ -31,6 +31,10 @@ MAX_INSERT = settings.MAX_BQ_INSERT
 FILE_LIST_EXPORT_SCHEMA = {
     'fields': [
         {
+            'name': 'cohort_id',
+            'type': 'INTEGER',
+            'mode': 'REQUIRED'
+        }, {
             'name': 'case_barcode',
             'type': 'STRING',
             'mode': 'REQUIRED'
@@ -47,11 +51,27 @@ FILE_LIST_EXPORT_SCHEMA = {
             'type': 'TIMESTAMP',
             'mode': 'REQUIRED'
         }, {
-            'name': 'case_gdc_uuid',
+            'name': 'Platform',
+            'type': 'STRING'
+        }, {
+            'name': 'Experimental Strategy',
+            'type': 'STRING'
+        }, {
+            'name': 'Data Category',
+            'type': 'STRING'
+        }, {
+            'name': 'Data Type',
+            'type': 'STRING'
+        }, {
+            'name': 'Data Format',
+            'type': 'STRING'
+        }, {
+            'name': 'Cloud Storage Location',
             'type': 'STRING'
         }
     ]
 }
+
 
 COHORT_EXPORT_SCHEMA = {
     'fields': [
