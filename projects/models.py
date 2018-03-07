@@ -50,6 +50,9 @@ class Program(models.Model):
 
         return last_view
 
+    def get_metadata_tables(self):
+        return self.public_metadata_tables_set.first()
+
     @classmethod
     def get_user_programs(cls, user, includeShared=True, includePublic=False):
         programs = user.program_set.filter(active=True)
@@ -151,11 +154,11 @@ class Project(models.Model):
     def get_bq_tables(self):
         result = []
         for datatable in self.user_data_tables_set.all():
-            project_name = datatable.google_project.project_name
+            project_id = datatable.google_project.project_id
             dataset_name = datatable.google_bq_dataset.dataset_name
             bq_tables = datatable.project_bq_tables_set.all()
             for bq_table in bq_tables:
-                result.append('{0}:{1}.{2}'.format(project_name, dataset_name, bq_table.bq_table_name))
+                result.append('{0}:{1}.{2}'.format(project_id, dataset_name, bq_table.bq_table_name))
         return result
 
     def __str__(self):

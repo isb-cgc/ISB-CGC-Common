@@ -26,7 +26,7 @@ from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
-from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater
+from cgc_cron.django_utils import AccessControlAnalyzer
 from tasks.tests.data_generators import create_csv_file_object
 
 logging.basicConfig(
@@ -78,7 +78,7 @@ class TestWhitelistMultiACL(TestCase):
         self.auth_dataset.save()
 
         self.project = GoogleProject(project_name="project1",
-                                     project_id="123",
+                                     project_id="a-123",
                                      big_query_dataset="bq_dataset1")
         self.project.save()
         self.project.user.add(self.auth_user)
@@ -100,7 +100,7 @@ class TestWhitelistMultiACL(TestCase):
         ]
 
         whitelist = NIHDatasetAuthorizationList.from_stream(create_csv_file_object(test_csv_data, include_header=True))
-        dsu = AccessControlUpdater(whitelist, database_alias='default')
+        dsu = AccessControlAnalyzer(whitelist, database_alias='default')
         result = dsu.process()
 
         self.assertEquals(len(result.skipped_era_logins), 0)
@@ -166,7 +166,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.auth_dataset_123.save()
 
         self.project_123 = GoogleProject(project_name="project1",
-                                         project_id="123",
+                                         project_id="a-123",
                                          big_query_dataset="bq_dataset1")
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
@@ -178,7 +178,7 @@ class TestWhitelistServiceAccountRevoke(TestCase):
         self.auth_dataset_456.save()
 
         self.project_456 = GoogleProject(project_name="project1",
-                                         project_id="456",
+                                         project_id="a-456",
                                          big_query_dataset="bq_dataset2")
         self.project_456.save()
         self.project_456.user.add(self.auth_user)

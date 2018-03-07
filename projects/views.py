@@ -281,7 +281,7 @@ def upload_files(request):
                 "USER_ID": request.user.id,
                 "STUDY": project.id,
                 "BUCKET": bucket.bucket_name,
-                "GOOGLE_PROJECT": google_project.project_name,
+                "GOOGLE_PROJECT": google_project.project_id,
                 "BIGQUERY_DATASET": dataset.dataset_name,
                 "FILES": [],
                 "USER_METADATA_TABLES": {
