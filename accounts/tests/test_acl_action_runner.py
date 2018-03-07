@@ -25,11 +25,9 @@ from django.utils import timezone
 
 from django.contrib.auth.models import User
 from accounts.models import AuthorizedDataset, NIH_User, GoogleProject, ServiceAccount, UserAuthorizedDatasets, ServiceAccountAuthorizedDatasets
-#from tasks.nih_whitelist_processor.auth_list_processor.nih_auth_list import NIHDatasetAuthorizationList
 from dataset_utils.nih_auth_list import NIHDatasetAuthorizationList
 from tasks.nih_whitelist_processor.utils import DatasetToACLMapping
-from tasks.nih_whitelist_processor.acl_group_util import ACLGroupSupportSimulator
-from tasks.nih_whitelist_processor.django_utils import AccessControlUpdater, \
+from cgc_cron.django_utils import AccessControlUpdater, \
     AccessControlActionRunner, ExpiredServiceAccountRemover, ServiceAccountDeactivateAction, ServiceAccountRemoveAction
 from tasks.tests.data_generators import create_csv_file_object
 
@@ -83,7 +81,7 @@ class TestAccessControlActionRunner(TestCase):
         self.auth_dataset_123.save()
 
         self.project_123 = GoogleProject(project_name="project123",
-                                         project_id="123",
+                                         project_id="a-123",
                                          big_query_dataset="bq_dataset1")
         self.project_123.save()
         self.project_123.user.add(self.auth_user)
@@ -99,7 +97,7 @@ class TestAccessControlActionRunner(TestCase):
         self.auth_dataset_456.save()
 
         self.project_456 = GoogleProject(project_name="project456",
-                                         project_id="456",
+                                         project_id="b-456",
                                          big_query_dataset="bq_dataset2")
         self.project_456.save()
         self.project_456.user.add(self.auth_user)
@@ -326,3 +324,20 @@ class TestAccessControlActionRunner(TestCase):
 
         # there should be no ServiceAccountAuthorizedDatasets for service account 123
         self.assertEquals(len(ServiceAccountAuthorizedDatasets.objects.filter(service_account=account_123_expired)), 0)
+
+
+class ACLGroupSupportSimulator(object):
+    def __init__(self, initial_acls):
+        self.acls = {}
+
+        for acl_name, items in initial_acls.iteritems():
+            self.acls[acl_name] = set(items)
+
+    def add_group_member(self, acl_group_name, user_email):
+        self.acls[acl_group_name].add(user_email)
+
+    def get_group_members(self, acl_group_name):
+        return self.acls[acl_group_name]
+
+    def remove_email_from_group(self, acl_group_name, email_to_remove):
+        self.acls[acl_group_name].remove(email_to_remove)
