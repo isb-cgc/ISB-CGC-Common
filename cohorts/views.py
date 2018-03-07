@@ -2381,3 +2381,148 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
         if db and db.open: db.close()
 
     return resp
+
+
+def export_file_list_to_bq(request, cohort_id=0):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_files', args=[cohort_id])
+
+    try:
+
+        req_user = User.objects.get(id=request.user.id)
+
+        # GET request receives the potential list of projects and datasets this user has available to make a table in
+        if request.method == 'GET':
+            result = {
+                'status': '',
+                'data': {
+                    'projects': []
+                }
+            }
+            gcps = GoogleProject.objects.filter(user=req_user, active=1)
+
+            if not gcps.count():
+                status = 500
+                result = {
+                    'status': 'error',
+                    'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
+                }
+                logger.info("[STATUS] No registered GCPs found - cannot export cohort ID {}.".format(str(cohort_id)))
+            else:
+                for gcp in gcps:
+                    bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
+
+                    this_proj = {
+                        'datasets': {},
+                        'name': gcp.project_id
+                    }
+                    bqs = BigQueryExportCohort(gcp.project_id, None, None)
+                    bq_tables = bqs.get_tables()
+                    for table in bq_tables:
+                        if table['dataset'] in bqds:
+                            if table['dataset'] not in this_proj['datasets']:
+                                this_proj['datasets'][table['dataset']] = []
+                            if table['table_id']:
+                                this_proj['datasets'][table['dataset']].append(table['table_id'])
+                    if len(this_proj['datasets']):
+                        result['data']['projects'].append(this_proj)
+
+                if not len(result['data']['projects']):
+                    status=500
+                    result = {
+                        'status': 'error',
+                        'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
+                    }
+                    logger.info("[STATUS] No registered datasets were found - cannot export cohort ID {}.".format(str(cohort_id)))
+                else:
+                    status=200
+                    result['status']='success'
+
+            return JsonResponse(result, status=status)
+
+        # POST is to actually export the cohort(s) to a chosen project:dataset:table
+
+        dataset = None
+        table = None
+        bq_proj_id = None
+
+        if not cohort_id:
+            messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
+            return redirect(redirect_url)
+
+        cohort = Cohort.objects.get(id=cohort_id)
+        dataset = request.POST.get('project-dataset', '').split(":")[1]
+        table = None
+
+        if request.POST.get('table-type', '') == 'new':
+            table = request.POST.get('new-table-name', None)
+            if table:
+                # Check the user-provided table name against the whitelist for Google BQ table names
+                # truncate at max length regardless of what we received
+                table = request.POST.get('new-table-name', '')[0:1024]
+                tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
+                match = tbl_whitelist.search(unicode(table))
+                if match:
+                    messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
+                    return redirect(redirect_url)
+        else:
+            table = request.POST.get('table-name', None)
+
+        proj_id = request.POST.get('project-dataset', '').split(":")[0]
+
+        if not len(proj_id):
+            messages.error(request, "You must provide a Google Cloud Project to which your cohort can be exported.")
+            return redirect(redirect_url)
+        else:
+            try:
+                gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
+            except ObjectDoesNotExist as e:
+                messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+                return redirect(redirect_url)
+
+        bq_proj_id = gcp.project_id
+
+        try:
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        except ObjectDoesNotExist as e:
+            messages.error(request, "You must be the owner of a cohort in order to export its file list.")
+            return redirect(redirect_url)
+
+        if not len(dataset):
+            dataset = "isb_cgc_cohort_export_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
+        if not table:
+            table = "isb_cgc_cohort_files_{}_{}_{}".format(cohort_id,re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
+        build = escape(request.GET.get('build', 'HG19'))
+
+        if not re.compile(r'[Hh][Gg](19|38)').search(build):
+            raise Exception("Invalid build supplied")
+
+        # Store file list to BigQuery
+        items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
+
+        bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+        bq_result = bcs.export_file_list_to_bq(items['file_list'])
+
+        # If BQ insertion fails, we warn the user
+        if 'insertErrors' in bq_result:
+            err_msg = ''
+            if len(bq_result['insertErrors']) > 1:
+                err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
+            else:
+                err_msg = 'There was an insertion error '
+            messages.error(request,
+                           err_msg + ' when exporting your cohort to BigQuery table {}. Creation of the BQ cohort has failed.'.format(table))
+        elif 'tableErrors' in bq_result:
+            messages.error(request,bq_result['tableErrors'])
+        else:
+            messages.info(request, "Cohort {} was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to export cohort {} to BQ:".format(str(cohort_id)))
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to export your cohort - please contact the administrator.")
+
+    return redirect(redirect_url)
