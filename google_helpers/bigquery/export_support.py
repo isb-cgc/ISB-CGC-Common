@@ -51,22 +51,22 @@ FILE_LIST_EXPORT_SCHEMA = {
             'type': 'TIMESTAMP',
             'mode': 'REQUIRED'
         }, {
-            'name': 'Platform',
+            'name': 'platform',
             'type': 'STRING'
         }, {
-            'name': 'Experimental Strategy',
+            'name': 'exp_strategy',
             'type': 'STRING'
         }, {
-            'name': 'Data Category',
+            'name': 'data_category',
             'type': 'STRING'
         }, {
-            'name': 'Data Type',
+            'name': 'data_type',
             'type': 'STRING'
         }, {
-            'name': 'Data Format',
+            'name': 'data_format',
             'type': 'STRING'
         }, {
-            'name': 'Cloud Storage Location',
+            'name': 'cloud_storage_location',
             'type': 'STRING'
         }
     ]

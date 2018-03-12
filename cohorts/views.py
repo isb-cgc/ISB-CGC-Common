@@ -2208,149 +2208,249 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     offset_clause = ""
 
     filter_counts = None
+    file_list = []
+    progs_without_files = []
+    total_file_count = 0
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        file_list_query = """
-            SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
-              md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
-            FROM {metadata_table} md
-            JOIN (
-                SELECT sample_barcode
-                FROM cohorts_samples
-                WHERE cohort_id = %s
-            ) cs
-            ON cs.sample_barcode = md.sample_barcode
-            WHERE md.file_uploaded='true' {type_clause} {filter_clause}
-            {limit_clause}
-            {offset_clause}
-            ;
-        """
+        if type == 'dicom':
 
-        if type == 'igv':
-            type_clause = "AND md.data_format='BAM'"
-            inc_filters['data_format'] = ['BAM']
-        elif type == 'camic':
-            type_clause = "AND md.data_format='SVS'"
-            inc_filters['data_format'] = ['SVS']
+            filter_counts = {}
 
-        db = get_sql_connection()
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+            limit_clause = ""
+            offset_clause = ""
 
-        file_list = []
-        progs_without_files = []
-        cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+            bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
+            bq_cohort_dataset = settings.COHORT_DATASET_ID
+            bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
+            data_project = settings.BIGQUERY_DATA_PROJECT_NAME
 
-        total_file_count = 0
+            file_list_query_base = """
+                SELECT cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
+                FROM  [{cohort_project}:{cohort_dataset}.{cohort_table}] cs
+                JOIN [{data_project}:{tcga_img_dataset}.{dcf_data_table}] ds
+                ON cs.case_barcode = ds.PatientID
+                JOIN [{data_project}:{tcga_bioclin_dataset}.{tcga_clin_table}] bc
+                ON bc.case_barcode=cs.case_barcode
+                WHERE cs.cohort_id = {cohort}
+                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
+            """.format(cohort_dataset=bq_cohort_dataset,
+                cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
+                data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
+                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id)
 
-        for program in cohort_programs:
+            file_list_query = """
+                {file_list}
+                {limit_clause}
+                {offset_clause}
+            """
 
-            program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
+            file_count_query = """
+                SELECT COUNT(*)
+                FROM (
+                  {file_list}
+                )
+            """
 
-            if len(program_data_tables) <= 0:
-                # This program has no metadata_data table for this build, or at all--skip
-                progs_without_files.append(program.name)
-                continue
+            if limit > 0:
+                limit_clause = ' LIMIT %s' % str(limit)
+                # Offset is only valid when there is a limit
+                if offset > 0:
+                    offset_clause = ' OFFSET %s' % str(offset)
 
-            program_data_table = program_data_tables[0].data_table
+            bq_service = authorize_credentials_with_Google()
 
-            params = (cohort_id,)
+            # Query the count
+            query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_count_query.format(file_list=file_list_query_base))
+            job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
+                                                   query_job['jobReference']['jobId'])
 
-            filter_clause = ''
-
-            if len(inc_filters):
-                built_clause = build_where_clause(inc_filters, for_files=True)
-                filter_clause = 'AND ' + built_clause['query_str']
-                params += built_clause['value_tuple']
+            retries = 0
 
             start = time.time()
-            counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+            while not job_is_done and retries < BQ_ATTEMPT_MAX:
+                retries += 1
+                sleep(1)
+                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
+                                                       query_job['jobReference']['jobId'])
             stop = time.time()
 
-            logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
+            logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
 
-            # Group up our program-speciic filter counts
-            # If this is our first program, just assign it to the result
-            if not filter_counts:
-                filter_counts = counts
-            # Otherwise loop through and add in the new values
-            else:
-                for attr in counts:
-                    if attr not in filter_counts:
-                        filter_counts[attr] = {}
-                    for val in counts[attr]:
-                        if val not in filter_counts[attr]:
-                            filter_counts[attr][val] = counts[attr][val]
-                        else:
-                            filter_counts[attr][val] += counts[attr][val]
+            results = get_bq_job_results(bq_service, query_job['jobReference'])
 
-            # If we have room in the file list, or if there's no limit, we'll file-query this program, otherwise there's no point
-            if len(file_list) < limit or limit < 0:
-                if limit > 0:
-                    limit_clause = ' LIMIT %s'
-                    params += (limit,)
-                    # Offset is only valid when there is a limit
-                    if offset > 0:
-                        offset_clause = ' OFFSET %s'
-                        params += (offset,)
+            for entry in results:
+                total_file_count = int(entry['f'][0]['v'])
+
+            # Query the file list only if there was anything to find
+            if total_file_count:
+                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_list_query.format(
+                    file_list=file_list_query_base, limit_clause=limit_clause, offset_clause=offset_clause)
+                )
+                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
+
+                retries = 0
 
                 start = time.time()
-                cursor.execute(file_list_query.format(
-                    metadata_table=program_data_table,
-                    type_clause=type_clause,
-                    limit_clause=limit_clause,
-                    offset_clause=offset_clause,
-                    filter_clause=filter_clause), params)
+                while not job_is_done and retries < BQ_ATTEMPT_MAX:
+                    retries += 1
+                    sleep(1)
+                    job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
+                                                           query_job['jobReference']['jobId'])
                 stop = time.time()
 
-                logger.info("[STATUS] Time to get file-list for program {}: {}s".format(program.name,str((stop-start)/1000)))
+                logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + (stop - start).__str__())
 
-                if cursor.rowcount > 0:
-                    for item in cursor.fetchall():
-                        whitelist_found = False
-                        # If this is a controlled-access entry, check for the user's access to it
-                        if item['access'] == 'controlled' and access:
-                            whitelists = item['acl'].split(',')
-                            for whitelist in whitelists:
-                                if whitelist in access:
-                                    whitelist_found = True
+                results = get_bq_job_results(bq_service, query_job['jobReference'])
 
+                if len(results) > 0:
+                    for entry in results:
                         file_list.append({
-                            'sample': item['sample_barcode'],
-                            'case': item['case_barcode'],
-                            'disease_code': item['disease_code'],
-                            'program': program.name,
-                            'cloudstorage_location': item['file_name_key'] or 'N/A',
-                            'index_name': item['index_file_name'] or 'N/A',
-                            'access': (item['access'] or 'N/A'),
-                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
-                            'filename': item['file_name'] or 'N/A',
-                            'exp_strat': item['experimental_strategy'] or 'N/A',
-                            'platform': item['platform'] or 'N/A',
-                            'datacat': item['data_category'] or 'N/A',
-                            'datatype': (item['data_type'] or 'N/A'),
-                            'dataformat': (item['data_format'] or 'N/A'),
-                            'program': program.name
+                            'case': entry['f'][0]['v'],
+                            'study_uid': entry['f'][1]['v'],
+                            'study_desc': entry['f'][2]['v'] or 'N/A',
+                            'disease_code': entry['f'][3]['v'],
+                            'project_short_name': entry['f'][4]['v'],
+                            'program': "TCGA"
                         })
 
-                # if we didn't get enough file listings from this program to max out the list,
-                # we should move the offset to 0 and change the limit to finish filling the list
-                if cursor.rowcount < (limit-len(file_list)):
-                    limit = (limit-len(file_list))
-                    offset = 0
+        else:
+            file_list_query = """
+                SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
+                  md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
+                FROM {metadata_table} md
+                JOIN (
+                    SELECT sample_barcode
+                    FROM cohorts_samples
+                    WHERE cohort_id = %s
+                ) cs
+                ON cs.sample_barcode = md.sample_barcode
+                WHERE md.file_uploaded='true' {type_clause} {filter_clause}
+                {limit_clause}
+                {offset_clause}
+                ;
+            """
 
-        files_counted = False
+            if type == 'igv':
+                type_clause = "AND md.data_format='BAM'"
+                inc_filters['data_format'] = ['BAM']
+            elif type == 'camic':
+                type_clause = "AND md.data_format='SVS'"
+                inc_filters['data_format'] = ['SVS']
 
-        # Add to the file total
-        for attr in filter_counts:
-            if files_counted:
-                continue
-            for val in filter_counts[attr]:
-                if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                    total_file_count += int(filter_counts[attr][val])
-            files_counted = True
+            db = get_sql_connection()
+            cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+
+            for program in cohort_programs:
+
+                program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
+
+                if len(program_data_tables) <= 0:
+                    # This program has no metadata_data table for this build, or at all--skip
+                    progs_without_files.append(program.name)
+                    continue
+
+                program_data_table = program_data_tables[0].data_table
+
+                params = (cohort_id,)
+
+                filter_clause = ''
+
+                if len(inc_filters):
+                    built_clause = build_where_clause(inc_filters, for_files=True)
+                    filter_clause = 'AND ' + built_clause['query_str']
+                    params += built_clause['value_tuple']
+
+                start = time.time()
+                counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+                stop = time.time()
+
+                logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
+
+                # Group up our program-speciic filter counts
+                # If this is our first program, just assign it to the result
+                if not filter_counts:
+                    filter_counts = counts
+                # Otherwise loop through and add in the new values
+                else:
+                    for attr in counts:
+                        if attr not in filter_counts:
+                            filter_counts[attr] = {}
+                        for val in counts[attr]:
+                            if val not in filter_counts[attr]:
+                                filter_counts[attr][val] = counts[attr][val]
+                            else:
+                                filter_counts[attr][val] += counts[attr][val]
+
+                # If we have room in the file list, or if there's no limit, we'll file-query this program, otherwise there's no point
+                if len(file_list) < limit or limit < 0:
+                    if limit > 0:
+                        limit_clause = ' LIMIT %s'
+                        params += (limit,)
+                        # Offset is only valid when there is a limit
+                        if offset > 0:
+                            offset_clause = ' OFFSET %s'
+                            params += (offset,)
+
+                    start = time.time()
+                    cursor.execute(file_list_query.format(
+                        metadata_table=program_data_table,
+                        type_clause=type_clause,
+                        limit_clause=limit_clause,
+                        offset_clause=offset_clause,
+                        filter_clause=filter_clause), params)
+                    stop = time.time()
+
+                    logger.info("[STATUS] Time to get file-list for program {}: {}s".format(program.name,str((stop-start)/1000)))
+
+                    if cursor.rowcount > 0:
+                        for item in cursor.fetchall():
+                            whitelist_found = False
+                            # If this is a controlled-access entry, check for the user's access to it
+                            if item['access'] == 'controlled' and access:
+                                whitelists = item['acl'].split(',')
+                                for whitelist in whitelists:
+                                    if whitelist in access:
+                                        whitelist_found = True
+
+                            file_list.append({
+                                'sample': item['sample_barcode'],
+                                'case': item['case_barcode'],
+                                'disease_code': item['disease_code'],
+                                'cloudstorage_location': item['file_name_key'] or 'N/A',
+                                'index_name': item['index_file_name'] or 'N/A',
+                                'access': (item['access'] or 'N/A'),
+                                'user_access': str(item['access'] != 'controlled' or whitelist_found),
+                                'filename': item['file_name'] or 'N/A',
+                                'exp_strat': item['experimental_strategy'] or 'N/A',
+                                'platform': item['platform'] or 'N/A',
+                                'datacat': item['data_category'] or 'N/A',
+                                'datatype': (item['data_type'] or 'N/A'),
+                                'dataformat': (item['data_format'] or 'N/A'),
+                                'program': program.name
+                            })
+
+                    # if we didn't get enough file listings from this program to max out the list,
+                    # we should move the offset to 0 and change the limit to finish filling the list
+                    if cursor.rowcount < (limit-len(file_list)):
+                        limit = (limit-len(file_list))
+                        offset = 0
+
+            files_counted = False
+
+            # Add to the file total
+            for attr in filter_counts:
+                if files_counted:
+                    continue
+                for val in filter_counts[attr]:
+                    if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                        total_file_count += int(filter_counts[attr][val])
+                files_counted = True
 
         resp = {
             'total_file_count': total_file_count,
