@@ -2237,6 +2237,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                 ON bc.case_barcode=cs.case_barcode
                 WHERE cs.cohort_id = {cohort}
                 GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
+                ORDER BY cs.case_barcode
             """.format(cohort_dataset=bq_cohort_dataset,
                 cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
                 data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
