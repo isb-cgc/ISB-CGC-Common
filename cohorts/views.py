@@ -910,9 +910,7 @@ def export_cohort_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
     redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
-
     try:
-
         req_user = User.objects.get(id=request.user.id)
 
         # GET request receives the potential list of projects and datasets this user has available to make a table in
@@ -1823,6 +1821,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
             metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
 
         cohort = Cohort.objects.get(id=cohort_id, active=True)
+        cohort.perm = cohort.get_perm(request)
 
         # Check if cohort contains user data samples - return info message if it does.
         # Get user accessed projects
@@ -2192,10 +2191,14 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     return render(request, template, template_values)
 
-# Copied over from metadata api
+
+@login_required
 def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
 
-    inc_filters = json.loads(request.GET.get('filters', '{}'))
+    inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
+
+    logger.debug(str(inc_filters))
+
     user = request.user
     user_email = user.email
     user_id = user.id
@@ -2320,8 +2323,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
         else:
             file_list_query = """
-                SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
-                  md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
+                SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
+                  md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
+                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
+
                 FROM {metadata_table} md
                 JOIN (
                     SELECT sample_barcode
@@ -2433,7 +2438,11 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                                 'datacat': item['data_category'] or 'N/A',
                                 'datatype': (item['data_type'] or 'N/A'),
                                 'dataformat': (item['data_format'] or 'N/A'),
-                                'program': program.name
+                                'program': program.name,
+                                'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
+                                'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
+                                'project_short_name': (item['project_short_name'] or 'N/A'),
+                                'cohort_id': cohort_id
                             })
 
                     # if we didn't get enough file listings from this program to max out the list,
@@ -2484,10 +2493,18 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     return resp
 
 
+@login_required
+@csrf_protect
+def export_file_list(request):
+    return export_file_list_to_bq(request)
+
+
+@login_required
+@csrf_protect
 def export_file_list_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
-    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_files', args=[cohort_id])
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
 
     try:
 
@@ -2591,12 +2608,18 @@ def export_file_list_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
 
         if not len(dataset):
-            dataset = "isb_cgc_cohort_export_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+            dataset = "isb_cgc_cohort_file_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
 
         if not table:
-            table = "isb_cgc_cohort_files_{}_{}_{}".format(cohort_id,re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+            table = "isb_cgc_cohort_files_{}_{}_{}".format(
+                cohort_id,
+                re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
+                datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            )
 
-        build = escape(request.GET.get('build', 'HG19'))
+        logger.debug("Table name: {}".format(table))
+
+        build = escape(request.POST.get('build', 'HG19'))
 
         if not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
@@ -2605,7 +2628,7 @@ def export_file_list_to_bq(request, cohort_id=0):
         items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
 
         bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
-        bq_result = bcs.export_file_list_to_bq(items['file_list'])
+        bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
 
         # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
@@ -2615,15 +2638,15 @@ def export_file_list_to_bq(request, cohort_id=0):
             else:
                 err_msg = 'There was an insertion error '
             messages.error(request,
-                           err_msg + ' when exporting your cohort to BigQuery table {}. Creation of the BQ cohort has failed.'.format(table))
+                           err_msg + ' when exporting your file list to BigQuery table {}. Creation of the BQ file list has failed.'.format(table))
         elif 'tableErrors' in bq_result:
             messages.error(request,bq_result['tableErrors'])
         else:
-            messages.info(request, "Cohort {} was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
+            messages.info(request, "Cohort {}'s file list was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
 
     except Exception as e:
-        logger.error("[ERROR] While trying to export cohort {} to BQ:".format(str(cohort_id)))
+        logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
         logger.exception(e)
-        messages.error(request, "There was an error while trying to export your cohort - please contact the administrator.")
+        messages.error(request, "There was an error while trying to export your file list - please contact the administrator.")
 
     return redirect(redirect_url)
