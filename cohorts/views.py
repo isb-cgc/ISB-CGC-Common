@@ -2197,8 +2197,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
-    logger.debug(str(inc_filters))
-
     user = request.user
     user_email = user.email
     user_id = user.id
@@ -2616,8 +2614,6 @@ def export_file_list_to_bq(request, cohort_id=0):
                 re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
                 datetime.datetime.now().strftime("%Y%m%d_%H%M")
             )
-
-        logger.debug("Table name: {}".format(table))
 
         build = escape(request.POST.get('build', 'HG19'))
 
