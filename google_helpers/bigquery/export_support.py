@@ -51,6 +51,12 @@ FILE_LIST_EXPORT_SCHEMA = {
             'type': 'TIMESTAMP',
             'mode': 'REQUIRED'
         }, {
+            'name': 'gdc_file_uuid',
+            'type': 'STRING'
+        }, {
+            'name': 'gdc_case_uuid',
+            'type': 'STRING'
+        }, {
             'name': 'platform',
             'type': 'STRING'
         }, {
@@ -79,8 +85,7 @@ COHORT_EXPORT_SCHEMA = {
             'name': 'cohort_id',
             'type': 'INTEGER',
             'mode': 'REQUIRED'
-        },
-        {
+        }, {
             'name': 'case_barcode',
             'type': 'STRING',
             'mode': 'REQUIRED'
@@ -274,10 +279,18 @@ class BigQueryExportFileList(BigQueryExport):
 
         for data in files:
             entry_dict = {
-                'sample_barcode': data['sample_barcode'],
-                'case_barcode': data['case_barcode'],
+                'cohort_id': data['cohort_id'],
+                'sample_barcode': data['sample'],
+                'case_barcode': data['case'],
                 'project_short_name': data['project_short_name'],
-                'case_gdc_uuid': data['case_gdc_uuid'],
+                'gdc_case_uuid': data['case_gdc_id'],
+                'gdc_file_uuid': data['file_gdc_id'],
+                'platform': data['platform'],
+                'exp_strategy': data['exp_strat'],
+                'data_category': data['datacat'],
+                'data_type': data['datatype'],
+                'data_format': data['dataformat'],
+                'cloud_storage_location': data['cloudstorage_location'],
                 'date_added': date_added
             }
             rows.append(entry_dict)
@@ -285,15 +298,11 @@ class BigQueryExportFileList(BigQueryExport):
         return rows
 
     # Export a file list into the BQ table referenced by project_id:dataset_id:table_id
-    def export_file_list_to_bq(self, files):
+    def export_file_list_to_bq(self, files, cohort_id):
         desc = ""
 
         if not self._table_exists():
-            cohorts = files.values_list('cohort_id', flat=True).distinct()
-            desc = "BQ Export file list table from ISB-CGC"
-            if len(cohorts):
-                desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""),
-                                                  ", ".join([str(x) for x in cohorts]))
+            desc = "BQ Export file list table from ISB-CGC cohort ID {}".format(str(cohort_id))
 
         return self.export_to_bq(desc, self._build_rows(files))
 

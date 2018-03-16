@@ -418,7 +418,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
             # for-each result, add to list
 
-            if results.__len__() > 0:
+            if len(results) > 0:
                 for barcode in results:
                     barcodes.append(str(barcode['f'][0]['v']))
 
@@ -427,7 +427,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
-            tmp_mut_table = 'bq_res_table_' + user.id.__str__() + "_" + make_id(6)
+            tmp_mut_table = 'bq_res_table_' + str(user.id) + "_" + make_id(6)
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
