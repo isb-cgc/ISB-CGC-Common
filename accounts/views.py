@@ -964,7 +964,7 @@ def get_user_datasets(request,user_id):
                     'datasets': {},
                     'name': gcp.project_id
                 }
-                bqs = BigQueryExport(gcp.project_id, None, None)
+                bqs = BigQueryExport(gcp.project_id, None, None, None)
                 bq_tables = bqs.get_tables()
                 for table in bq_tables:
                     if table['dataset'] in bqds:
