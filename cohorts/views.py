@@ -1839,6 +1839,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                            'export_url': reverse('export_cohort_filelist_to_bq', kwargs={'cohort_id': cohort_id}),
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
@@ -2508,57 +2509,6 @@ def export_file_list_to_bq(request, cohort_id=0):
 
         req_user = User.objects.get(id=request.user.id)
 
-        # GET request receives the potential list of projects and datasets this user has available to make a table in
-        if request.method == 'GET':
-            result = {
-                'status': '',
-                'data': {
-                    'projects': []
-                }
-            }
-            gcps = GoogleProject.objects.filter(user=req_user, active=1)
-
-            if not gcps.count():
-                status = 500
-                result = {
-                    'status': 'error',
-                    'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
-                }
-                logger.info("[STATUS] No registered GCPs found - cannot export cohort ID {}.".format(str(cohort_id)))
-            else:
-                for gcp in gcps:
-                    bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
-
-                    this_proj = {
-                        'datasets': {},
-                        'name': gcp.project_id
-                    }
-                    bqs = BigQueryExportCohort(gcp.project_id, None, None)
-                    bq_tables = bqs.get_tables()
-                    for table in bq_tables:
-                        if table['dataset'] in bqds:
-                            if table['dataset'] not in this_proj['datasets']:
-                                this_proj['datasets'][table['dataset']] = []
-                            if table['table_id']:
-                                this_proj['datasets'][table['dataset']].append(table['table_id'])
-                    if len(this_proj['datasets']):
-                        result['data']['projects'].append(this_proj)
-
-                if not len(result['data']['projects']):
-                    status=500
-                    result = {
-                        'status': 'error',
-                        'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
-                    }
-                    logger.info("[STATUS] No registered datasets were found - cannot export cohort ID {}.".format(str(cohort_id)))
-                else:
-                    status=200
-                    result['status']='success'
-
-            return JsonResponse(result, status=status)
-
-        # POST is to actually export the cohort(s) to a chosen project:dataset:table
-
         dataset = None
         table = None
         bq_proj_id = None
@@ -2568,6 +2518,13 @@ def export_file_list_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
 
         cohort = Cohort.objects.get(id=cohort_id)
+
+        try:
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        except ObjectDoesNotExist as e:
+            messages.error(request, "You must be the owner of a cohort in order to export its file list.")
+            return redirect(redirect_url)
+
         dataset = request.POST.get('project-dataset', '').split(":")[1]
         table = None
 
@@ -2598,12 +2555,6 @@ def export_file_list_to_bq(request, cohort_id=0):
                 return redirect(redirect_url)
 
         bq_proj_id = gcp.project_id
-
-        try:
-            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
-        except ObjectDoesNotExist as e:
-            messages.error(request, "You must be the owner of a cohort in order to export its file list.")
-            return redirect(redirect_url)
 
         if not len(dataset):
             dataset = "isb_cgc_cohort_file_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))

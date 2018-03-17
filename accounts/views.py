@@ -30,6 +30,7 @@ from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
+from google_helpers.bigquery.export_support import BigQueryExport
 from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
@@ -923,3 +924,76 @@ def delete_bqdataset(request, user_id, bqdataset_id):
             bqdataset.delete()
         return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
     return redirect('user_gcp_list', user_id=user_id)
+
+
+@login_required
+def get_user_datasets(request,user_id):
+
+    result = None
+    status = '200'
+
+    try:
+        if int(request.user.id) != int(user_id):
+            logger.debug(str(request.user.id))
+            logger.debug(str(user_id))
+            raise Exception("User {} is not the owner of the requested datasets.".format(str(request.user.id)))
+
+        req_user = User.objects.get(id=request.user.id)
+
+        result = {
+            'status': '',
+            'data': {
+                'projects': []
+            }
+        }
+
+        gcps = GoogleProject.objects.filter(user=req_user, active=1)
+
+        if not gcps.count():
+            status = '500'
+            result = {
+                'status': 'error',
+                'msg': "No registered Google Cloud Projects could be found for user ID {}.".format(str(req_user.id))
+            }
+            logger.info("[STATUS] No registered GCPs found for user {}.".format(str(req_user.id)))
+        else:
+            for gcp in gcps:
+                bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
+
+                this_proj = {
+                    'datasets': {},
+                    'name': gcp.project_id
+                }
+                bqs = BigQueryExport(gcp.project_id, None, None)
+                bq_tables = bqs.get_tables()
+                for table in bq_tables:
+                    if table['dataset'] in bqds:
+                        if table['dataset'] not in this_proj['datasets']:
+                            this_proj['datasets'][table['dataset']] = []
+                        if table['table_id']:
+                            this_proj['datasets'][table['dataset']].append(table['table_id'])
+                if len(this_proj['datasets']):
+                    result['data']['projects'].append(this_proj)
+
+            if not len(result['data']['projects']):
+                status = '500'
+                result = {
+                    'status': 'error',
+                    'msg': "No registered datasets were found in user ID {}'s registered Google Cloud Projects.".format(str(req_user.id))
+                }
+                logger.info(
+                    "[STATUS] No registered datasets were found for user {}.".format(str(req_user.id)))
+            else:
+                status = '200'
+                result['status'] = 'success'
+
+
+    except Exception as e:
+        logger.error("[ERROR] While retrieving user {}'s registered BQ datasets and tables:".format(str(user_id)))
+        logger.exception(e)
+        result = {'message': "There was an error while retrieving user {}'s datasets and BQ tables. Please contact the administrator.".format(str(request.user.id)), 'status': 'error'}
+        status='500'
+
+    return JsonResponse(result, status=status)
+
+

@@ -267,35 +267,42 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
     def get_schema(self):
         return deepcopy(self.table_schema)
 
+    # Must always be implemented in a derived class
+    def _build_row(self, item):
+        logger.warn("[WARNING] You should always implement _build_row in your derived export class!")
+        return item
+
+    def _build_rows(self, data):
+        rows = []
+        for item in data:
+            entry_dict = self._build_row(item)
+            rows.append(entry_dict)
+        return rows
+
 
 class BigQueryExportFileList(BigQueryExport):
 
     def __init__(self, project_id, dataset_id, table_id):
         super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, FILE_LIST_EXPORT_SCHEMA)
 
-    def _build_rows(self, files):
+    def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        rows = []
-
-        for data in files:
-            entry_dict = {
-                'cohort_id': data['cohort_id'],
-                'sample_barcode': data['sample'],
-                'case_barcode': data['case'],
-                'project_short_name': data['project_short_name'],
-                'gdc_case_uuid': data['case_gdc_id'],
-                'gdc_file_uuid': data['file_gdc_id'],
-                'platform': data['platform'],
-                'exp_strategy': data['exp_strat'],
-                'data_category': data['datacat'],
-                'data_type': data['datatype'],
-                'data_format': data['dataformat'],
-                'cloud_storage_location': data['cloudstorage_location'],
-                'date_added': date_added
-            }
-            rows.append(entry_dict)
-
-        return rows
+        entry_dict = {
+            'cohort_id': data['cohort_id'],
+            'sample_barcode': data['sample'],
+            'case_barcode': data['case'],
+            'project_short_name': data['project_short_name'],
+            'gdc_case_uuid': data['case_gdc_id'],
+            'gdc_file_uuid': data['file_gdc_id'],
+            'platform': data['platform'],
+            'exp_strategy': data['exp_strat'],
+            'data_category': data['datacat'],
+            'data_type': data['datatype'],
+            'data_format': data['dataformat'],
+            'cloud_storage_location': data['cloudstorage_location'],
+            'date_added': date_added
+        }
+        return entry_dict
 
     # Export a file list into the BQ table referenced by project_id:dataset_id:table_id
     def export_file_list_to_bq(self, files, cohort_id):
@@ -313,23 +320,19 @@ class BigQueryExportCohort(BigQueryExport):
         self._uuids = uuids
         super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, COHORT_EXPORT_SCHEMA)
 
-    def _build_rows(self, samples):
+    def _build_row(self, sample):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        rows = []
+        entry_dict = {
+            'cohort_id': sample['cohort_id'],
+            'sample_barcode': sample['sample_barcode'],
+            'case_barcode': sample['case_barcode'],
+            'project_short_name': sample['project_short_name'],
+            'date_added': date_added
+        }
+        if self._uuids and sample['sample_barcode'] in self._uuids:
+            entry_dict['case_gdc_uuid'] = self._uuids[sample['sample_barcode']]
 
-        for sample in samples:
-            entry_dict = {
-                'cohort_id': sample['cohort_id'],
-                'sample_barcode': sample['sample_barcode'],
-                'case_barcode': sample['case_barcode'],
-                'project_short_name': sample['project_short_name'],
-                'date_added': date_added
-            }
-            if self._uuids and sample['sample_barcode'] in self._uuids:
-                entry_dict['case_gdc_uuid'] = self._uuids[sample['sample_barcode']]
-            rows.append(entry_dict)
-
-        return rows
+        return entry_dict
 
     # Export a cohort into the BQ table referenced by project_id:dataset_id:table_id
     def export_cohort_to_bq(self, samples):
