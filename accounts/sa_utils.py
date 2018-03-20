@@ -269,7 +269,11 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 'message': log_msg
             })
 
-            return {'message': 'You must be a member of a project in order to register its service accounts.'}
+            return {
+                'message': 'You must be a member of a project in order to register its service accounts.',
+                'redirect': True,
+                'user_not_found': True
+            }
 
         # 5. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
         if not verified_sa:

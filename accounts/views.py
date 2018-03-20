@@ -335,11 +335,12 @@ def verify_gcp(request, user_id):
     status = None
     response = {}
     try:
+        gcp = None
         gcp_id = request.GET.get('gcp-id', None)
         is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
         try:
-            GoogleProject.objects.get(project_id=gcp_id, active=1)
+            gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
             # Can't register the same GCP twice - return immediately
             if not is_refresh:
                 return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(gcp_id)}, status='500')
@@ -371,9 +372,13 @@ def verify_gcp(request, user_id):
 
         if not user_found:
             status='403'
-            logger.error("[ERROR] While attempting to register GCP ID {}: ".format(gcp_id))
-            logger.error("User {} was not found on GCP {}.".format(user.email,gcp_id))
-            response['message'] = 'Your user email {} was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,gcp_id,"register" if not is_refresh else "refresh")
+            logger.error("[ERROR] While attempting to {} GCP ID {}: ".format("register" if not is_refresh else "refresh",gcp_id))
+            logger.error("User {} was not found on GCP {}'s IAM policy.".format(user.email,gcp_id))
+            response['message'] = 'Your user email ({}) was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,gcp_id,"register" if not is_refresh else "refresh")
+            if is_refresh:
+                gcp.user.set(gcp.user.all().exclude(id=user.id))
+                gcp.save()
+                response['redirect']=reverse('user_gcp_list',kwargs={'user_id': user.id})
         else:
             response = {'roles': roles,'gcp_id': gcp_id}
             status='200'
@@ -548,6 +553,14 @@ def verify_sa(request, user_id):
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
+                # Users attempting to refresh a project they're not on go back to their GCP list (because this GCP was probably removed from it)
+                if 'redirect' in result.keys():
+                    result['redirect'] = reverse('user_gcp_list', kwargs={'user_id': request.user.id})
+                if 'user_not_found' in result.keys():
+                    gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+                    user=User.objects.get(id=request.user.id)
+                    gcp.user.set(gcp.user.all().exclude(id=user.id))
+                    gcp.save()
             else:
                 if result['all_user_datasets_verified']:
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
