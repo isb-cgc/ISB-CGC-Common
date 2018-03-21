@@ -665,7 +665,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     for cohort in cohort_id_names:
         cohort_listing.append({
             'value': int(cohort['id']),
-            'label': cohort['name'].encode('utf8')
+            'label': escape(cohort['name']).encode('utf8')
         })
     workbook = None
     worksheet = None
@@ -1001,14 +1001,14 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
         if request.POST:
             name = request.POST.get('name')
-            whitelist = re.compile(WHITELIST_RE,re.UNICODE)
-            match = whitelist.search(unicode(name))
-            if match:
-                # XSS risk, log and fail this cohort save
-                match = whitelist.findall(unicode(name))
-                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
-                messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
-                return redirect(redirect_url)
+            # whitelist = re.compile(WHITELIST_RE,re.UNICODE)
+            # match = whitelist.search(unicode(name))
+            # if match:
+            #     # XSS risk, log and fail this cohort save
+            #     match = whitelist.findall(unicode(name))
+            #     logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
+            #     messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+            #     return redirect(redirect_url)
 
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
@@ -1174,7 +1174,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     # Check if this was a new cohort or an edit to an existing one and redirect accordingly
                     if not source:
                         redirect_url = reverse('cohort_list')
-                        messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
+                        messages.info(request, 'Cohort "%s" created successfully.' % escape(cohort.name))
                     else:
                         redirect_url = reverse('cohort_details', args=[cohort.id])
                         messages.info(request, 'Changes applied successfully.')
@@ -1590,7 +1590,7 @@ def set_operation(request):
 
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
-                messages.info(request, 'Cohort "%s" created successfully.' % new_cohort.name)
+                messages.info(request, 'Cohort "%s" created successfully.' % escape(new_cohort.name))
             else:
                 message = 'Operation resulted in empty set of samples. Cohort not created.'
                 messages.warning(request, message)
@@ -1600,7 +1600,7 @@ def set_operation(request):
         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
         logger.exception(e)
         redirect_url = 'cohort_list'
-        message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % name) if name else '')
+        message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % escape(name)) if name else '')
         messages.error(request, message)
     finally:
         if cursor: cursor.close()
@@ -1708,7 +1708,7 @@ def save_cohort_from_plot(request):
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
 
-        result['message'] = "Cohort '" + cohort.name + "' created from the selection set."
+        result['message'] = "Cohort '" + escape(cohort.name) + "' created from the selection set."
     else:
         result['error'] = "No cohort name was supplied - the cohort was not saved."
 
