@@ -2438,12 +2438,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
 @login_required
 @csrf_protect
-def export_file_list(request):
-    return export_file_list_to_bq(request)
-
-
-@login_required
-@csrf_protect
 def export_file_list_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
