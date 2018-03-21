@@ -401,6 +401,9 @@ def verify_gcp(request, user_id):
 def register_gcp(request, user_id):
     is_refresh = False
 
+    redirect_view = 'user_gcp_list'
+    args={'user_id': request.user.id}
+
     try:
         # log the reports using Cloud logging API
         st_logger = StackDriverLogger.build_from_django_settings()
@@ -481,7 +484,11 @@ def register_gcp(request, user_id):
             if not gcp.user.all().count():
                 raise Exception("GCP {} has no users!".format(project_id))
 
-            return redirect('user_gcp_list', user_id=request.user.id)
+            if request.POST.get('detail','') == 'true':
+                redirect_view = 'gcp_detail'
+                args['gcp_id'] = gcp.id
+
+            return redirect(reverse(redirect_view, kwargs=args))
 
         return render(request, 'GenespotRE/register_gcp.html', {})
 
@@ -490,7 +497,7 @@ def register_gcp(request, user_id):
         logger.exception(e)
         messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact the administrator.")
 
-    return redirect('user_gcp_list', user_id=request.user.id)
+    return redirect(reverse(redirect_view, kwargs=args))
 
 
 
