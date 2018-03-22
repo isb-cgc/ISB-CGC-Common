@@ -270,7 +270,7 @@ def fetch_build_data_attr(build):
                             if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                 METADATA_DATA_ATTR[build][attr]['values'][val] = {
                                     'displ_value': val,
-                                    'value': re.sub(r"[^A-Za-z0-9.:_\-]","",re.sub(r"\s+","-", val)),
+                                    'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
                                     'name': val
                                 }
 
