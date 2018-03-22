@@ -23,7 +23,8 @@ import datetime
 import time
 
 import django
-from google_helpers.cohort_bigquery import BigQueryCohortSupport
+from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
+from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -55,7 +56,7 @@ debug = settings.DEBUG # RO global for this file
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
-WHITELIST_RE = settings.WHITELIST_RE
+BLACKLIST_RE = settings.BLACKLIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger('main_logger')
@@ -125,6 +126,50 @@ def get_cohort_uuids(cohort_id):
 
     except Exception as e:
         logger.error("[ERROR] While fetching UUIDs for a cohort:")
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return result
+
+
+def get_cohort_samples_for_export(cohort_id):
+    if not cohort_id:
+        raise Exception("A cohort ID was not provided (value={}).".format("None" if cohort_id is None else str(cohort_id)))
+
+    cohort_progs = Cohort.objects.get(id=cohort_id).get_programs()
+
+    query_base = """
+        SELECT cs.sample_barcode, cs.case_barcode, CONCAT(pp.name,'-',ps.name), cs.cohort_id
+        FROM cohorts_samples cs
+        JOIN {} ms
+        ON ms.sample_barcode = cs.sample_barcode
+        JOIN projects_project ps
+        ON ps.id = cs.project_id
+        JOIN projects_program pp
+        ON pp.id = ps.program_id
+    """
+
+    result = []
+
+    db = None
+    cursor = None
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        for prog in cohort_progs:
+            samples_table = Public_Metadata_Tables.objects.get(program=prog).samples_table
+
+            cursor.execute(query_base.format(samples_table) + " WHERE cs.cohort_id = %s;", (cohort_id,))
+
+            for row in cursor.fetchall():
+                result.append({'sample_barcode': row[0], 'case_barcode': row[1], 'project_short_name': row[2], 'cohort_id': row[3]})
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching export information for a cohort:")
         logger.exception(e)
     finally:
         if cursor: cursor.close()
@@ -620,7 +665,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     for cohort in cohort_id_names:
         cohort_listing.append({
             'value': int(cohort['id']),
-            'label': cohort['name'].encode('utf8')
+            'label': escape(cohort['name']).encode('utf8')
         })
     workbook = None
     worksheet = None
@@ -762,7 +807,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
 
-            cohort_programs = [ {'id': x.id, 'name': x.name, 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
+            cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
             # Do not show shared users for public cohorts
             if not cohort.is_public():
@@ -775,6 +820,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
             template_values['total_cases'] = cohort.case_size()
             template_values['shared_with_users'] = shared_with_users
             template_values['cohort_programs'] = cohort_programs
+            template_values['export_url'] = reverse('export_cohort', kwargs={'cohort_id': cohort_id})
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
@@ -852,74 +898,14 @@ def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_
 
     return redirect(redirect_url)
 
-
-@login_required
-@csrf_protect
-def export_cohort(request):
-    return export_cohort_to_bq(request)
-
-
 @login_required
 @csrf_protect
 def export_cohort_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
     redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
-
     try:
-
         req_user = User.objects.get(id=request.user.id)
-
-        # GET request receives the potential list of projects and datasets this user has available to make a table in
-        if request.method == 'GET':
-            result = {
-                'status': '',
-                'data': {
-                    'projects': []
-                }
-            }
-            gcps = GoogleProject.objects.filter(user=req_user, active=1)
-
-            if not gcps.count():
-                status = 500
-                result = {
-                    'status': 'error',
-                    'msg': "We didn't see any Google Cloud Projects registered for you. Please register at least one project before trying to export your cohort."
-                }
-                logger.info("[STATUS] No registered GCPs found - cannot export cohort ID {}.".format(str(cohort_id)))
-            else:
-                for gcp in gcps:
-                    bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
-
-                    this_proj = {
-                        'datasets': {},
-                        'name': gcp.project_id
-                    }
-                    bqs = BigQueryCohortSupport(gcp.project_id, None, None)
-                    bq_tables = bqs.get_tables()
-                    for table in bq_tables:
-                        if table['dataset'] in bqds:
-                            if table['dataset'] not in this_proj['datasets']:
-                                this_proj['datasets'][table['dataset']] = []
-                            if table['table_id']:
-                                this_proj['datasets'][table['dataset']].append(table['table_id'])
-                    if len(this_proj['datasets']):
-                        result['data']['projects'].append(this_proj)
-
-                if not len(result['data']['projects']):
-                    status=500
-                    result = {
-                        'status': 'error',
-                        'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least one dataset in one of your proejcts before trying to export your cohort."
-                    }
-                    logger.info("[STATUS] No registered datasets were found - cannot export cohort ID {}.".format(str(cohort_id)))
-                else:
-                    status=200
-                    result['status']='success'
-
-            return JsonResponse(result, status=status)
-
-        # POST is to actually export the cohort(s) to a chosen project:dataset:table
 
         dataset = None
         table = None
@@ -930,6 +916,13 @@ def export_cohort_to_bq(request, cohort_id=0):
             return redirect(redirect_url)
 
         cohort = Cohort.objects.get(id=cohort_id)
+
+        try:
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        except ObjectDoesNotExist as e:
+            messages.error(request, "You must be the owner of a cohort in order to export it.")
+            return redirect(redirect_url)
+
         dataset = request.POST.get('project-dataset', '').split(":")[1]
         table = None
 
@@ -961,12 +954,6 @@ def export_cohort_to_bq(request, cohort_id=0):
 
         bq_proj_id = gcp.project_id
 
-        try:
-            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
-        except ObjectDoesNotExist as e:
-            messages.error(request, "You must be the owner of a cohort in order to export it.")
-            return redirect(redirect_url)
-
         if not len(dataset):
             dataset = "isb_cgc_cohort_export_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
 
@@ -974,10 +961,10 @@ def export_cohort_to_bq(request, cohort_id=0):
             table = "isb_cgc_cohort_{}_{}_{}".format(cohort_id,re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),datetime.datetime.now().strftime("%Y%m%d_%H%M"))
 
         # Store cohort to BigQuery
-        samples = Samples.objects.filter(cohort=cohort)
+        samples = get_cohort_samples_for_export(cohort_id)
         uuids = get_cohort_uuids(cohort_id)
-        bcs = BigQueryCohortSupport(bq_proj_id, dataset, table)
-        bq_result = bcs.export_cohort_to_bq(samples, uuids)
+        bcs = BigQueryExportCohort(bq_proj_id, dataset, table, uuids)
+        bq_result = bcs.export_cohort_to_bq(samples)
 
         # If BQ insertion fails, we warn the user
         if 'insertErrors' in bq_result:
@@ -1001,7 +988,6 @@ def export_cohort_to_bq(request, cohort_id=0):
     return redirect(redirect_url)
 
 
-
 @login_required
 @csrf_protect
 def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=False):
@@ -1015,12 +1001,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
         if request.POST:
             name = request.POST.get('name')
-            whitelist = re.compile(WHITELIST_RE,re.UNICODE)
-            match = whitelist.search(unicode(name))
+            blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+            match = blacklist.search(unicode(name))
             if match:
                 # XSS risk, log and fail this cohort save
-                match = whitelist.findall(unicode(name))
-                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
+                match = blacklist.findall(unicode(name))
+                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+str(match))
                 messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
                 return redirect(redirect_url)
 
@@ -1188,7 +1174,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     # Check if this was a new cohort or an edit to an existing one and redirect accordingly
                     if not source:
                         redirect_url = reverse('cohort_list')
-                        messages.info(request, 'Cohort "%s" created successfully.' % cohort.name)
+                        messages.info(request, 'Cohort "%s" created successfully.' % escape(cohort.name))
                     else:
                         redirect_url = reverse('cohort_details', args=[cohort.id])
                         messages.info(request, 'Changes applied successfully.')
@@ -1604,7 +1590,7 @@ def set_operation(request):
 
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
-                messages.info(request, 'Cohort "%s" created successfully.' % new_cohort.name)
+                messages.info(request, 'Cohort "%s" created successfully.' % escape(new_cohort.name))
             else:
                 message = 'Operation resulted in empty set of samples. Cohort not created.'
                 messages.warning(request, message)
@@ -1614,7 +1600,7 @@ def set_operation(request):
         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
         logger.exception(e)
         redirect_url = 'cohort_list'
-        message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % name) if name else '')
+        message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % escape(name)) if name else '')
         messages.error(request, message)
     finally:
         if cursor: cursor.close()
@@ -1675,12 +1661,12 @@ def save_cohort_from_plot(request):
 
     if cohort_name:
 
-        whitelist = re.compile(WHITELIST_RE,re.UNICODE)
-        match = whitelist.search(unicode(cohort_name))
+        blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+        match = blacklist.search(unicode(cohort_name))
         if match:
             # XSS risk, log and fail this cohort save
-            match = whitelist.findall(unicode(cohort_name))
-            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+cohort_name+', characters: '+match.__str__())
+            match = blacklist.findall(unicode(cohort_name))
+            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+cohort_name+', characters: '+str(match))
             result['error'] = "Your cohort's name contains invalid characters; please choose another name."
             return HttpResponse(json.dumps(result), status=200)
 
@@ -1722,7 +1708,7 @@ def save_cohort_from_plot(request):
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
 
-        result['message'] = "Cohort '" + cohort.name + "' created from the selection set."
+        result['message'] = "Cohort '" + escape(cohort.name) + "' created from the selection set."
     else:
         result['error'] = "No cohort name was supplied - the cohort was not saved."
 
@@ -1779,6 +1765,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
             metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
 
         cohort = Cohort.objects.get(id=cohort_id, active=True)
+        cohort.perm = cohort.get_perm(request)
 
         # Check if cohort contains user data samples - return info message if it does.
         # Get user accessed projects
@@ -1796,6 +1783,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                            'export_url': reverse('export_cohort_filelist_to_bq', kwargs={'cohort_id': cohort_id}),
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
@@ -2148,10 +2136,12 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     return render(request, template, template_values)
 
-# Copied over from metadata api
+
+@login_required
 def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
 
-    inc_filters = json.loads(request.GET.get('filters', '{}'))
+    inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
+
     user = request.user
     user_email = user.email
     user_id = user.id
@@ -2164,149 +2154,256 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     offset_clause = ""
 
     filter_counts = None
+    file_list = []
+    progs_without_files = []
+    total_file_count = 0
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        file_list_query = """
-            SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key, md.index_file_name, md.access, md.acl,
-              md.platform, md.data_type, md.data_category, md.experimental_strategy, md.data_format
-            FROM {metadata_table} md
-            JOIN (
-                SELECT sample_barcode
-                FROM cohorts_samples
-                WHERE cohort_id = %s
-            ) cs
-            ON cs.sample_barcode = md.sample_barcode
-            WHERE md.file_uploaded='true' {type_clause} {filter_clause}
-            {limit_clause}
-            {offset_clause}
-            ;
-        """
+        if type == 'dicom':
 
-        if type == 'igv':
-            type_clause = "AND md.data_format='BAM'"
-            inc_filters['data_format'] = ['BAM']
-        elif type == 'camic':
-            type_clause = "AND md.data_format='SVS'"
-            inc_filters['data_format'] = ['SVS']
+            filter_counts = {}
 
-        db = get_sql_connection()
-        cursor = db.cursor(MySQLdb.cursors.DictCursor)
+            limit_clause = ""
+            offset_clause = ""
 
-        file_list = []
-        progs_without_files = []
-        cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+            bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
+            bq_cohort_dataset = settings.COHORT_DATASET_ID
+            bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
+            data_project = settings.BIGQUERY_DATA_PROJECT_NAME
 
-        total_file_count = 0
+            file_list_query_base = """
+                SELECT cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
+                FROM  [{cohort_project}:{cohort_dataset}.{cohort_table}] cs
+                JOIN [{data_project}:{tcga_img_dataset}.{dcf_data_table}] ds
+                ON cs.case_barcode = ds.PatientID
+                JOIN [{data_project}:{tcga_bioclin_dataset}.{tcga_clin_table}] bc
+                ON bc.case_barcode=cs.case_barcode
+                WHERE cs.cohort_id = {cohort}
+                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
+                ORDER BY cs.case_barcode
+            """.format(cohort_dataset=bq_cohort_dataset,
+                cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
+                data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
+                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id)
 
-        for program in cohort_programs:
+            file_list_query = """
+                {file_list}
+                {limit_clause}
+                {offset_clause}
+            """
 
-            program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
+            file_count_query = """
+                SELECT COUNT(*)
+                FROM (
+                  {file_list}
+                )
+            """
 
-            if len(program_data_tables) <= 0:
-                # This program has no metadata_data table for this build, or at all--skip
-                progs_without_files.append(program.name)
-                continue
+            if limit > 0:
+                limit_clause = ' LIMIT %s' % str(limit)
+                # Offset is only valid when there is a limit
+                if offset > 0:
+                    offset_clause = ' OFFSET %s' % str(offset)
 
-            program_data_table = program_data_tables[0].data_table
+            bq_service = authorize_credentials_with_Google()
 
-            params = (cohort_id,)
+            # Query the count
+            query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_count_query.format(file_list=file_list_query_base))
+            job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
+                                                   query_job['jobReference']['jobId'])
 
-            filter_clause = ''
-
-            if len(inc_filters):
-                built_clause = build_where_clause(inc_filters, for_files=True)
-                filter_clause = 'AND ' + built_clause['query_str']
-                params += built_clause['value_tuple']
+            retries = 0
 
             start = time.time()
-            counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+            while not job_is_done and retries < BQ_ATTEMPT_MAX:
+                retries += 1
+                sleep(1)
+                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
+                                                       query_job['jobReference']['jobId'])
             stop = time.time()
 
-            logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
+            logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
 
-            # Group up our program-speciic filter counts
-            # If this is our first program, just assign it to the result
-            if not filter_counts:
-                filter_counts = counts
-            # Otherwise loop through and add in the new values
-            else:
-                for attr in counts:
-                    if attr not in filter_counts:
-                        filter_counts[attr] = {}
-                    for val in counts[attr]:
-                        if val not in filter_counts[attr]:
-                            filter_counts[attr][val] = counts[attr][val]
-                        else:
-                            filter_counts[attr][val] += counts[attr][val]
+            results = get_bq_job_results(bq_service, query_job['jobReference'])
 
-            # If we have room in the file list, or if there's no limit, we'll file-query this program, otherwise there's no point
-            if len(file_list) < limit or limit < 0:
-                if limit > 0:
-                    limit_clause = ' LIMIT %s'
-                    params += (limit,)
-                    # Offset is only valid when there is a limit
-                    if offset > 0:
-                        offset_clause = ' OFFSET %s'
-                        params += (offset,)
+            for entry in results:
+                total_file_count = int(entry['f'][0]['v'])
+
+            # Query the file list only if there was anything to find
+            if total_file_count:
+                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_list_query.format(
+                    file_list=file_list_query_base, limit_clause=limit_clause, offset_clause=offset_clause)
+                )
+                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
+
+                retries = 0
 
                 start = time.time()
-                cursor.execute(file_list_query.format(
-                    metadata_table=program_data_table,
-                    type_clause=type_clause,
-                    limit_clause=limit_clause,
-                    offset_clause=offset_clause,
-                    filter_clause=filter_clause), params)
+                while not job_is_done and retries < BQ_ATTEMPT_MAX:
+                    retries += 1
+                    sleep(1)
+                    job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
+                                                           query_job['jobReference']['jobId'])
                 stop = time.time()
 
-                logger.info("[STATUS] Time to get file-list for program {}: {}s".format(program.name,str((stop-start)/1000)))
+                logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + (stop - start).__str__())
 
-                if cursor.rowcount > 0:
-                    for item in cursor.fetchall():
-                        whitelist_found = False
-                        # If this is a controlled-access entry, check for the user's access to it
-                        if item['access'] == 'controlled' and access:
-                            whitelists = item['acl'].split(',')
-                            for whitelist in whitelists:
-                                if whitelist in access:
-                                    whitelist_found = True
+                results = get_bq_job_results(bq_service, query_job['jobReference'])
 
+                if len(results) > 0:
+                    for entry in results:
                         file_list.append({
-                            'sample': item['sample_barcode'],
-                            'case': item['case_barcode'],
-                            'disease_code': item['disease_code'],
-                            'program': program.name,
-                            'cloudstorage_location': item['file_name_key'] or 'N/A',
-                            'index_name': item['index_file_name'] or 'N/A',
-                            'access': (item['access'] or 'N/A'),
-                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
-                            'filename': item['file_name'] or 'N/A',
-                            'exp_strat': item['experimental_strategy'] or 'N/A',
-                            'platform': item['platform'] or 'N/A',
-                            'datacat': item['data_category'] or 'N/A',
-                            'datatype': (item['data_type'] or 'N/A'),
-                            'dataformat': (item['data_format'] or 'N/A'),
-                            'program': program.name
+                            'case': entry['f'][0]['v'],
+                            'study_uid': entry['f'][1]['v'],
+                            'study_desc': entry['f'][2]['v'] or 'N/A',
+                            'disease_code': entry['f'][3]['v'],
+                            'project_short_name': entry['f'][4]['v'],
+                            'program': "TCGA"
                         })
 
-                # if we didn't get enough file listings from this program to max out the list,
-                # we should move the offset to 0 and change the limit to finish filling the list
-                if cursor.rowcount < (limit-len(file_list)):
-                    limit = (limit-len(file_list))
-                    offset = 0
+        else:
+            file_list_query = """
+                SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
+                  md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
+                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
 
-        files_counted = False
+                FROM {metadata_table} md
+                JOIN (
+                    SELECT sample_barcode
+                    FROM cohorts_samples
+                    WHERE cohort_id = %s
+                ) cs
+                ON cs.sample_barcode = md.sample_barcode
+                WHERE md.file_uploaded='true' {type_clause} {filter_clause}
+                {limit_clause}
+                {offset_clause}
+                ;
+            """
 
-        # Add to the file total
-        for attr in filter_counts:
-            if files_counted:
-                continue
-            for val in filter_counts[attr]:
-                if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                    total_file_count += int(filter_counts[attr][val])
-            files_counted = True
+            if type == 'igv':
+                type_clause = "AND md.data_format='BAM'"
+                inc_filters['data_format'] = ['BAM']
+            elif type == 'camic':
+                type_clause = "AND md.data_format='SVS'"
+                inc_filters['data_format'] = ['SVS']
+
+            db = get_sql_connection()
+            cursor = db.cursor(MySQLdb.cursors.DictCursor)
+
+            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+
+            for program in cohort_programs:
+
+                program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
+
+                if len(program_data_tables) <= 0:
+                    # This program has no metadata_data table for this build, or at all--skip
+                    progs_without_files.append(program.name)
+                    continue
+
+                program_data_table = program_data_tables[0].data_table
+
+                params = (cohort_id,)
+
+                filter_clause = ''
+
+                if len(inc_filters):
+                    built_clause = build_where_clause(inc_filters, for_files=True)
+                    filter_clause = 'AND ' + built_clause['query_str']
+                    params += built_clause['value_tuple']
+
+                start = time.time()
+                counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+                stop = time.time()
+
+                logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
+
+                # Group up our program-speciic filter counts
+                # If this is our first program, just assign it to the result
+                if not filter_counts:
+                    filter_counts = counts
+                # Otherwise loop through and add in the new values
+                else:
+                    for attr in counts:
+                        if attr not in filter_counts:
+                            filter_counts[attr] = {}
+                        for val in counts[attr]:
+                            if val not in filter_counts[attr]:
+                                filter_counts[attr][val] = counts[attr][val]
+                            else:
+                                filter_counts[attr][val] += counts[attr][val]
+
+                # If we have room in the file list, or if there's no limit, we'll file-query this program, otherwise there's no point
+                if len(file_list) < limit or limit < 0:
+                    if limit > 0:
+                        limit_clause = ' LIMIT %s'
+                        params += (limit,)
+                        # Offset is only valid when there is a limit
+                        if offset > 0:
+                            offset_clause = ' OFFSET %s'
+                            params += (offset,)
+
+                    start = time.time()
+                    cursor.execute(file_list_query.format(
+                        metadata_table=program_data_table,
+                        type_clause=type_clause,
+                        limit_clause=limit_clause,
+                        offset_clause=offset_clause,
+                        filter_clause=filter_clause), params)
+                    stop = time.time()
+
+                    logger.info("[STATUS] Time to get file-list for program {}: {}s".format(program.name,str((stop-start)/1000)))
+
+                    if cursor.rowcount > 0:
+                        for item in cursor.fetchall():
+                            whitelist_found = False
+                            # If this is a controlled-access entry, check for the user's access to it
+                            if item['access'] == 'controlled' and access:
+                                whitelists = item['acl'].split(',')
+                                for whitelist in whitelists:
+                                    if whitelist in access:
+                                        whitelist_found = True
+
+                            file_list.append({
+                                'sample': item['sample_barcode'],
+                                'case': item['case_barcode'],
+                                'disease_code': item['disease_code'],
+                                'cloudstorage_location': item['file_name_key'] or 'N/A',
+                                'index_name': item['index_file_name'] or 'N/A',
+                                'access': (item['access'] or 'N/A'),
+                                'user_access': str(item['access'] != 'controlled' or whitelist_found),
+                                'filename': item['file_name'] or 'N/A',
+                                'exp_strat': item['experimental_strategy'] or 'N/A',
+                                'platform': item['platform'] or 'N/A',
+                                'datacat': item['data_category'] or 'N/A',
+                                'datatype': (item['data_type'] or 'N/A'),
+                                'dataformat': (item['data_format'] or 'N/A'),
+                                'program': program.name,
+                                'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
+                                'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
+                                'project_short_name': (item['project_short_name'] or 'N/A'),
+                                'cohort_id': cohort_id
+                            })
+
+                    # if we didn't get enough file listings from this program to max out the list,
+                    # we should move the offset to 0 and change the limit to finish filling the list
+                    if cursor.rowcount < (limit-len(file_list)):
+                        limit = (limit-len(file_list))
+                        offset = 0
+
+            files_counted = False
+
+            # Add to the file total
+            for attr in filter_counts:
+                if files_counted:
+                    continue
+                for val in filter_counts[attr]:
+                    if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                        total_file_count += int(filter_counts[attr][val])
+                files_counted = True
 
         resp = {
             'total_file_count': total_file_count,
@@ -2337,3 +2434,104 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
         if db and db.open: db.close()
 
     return resp
+
+
+@login_required
+@csrf_protect
+def export_file_list_to_bq(request, cohort_id=0):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
+
+    try:
+
+        req_user = User.objects.get(id=request.user.id)
+
+        dataset = None
+        table = None
+        bq_proj_id = None
+
+        if not cohort_id:
+            messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
+            return redirect(redirect_url)
+
+        cohort = Cohort.objects.get(id=cohort_id)
+
+        try:
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        except ObjectDoesNotExist as e:
+            messages.error(request, "You must be the owner of a cohort in order to export its file list.")
+            return redirect(redirect_url)
+
+        dataset = request.POST.get('project-dataset', '').split(":")[1]
+        table = None
+
+        if request.POST.get('table-type', '') == 'new':
+            table = request.POST.get('new-table-name', None)
+            if table:
+                # Check the user-provided table name against the whitelist for Google BQ table names
+                # truncate at max length regardless of what we received
+                table = request.POST.get('new-table-name', '')[0:1024]
+                tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
+                match = tbl_whitelist.search(unicode(table))
+                if match:
+                    messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
+                    return redirect(redirect_url)
+        else:
+            table = request.POST.get('table-name', None)
+
+        proj_id = request.POST.get('project-dataset', '').split(":")[0]
+
+        if not len(proj_id):
+            messages.error(request, "You must provide a Google Cloud Project to which your cohort can be exported.")
+            return redirect(redirect_url)
+        else:
+            try:
+                gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
+            except ObjectDoesNotExist as e:
+                messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+                return redirect(redirect_url)
+
+        bq_proj_id = gcp.project_id
+
+        if not len(dataset):
+            dataset = "isb_cgc_cohort_file_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
+        if not table:
+            table = "isb_cgc_cohort_files_{}_{}_{}".format(
+                cohort_id,
+                re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
+                datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            )
+
+        build = escape(request.POST.get('build', 'HG19'))
+
+        if not re.compile(r'[Hh][Gg](19|38)').search(build):
+            raise Exception("Invalid build supplied")
+
+        # Store file list to BigQuery
+        items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
+
+        bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+        bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
+
+        # If BQ insertion fails, we warn the user
+        if 'insertErrors' in bq_result:
+            err_msg = ''
+            if len(bq_result['insertErrors']) > 1:
+                err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
+            else:
+                err_msg = 'There was an insertion error '
+            messages.error(request,
+                           err_msg + ' when exporting your file list to BigQuery table {}. Creation of the BQ file list has failed.'.format(table))
+        elif 'tableErrors' in bq_result:
+            messages.error(request,bq_result['tableErrors'])
+        else:
+            messages.info(request, "Cohort {}'s file list was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to export your file list - please contact the administrator.")
+
+    return redirect(redirect_url)

@@ -26,15 +26,16 @@ from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.core.urlresolvers import reverse
 from google_helpers.stackdriver import StackDriverLogger
-from google_helpers.bigquery_service import get_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
+from google_helpers.bigquery.export_support import BigQueryExport
 from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
-from sa_utils import verify_service_account
+from sa_utils import verify_service_account, register_service_account
 
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
 import json
@@ -334,11 +335,12 @@ def verify_gcp(request, user_id):
     status = None
     response = {}
     try:
+        gcp = None
         gcp_id = request.GET.get('gcp-id', None)
         is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
         try:
-            GoogleProject.objects.get(project_id=gcp_id, active=1)
+            gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
             # Can't register the same GCP twice - return immediately
             if not is_refresh:
                 return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(gcp_id)}, status='500')
@@ -370,9 +372,13 @@ def verify_gcp(request, user_id):
 
         if not user_found:
             status='403'
-            logger.error("[ERROR] While attempting to register GCP ID {}: ".format(gcp_id))
-            logger.error("User {} was not found on GCP {}.".format(user.email,gcp_id))
-            response['message'] = 'Your user email {} was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,gcp_id,"register" if not is_refresh else "refresh")
+            logger.error("[ERROR] While attempting to {} GCP ID {}: ".format("register" if not is_refresh else "refresh",gcp_id))
+            logger.error("User {} was not found on GCP {}'s IAM policy.".format(user.email,gcp_id))
+            response['message'] = 'Your user email ({}) was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,gcp_id,"register" if not is_refresh else "refresh")
+            if is_refresh:
+                gcp.user.set(gcp.user.all().exclude(id=user.id))
+                gcp.save()
+                response['redirect']=reverse('user_gcp_list',kwargs={'user_id': user.id})
         else:
             response = {'roles': roles,'gcp_id': gcp_id}
             status='200'
@@ -394,6 +400,9 @@ def verify_gcp(request, user_id):
 @login_required
 def register_gcp(request, user_id):
     is_refresh = False
+
+    redirect_view = 'user_gcp_list'
+    args={'user_id': request.user.id}
 
     try:
         # log the reports using Cloud logging API
@@ -475,7 +484,11 @@ def register_gcp(request, user_id):
             if not gcp.user.all().count():
                 raise Exception("GCP {} has no users!".format(project_id))
 
-            return redirect('user_gcp_list', user_id=request.user.id)
+            if request.POST.get('detail','') == 'true':
+                redirect_view = 'gcp_detail'
+                args['gcp_id'] = gcp.id
+
+            return redirect(reverse(redirect_view, kwargs=args))
 
         return render(request, 'GenespotRE/register_gcp.html', {})
 
@@ -484,7 +497,7 @@ def register_gcp(request, user_id):
         logger.exception(e)
         messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact the administrator.")
 
-    return redirect('user_gcp_list', user_id=request.user.id)
+    return redirect(reverse(redirect_view, kwargs=args))
 
 
 
@@ -547,6 +560,14 @@ def verify_sa(request, user_id):
             if 'message' in result.keys():
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
+                # Users attempting to refresh a project they're not on go back to their GCP list (because this GCP was probably removed from it)
+                if 'redirect' in result.keys():
+                    result['redirect'] = reverse('user_gcp_list', kwargs={'user_id': request.user.id})
+                if 'user_not_found' in result.keys():
+                    gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+                    user=User.objects.get(id=request.user.id)
+                    gcp.user.set(gcp.user.all().exclude(id=user.id))
+                    gcp.save()
             else:
                 if result['all_user_datasets_verified']:
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
@@ -604,170 +625,17 @@ def register_sa(request, user_id):
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
-            user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+            err_msgs = register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
 
-            # If we've received a remove-all request, ignore any provided datasets
-            if remove_all:
-                datasets = ['']
+            for msg_tuple in err_msgs:
+                if msg_tuple[1] == 'error':
+                    messages.error(request, msg_tuple[0])
+                elif msg_tuple[1] == 'warning':
+                    messages.warning(request, msg_tuple[0])
+                else:
+                    logger.error("[ERROR] Unimplemented message level: {}, {}".format(msg_tuple[1], msg_tuple[0]))
 
-            if len(datasets) == 1 and datasets[0] == '':
-                datasets = []
-            else:
-                datasets = map(int, datasets)
-
-            # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
-
-            err_msgs = []
-
-            # If the verification was successful, finalize access
-            if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa, user_email)})
-
-                # Datasets verified, add service accounts to appropriate acl groups
-                protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
-
-                # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
-                public_datasets = AuthorizedDataset.objects.filter(public=True)
-                directory_service, http_auth = get_directory_resource()
-
-                service_account_obj, created = ServiceAccount.objects.update_or_create(
-                    google_project=user_gcp, service_account=user_sa,
-                    defaults={
-                        'google_project': user_gcp,
-                        'service_account': user_sa,
-                        'active': True
-                    })
-
-                if not created:
-                    logger.info("[STATUS] User {} re-registered service account {}".format(user_email, user_sa))
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': "[STATUS] User {} re-registered service account {}".format(user_email, user_sa)})
-                for dataset in public_datasets | protected_datasets:
-                    service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.objects.update_or_create(
-                        service_account=service_account_obj, authorized_dataset=dataset,
-                        defaults={
-                            'service_account': service_account_obj,
-                            'authorized_dataset': dataset
-                        }
-                    )
-
-                    try:
-                        body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                             {'message': '{}: Attempting to add service account to Google Group {} for user {}.'.format(
-                                 str(service_account_obj.service_account), dataset.acl_google_group, user_email)})
-                        directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
-
-                        logger.info("Attempting to insert service account {} into Google Group {}. "
-                                    "If an error message doesn't follow, they were successfully added."
-                                    .format(str(service_account_obj.service_account), dataset.acl_google_group))
-
-                    except HttpError as e:
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                            {'message': '{}: There was an error in adding the service account to Google Group {} for user {}. {}'.format(
-                                str(service_account_obj.service_account), dataset.acl_google_group, user_email, e)})
-                        # We're not too concerned with 'Member already exists.' errors
-                        if e.resp.status == 409 and e._get_reason() == 'Member already exists.':
-                            logger.info(e)
-                        # ...but we are with others
-                        else:
-                            logger.warn(e)
-                            err_msgs.append(
-                               "There was an error while user {} was registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
-                                   user_email,
-                                   str(service_account_obj.service_account),
-                                    dataset.name
-                               ))
-                            # If there was an error, the SA isn't on the Google Group, so we should remove it's
-                            # ServiceAccountAuthorizedDataset entry
-                            service_account_auth_dataset.delete()
-
-
-                # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
-                if is_adjust:
-                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj).filter(authorized_dataset__public=0)
-                    for saad in saads:
-                        if saad.authorized_dataset not in protected_datasets or remove_all:
-                            try:
-                                directory_service, http_auth = get_directory_resource()
-                                directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                                                   memberKey=saad.service_account.service_account).execute(http=http_auth)
-                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                                    'message': '{0}: Attempting to remove service account from Google Group {1}.'.format(
-                                        saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                                logger.info("Attempting to remove service account {} from group {}. "
-                                            "If an error message doesn't follow, they were successfully deleted"
-                                            .format(saad.service_account.service_account,
-                                                    saad.authorized_dataset.acl_google_group))
-                            except HttpError as e:
-                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                                    'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
-                                        str(saad.service_account.service_account),
-                                        saad.authorized_dataset.acl_google_group)})
-                                # We're not concerned with 'user doesn't exist' errors
-                                if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
-                                    logger.info(e)
-                                else:
-                                    logger.error("[ERROR] When trying to remove SA {} from a Google Group:".format(str(saad.service_account.service_account)))
-                                    logger.exception(e)
-
-                            saad.delete()
-
-                if len(err_msgs):
-                    messages.error(
-                        request,"The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format("\n".join(err_msgs))
-                    )
-                return redirect('user_gcp_list', user_id=user_id)
-
-            # if verification was unsuccessful, report errors, and revoke current access if there is any
-            else:
-                # Some sort of error when attempting to verify
-                if 'message' in result.keys():
-                    messages.error(request, result['message'])
-                    logger.warn(result['message'])
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: {1}'.format(user_sa, result['message'])})
-                # Verification passed before but failed now
-                elif not result['all_user_datasets_verified']:
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
-                    logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
-                    messages.error(request, 'We were not able to verify all users with access to this Service Account for all of the datasets requested.')
-
-                # Check for current access and revoke
-                try:
-                    service_account_obj = ServiceAccount.objects.get(service_account=user_sa, active=1)
-                    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj)
-
-                    # We can't be too sure, so revoke it all
-                    for saad in saads:
-                        if not saad.authorized_dataset.public:
-                            try:
-                                directory_service, http_auth = get_directory_resource()
-                                directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                                                   memberKey=saad.service_account.service_account).execute(http=http_auth)
-                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                                    'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
-                                        saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                                logger.info("Attempting to delete user {} from group {}. "
-                                            "If an error message doesn't follow, they were successfully deleted"
-                                            .format(saad.service_account.service_account,
-                                                    saad.authorized_dataset.acl_google_group))
-                            except HttpError as e:
-                                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                                    'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
-                                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                                if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
-                                    logger.info(e)
-                                else:
-                                    logger.error("[ERROR] When trying to remove a service account from a Google Group:")
-                                    logger.exception(e)
-
-                            saad.delete()
-
-                except ObjectDoesNotExist:
-                    logger.info("[STATUS] Service Account {} could not be verified or failed to verify, but is not registered. No datasets to revoke.".format(user_sa))
-
-                return redirect('user_gcp_list', user_id=user_id)
+            return redirect('user_gcp_list', user_id=user_id)
         else:
             messages.error(request, 'There was no Google Cloud Project provided.', 'warning')
             return redirect('user_gcp_list', user_id=user_id)
@@ -923,3 +791,76 @@ def delete_bqdataset(request, user_id, bqdataset_id):
             bqdataset.delete()
         return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
     return redirect('user_gcp_list', user_id=user_id)
+
+
+@login_required
+def get_user_datasets(request,user_id):
+
+    result = None
+    status = '200'
+
+    try:
+        if int(request.user.id) != int(user_id):
+            logger.debug(str(request.user.id))
+            logger.debug(str(user_id))
+            raise Exception("User {} is not the owner of the requested datasets.".format(str(request.user.id)))
+
+        req_user = User.objects.get(id=request.user.id)
+
+        result = {
+            'status': '',
+            'data': {
+                'projects': []
+            }
+        }
+
+        gcps = GoogleProject.objects.filter(user=req_user, active=1)
+
+        if not gcps.count():
+            status = '500'
+            result = {
+                'status': 'error',
+                'msg': "No registered Google Cloud Projects could be found for user ID {}.".format(str(req_user.id))
+            }
+            logger.info("[STATUS] No registered GCPs found for user {}.".format(str(req_user.id)))
+        else:
+            for gcp in gcps:
+                bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
+
+                this_proj = {
+                    'datasets': {},
+                    'name': gcp.project_id
+                }
+                bqs = BigQueryExport(gcp.project_id, None, None, None)
+                bq_tables = bqs.get_tables()
+                for table in bq_tables:
+                    if table['dataset'] in bqds:
+                        if table['dataset'] not in this_proj['datasets']:
+                            this_proj['datasets'][table['dataset']] = []
+                        if table['table_id']:
+                            this_proj['datasets'][table['dataset']].append(table['table_id'])
+                if len(this_proj['datasets']):
+                    result['data']['projects'].append(this_proj)
+
+            if not len(result['data']['projects']):
+                status = '500'
+                result = {
+                    'status': 'error',
+                    'msg': "No registered datasets were found in user ID {}'s registered Google Cloud Projects.".format(str(req_user.id))
+                }
+                logger.info(
+                    "[STATUS] No registered datasets were found for user {}.".format(str(req_user.id)))
+            else:
+                status = '200'
+                result['status'] = 'success'
+
+
+    except Exception as e:
+        logger.error("[ERROR] While retrieving user {}'s registered BQ datasets and tables:".format(str(user_id)))
+        logger.exception(e)
+        result = {'message': "There was an error while retrieving user {}'s datasets and BQ tables. Please contact the administrator.".format(str(request.user.id)), 'status': 'error'}
+        status='500'
+
+    return JsonResponse(result, status=status)
+
+
