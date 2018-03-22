@@ -56,7 +56,7 @@ debug = settings.DEBUG # RO global for this file
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
-WHITELIST_RE = settings.WHITELIST_RE
+BLACKLIST_RE = settings.BLACKLIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger('main_logger')
@@ -807,7 +807,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
 
-            cohort_programs = [ {'id': x.id, 'name': x.name, 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
+            cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
             # Do not show shared users for public cohorts
             if not cohort.is_public():
@@ -1001,14 +1001,14 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
         if request.POST:
             name = request.POST.get('name')
-            # whitelist = re.compile(WHITELIST_RE,re.UNICODE)
-            # match = whitelist.search(unicode(name))
-            # if match:
-            #     # XSS risk, log and fail this cohort save
-            #     match = whitelist.findall(unicode(name))
-            #     logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+match.__str__())
-            #     messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
-            #     return redirect(redirect_url)
+            blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+            match = blacklist.search(unicode(name))
+            if match:
+                # XSS risk, log and fail this cohort save
+                match = blacklist.findall(unicode(name))
+                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+str(match))
+                messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+                return redirect(redirect_url)
 
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
@@ -1661,12 +1661,12 @@ def save_cohort_from_plot(request):
 
     if cohort_name:
 
-        whitelist = re.compile(WHITELIST_RE,re.UNICODE)
-        match = whitelist.search(unicode(cohort_name))
+        blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+        match = blacklist.search(unicode(cohort_name))
         if match:
             # XSS risk, log and fail this cohort save
-            match = whitelist.findall(unicode(cohort_name))
-            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+cohort_name+', characters: '+match.__str__())
+            match = blacklist.findall(unicode(cohort_name))
+            logger.error('[ERROR] While saving a cohort, saw a malformed name: '+cohort_name+', characters: '+str(match))
             result['error'] = "Your cohort's name contains invalid characters; please choose another name."
             return HttpResponse(json.dumps(result), status=200)
 

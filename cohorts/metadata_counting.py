@@ -36,7 +36,6 @@ debug = settings.DEBUG # RO global for this file
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
-WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger('main_logger')
