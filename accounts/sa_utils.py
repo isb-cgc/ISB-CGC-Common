@@ -19,12 +19,15 @@ from googleapiclient.errors import HttpError
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.stackdriver import StackDriverLogger
 import re
+import logging
 from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist, ManagedServiceAccounts
 from models import *
 from django.conf import settings
 import traceback
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.iam_service import get_iam_resource
+
+logger = logging.getLogger('main_logger')
 
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
