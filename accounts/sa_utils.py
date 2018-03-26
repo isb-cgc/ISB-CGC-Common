@@ -306,7 +306,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             # IF USER IS REGISTERED
             if member['registered_user']:
 
-                user = User.objects.get(email=member['email'])
+                user = User.objects.get(email=email)
 
                 nih_user = None
 
@@ -316,8 +316,8 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 except ObjectDoesNotExist:
                     nih_user = None
                 except MultipleObjectsReturned:
-                    st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True)))})
-                    raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True))))
+                    st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True)))})
+                    raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True))))
 
                 member['nih_registered'] = bool(nih_user)
 
@@ -360,7 +360,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             else:
                 member['nih_registered'] = False
                 if len(controlled_datasets):
-                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(controlled_dataset_names))})
+                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, email, ','.join(controlled_dataset_names))})
                     all_user_datasets_verified = False
                     for dataset in controlled_datasets:
                         member['datasets'].append({'name': dataset.name, 'valid': False})
