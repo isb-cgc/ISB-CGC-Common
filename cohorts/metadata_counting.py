@@ -708,7 +708,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
-        logger.debug('[BENCHMARKING] Filters requested: '+str(inc_filters))
 
         # query sample and case counts
         count_query = 'SELECT COUNT(DISTINCT %s) FROM %s'
