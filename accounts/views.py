@@ -63,11 +63,12 @@ def unregister_sa(user_id, sa_id):
             directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
                                                memberKey=saad.service_account.service_account).execute(http=http_auth)
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '[STATUS] Attempting to delete SA {0} from Google Group {1}.'.format(
+                'message': '[STATUS] Attempting to delete SA {} from Google Group {}.'.format(
                     saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
             logger.info("[STATUS] Attempting to delete SA {} from Google Group {}. " +
-                        "If an error message doesn't follow, they were successfully deleted"
-                        .format(saad.service_account.service_account, saad.authorized_dataset.acl_google_group))
+                        "If an error message doesn't follow, they were successfully deleted".format(
+                            saad.service_account.service_account, saad.authorized_dataset.acl_google_group)
+                        )
         except HttpError as e:
             # We're not concerned with 'user doesn't exist' errors
             if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
@@ -359,16 +360,17 @@ def verify_gcp(request, user_id):
         for val in bindings:
             role = val['role']
             members = val['members']
-            roles[role] = []
 
             for member in members:
                 if member.startswith('user:'):
                     email = member.split(':')[1]
+                    if email not in roles:
+                        roles[email] = {}
+                        roles[email]['roles'] = []
+                        roles[email]['registered_user'] = bool(User.objects.filter(email=email).first())
                     if user.email.lower() == email.lower():
                         user_found = True
-                    registered_user = bool(User.objects.filter(email=email).first())
-                    roles[role].append({'email': email,
-                                       'registered_user': registered_user})
+                    roles[email]['roles'].append(role)
 
         if not user_found:
             status='403'
