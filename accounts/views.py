@@ -65,8 +65,7 @@ def unregister_sa(user_id, sa_id):
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '[STATUS] Attempting to delete SA {} from Google Group {}.'.format(
                     saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}. " +
-                        "If an error message doesn't follow, they were successfully deleted".format(
+            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}. If an error message doesn't follow, they were successfully deleted".format(
                             saad.service_account.service_account, saad.authorized_dataset.acl_google_group)
                         )
         except HttpError as e:
