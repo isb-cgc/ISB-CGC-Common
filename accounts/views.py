@@ -55,7 +55,9 @@ def unregister_sa(user_id, sa_id):
     sa = ServiceAccount.objects.get(service_account=sa_id, active=1)
     saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
 
-    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME,"[STATUS] User {} is unregistering SA {}".format(User.objects.get(id=user_id).email,sa_id))
+    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME,"[STATUS] User {} is unregistering SA {}".format(
+        User.objects.get(id=user_id).email,sa_id)
+    )
 
     for saad in saads:
         try:
@@ -65,7 +67,7 @@ def unregister_sa(user_id, sa_id):
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '[STATUS] Attempting to delete SA {} from Google Group {}.'.format(
                     saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}. If an error message doesn't follow, they were successfully deleted".format(
+            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}.".format(
                             saad.service_account.service_account, saad.authorized_dataset.acl_google_group)
                         )
         except HttpError as e:
