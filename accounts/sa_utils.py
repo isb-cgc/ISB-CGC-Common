@@ -19,12 +19,15 @@ from googleapiclient.errors import HttpError
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.stackdriver import StackDriverLogger
 import re
-from .utils import ServiceAccountBlacklist, is_email_in_iam_roles, GoogleOrgWhitelist, ManagedServiceAccounts
+import logging
+from .utils import ServiceAccountBlacklist, GoogleOrgWhitelist, ManagedServiceAccounts
 from models import *
 from django.conf import settings
 import traceback
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.iam_service import get_iam_resource
+
+logger = logging.getLogger('main_logger')
 
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
@@ -184,12 +187,15 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         for val in bindings:
             role = val['role']
             members = val['members']
-            roles[role] = []
             for member in members:
                 if member.startswith('user:'):
                     email = member.split(':')[1]
-                    registered_user = bool(User.objects.filter(email=email).first())
-                    roles[role].append({'email': email,'registered_user': registered_user})
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
                 elif member.startswith('serviceAccount'):
                     member_sa = member.split(':')[1].lower()
                     if member_sa == service_account.lower():
@@ -263,7 +269,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             return {'message': msg}
 
         # 4. Verify that the current user is on the GCP project
-        if not is_email_in_iam_roles(roles, user_email):
+        if not user_email in roles:
             log_msg = '[STATUS] While verifying SA {0}: User email {1} is not in the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
             logger.info(log_msg)
             st_logger.write_struct_log_entry(log_name, {
@@ -293,72 +299,71 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         # 6. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
         all_user_datasets_verified = True
 
-        for role, members in roles.items():
-            for member in members:
+        for email in roles:
+            member = roles[email]
+            member['datasets'] = []
 
-                member['datasets'] = []
+            # IF USER IS REGISTERED
+            if member['registered_user']:
 
-                # IF USER IS REGISTERED
-                if member['registered_user']:
-                    # TODO: This should probably be a .get() with a try/except because multiple-users-same-email is a problem
-                    user = User.objects.filter(email=member['email']).first()
+                user = User.objects.get(email=email)
 
+                nih_user = None
+
+                # FIND NIH_USER FOR USER
+                try:
+                    nih_user = NIH_User.objects.get(user_id=user.id, linked=True)
+                except ObjectDoesNotExist:
                     nih_user = None
+                except MultipleObjectsReturned:
+                    st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True)))})
+                    raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True))))
 
-                    # FIND NIH_USER FOR USER
-                    try:
-                        nih_user = NIH_User.objects.get(user_id=user.id, linked=True)
-                    except ObjectDoesNotExist:
-                        nih_user = None
-                    except MultipleObjectsReturned:
-                        st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True)))})
-                        raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(member['email'], ",".join(nih_user.values_list('NIH_username',flat=True))))
+                member['nih_registered'] = bool(nih_user)
 
-                    member['nih_registered'] = bool(nih_user)
+                # IF USER HAS LINKED ERA COMMONS ID
+                if nih_user:
 
-                    # IF USER HAS LINKED ERA COMMONS ID
-                    if nih_user:
+                    # FIND ALL DATASETS USER HAS ACCESS TO
+                    user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True))
 
-                        # FIND ALL DATASETS USER HAS ACCESS TO
-                        user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True))
+                    # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
+                    for dataset in controlled_datasets:
+                        member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
 
-                        # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
-                        for dataset in controlled_datasets:
-                            member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
+                    valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
+                    invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
 
-                        valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
-                        invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
+                    logger.info("[STATUS] For user {}".format(nih_user.NIH_username))
+                    logger.info("[STATUS] valid datasets: {}".format(str(valid_datasets)))
+                    logger.info("[STATUS] invalid datasets: {}".format(str(invalid_datasets)))
 
-                        logger.info("[STATUS] For user {}".format(nih_user.NIH_username))
-                        logger.info("[STATUS] valid datasets: {}".format(str(valid_datasets)))
-                        logger.info("[STATUS] invalid datasets: {}".format(str(invalid_datasets)))
-
-                        if not len(invalid_datasets):
-                            if len(valid_datasets):
-                                if controlled_datasets:
-                                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
-                        else:
-                            all_user_datasets_verified = False
-                            if len(controlled_datasets):
-                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(invalid_datasets))})
-
-                    # IF USER HAS NO ERA COMMONS ID
+                    if not len(invalid_datasets):
+                        if len(valid_datasets):
+                            if controlled_datasets:
+                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
                     else:
-                        # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
-                        if len(controlled_datasets):
-                            all_user_datasets_verified = False
-                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
-                            for dataset in controlled_datasets:
-                                member['datasets'].append({'name': dataset.name, 'valid': False})
-
-                # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
-                else:
-                    member['nih_registered'] = False
-                    if len(controlled_datasets):
-                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, member['email'], ','.join(controlled_dataset_names))})
                         all_user_datasets_verified = False
+                        if len(controlled_datasets):
+                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(invalid_datasets))})
+
+                # IF USER HAS NO ERA COMMONS ID
+                else:
+                    # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
+                    if len(controlled_datasets):
+                        all_user_datasets_verified = False
+                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
                         for dataset in controlled_datasets:
                             member['datasets'].append({'name': dataset.name, 'valid': False})
+
+            # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
+            else:
+                member['nih_registered'] = False
+                if len(controlled_datasets):
+                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, email, ','.join(controlled_dataset_names))})
+                    all_user_datasets_verified = False
+                    for dataset in controlled_datasets:
+                        member['datasets'].append({'name': dataset.name, 'valid': False})
 
     except HttpError as e:
         logger.error("[STATUS] While verifying service account {}: ".format(service_account))

@@ -51,6 +51,10 @@ FILE_LIST_EXPORT_SCHEMA = {
             'type': 'TIMESTAMP',
             'mode': 'REQUIRED'
         }, {
+            'name': 'build',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
             'name': 'gdc_file_uuid',
             'type': 'STRING'
         }, {
@@ -290,6 +294,7 @@ class BigQueryExportFileList(BigQueryExport):
         entry_dict = {
             'cohort_id': data['cohort_id'],
             'sample_barcode': data['sample'],
+            'build': data['build'],
             'case_barcode': data['case'],
             'project_short_name': data['project_short_name'],
             'gdc_case_uuid': data['case_gdc_id'],
