@@ -2357,7 +2357,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                                 'sample': item['sample_barcode'],
                                 'case': item['case_barcode'],
                                 'disease_code': item['disease_code'],
-                                'build': build,
+                                'build': build.lower(),
                                 'cloudstorage_location': item['file_name_key'] or 'N/A',
                                 'index_name': item['index_file_name'] or 'N/A',
                                 'access': (item['access'] or 'N/A'),
