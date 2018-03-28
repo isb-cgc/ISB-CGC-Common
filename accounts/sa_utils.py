@@ -438,23 +438,23 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
             try:
                 body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                                 {
-                                                     'message': '{}: Attempting to add service account to Google Group {} for user {}.'.format(
-                                                         str(service_account_obj.service_account), dataset.acl_google_group,
-                                                         user_email)})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,{
+                     'message': '{}: Attempting to add service account to Google Group {} for user {}.'.format(
+                         str(service_account_obj.service_account), dataset.acl_google_group,
+                         user_email)
+                })
                 directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
 
-                logger.info("Attempting to insert service account {} into Google Group {}. "
-                            "If an error message doesn't follow, they were successfully added."
-                            .format(str(service_account_obj.service_account), dataset.acl_google_group))
+                logger.info("Attempting to insert service account {} into Google Group {}. ".format(
+                    str(service_account_obj.service_account), dataset.acl_google_group)
+                )
 
             except HttpError as e:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                                 {
-                                                     'message': '{}: There was an error in adding the service account to Google Group {} for user {}. {}'.format(
-                                                         str(service_account_obj.service_account), dataset.acl_google_group,
-                                                         user_email, e)})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                     'message': '{}: There was an error in adding the service account to Google Group {} for user {}. {}'.format(
+                         str(service_account_obj.service_account), dataset.acl_google_group,
+                         user_email, e)
+                })
                 # We're not too concerned with 'Member already exists.' errors
                 if e.resp.status == 409 and e._get_reason() == 'Member already exists.':
                     logger.info(e)
@@ -485,10 +485,9 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                             'message': '{0}: Attempting to remove service account from Google Group {1}.'.format(
                                 saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                        logger.info("Attempting to remove service account {} from group {}. "
-                                    "If an error message doesn't follow, they were successfully deleted"
-                                    .format(saad.service_account.service_account,
-                                            saad.authorized_dataset.acl_google_group))
+                        logger.info("Attempting to remove service account {} from group {}. ".format(
+                            saad.service_account.service_account,saad.authorized_dataset.acl_google_group)
+                        )
                     except HttpError as e:
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                             'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
@@ -541,10 +540,9 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                             'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
                                 saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                        logger.info("Attempting to delete user {} from group {}. "
-                                    "If an error message doesn't follow, they were successfully deleted"
-                                    .format(saad.service_account.service_account,
-                                            saad.authorized_dataset.acl_google_group))
+                        logger.info("Attempting to delete user {} from group {}. ".format(
+                            saad.service_account.service_account,saad.authorized_dataset.acl_google_group)
+                        )
                     except HttpError as e:
                         st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                             'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
