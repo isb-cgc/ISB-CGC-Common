@@ -35,9 +35,10 @@ from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
-from sa_utils import verify_service_account, register_service_account
+from sa_utils import verify_service_account, register_service_account, \
+                     unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
+                     do_nih_unlink, deactivate_nih_add_to_open
 
-from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
 import json
 
 logger = logging.getLogger('main_logger')
@@ -48,90 +49,13 @@ SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
-
-def unregister_sa(user_id, sa_id):
-    st_logger = StackDriverLogger.build_from_django_settings()
-
-    sa = ServiceAccount.objects.get(service_account=sa_id, active=1)
-    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
-
-    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME,"[STATUS] User {} is unregistering SA {}".format(User.objects.get(id=user_id).email,sa_id))
-
-    for saad in saads:
-        try:
-            directory_service, http_auth = get_directory_resource()
-            directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                               memberKey=saad.service_account.service_account).execute(http=http_auth)
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '[STATUS] Attempting to delete SA {} from Google Group {}.'.format(
-                    saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}. " +
-                        "If an error message doesn't follow, they were successfully deleted".format(
-                            saad.service_account.service_account, saad.authorized_dataset.acl_google_group)
-                        )
-        except HttpError as e:
-            # We're not concerned with 'user doesn't exist' errors
-            if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[STATUS] While removing SA {0} from Google Group {1}.'.format(
-                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[STATUS] {}.'.format(str(e))})
-                logger.info('[WARNING] While removing SA {0} from Google Group {1}: {2}'.format(
-                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
-            # ...but we are concerned with anything else
-            else:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[ERROR] There was an error in removing SA {0} from Google Group {1}.'.format(
-                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[ERROR] {}}.'.format(str(e))})
-                logger.error('[ERROR] There was an error in removing SA {0} from Google Group {1}: {2}'.format(
-                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
-                logger.exception(e)
-
-    for saad in saads:
-        saad.delete()
-    sa.active = False
-    sa.save()
-
-
 @login_required
 def extended_logout_view(request):
     response = None
     try:
         # deactivate NIH_username entry if exists
         user = User.objects.get(id=request.user.id)
-        try:
-            nih_user = NIH_User.objects.get(user=user, linked=True)
-            nih_user.active = False
-            nih_user.save()
-            logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
-
-        except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
-            if type(e) is MultipleObjectsReturned:
-                logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), request.user.id))
-                nih_users = NIH_User.objects.filter(user=user)
-                for nih_user in nih_users:
-                    nih_user.active = False
-                    nih_user.save()
-                    nih_user.delete_all_auth_datasets()
-            else:
-                logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user.email))
-
-        directory_service, http_auth = get_directory_resource()
-        user_email = user.email
-
-        # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
-        try:
-            body = {"email": user_email, "role": "MEMBER"}
-            directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-            logger.info("[STATUS] Attempting to insert user {} into group {}. "
-                        "If an error message doesn't follow, they were successfully added."
-                        .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
-        except HttpError as e:
-            logger.info(e)
-
+        deactivate_nih_add_to_open(request.user.id, user.email)
         response = account_views.logout(request)
 
     except ObjectDoesNotExist as e:
@@ -146,133 +70,15 @@ def extended_logout_view(request):
         return redirect(reverse('user_detail', args=[request.user.id]))
     return response
 
-
-class ACLDeleteAction(object):
-    def __init__(self, acl_group_name, user_email):
-        self.acl_group_name = acl_group_name
-        self.user_email = user_email
-
-    def __str__(self):
-        return "ACLDeleteAction(acl_group_name: {}, user_email: {})".format(self.acl_group_name,self.user_email)
-
-    def __repr_(self):
-        return self.__str__()
-
-
-class UnlinkAccountsResult(object):
-    def __init__(self, unlinked_nih_users, acl_delete_actions):
-        self.unlinked_nih_users = unlinked_nih_users
-        self.acl_delete_actions = acl_delete_actions
-
-    def __str__(self):
-        return "UnlinkAccountsResult(unlinked_nih_users: {}, acl_delete_actions: {})".format(str(self.unlinked_nih_users), str(self.acl_delete_actions))
-
-    def __repr__(self):
-        return self.__str__()
-
-
-def unlink_accounts_and_get_acl_tasks(user_id):
-    """
-    This function modifies the 'NIH_User' objects!
-
-    1. Finds a NIH_User object with the given user_id that has the "linked" field set to True. The "linked"
-       field is then set to "False".
-       Exception case: If there are multiple NIH_User objects with the given user_id that also have "linked"
-       set to True
-
-    2. Creates a list of associated email addresses of NIH_user objects that have to be removed from
-       the controlled data ACL group.
-
-
-    Args:
-        user_id: ID of the User object associated with the NIH_User object.
-        acl_group_name: Name of the access control Google Group.
-
-    Returns: An UnlinkAccountsResult object.
-
-    Throws: ObjectDoesNotExist if no NIH_User object is found with the given user_id
-    """
-
-    unlinked_nih_user_list = []
-    ACLDeleteAction_list = []
-
-    user_email = User.objects.get(id=user_id).email
-
-    try:
-        nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
-        nih_account_to_unlink.linked = False
-        nih_account_to_unlink.save()
-
-        removed_datasets = nih_account_to_unlink.delete_all_auth_datasets()
-
-        logger.info("[STATUS] Removed the following datasets from {}: {}".format(
-            user_email, "; ".join(removed_datasets.values_list('whitelist_id',flat=True)))
-        )
-
-        unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
-
-    except MultipleObjectsReturned as e:
-        logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
-        nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
-
-        for nih_account_to_unlink in nih_user_query_set:
-            nih_account_to_unlink.linked = False
-            nih_account_to_unlink.save()
-            nih_account_to_unlink.delete_all_auth_datasets()
-            unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
-
-            logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
-
-    # Revoke them from all datasets, regardless of actual permission, to be safe
-    das = DatasetAccessSupportFactory.from_webapp_django_settings()
-    datasets_to_revoke = das.get_all_datasets_and_google_groups()
-
-    for dataset in datasets_to_revoke:
-        ACLDeleteAction_list.append(ACLDeleteAction(dataset.google_group_name, user_email))
-
-    logger.info("ACLDeleteAction_list for {}: {}".format(str(ACLDeleteAction_list), user_email))
-
-    return UnlinkAccountsResult(unlinked_nih_user_list, ACLDeleteAction_list)
-
-
 @login_required
 def unlink_accounts(request):
     user_id = request.user.id
 
     try:
-        try:
-            unlink_accounts_result = unlink_accounts_and_get_acl_tasks(user_id)
-        except ObjectDoesNotExist as e:
-            user_email = User.objects.get(id=user_id).email
-            logger.error("[ERROR] NIH_User not found for user_id {}. Error: {}".format(user_id, e))
-            messages.error(request, "No linked NIH users were found for user {}.".format(user_email))
+        message = do_nih_unlink(user_id)
+        if message:
+            messages.error(request, message)
             return redirect(reverse('user_detail', args=[user_id]))
-        except Exception as e:
-            logger.error("[ERROR] When trying to get the unlink actions:")
-            logger.exception(e)
-            messages.error(request, "Encountered an error when trying to unlink this account--please contact the administrator.")
-            return redirect(reverse('user_detail', args=[user_id]))
-
-        directory_service, http_auth = get_directory_resource()
-        for action in unlink_accounts_result.acl_delete_actions:
-            user_email = action.user_email
-            google_group_acl = action.acl_group_name
-
-            # If the user isn't actually in the ACL, we'll get an HttpError
-            try:
-                logger.info("[STATUS] Removing user {} from {}...".format(user_email, google_group_acl))
-                directory_service.members().delete(groupKey=google_group_acl,
-                                                   memberKey=user_email).execute(http=http_auth)
-
-            except HttpError as e:
-                logger.info("[STATUS] {} could not be deleted from {}, probably because they were not a member".format(user_email, google_group_acl))
-                logger.exception(e)
-            except Exception as e:
-                logger.error("[ERROR] When trying to remove from the Google Group:")
-                logger.exception(e)
-                messages.error(request,
-                               "Encountered an error when trying to unlink this account--please contact the administrator.")
-                return redirect(reverse('user_detail', args=[user_id]))
 
     except Exception as e:
         logger.error("[ERROR] While unlinking accounts:")
@@ -519,14 +325,8 @@ def user_gcp_delete(request, user_id, gcp_id):
             user = User.objects.get(id=user_id)
             logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
             gcp = GoogleProject.objects.get(id=gcp_id, active=1)
-
-            # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
-            service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id, active=1)
-            for service_account in service_accounts:
-                unregister_sa(user_id,service_account.service_account)
-
+            unregister_all_gcp_sa(user_id, gcp_id)
             gcp.user.clear()
-
             gcp.active=False
             gcp.save()
     except Exception as e:
@@ -604,10 +404,10 @@ def register_sa(request, user_id):
 
             if request.GET.get('sa_id'):
                 template = 'GenespotRE/adjust_sa.html'
-                service_account = ServiceAccount.objects.get(id=request.GET.get('sa_id'), active=1)
-                context['gcp_id'] = service_account.google_project.project_id
-                context['sa_datasets'] = service_account.get_auth_datasets()
-                context['sa_id'] = service_account.service_account
+                sa_dict = service_account_dict(request.GET.get('sa_id'))
+                context['gcp_id'] = sa_dict['gcp_id']
+                context['sa_datasets'] = sa_dict['sa_datasets']
+                context['sa_id'] = sa_dict['sa_id']
             else:
                 gcp_id = escape(request.GET.get('gcp_id'))
                 crm_service = get_special_crm_resource()
@@ -653,7 +453,7 @@ def register_sa(request, user_id):
 def delete_sa(request, user_id, sa_id):
     try:
         if request.POST:
-            unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
+            unregister_sa_with_id(user_id, sa_id)
     except Exception as e:
         logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_id))
         logger.exception(e)
@@ -767,6 +567,7 @@ def register_bqdataset(request, user_id, gcp_id):
                     bqdataset_name, gcp.project_id))
 
         except HttpError as e:
+            st_logger = StackDriverLogger.build_from_django_settings()
             messages.error(request, 'There was an unknown error processing this request.')
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '{0}: There was an error accessing the Google Cloud Project dataset list.'.format(
@@ -864,5 +665,3 @@ def get_user_datasets(request,user_id):
         status='500'
 
     return JsonResponse(result, status=status)
-
-
