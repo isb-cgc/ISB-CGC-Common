@@ -1738,14 +1738,6 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
         metadata_data_attr = metadata_data_attr_builds[build]
 
         has_access = auth_dataset_whitelists_for_user(request.user.id)
-        # nih_user = NIH_User.objects.filter(user=request.user, active=True)
-        # has_access = None
-        # if len(nih_user) > 0:
-        #     user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-        #     for dataset in user_auth_sets:
-        #         if not has_access:
-        #             has_access = []
-        #         has_access.append(dataset.authorized_dataset.whitelist_id)
 
         items = None
 
@@ -1829,15 +1821,6 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
     metadata_data_attr = fetch_build_data_attr(build)
 
     has_access = auth_dataset_whitelists_for_user(request.user.id)
-    # nih_user = NIH_User.objects.filter(user=request.user, active=True)
-    # has_access = None
-    #
-    # if len(nih_user) > 0:
-    #     user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-    #     for dataset in user_auth_sets:
-    #         if not has_access:
-    #             has_access = []
-    #         has_access.append(dataset.authorized_dataset.whitelist_id)
 
     result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, **params)
 
