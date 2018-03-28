@@ -127,9 +127,9 @@ def extended_logout_view(request):
         try:
             body = {"email": user_email, "role": "MEMBER"}
             directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-            logger.info("[STATUS] Attempting to insert user {} into group {}. "
-                        "If an error message doesn't follow, they were successfully added."
-                        .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
+            logger.info("[STATUS] Attempting to insert user {} into group {}. " .format(
+                str(user_email), OPEN_ACL_GOOGLE_GROUP)
+            )
         except HttpError as e:
             logger.info(e)
 
