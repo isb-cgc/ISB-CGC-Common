@@ -18,6 +18,8 @@ import re
 import base64
 from json import dumps as json_dumps
 import traceback
+import datetime
+import pytz
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from googleapiclient.errors import HttpError
@@ -949,6 +951,7 @@ def demo_process_success(auth, user_id, saml_response):
                                            "[ERROR] Exception while finding user email: {}".format(str(e)))
             logger.error("[ERROR] Exception while finding user email: ")
             logger.exception(e)
+            warn_message = ""
 
         if len(authorized_datasets) > 0:
             # if user has access to one or more datasets, warn message is different
@@ -1092,14 +1095,14 @@ def deactivate_nih_add_to_open(user_id, user_email):
 
     except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
         if type(e) is MultipleObjectsReturned:
-            logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), request.user.id))
-            nih_users = NIH_User.objects.filter(user=user)
+            logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), user_id))
+            nih_users = NIH_User.objects.filter(user_id=user_id)
             for nih_user in nih_users:
                 nih_user.active = False
                 nih_user.save()
                 nih_user.delete_all_auth_datasets()
         else:
-            logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user.email))
+            logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user_email))
 
     directory_service, http_auth = get_directory_resource()
 
