@@ -19,7 +19,7 @@ limitations under the License.
 from django.db import models
 from django.contrib.auth.models import User
 import logging
-from datetime import datetime, timedelta
+import datetime
 import pytz
 
 logger = logging.getLogger('main_logger')
@@ -149,7 +149,7 @@ class ServiceAccount(models.Model):
         return result
 
     def is_expired(self):
-        expired_time = pytz.utc.localize(datetime.utcnow() + timedelta(days=-7, minutes=10))
+        expired_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(days=-7, minutes=10))
         return self.authorized_date < expired_time
 
 
