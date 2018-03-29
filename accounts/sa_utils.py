@@ -601,8 +601,7 @@ def unregister_sa(user_id, sa_name):
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
                 'message': '[STATUS] Attempting to delete SA {} from Google Group {}.'.format(
                     saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}. " +
-                        "If an error message doesn't follow, they were successfully deleted".format(
+            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}.".format(
                             saad.service_account.service_account, saad.authorized_dataset.acl_google_group)
                         )
         except HttpError as e:
@@ -1110,7 +1109,6 @@ def deactivate_nih_add_to_open(user_id, user_email):
         body = {"email": user_email, "role": "MEMBER"}
         directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
         logger.info("[STATUS] Attempting to insert user {} into group {}. "
-                    "If an error message doesn't follow, they were successfully added."
                     .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
     except HttpError as e:
         logger.info(e)
