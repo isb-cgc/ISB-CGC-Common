@@ -811,6 +811,8 @@ class DemoLoginResults(object):
 def demo_process_success(auth, user_id, saml_response):
     retval = DemoLoginResults()
     st_logger = StackDriverLogger.build_from_django_settings()
+    NIH_username = None
+    user_email = None
 
     st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] received ?acs")
     auth.process_response()
