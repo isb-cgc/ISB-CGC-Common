@@ -623,9 +623,10 @@ def get_user_datasets(request,user_id):
             status = '500'
             result = {
                 'status': 'error',
-                'msg': "No registered Google Cloud Projects could be found for user ID {}.".format(str(req_user.id))
+                'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
+                    + "project and dataset before attempting to export your cohort."
             }
-            logger.info("[STATUS] No registered GCPs found for user {}.".format(str(req_user.id)))
+            logger.info("[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
         else:
             for gcp in gcps:
                 bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
@@ -649,10 +650,11 @@ def get_user_datasets(request,user_id):
                 status = '500'
                 result = {
                     'status': 'error',
-                    'msg': "No registered datasets were found in user ID {}'s registered Google Cloud Projects.".format(str(req_user.id))
+                    'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least "
+                        + "one dataset in one of your proejcts before attempting to export your cohort."
                 }
                 logger.info(
-                    "[STATUS] No registered datasets were found for user {}.".format(str(req_user.id)))
+                    "[STATUS] No registered datasets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
             else:
                 status = '200'
                 result['status'] = 'success'
