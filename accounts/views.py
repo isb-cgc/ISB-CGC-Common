@@ -624,7 +624,7 @@ def get_user_datasets(request,user_id):
             result = {
                 'status': 'error',
                 'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
-                    + "project and dataset before attempting to export your cohort."
+                    + "project and BigQuery dataset before attempting to export your cohort."
             }
             logger.info("[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
         else:
@@ -650,8 +650,8 @@ def get_user_datasets(request,user_id):
                 status = '500'
                 result = {
                     'status': 'error',
-                    'msg': "No registered datasets were found in your Google Cloud Projects. Please register at least "
-                        + "one dataset in one of your proejcts before attempting to export your cohort."
+                    'msg': "No registered BigQuery datasets were found in your Google Cloud Projects. Please register "
+                        + "at least  one dataset in one of your projects before attempting to export your cohort."
                 }
                 logger.info(
                     "[STATUS] No registered datasets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
