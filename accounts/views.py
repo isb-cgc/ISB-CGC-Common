@@ -418,7 +418,7 @@ def register_sa(request, user_id):
 
             return render(request, template, context)
 
-        # This is an attempt to formally register the service account, post verification
+        # This is an attempt to formally register (or refresh) the service account, post verification
         elif request.POST.get('gcp_id'):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
