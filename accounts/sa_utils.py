@@ -287,7 +287,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             })
 
             return {
-                'message': 'You must be a member of a project in order to register its service accounts.',
+                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of a project in order to {} its service accounts.'.format(user_email, gcp_id, "refresh" if is_refresh else "register"),
                 'redirect': True,
                 'user_not_found': True
             }
@@ -527,6 +527,12 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
             logger.warn(result['message'])
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
                                              {'message': '{0}: {1}'.format(user_sa, result['message'])})
+
+            # If the error is the user wasn't found on this GCP, remove them from it in the Web Application
+            if 'user_not_found' in result:
+                user_gcp.user.set(user_gcp.user.all().exclude(id=User.objects.get(email=user_email).id))
+                user_gcp.save()
+
         # Verification passed before but failed now
         elif not result['all_user_datasets_verified']:
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
