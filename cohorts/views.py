@@ -2135,6 +2135,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     resp = None
     db = None
     cursor = None
+    query_limit = limit
     type_clause = ""
     limit_clause = ""
     offset_clause = ""
@@ -2324,9 +2325,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
                 # If we have room in the file list, or if there's no limit, we'll file-query this program, otherwise there's no point
                 if len(file_list) < limit or limit < 0:
-                    if limit > 0:
+                    if query_limit > 0:
                         limit_clause = ' LIMIT %s'
-                        params += (limit,)
+                        params += (query_limit,)
                         # Offset is only valid when there is a limit
                         if offset > 0:
                             offset_clause = ' OFFSET %s'
@@ -2375,10 +2376,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                                 'cohort_id': cohort_id
                             })
 
-                    # if we didn't get enough file listings from this program to max out the list,
+                    # if we had a limit and didn't get enough file listings from this program to max out the list,
                     # we should move the offset to 0 and change the limit to finish filling the list
-                    if cursor.rowcount < (limit-len(file_list)):
-                        limit = (limit-len(file_list))
+                    if limit > 0 and limit > len(file_list):
+                        query_limit = (limit-len(file_list))
                         offset = 0
 
             files_counted = False
