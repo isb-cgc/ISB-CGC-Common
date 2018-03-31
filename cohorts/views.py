@@ -2283,6 +2283,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
 
             for program in cohort_programs:
+                limit_clause = ""
+                offset_clause = ""
 
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
 
