@@ -23,7 +23,7 @@ from django.test import TestCase
 from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist
 from accounts.models import NIH_User
-from accounts.views import unlink_accounts_and_get_acl_tasks, ACLDeleteAction
+from accounts.sa_utils import unlink_accounts_and_get_acl_tasks, ACLDeleteAction
 
 logging.basicConfig(
     level=logging.INFO

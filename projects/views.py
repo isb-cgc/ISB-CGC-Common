@@ -41,7 +41,7 @@ import logging
 
 logger = logging.getLogger('main_logger')
 
-WHITELIST_RE = settings.WHITELIST_RE
+BLACKLIST_RE = settings.BLACKLIST_RE
 
 @login_required
 def public_program_list(request):
@@ -181,26 +181,26 @@ def upload_files(request):
     try:
 
         # TODO: Validation
-        whitelist = re.compile(WHITELIST_RE, re.UNICODE)
+        blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
 
         if request.POST['program-type'] == 'new':
             program_name = request.POST['program-name']
             program_desc = request.POST['program-description']
-            match_name = whitelist.search(unicode(program_name))
-            match_desc = whitelist.search(unicode(program_desc))
+            match_name = blacklist.search(unicode(program_name))
+            match_desc = blacklist.search(unicode(program_desc))
 
             if match_name or match_desc:
                 # XSS risk, log and fail this cohort save
                 matches = ""
                 fields = ""
                 if match_name:
-                    match_name = whitelist.findall(unicode(program_name))
+                    match_name = blacklist.findall(unicode(program_name))
                     logger.error(
                         '[ERROR] While saving a user program, saw a malformed name: ' + program_name + ', characters: ' + match_name.__str__())
                     matches = "name contains"
                     fields = "name"
                 if match_desc:
-                    match_desc = whitelist.findall(unicode(program_desc))
+                    match_desc = blacklist.findall(unicode(program_desc))
                     logger.error(
                         '[ERROR] While saving a user program, saw a malformed description: ' + program_desc + ', characters: ' + match_desc.__str__())
                     matches = "name and description contain" if match_name else "description contains"
@@ -227,21 +227,21 @@ def upload_files(request):
         else:
             project_name = request.POST['project-name']
             project_desc = request.POST['project-description']
-            match_name = whitelist.search(unicode(project_name))
-            match_desc = whitelist.search(unicode(project_desc))
+            match_name = blacklist.search(unicode(project_name))
+            match_desc = blacklist.search(unicode(project_desc))
 
             if match_name or match_desc:
                 # XSS risk, log and fail this cohort save
                 matches = ""
                 fields = ""
                 if match_name:
-                    match_name = whitelist.findall(unicode(project_name))
+                    match_name = blacklist.findall(unicode(project_name))
                     logger.error(
                         '[ERROR] While saving a user project, saw a malformed name: ' + project_name + ', characters: ' + match_name.__str__())
                     matches = "name contains"
                     fields = "name"
                 if match_desc:
-                    match_desc = whitelist.findall(unicode(project_desc))
+                    match_desc = blacklist.findall(unicode(project_desc))
                     logger.error(
                         '[ERROR] While saving a user project, saw a malformed description: ' + project_desc + ', characters: ' + match_desc.__str__())
                     matches = "name and description contain" if match_name else "description contains"

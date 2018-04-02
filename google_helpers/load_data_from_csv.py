@@ -27,7 +27,7 @@ import time
 import uuid
 import sys
 
-from google_helpers.bigquery_service import get_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
 
 logger = logging.getLogger(__name__)
 

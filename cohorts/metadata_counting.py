@@ -25,7 +25,7 @@ import django
 import re
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
-from google_helpers.bigquery_service import authorize_credentials_with_Google
+from google_helpers.bigquery.service import authorize_credentials_with_Google
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
 BQ_ATTEMPT_MAX = 10
@@ -36,7 +36,6 @@ debug = settings.DEBUG # RO global for this file
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
-WHITELIST_RE = settings.WHITELIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger('main_logger')
@@ -418,7 +417,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
             # for-each result, add to list
 
-            if results.__len__() > 0:
+            if len(results) > 0:
                 for barcode in results:
                     barcodes.append(str(barcode['f'][0]['v']))
 
@@ -427,7 +426,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
-            tmp_mut_table = 'bq_res_table_' + user.id.__str__() + "_" + make_id(6)
+            tmp_mut_table = 'bq_res_table_' + str(user.id) + "_" + make_id(6)
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
@@ -709,7 +708,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         stop = time.time()
         logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
-        logger.debug('[BENCHMARKING] Filters requested: '+str(inc_filters))
 
         # query sample and case counts
         count_query = 'SELECT COUNT(DISTINCT %s) FROM %s'
