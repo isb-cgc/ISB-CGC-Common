@@ -899,6 +899,7 @@ def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def export_cohort_to_bq(request, cohort_id=0):
@@ -2428,6 +2429,89 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
 @login_required
 @csrf_protect
+def export_file_list_to_gcs(request, cohort_id=0):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
+
+    try:
+        req_user = User.objects.get(id=request.user.id)
+        gcs_proj_id = None
+
+        if not cohort_id:
+            messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
+            return redirect(redirect_url)
+
+        cohort = Cohort.objects.get(id=cohort_id)
+
+        try:
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        except ObjectDoesNotExist as e:
+            messages.error(request, "You must be the owner of a cohort in order to export its file list.")
+            return redirect(redirect_url)
+
+        bucket = request.POST.get('project-bucket', '').split(":")[1]
+        file_name = None
+
+        if request.POST.get('file-type', '') == 'new':
+            file_name = request.POST.get('new-file-name', None)
+            if file_name:
+                # Check the user-provided file name against the whitelist for Google GCS files names
+                # truncate at max length regardless of what we received
+                file_name = request.POST.get('new-file-name', '')[0:1024]
+                file_whitelist = re.compile(ur'([^A-Za-z0-9_])', re.UNICODE)
+                match = file_whitelist.search(unicode(file_name))
+                if match:
+                    messages.error(request,
+                                   "There are invalid characters in your file name; only numbers, letters, and underscores are permitted.")
+                    return redirect(redirect_url)
+        else:
+            file_name = request.POST.get('file-name', None)
+
+        proj_id = request.POST.get('project-bucket', '').split(":")[0]
+
+        if not len(proj_id):
+            messages.error(request, "You must provide a Google Cloud Project to which your file list can be exported.")
+            return redirect(redirect_url)
+        else:
+            try:
+                gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
+            except ObjectDoesNotExist as e:
+                messages.error(request,
+                               "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+                return redirect(redirect_url)
+
+        gcs_proj_id = gcp.project_id
+
+        if not len(bucket):
+            bucket = "isb_cgc_cohort_file_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
+        if not file_name:
+            file_name = "isb_cgc_cohort_files_{}_{}_{}.csv".format(
+                cohort_id,
+                re.sub(r"[\s,\.'-]+", "_", req_user.email.split('@')[0].lower()),
+                datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            )
+
+        build = escape(request.POST.get('build', 'HG19'))
+
+        if not re.compile(r'[Hh][Gg](19|38)').search(build):
+            raise Exception("Invalid build supplied")
+
+        # Store file list to BigQuery
+        items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
+
+
+
+
+    except Exception as e:
+        logger.error("[ERROR] While exporting file list to GCS for cohort {}: ".format(str(cohort_id)))
+        logger.exception(e)
+
+    return redirect(redirect_url)
+
+
+@login_required
+@csrf_protect
 def export_file_list_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
@@ -2500,7 +2584,9 @@ def export_file_list_to_bq(request, cohort_id=0):
             raise Exception("Invalid build supplied")
 
         # Store file list to BigQuery
+        logger.info("[STATUS] Retrieving file list too export...")
         items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
+        logger.info("[STATUS] ...done.")
 
         bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
         bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
