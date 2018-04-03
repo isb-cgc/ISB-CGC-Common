@@ -1928,6 +1928,8 @@ def streaming_csv_view(request, cohort_id=0):
                                              content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
             response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}_{}.csv"'.format(str(cohort_id),build,timestamp)
+            logger.debug("Cookie: {}".format(str(request.GET.get('downloadToken'))))
+            response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
 
     except Exception as e:
@@ -2283,6 +2285,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
             cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
 
+            logger.info("[STATUS] Fetching file list for program(s) {}...".format(", ".join([x.name for x in cohort_programs])))
             for program in cohort_programs:
                 limit_clause = ""
                 offset_clause = ""
@@ -2385,6 +2388,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         query_limit = (limit-len(file_list))
                         offset = 0
 
+            logger.info("[STATUS] ...done")
             files_counted = False
 
             # Add to the file total
@@ -2584,7 +2588,7 @@ def export_file_list_to_bq(request, cohort_id=0):
             raise Exception("Invalid build supplied")
 
         # Store file list to BigQuery
-        logger.info("[STATUS] Retrieving file list too export...")
+        logger.info("[STATUS] Retrieving file list to export...")
         items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
         logger.info("[STATUS] ...done.")
 
