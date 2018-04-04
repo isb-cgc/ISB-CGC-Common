@@ -2126,7 +2126,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2307,26 +2307,29 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     filter_clause = 'AND ' + built_clause['query_str']
                     params += built_clause['value_tuple']
 
-                start = time.time()
-                counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
-                stop = time.time()
+                if not files_only:
+                    start = time.time()
+                    counts = count_public_data_types(request.user, cohort_id, program, inc_filters, (type is not None and type != 'all'), build)
+                    stop = time.time()
 
-                logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
+                    logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str((stop-start)/1000)))
 
-                # Group up our program-speciic filter counts
-                # If this is our first program, just assign it to the result
-                if not filter_counts:
-                    filter_counts = counts
-                # Otherwise loop through and add in the new values
+                    # Group up our program-speciic filter counts
+                    # If this is our first program, just assign it to the result
+                    if not filter_counts:
+                        filter_counts = counts
+                    # Otherwise loop through and add in the new values
+                    else:
+                        for attr in counts:
+                            if attr not in filter_counts:
+                                filter_counts[attr] = {}
+                            for val in counts[attr]:
+                                if val not in filter_counts[attr]:
+                                    filter_counts[attr][val] = counts[attr][val]
+                                else:
+                                    filter_counts[attr][val] += counts[attr][val]
                 else:
-                    for attr in counts:
-                        if attr not in filter_counts:
-                            filter_counts[attr] = {}
-                        for val in counts[attr]:
-                            if val not in filter_counts[attr]:
-                                filter_counts[attr][val] = counts[attr][val]
-                            else:
-                                filter_counts[attr][val] += counts[attr][val]
+                    filter_counts = {}
 
                 # If we have room in the file list, or if there's no limit, we'll file-query this program, otherwise there's no point
                 if len(file_list) < limit or limit < 0:
@@ -2390,14 +2393,15 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             logger.info("[STATUS] ...done")
             files_counted = False
 
+            if not files_only:
             # Add to the file total
-            for attr in filter_counts:
-                if files_counted:
-                    continue
-                for val in filter_counts[attr]:
-                    if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                        total_file_count += int(filter_counts[attr][val])
-                files_counted = True
+                for attr in filter_counts:
+                    if files_counted:
+                        continue
+                    for val in filter_counts[attr]:
+                        if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                            total_file_count += int(filter_counts[attr][val])
+                    files_counted = True
 
         resp = {
             'total_file_count': total_file_count,
@@ -2604,7 +2608,7 @@ def export_file_list_to_bq(request, cohort_id=0):
         # - We stopped finding records
         while (items_exported < total_expected) and not time_surpassed and not errors and not found_none:
 
-            items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build)
+            items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build, files_only=True)
 
             found_none = len(items['file_list']) <= 0
 
