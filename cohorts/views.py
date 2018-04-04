@@ -1928,7 +1928,6 @@ def streaming_csv_view(request, cohort_id=0):
                                              content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
             response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}_{}.csv"'.format(str(cohort_id),build,timestamp)
-            logger.debug("Cookie: {}".format(str(request.GET.get('downloadToken'))))
             response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
 
@@ -2588,25 +2587,40 @@ def export_file_list_to_bq(request, cohort_id=0):
             raise Exception("Invalid build supplied")
 
         # Store file list to BigQuery
-        logger.info("[STATUS] Retrieving file list to export...")
-        items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
-        logger.info("[STATUS] ...done.")
+        items_exported = 0
+        items_expected = request.GET.get('expected_export',0)
+        time_surpassed = False
+        errors = False
+        block_size = 5000
+        start_time = time.time()
+        # Allow 1m
+        time_alotted = 60000
+        while items_exported < items_expected and not time_surpassed and not errors:
+            items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build)
 
-        bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
-        bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
+            bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+            bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
 
-        # If BQ insertion fails, we warn the user
-        if 'insertErrors' in bq_result:
-            err_msg = ''
-            if len(bq_result['insertErrors']) > 1:
-                err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
-            else:
-                err_msg = 'There was an insertion error '
-            messages.error(request,
-                           err_msg + ' when exporting your file list to BigQuery table {}. Creation of the BQ file list has failed.'.format(table))
-        elif 'tableErrors' in bq_result:
-            messages.error(request,bq_result['tableErrors'])
-        else:
+            items_exported=items_exported+block_size
+
+            time_surpassed = bool((time.time()-start_time) > time_alotted)
+
+            # If BQ insertion fails, we warn the user
+            if 'insertErrors' in bq_result:
+                errors = True
+                err_msg = ''
+                if len(bq_result['insertErrors']) > 1:
+                    err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
+                else:
+                    err_msg = 'There was an insertion error '
+                messages.error(request,
+                               err_msg + ' when exporting your file list to BigQuery table {}. Creation of the BQ file list has failed.'.format(table))
+            elif 'tableErrors' in bq_result:
+                messages.error(request,bq_result['tableErrors'])
+
+        if time_surpassed:
+            messages.error(request,"Timed out while attempting to export your file list - it may be too large!")
+        elif not errors:
             messages.info(request, "Cohort {}'s file list was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
 
     except Exception as e:
