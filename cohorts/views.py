@@ -2608,14 +2608,30 @@ def export_file_list_to_bq(request, cohort_id=0):
 
             found_none = len(items['file_list']) <= 0
 
+            # If we found files, export them
             if not found_none:
                 bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
+            # otherwise, warn, because it means our count was too high for what we found
             elif (items_exported < total_expected):
                 logger.warn("[WARNING] While exporting the file list for cohort {}, expected {} files but only found {}!".format(
                     str(cohort_id),str(total_expected),str(items_exported)
                 ))
+                messages.warning(request,
+                    "While exporting your cohort's file list, we only found {} records but expected {}.".format(
+                        str(items_exported), str(total_expected)
+                ))
 
             items_exported += len(items['file_list'])
+
+            # Warning if expected count was too low
+            if items_exported > total_expected:
+                logger.warn("[WARNING] While exporting the file list for cohort {}, expected {} files but found {}!".format(
+                    str(cohort_id),str(total_expected),str(items_exported)
+                ))
+                messages.warning(request,
+                    "While exporting your cohort's file list, we found {} records but only expected {}.".format(
+                        str(items_exported), str(total_expected)
+                ))
 
             time_surpassed = bool((time.time()-start_time) > time_alotted)
 
