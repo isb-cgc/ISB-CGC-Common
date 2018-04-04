@@ -2584,21 +2584,36 @@ def export_file_list_to_bq(request, cohort_id=0):
             raise Exception("Invalid build supplied")
 
         # Store file list to BigQuery
-        items_exported = 0
-        total_expected = int(request.POST.get('total_expected', '0'))
-        time_surpassed = False
-        errors = False
-        block_size = 5000
-        start_time = time.time()
+        bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+
         # Allow 1m
         time_alotted = 60000
+        time_surpassed = False
+        start_time = time.time()
+        errors = False
+        found_none = False
 
-        while (items_exported < total_expected) and not time_surpassed and not errors:
+        total_expected = int(request.POST.get('total_expected', '0'))
+        items_exported = 0
+        block_size = 5000
+
+        # Exit criteria:
+        # - We found all we expected to find
+        # - We ran over the time limit
+        # - There was an insertion error
+        # - We stopped finding records
+        while (items_exported < total_expected) and not time_surpassed and not errors and not found_none:
 
             items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build)
 
-            bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
-            bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
+            found_none = len(items['file_list']) <= 0
+
+            if not found_none:
+                bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
+            elif (items_exported < total_expected):
+                logger.warn("[WARNING] While exporting the file list for cohort {}, expected {} files but only found {}!".format(
+                    str(cohort_id),str(total_expected),str(items_exported)
+                ))
 
             items_exported += len(items['file_list'])
 
