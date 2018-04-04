@@ -2503,9 +2503,6 @@ def export_file_list_to_gcs(request, cohort_id=0):
         # Store file list to BigQuery
         items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
 
-
-
-
     except Exception as e:
         logger.error("[ERROR] While exporting file list to GCS for cohort {}: ".format(str(cohort_id)))
         logger.exception(e)
@@ -2588,20 +2585,22 @@ def export_file_list_to_bq(request, cohort_id=0):
 
         # Store file list to BigQuery
         items_exported = 0
-        items_expected = request.GET.get('expected_export',0)
+        total_expected = int(request.POST.get('total_expected', '0'))
         time_surpassed = False
         errors = False
         block_size = 5000
         start_time = time.time()
         # Allow 1m
         time_alotted = 60000
-        while items_exported < items_expected and not time_surpassed and not errors:
+
+        while (items_exported < total_expected) and not time_surpassed and not errors:
+
             items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build)
 
             bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
             bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
 
-            items_exported=items_exported+block_size
+            items_exported += len(items['file_list'])
 
             time_surpassed = bool((time.time()-start_time) > time_alotted)
 
