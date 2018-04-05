@@ -2591,7 +2591,7 @@ def export_file_list_to_bq(request, cohort_id=0):
         bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
 
         # Allow 1m
-        time_alotted = 60000
+        time_alotted = 180
         time_surpassed = False
         start_time = time.time()
         errors = False
