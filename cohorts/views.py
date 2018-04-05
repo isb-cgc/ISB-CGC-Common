@@ -2590,7 +2590,7 @@ def export_file_list_to_bq(request, cohort_id=0):
         # Store file list to BigQuery
         bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
 
-        # Allow 1m
+        # Allow 3m
         time_alotted = 180
         time_surpassed = False
         start_time = time.time()
@@ -2606,6 +2606,7 @@ def export_file_list_to_bq(request, cohort_id=0):
         # - We ran over the time limit
         # - There was an insertion error
         # - We stopped finding records
+        start_export = time.time()
         while (items_exported < total_expected) and not time_surpassed and not errors and not found_none:
 
             items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build, files_only=True)
@@ -2652,6 +2653,9 @@ def export_file_list_to_bq(request, cohort_id=0):
             elif 'tableErrors' in bq_result:
                 messages.error(request,bq_result['tableErrors'])
 
+        stop_export = time.time()
+        logger.info("[STATUS] Time to export {} rows: {}s".format(str(total_expected),str(stop_export-start_export)))
+        
         if time_surpassed:
             messages.error(request,"Timed out while attempting to export your file list - it may be too large!")
         elif not errors:
