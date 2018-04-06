@@ -165,7 +165,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_public_data_types(user, cohort_id, program, inc_filters, filter_format=False, build='HG19'):
+def count_public_data_type(user, data_query, inc_filters, filter_format=False, build='HG19'):
 
     db = None
     cursor = None
@@ -174,14 +174,8 @@ def count_public_data_types(user, cohort_id, program, inc_filters, filter_format
 
     QUERY_BASE = """
         SELECT {attr}, COUNT(*) AS count
-        FROM {metadata_table} md
-        JOIN (
-          SELECT DISTINCT sample_barcode
-          FROM cohorts_samples
-          WHERE cohort_id = %s
-        ) cs
-        ON cs.sample_barcode = md.sample_barcode
-        WHERE md.file_uploaded='true' {where_clause}
+        FROM ({data_query_clause}) AS qc
+        WHERE 1 {where_clause}
         GROUP BY {attr};
     """
 
@@ -194,22 +188,19 @@ def count_public_data_types(user, cohort_id, program, inc_filters, filter_format
 
         metadata_data_attr = fetch_build_data_attr(build)
 
-        program_data_table = Public_Data_Tables.objects.filter(program=program, build=build)[0].data_table
-
         # Make our where clauses
         for filter in inc_filters:
-            if validate_filter_key(filter, program.id, build):
-                filter_clauses[filter] = {'where_clause': None, 'parameters': None}
+            #if validate_filter_key(filter, program.id, build):
+            filter_clauses[filter] = {'where_clause': None, 'parameters': None}
 
-                subfilter = {}
-                subfilter[filter] = inc_filters[filter]
+            subfilter = {}
+            subfilter[filter] = inc_filters[filter]
 
-                built_clause = build_where_clause(subfilter, for_files=True)
-
-                filter_clauses[filter]['where_clause'] = built_clause['query_str']
-                filter_clauses[filter]['parameters'] = built_clause['value_tuple']
-            else:
-                raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
+            built_clause = build_where_clause(subfilter, for_files=True)
+            filter_clauses[filter]['where_clause'] = built_clause['query_str']
+            filter_clauses[filter]['parameters'] = built_clause['value_tuple']
+            #else:
+            #   raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
 
         for attr in metadata_data_attr:
 
@@ -220,13 +211,10 @@ def count_public_data_types(user, cohort_id, program, inc_filters, filter_format
 
             if len(filter_clause):
                 where_clause = "AND ( {} )".format(filter_clause)
+            paramter_tuple = tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format'))
 
-            paramter_tuple = (cohort_id,) + tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format'))
-
-            query = QUERY_BASE.format(metadata_table=program_data_table, where_clause=where_clause, attr=attr)
-
-            cursor.execute(query,paramter_tuple)
-
+            query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr)
+            cursor.execute(query, paramter_tuple)
             for row in cursor.fetchall():
                 val = "None" if not row[0] else row[0]
                 counts[attr][val] = row[1]
