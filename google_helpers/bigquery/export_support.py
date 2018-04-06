@@ -136,6 +136,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         index = 0
         next = 0
 
+        logger.info("[STATUS] Beginning row stream...")
         while index < len(rows) and next is not None:
             next = MAX_INSERT+index
             body = None
@@ -150,6 +151,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                                             tableId=self.table_id,
                                             body=body).execute()
             index = next
+        logger.info("[STATUS] ...done.")
 
         return response
 
@@ -247,7 +249,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
     # Export data to the BQ table referenced by project_id:dataset_id:table_id
     def export_to_bq(self, desc, rows):
-        logger.debug("Called export_to_bq")
+        logger.info("[STATUS] Initiating BQ export of {} rows".format(str(len(rows))))
         # Get the dataset (make if not exists)
         if not self._dataset_exists():
             self._insert_dataset()

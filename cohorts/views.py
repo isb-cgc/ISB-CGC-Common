@@ -899,6 +899,7 @@ def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_
 
     return redirect(redirect_url)
 
+
 @login_required
 @csrf_protect
 def export_cohort_to_bq(request, cohort_id=0):
@@ -1927,6 +1928,7 @@ def streaming_csv_view(request, cohort_id=0):
                                              content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
             response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}_{}.csv"'.format(str(cohort_id),build,timestamp)
+            response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
 
     except Exception as e:
@@ -2124,7 +2126,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2135,6 +2137,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
     resp = None
     db = None
     cursor = None
+    query_limit = limit
     type_clause = ""
     limit_clause = ""
     offset_clause = ""
@@ -2403,6 +2406,86 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
 @login_required
 @csrf_protect
+def export_file_list_to_gcs(request, cohort_id=0):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
+
+    try:
+        req_user = User.objects.get(id=request.user.id)
+        gcs_proj_id = None
+
+        if not cohort_id:
+            messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
+            return redirect(redirect_url)
+
+        cohort = Cohort.objects.get(id=cohort_id)
+
+        try:
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        except ObjectDoesNotExist as e:
+            messages.error(request, "You must be the owner of a cohort in order to export its file list.")
+            return redirect(redirect_url)
+
+        bucket = request.POST.get('project-bucket', '').split(":")[1]
+        file_name = None
+
+        if request.POST.get('file-type', '') == 'new':
+            file_name = request.POST.get('new-file-name', None)
+            if file_name:
+                # Check the user-provided file name against the whitelist for Google GCS files names
+                # truncate at max length regardless of what we received
+                file_name = request.POST.get('new-file-name', '')[0:1024]
+                file_whitelist = re.compile(ur'([^A-Za-z0-9_])', re.UNICODE)
+                match = file_whitelist.search(unicode(file_name))
+                if match:
+                    messages.error(request,
+                                   "There are invalid characters in your file name; only numbers, letters, and underscores are permitted.")
+                    return redirect(redirect_url)
+        else:
+            file_name = request.POST.get('file-name', None)
+
+        proj_id = request.POST.get('project-bucket', '').split(":")[0]
+
+        if not len(proj_id):
+            messages.error(request, "You must provide a Google Cloud Project to which your file list can be exported.")
+            return redirect(redirect_url)
+        else:
+            try:
+                gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
+            except ObjectDoesNotExist as e:
+                messages.error(request,
+                               "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+                return redirect(redirect_url)
+
+        gcs_proj_id = gcp.project_id
+
+        if not len(bucket):
+            bucket = "isb_cgc_cohort_file_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
+        if not file_name:
+            file_name = "isb_cgc_cohort_files_{}_{}_{}.csv".format(
+                cohort_id,
+                re.sub(r"[\s,\.'-]+", "_", req_user.email.split('@')[0].lower()),
+                datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            )
+
+        build = escape(request.POST.get('build', 'HG19'))
+
+        if not re.compile(r'[Hh][Gg](19|38)').search(build):
+            raise Exception("Invalid build supplied")
+
+        # Store file list to BigQuery
+        items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
+
+    except Exception as e:
+        logger.error("[ERROR] While exporting file list to GCS for cohort {}: ".format(str(cohort_id)))
+        logger.exception(e)
+
+    return redirect(redirect_url)
+
+
+@login_required
+@csrf_protect
 def export_file_list_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
@@ -2475,23 +2558,77 @@ def export_file_list_to_bq(request, cohort_id=0):
             raise Exception("Invalid build supplied")
 
         # Store file list to BigQuery
-        items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
-
         bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
-        bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
 
-        # If BQ insertion fails, we warn the user
-        if 'insertErrors' in bq_result:
-            err_msg = ''
-            if len(bq_result['insertErrors']) > 1:
-                err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
-            else:
-                err_msg = 'There was an insertion error '
-            messages.error(request,
-                           err_msg + ' when exporting your file list to BigQuery table {}. Creation of the BQ file list has failed.'.format(table))
-        elif 'tableErrors' in bq_result:
-            messages.error(request,bq_result['tableErrors'])
-        else:
+        # Allow 3m
+        time_alotted = 180
+        time_surpassed = False
+        start_time = time.time()
+        errors = False
+        found_none = False
+
+        total_expected = int(request.POST.get('total_expected', '0'))
+        items_exported = 0
+        block_size = 5000
+
+        # Exit criteria:
+        # - We found all we expected to find
+        # - We ran over the time limit
+        # - There was an insertion error
+        # - We stopped finding records
+        start_export = time.time()
+        while (items_exported < total_expected) and not time_surpassed and not errors and not found_none:
+
+            items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build, files_only=True)
+
+            found_none = len(items['file_list']) <= 0
+
+            # If we found files, export them
+            if not found_none:
+                bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
+            # otherwise, warn, because it means our count was too high for what we found
+            elif (items_exported < total_expected):
+                logger.warn("[WARNING] While exporting the file list for cohort {}, expected {} files but only found {}!".format(
+                    str(cohort_id),str(total_expected),str(items_exported)
+                ))
+                messages.warning(request,
+                    "While exporting your cohort's file list, we only found {} records but expected {}.".format(
+                        str(items_exported), str(total_expected)
+                ))
+
+            items_exported += len(items['file_list'])
+
+            # Warning if expected count was too low
+            if items_exported > total_expected:
+                logger.warn("[WARNING] While exporting the file list for cohort {}, expected {} files but found {}!".format(
+                    str(cohort_id),str(total_expected),str(items_exported)
+                ))
+                messages.warning(request,
+                    "While exporting your cohort's file list, we found {} records but only expected {}.".format(
+                        str(items_exported), str(total_expected)
+                ))
+
+            time_surpassed = bool((time.time()-start_time) > time_alotted)
+
+            # If BQ insertion fails, we warn the user
+            if 'insertErrors' in bq_result:
+                errors = True
+                err_msg = ''
+                if len(bq_result['insertErrors']) > 1:
+                    err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
+                else:
+                    err_msg = 'There was an insertion error '
+                messages.error(request,
+                               err_msg + ' when exporting your file list to BigQuery table {}. Creation of the BQ file list has failed.'.format(table))
+            elif 'tableErrors' in bq_result:
+                messages.error(request,bq_result['tableErrors'])
+
+        stop_export = time.time()
+        logger.info("[STATUS] Time to export {} rows: {}s".format(str(total_expected),str(stop_export-start_export)))
+        
+        if time_surpassed:
+            messages.error(request,"Timed out while attempting to export your file list - it may be too large!")
+        elif not errors:
             messages.info(request, "Cohort {}'s file list was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
 
     except Exception as e:

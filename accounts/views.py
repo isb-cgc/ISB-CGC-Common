@@ -418,7 +418,7 @@ def register_sa(request, user_id):
 
             return render(request, template, context)
 
-        # This is an attempt to formally register the service account, post verification
+        # This is an attempt to formally register (or refresh) the service account, post verification
         elif request.POST.get('gcp_id'):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
@@ -623,9 +623,10 @@ def get_user_datasets(request,user_id):
             status = '500'
             result = {
                 'status': 'error',
-                'msg': "No registered Google Cloud Projects could be found for user ID {}.".format(str(req_user.id))
+                'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
+                    + "project and BigQuery dataset before attempting to export your cohort."
             }
-            logger.info("[STATUS] No registered GCPs found for user {}.".format(str(req_user.id)))
+            logger.info("[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
         else:
             for gcp in gcps:
                 bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
@@ -649,10 +650,11 @@ def get_user_datasets(request,user_id):
                 status = '500'
                 result = {
                     'status': 'error',
-                    'msg': "No registered datasets were found in user ID {}'s registered Google Cloud Projects.".format(str(req_user.id))
+                    'msg': "No registered BigQuery datasets were found in your Google Cloud Projects. Please register "
+                        + "at least  one dataset in one of your projects before attempting to export your cohort."
                 }
                 logger.info(
-                    "[STATUS] No registered datasets were found for user {}.".format(str(req_user.id)))
+                    "[STATUS] No registered datasets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
             else:
                 status = '200'
                 result['status'] = 'success'
