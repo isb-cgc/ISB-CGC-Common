@@ -155,6 +155,11 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return response
 
+    def _query_to_table(self, query, parameters):
+        bigquery_service = get_bigquery_service()
+
+        return {}
+
     # Get all the tables for this object's project ID
     def get_tables(self):
         bq_tables = []
@@ -247,9 +252,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return response
 
-    # Export data to the BQ table referenced by project_id:dataset_id:table_id
-    def export_to_bq(self, desc, rows):
-        logger.info("[STATUS] Initiating BQ export of {} rows".format(str(len(rows))))
+    def _confirm_dataset_and_table(self, desc):
         # Get the dataset (make if not exists)
         if not self._dataset_exists():
             self._insert_dataset()
@@ -267,6 +270,24 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 'tableErrors': "The table schema of {} does not match the required schema for cohort export. Please make a new table, or adjust this table's schema.".format(
                     self.table_id)
             }
+        return {}
+
+    def export_query_to_bq(self, desc, query, parameters):
+        logger.info("[STATUS] Initiating BQ query to table")
+        check_dataset_table = self._confirm_dataset_and_table(desc)
+
+        if 'tableErrors' in check_dataset_table:
+            return check_dataset_table
+
+        return self._query_to_table(query, parameters)
+
+    # Export data to the BQ table referenced by project_id:dataset_id:table_id
+    def export_rows_to_bq(self, desc, rows):
+        logger.info("[STATUS] Initiating BQ export of {} rows".format(str(len(rows))))
+        check_dataset_table = self._confirm_dataset_and_table(desc)
+
+        if 'tableErrors' in check_dataset_table:
+            return check_dataset_table
 
         return self._streaming_insert(rows)
 
@@ -318,7 +339,16 @@ class BigQueryExportFileList(BigQueryExport):
         if not self._table_exists():
             desc = "BQ Export file list table from ISB-CGC cohort ID {}".format(str(cohort_id))
 
-        return self.export_to_bq(desc, self._build_rows(files))
+        return self.export_rows_to_bq(desc, self._build_rows(files))
+
+    # Create the BQ table referenced by project_id:dataset_id:table_id from a parameterized BQ query
+    def export_file_list_query_to_bq(self, query, parameters, cohort_id):
+        desc = ""
+
+        if not self._table_exists():
+            desc = "BQ Export file list table from ISB-CGC cohort ID {}".format(str(cohort_id))
+
+        return self.export_query_to_bq(desc, query, parameters)
 
 
 class BigQueryExportCohort(BigQueryExport):
