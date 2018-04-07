@@ -2291,6 +2291,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
             params = ()
             base_clause = ''
+            count_base_clause = ''
             first_program = True;
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
@@ -2310,6 +2311,11 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     metadata_table=program_data_table,
                     type_clause=type_clause,
                     filter_clause=filter_clause)
+                count_base_clause += union_clause.format(
+                    cohort_id=cohort_id,
+                    metadata_table=program_data_table,
+                    type_clause=type_clause,
+                    filter_clause='')
                 first_program = False;
 
             if limit > 0:
@@ -2325,10 +2331,9 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             logger.info("[STATUS] Time to get file-list: {}s".format(str((stop - start) / 1000)))
 
             limit_index = cursor._last_executed.rfind("LIMIT")
-            count_base_clause = (cursor._last_executed)[:limit_index]
             start = time.time()
-            counts = count_public_data_type(request.user,count_base_clause,
-                                            inc_filters,(type is not None and type != 'all'), build)
+            counts = count_public_data_type(request.user, count_base_clause,
+                                            inc_filters, cohort_programs, (type is not None and type != 'all'), build)
             stop = time.time()
             logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
 
