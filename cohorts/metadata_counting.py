@@ -6,7 +6,7 @@ Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
 You may obtain a copy of the License at
 
-   http://www.apache.org/licenses/LICENSE-2.0
+   http://www.apache.org/licenses/LICENSE-2.0how to c
 
 Unless required by applicable law or agreed to in writing, software
 distributed under the License is distributed on an "AS IS" BASIS,
@@ -165,7 +165,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_public_data_type(user, data_query, inc_filters, filter_format=False, build='HG19'):
+def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19'):
 
     db = None
     cursor = None
@@ -190,7 +190,9 @@ def count_public_data_type(user, data_query, inc_filters, filter_format=False, b
 
         # Make our where clauses
         for filter in inc_filters:
-            #if validate_filter_key(filter, program.id, build):
+            for prog in program_list:
+                if not validate_filter_key(filter, prog, build):
+                    raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
             filter_clauses[filter] = {'where_clause': None, 'parameters': None}
 
             subfilter = {}
@@ -199,20 +201,14 @@ def count_public_data_type(user, data_query, inc_filters, filter_format=False, b
             built_clause = build_where_clause(subfilter, for_files=True)
             filter_clauses[filter]['where_clause'] = built_clause['query_str']
             filter_clauses[filter]['parameters'] = built_clause['value_tuple']
-            #else:
-            #   raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
 
         for attr in metadata_data_attr:
-
             counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
-
             where_clause = ""
             filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
-
             if len(filter_clause):
                 where_clause = "AND ( {} )".format(filter_clause)
             paramter_tuple = tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format'))
-
             query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr)
             cursor.execute(query, paramter_tuple)
             for row in cursor.fetchall():
