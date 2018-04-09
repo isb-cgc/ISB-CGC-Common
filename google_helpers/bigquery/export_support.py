@@ -20,6 +20,7 @@ from copy import deepcopy
 import logging
 import datetime
 import time
+from time import sleep
 from django.conf import settings
 from uuid import uuid4
 from google_helpers.bigquery.service import get_bigquery_service
@@ -165,13 +166,13 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         query_data = {
             'jobReference': {
-                'projectId': self.project_id,
+                'projectId': settings.BIGQUERY_PROJECT_NAME,
                 'job_id': job_id
             },
             'configuration': {
                 'query': {
                     'query': query,
-                    'priority': 'BATCH',
+                    'priority': 'INTERACTIVE',
                     'destinationTable': {
                         'projectId': self.project_id,
                         'datasetId': self.dataset_id,
@@ -182,35 +183,67 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         }
 
         query_job = bq_service.jobs().insert(
-            projectId=settings.BQ_PROJECT_ID,
+            projectId=settings.BIGQUERY_PROJECT_NAME,
             body=query_data).execute(num_retries=5)
 
-        job_is_done = bq_service.jobs().get(projectId=settings.BQ_PROJECT_ID, jobId=query_job['jobReference']['jobId']).execute()
+        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=query_job['jobReference']['jobId']).execute()
 
         retries = 0
 
-        while not job_is_done and retries < BQ_ATTEMPT_MAX:
+        while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
-            sleep(2)
-            job_is_done = bq_service.jobs().get(projectId=settings.BQ_PROJECT_ID,
+            sleep(1)
+            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
                               jobId=query_job['jobReference']['jobId']).execute()
 
-        if job_is_done:
-            # Check the table
-            export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
-            if not export_table:
-                logger.error("[ERROR] Export table {}:{}.{} not found".format(self.project_id,self.dataset_id,self.table_id))
+        result = {
+            'status': None,
+            'message': None
+        }
+
+        if job_is_done and job_is_done['status']['state'] == 'DONE':
+            if 'status' in job_is_done and 'errors' in job_is_done['status']:
+                msg = "Export of cohort file manifest to table {}:{}.{} was unsuccessful, reason: {}".format(
+                    self.project_id, self.dataset_id, self.table_id, job_is_done['status']['errors'][0]['message'])
+                logger.error("[ERROR] {}".format(msg))
+                result['status'] = 'error'
+                result['message'] = "Unable to export cohort file manifest to table {}:{}.{}--please contact the administrator.".format(
+                    self.project_id, self.dataset_id, self.table_id)
             else:
-                logger.debug(str(export_table))
-                if export_table['numRows'] > 0:
-                    logger.info("[STATUS] Successfully exported query into BQ table {}:{}.{}".format(self.project_id,self.dataset_id,self.table_id))
+                # Check the table
+                export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
+                if not export_table:
+                    msg = "Export table {}:{}.{} not found".format(self.project_id,self.dataset_id,self.table_id)
+                    logger.error("[ERROR] ".format({msg}))
+                    bq_result = bq_service.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_NAME,
+                                  jobId=query_job['jobReference']['jobId']).execute()
+                    if 'errors' in bq_result:
+                        logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
+                    result['status'] = 'error'
+                    result['message'] = "Unable to export cohort file manifest to table {}:{}.{}--please contact the administrator.".format(
+                        self.project_id, self.dataset_id, self.table_id)
+                else:
+                    if int(export_table['numRows']) > 0:
+                        logger.info("[STATUS] Successfully exported cohort file manifest into BQ table {}:{}.{}".format(self.project_id,self.dataset_id,self.table_id))
+                        result['status'] = 'success'
+                        result['message'] = int(export_table['numRows'])
+                    else:
+                        msg = "Table {}:{}.{} created, but no rows found. Cohort file manifest export may not have succeeded".format(
+                            self.project_id,
+                            self.dataset_id,
+                            self.table_id
+                        )
+                        logger.warn("[WARNING] {}.".format(msg))
+                        result['status'] = 'error'
+                        result['message'] = msg + "--please contact the administrator."
         else:
-            logger.error(
-                "[ERROR] Export of table {}:{}.{} did not complete in the time allowed".format(self.project_id, self.dataset_id, self.table_id))
+            logger.debug(str(job_is_done))
+            msg = "Export of table {}:{}.{} did not complete in the time allowed".format(self.project_id, self.dataset_id, self.table_id)
+            logger.error("[ERROR] {}.".format(msg))
+            result['status'] = 'error'
+            result['message'] = msg + "--please contact the administrator."
 
-
-
-        return {}
+        return result
 
     # Get all the tables for this object's project ID
     def get_tables(self):

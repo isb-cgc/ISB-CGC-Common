@@ -2125,7 +2125,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False, query_str_only=False):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2189,7 +2189,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                   {base_clause}
                 )
             """
-
 
             if limit > 0:
                 limit_clause = ' LIMIT %s' % str(limit)
@@ -2315,7 +2314,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     metadata_table=program_data_table,
                     type_clause=type_clause,
                     filter_clause='')
-                first_program = False;
+                first_program = False
 
             if limit > 0:
                 limit_clause = ' LIMIT %s' % str(limit)
@@ -2495,10 +2494,11 @@ def export_file_list_to_bq(request, cohort_id=0):
 
     redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
 
+    status = 200
+    bq_result = None
+
     try:
-
         req_user = User.objects.get(id=request.user.id)
-
         dataset = None
         table = None
         bq_proj_id = None
@@ -2556,19 +2556,100 @@ def export_file_list_to_bq(request, cohort_id=0):
                 datetime.datetime.now().strftime("%Y%m%d_%H%M")
             )
 
-        build = escape(request.POST.get('build', 'HG19'))
+        build = escape(request.POST.get('build', 'HG19')).lower()
 
         if not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
 
         # Store file list to BigQuery
         bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
-        bq_result = bcs.export_file_list_query_to_bq(query, None, cohort_id)
 
+        query_string_base = """
+                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
+                  md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                  md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                  {cohort_id} as cohort_id, "{build}" as build, PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                 FROM `{metadata_table}` md
+                 JOIN (
+                     SELECT sample_barcode
+                     FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
+                     WHERE cohort_id = {cohort_id}
+                 ) cs
+                 ON cs.sample_barcode = md.sample_barcode
+                 WHERE md.file_uploaded {filter_clause}
+                 ORDER BY md.sample_barcode
+        """
+
+        filter_clause = ""
+        cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+        union_queries = []
+        inc_filters = json.loads(request.POST.get('filters', '{}'))
+        if len(inc_filters):
+            built_clause = build_where_clause(inc_filters, for_files=True)
+            filter_clause = 'AND ' + built_clause['query_str'].replace('%s',"'%s'") % built_clause['value_tuple']
+
+        date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        program_bq_tables = {
+            'TARGET': {
+                'dataset_id': 'metadata_export',
+                'table_id': 'target_metadata_data_'+build
+            },
+            'TCGA': {
+                'dataset_id': 'metadata_export',
+                'table_id': 'tcga_metadata_data_'+build
+            },
+            'CCLE': {
+                'dataset_id': 'metadata_export',
+                'table_id': 'ccle_metadata_data_'+build
+            }
+        }
+
+        for program in cohort_programs:
+            metadata_table = "{}.{}.{}".format(
+                "isb-cgc-test", program_bq_tables[program.name]['dataset_id'], program_bq_tables[program.name]['table_id'],
+            )
+
+            union_queries.append(
+                query_string_base.format(
+                    metadata_table=metadata_table,
+                    deployment_project=settings.BIGQUERY_PROJECT_NAME,
+                    deployment_dataset=settings.COHORT_DATASET_ID,
+                    deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
+                    filter_clause=filter_clause,
+                    cohort_id=cohort_id,
+                    date_added=date_added,
+                    build=build,
+                    tz=settings.TIME_ZONE
+                )
+            )
+
+        if len(union_queries) > 1:
+            query_string = ") UNION ALL (".join(union_queries)
+            query_string = '(' + query_string + ')'
+        query_string = '#standardSQL\n'+query_string
+
+        logger.debug("[STATUS] query to table export query: ")
+        logger.debug(query_string)
+
+        bq_result = bcs.export_file_list_query_to_bq(query_string, None, cohort_id)
+
+        # If BQ insertion fails, we warn the user
+        if bq_result['status'] == 'error':
+            status = 400
+            if not 'message' in bq_result:
+                bq_result['message'] = "We were unable to export cohort {}'s file list to BigQuery table {}:{}.{}--please contact the administrator.".format(
+                    str(cohort_id), bq_proj_id, dataset, table
+                )
+        else:
+            bq_result['message'] = "Cohort {}'s file list was successfully exported to table {}:{}.{} ({} rows).".format(
+                str(cohort_id), bq_proj_id, dataset, table, bq_result['message']
+            )
 
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
         logger.exception(e)
-        messages.error(request, "There was an error while trying to export your file list - please contact the administrator.")
+        status = 500
+        bq_result = {'status': 'error', 'message': "There was an error while trying to export your file list - please contact the administrator."}
 
-    return redirect(redirect_url)
+    return JsonResponse(bq_result, status=status)
