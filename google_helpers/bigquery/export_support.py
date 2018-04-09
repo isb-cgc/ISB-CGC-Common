@@ -19,10 +19,14 @@ limitations under the License.
 from copy import deepcopy
 import logging
 import datetime
+import time
 from django.conf import settings
+from uuid import uuid4
 from google_helpers.bigquery.service import get_bigquery_service
 from abstract import BigQueryExportABC
 from cohort_support import BigQuerySupport
+
+BQ_ATTEMPT_MAX = 10
 
 logger = logging.getLogger('main_logger')
 
@@ -156,7 +160,55 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         return response
 
     def _query_to_table(self, query, parameters):
-        bigquery_service = get_bigquery_service()
+        bq_service = get_bigquery_service()
+        job_id = str(uuid4())
+
+        query_data = {
+            'jobReference': {
+                'projectId': self.project_id,
+                'job_id': job_id
+            },
+            'configuration': {
+                'query': {
+                    'query': query,
+                    'priority': 'BATCH',
+                    'destinationTable': {
+                        'projectId': self.project_id,
+                        'datasetId': self.dataset_id,
+                        'tableId': self.table_id
+                    },
+                }
+            }
+        }
+
+        query_job = bq_service.jobs().insert(
+            projectId=settings.BQ_PROJECT_ID,
+            body=query_data).execute(num_retries=5)
+
+        job_is_done = bq_service.jobs().get(projectId=settings.BQ_PROJECT_ID, jobId=query_job['jobReference']['jobId']).execute()
+
+        retries = 0
+
+        while not job_is_done and retries < BQ_ATTEMPT_MAX:
+            retries += 1
+            sleep(2)
+            job_is_done = bq_service.jobs().get(projectId=settings.BQ_PROJECT_ID,
+                              jobId=query_job['jobReference']['jobId']).execute()
+
+        if job_is_done:
+            # Check the table
+            export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
+            if not export_table:
+                logger.error("[ERROR] Export table {}:{}.{} not found".format(self.project_id,self.dataset_id,self.table_id))
+            else:
+                logger.debug(str(export_table))
+                if export_table['numRows'] > 0:
+                    logger.info("[STATUS] Successfully exported query into BQ table {}:{}.{}".format(self.project_id,self.dataset_id,self.table_id))
+        else:
+            logger.error(
+                "[ERROR] Export of table {}:{}.{} did not complete in the time allowed".format(self.project_id, self.dataset_id, self.table_id))
+
+
 
         return {}
 

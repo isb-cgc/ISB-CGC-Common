@@ -1766,13 +1766,12 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
         # Get user accessed projects
         user_projects = Project.get_user_projects(request.user)
         cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
-        if len(cohort_sample_list):
+        if cohort_sample_list.count():
             messages.info(
                 request,
                 "File listing is not available for cohort samples that come from a user uploaded project. " +
                 "This functionality is currently being worked on and will become available in a future release."
             )
-
 
         return render(request, template, {'request': request,
                                             'cohort': cohort,
@@ -2126,7 +2125,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False, query_str_only=False):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2564,77 +2563,8 @@ def export_file_list_to_bq(request, cohort_id=0):
 
         # Store file list to BigQuery
         bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+        bq_result = bcs.export_file_list_query_to_bq(query, None, cohort_id)
 
-        # Allow 3m
-        time_alotted = 180
-        time_surpassed = False
-        start_time = time.time()
-        errors = False
-        found_none = False
-
-        total_expected = int(request.POST.get('total_expected', '0'))
-        items_exported = 0
-        block_size = 5000
-
-        # Exit criteria:
-        # - We found all we expected to find
-        # - We ran over the time limit
-        # - There was an insertion error
-        # - We stopped finding records
-        start_export = time.time()
-        while (items_exported < total_expected) and not time_surpassed and not errors and not found_none:
-
-            items = cohort_files(request=request, cohort_id=cohort_id, limit=block_size, offset=items_exported, build=build, files_only=True)
-
-            found_none = len(items['file_list']) <= 0
-
-            # If we found files, export them
-            if not found_none:
-                bq_result = bcs.export_file_list_to_bq(items['file_list'], cohort_id)
-            # otherwise, warn, because it means our count was too high for what we found
-            elif (items_exported < total_expected):
-                logger.warn("[WARNING] While exporting the file list for cohort {}, expected {} files but only found {}!".format(
-                    str(cohort_id),str(total_expected),str(items_exported)
-                ))
-                messages.warning(request,
-                    "While exporting your cohort's file list, we only found {} records but expected {}.".format(
-                        str(items_exported), str(total_expected)
-                ))
-
-            items_exported += len(items['file_list'])
-
-            # Warning if expected count was too low
-            if items_exported > total_expected:
-                logger.warn("[WARNING] While exporting the file list for cohort {}, expected {} files but found {}!".format(
-                    str(cohort_id),str(total_expected),str(items_exported)
-                ))
-                messages.warning(request,
-                    "While exporting your cohort's file list, we found {} records but only expected {}.".format(
-                        str(items_exported), str(total_expected)
-                ))
-
-            time_surpassed = bool((time.time()-start_time) > time_alotted)
-
-            # If BQ insertion fails, we warn the user
-            if 'insertErrors' in bq_result:
-                errors = True
-                err_msg = ''
-                if len(bq_result['insertErrors']) > 1:
-                    err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
-                else:
-                    err_msg = 'There was an insertion error '
-                messages.error(request,
-                               err_msg + ' when exporting your file list to BigQuery table {}. Creation of the BQ file list has failed.'.format(table))
-            elif 'tableErrors' in bq_result:
-                messages.error(request,bq_result['tableErrors'])
-
-        stop_export = time.time()
-        logger.info("[STATUS] Time to export {} rows: {}s".format(str(total_expected),str(stop_export-start_export)))
-        
-        if time_surpassed:
-            messages.error(request,"Timed out while attempting to export your file list - it may be too large!")
-        elif not errors:
-            messages.info(request, "Cohort {}'s file list was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
 
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
