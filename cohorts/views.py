@@ -1805,11 +1805,13 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         return HttpResponse(response_str, status=500)
 
     params = {}
+    do_filter_count = True
     if request.GET.get('page', None) is not None:
         page = int(request.GET.get('page'))
         offset = (page - 1) * 20
         params['page'] = page
         params['offset'] = offset
+        do_filter_count = False
     elif request.GET.get('offset', None) is not None:
         offset = int(request.GET.get('offset'))
         params['offset'] = offset
@@ -1819,21 +1821,19 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
     build = request.GET.get('build','HG19')
 
-    metadata_data_attr = fetch_build_data_attr(build)
-
     has_access = auth_dataset_whitelists_for_user(request.user.id)
 
-    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, **params)
+    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
-    for attr in result['metadata_data_counts']:
-        for val in result['metadata_data_counts'][attr]:
-            metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
-        metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
-                                              metadata_data_attr[attr]['values']]
-
-    del result['metadata_data_counts']
-
-    result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
+    if do_filter_count:
+        metadata_data_attr = fetch_build_data_attr(build)
+        for attr in result['metadata_data_counts']:
+            for val in result['metadata_data_counts'][attr]:
+                metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+            metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
+                                                  metadata_data_attr[attr]['values']]
+        del result['metadata_data_counts']
+        result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
 
     return JsonResponse(result, status=200)
 
@@ -2126,7 +2126,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False):
+def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, do_filter_count=True, files_only=False):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2330,12 +2330,13 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             stop = time.time()
             logger.info("[STATUS] Time to get file-list: {}s".format(str((stop - start) / 1000)))
 
-            limit_index = cursor._last_executed.rfind("LIMIT")
-            start = time.time()
-            counts = count_public_data_type(request.user, count_base_clause,
+            counts = {};
+            if do_filter_count:
+                start = time.time()
+                counts = count_public_data_type(request.user, count_base_clause,
                                             inc_filters, cohort_programs, (type is not None and type != 'all'), build)
-            stop = time.time()
-            logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
+                stop = time.time()
+                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
 
             if cursor.rowcount > 0:
                 for item in cursor.fetchall():
