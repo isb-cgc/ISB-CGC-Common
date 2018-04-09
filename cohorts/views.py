@@ -2477,7 +2477,7 @@ def export_file_list_to_gcs(request, cohort_id=0):
         if not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
 
-        # Store file list to BigQuery
+        # Store file list to GCS
         items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
 
     except Exception as e:

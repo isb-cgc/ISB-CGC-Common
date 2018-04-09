@@ -466,4 +466,4 @@ class BigQueryExportCohort(BigQueryExport):
                 desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""),
                                                   ", ".join([str(x) for x in cohorts]))
 
-        return self.export_to_bq(desc, self._build_rows(samples))
+        return self.export_rows_to_bq(desc, self._build_rows(samples))
