@@ -191,7 +191,7 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
         # Make our where clauses
         for filter in inc_filters:
             for prog in program_list:
-                if not validate_filter_key(filter, prog, build):
+                if not validate_filter_key(filter, prog.id, build):
                     raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
             filter_clauses[filter] = {'where_clause': None, 'parameters': None}
 
