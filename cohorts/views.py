@@ -2371,6 +2371,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             logger.info("[STATUS] Time to get file-list: {}s".format(str((stop - start) / 1000)))
 
             limit_index = cursor._last_executed.rfind("LIMIT")
+
             start = time.time()
             counts = count_public_data_type(request.user, count_base_clause,
                                             inc_filters, cohort_programs, (type is not None and type != 'all'), build)
@@ -2700,7 +2701,6 @@ def export_file_list_to_bq(request, cohort_id=0):
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
         logger.exception(e)
-        status = 500
-        bq_result = {'status': 'error', 'message': "There was an error while trying to export your file list - please contact the administrator."}
+        messages.error(request, "There was an error while trying to export your file list - please contact the administrator.")
 
-    return JsonResponse(bq_result, status=status)
+    return redirect(redirect_url)
