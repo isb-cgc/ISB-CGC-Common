@@ -2295,7 +2295,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
                   md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
- 
+
                  FROM {metadata_table} md
                  JOIN (
                      SELECT sample_barcode
@@ -2303,14 +2303,14 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.sample_barcode = md.sample_barcode
-                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}   
-                 ORDER BY md.sample_barcode         
+                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}
+                 ORDER BY md.sample_barcode
             """
 
             file_list_query = """
                 {base_clause}
                 {limit_clause}
-                {offset_clause}                
+                {offset_clause}
             """
 
             if type == 'igv':
@@ -2332,6 +2332,8 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
                 if len(program_data_tables) <= 0:
+                    filter_counts = {}
+                    # This program has no metadata_data table for this build, or at all--skip
                     progs_without_files.append(program.name)
                     continue
                 program_data_table = program_data_tables[0].data_table
@@ -2408,14 +2410,17 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     })
             filter_counts = counts
             files_counted = False
+
+            if not files_only:
             # Add to the file total
-            for attr in filter_counts:
-                if files_counted:
-                    continue
-                for val in filter_counts[attr]:
-                    if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                        total_file_count += int(filter_counts[attr][val])
-                files_counted = True
+                for attr in filter_counts:
+                    if files_counted:
+                        continue
+                    for val in filter_counts[attr]:
+                        if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                            total_file_count += int(filter_counts[attr][val])
+                    files_counted = True
+
         resp = {
             'total_file_count': total_file_count,
             'page': page,
@@ -2538,7 +2543,9 @@ def export_file_list_to_bq(request, cohort_id=0):
     bq_result = None
 
     try:
+
         req_user = User.objects.get(id=request.user.id)
+
         dataset = None
         table = None
         bq_proj_id = None
