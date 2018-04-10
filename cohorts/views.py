@@ -2374,12 +2374,24 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
             if not files_only:
                 start = time.time()
-                counts = count_public_data_type(request.user, count_base_clause,
-                                                inc_filters, cohort_programs, (type is not None and type != 'all'), build)
+                counts = count_public_data_types(request.user, cohort_id, program, inc_filters,(type is not None and type != 'all'), build)
                 stop = time.time()
-                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
-                filter_counts = counts
-                files_counted = False
+                logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str(stop-start)))
+
+                # Group up our program-speciic filter counts
+                # If this is our first program, just assign it to the result
+                if not filter_counts:
+                    filter_counts = counts
+                # Otherwise loop through and add in the new values
+                else:
+                    for attr in counts:
+                        if attr not in filter_counts:
+                            filter_counts[attr] = {}
+                        for val in counts[attr]:
+                            if val not in filter_counts[attr]:
+                                filter_counts[attr][val] = counts[attr][val]
+                            else:
+                                filter_counts[attr][val] += counts[attr][val]
             else:
                 filter_counts = {}
 
@@ -2414,7 +2426,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         'project_short_name': (item['project_short_name'] or 'N/A'),
                         'cohort_id': cohort_id
                     })
-
 
             if not files_only:
             # Add to the file total
