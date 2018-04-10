@@ -160,7 +160,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return response
 
-    def _query_to_table(self, query, parameters):
+    def _query_to_table(self, query, parameters, type):
         bq_service = get_bigquery_service()
         job_id = str(uuid4())
 
@@ -203,12 +203,12 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
-                msg = "Export of cohort file manifest to table {}:{}.{} was unsuccessful, reason: {}".format(
-                    self.project_id, self.dataset_id, self.table_id, job_is_done['status']['errors'][0]['message'])
+                msg = "Export of {} to table {}:{}.{} was unsuccessful, reason: {}".format(
+                    type, self.project_id, self.dataset_id, self.table_id, job_is_done['status']['errors'][0]['message'])
                 logger.error("[ERROR] {}".format(msg))
                 result['status'] = 'error'
-                result['message'] = "Unable to export cohort file manifest to table {}:{}.{}--please contact the administrator.".format(
-                    self.project_id, self.dataset_id, self.table_id)
+                result['message'] = "Unable to export {} to table {}:{}.{}--please contact the administrator.".format(
+                    type, self.project_id, self.dataset_id, self.table_id)
             else:
                 # Check the table
                 export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
@@ -220,15 +220,16 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     if 'errors' in bq_result:
                         logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
                     result['status'] = 'error'
-                    result['message'] = "Unable to export cohort file manifest to table {}:{}.{}--please contact the administrator.".format(
-                        self.project_id, self.dataset_id, self.table_id)
+                    result['message'] = "Unable to export {} to table {}:{}.{}--please contact the administrator.".format(
+                        type, self.project_id, self.dataset_id, self.table_id)
                 else:
                     if int(export_table['numRows']) > 0:
-                        logger.info("[STATUS] Successfully exported cohort file manifest into BQ table {}:{}.{}".format(self.project_id,self.dataset_id,self.table_id))
+                        logger.info("[STATUS] Successfully exported {} into BQ table {}:{}.{}".format(type, self.project_id,self.dataset_id,self.table_id))
                         result['status'] = 'success'
                         result['message'] = int(export_table['numRows'])
                     else:
-                        msg = "Table {}:{}.{} created, but no rows found. Cohort file manifest export may not have succeeded".format(
+                        msg = "Table {}:{}.{} created, but no rows found. Export of {} may not have succeeded".format(
+                            type,
                             self.project_id,
                             self.dataset_id,
                             self.table_id
@@ -357,14 +358,14 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             }
         return {}
 
-    def export_query_to_bq(self, desc, query, parameters):
+    def export_query_to_bq(self, desc, query, parameters, type):
         logger.info("[STATUS] Initiating BQ query to table")
         check_dataset_table = self._confirm_dataset_and_table(desc)
 
         if 'tableErrors' in check_dataset_table:
             return check_dataset_table
 
-        return self._query_to_table(query, parameters)
+        return self._query_to_table(query, parameters, type)
 
     # Export data to the BQ table referenced by project_id:dataset_id:table_id
     def export_rows_to_bq(self, desc, rows):
@@ -433,7 +434,7 @@ class BigQueryExportFileList(BigQueryExport):
         if not self._table_exists():
             desc = "BQ Export file list table from ISB-CGC cohort ID {}".format(str(cohort_id))
 
-        return self.export_query_to_bq(desc, query, parameters)
+        return self.export_query_to_bq(desc, query, parameters, "cohort file manifest")
 
 
 class BigQueryExportCohort(BigQueryExport):
@@ -466,4 +467,11 @@ class BigQueryExportCohort(BigQueryExport):
                 desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""),
                                                   ", ".join([str(x) for x in cohorts]))
 
-        return self.export_to_bq(desc, self._build_rows(samples))
+        return self.export_rows_to_bq(desc, self._build_rows(samples))
+
+    def export_cohort_query_to_bq(self, query, parameters, cohort_id):
+        desc = ""
+        if not self._table_exists():
+            desc = "BQ Export cohort table from ISB-CGC, cohort ID {}".format(str(cohort_id))
+
+        return self.export_query_to_bq(desc, query, parameters, "cohort")

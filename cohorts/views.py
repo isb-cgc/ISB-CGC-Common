@@ -134,51 +134,6 @@ def get_cohort_uuids(cohort_id):
 
     return result
 
-
-def get_cohort_samples_for_export(cohort_id):
-    if not cohort_id:
-        raise Exception("A cohort ID was not provided (value={}).".format("None" if cohort_id is None else str(cohort_id)))
-
-    cohort_progs = Cohort.objects.get(id=cohort_id).get_programs()
-
-    query_base = """
-        SELECT cs.sample_barcode, cs.case_barcode, CONCAT(pp.name,'-',ps.name), cs.cohort_id
-        FROM cohorts_samples cs
-        JOIN {} ms
-        ON ms.sample_barcode = cs.sample_barcode
-        JOIN projects_project ps
-        ON ps.id = cs.project_id
-        JOIN projects_program pp
-        ON pp.id = ps.program_id
-    """
-
-    result = []
-
-    db = None
-    cursor = None
-
-    try:
-        db = get_sql_connection()
-        cursor = db.cursor()
-
-        for prog in cohort_progs:
-            samples_table = Public_Metadata_Tables.objects.get(program=prog).samples_table
-
-            cursor.execute(query_base.format(samples_table) + " WHERE cs.cohort_id = %s;", (cohort_id,))
-
-            for row in cursor.fetchall():
-                result.append({'sample_barcode': row[0], 'case_barcode': row[1], 'project_short_name': row[2], 'cohort_id': row[3]})
-
-    except Exception as e:
-        logger.error("[ERROR] While fetching export information for a cohort:")
-        logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-    return result
-
-
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
 
     if program_id is None and cohort_id is None:
@@ -905,6 +860,9 @@ def remove_cohort_from_worksheet(request, workbook_id=0, worksheet_id=0, cohort_
 def export_cohort_to_bq(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
+    bq_result = None
+    status = '400'
+
     redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
     try:
         req_user = User.objects.get(id=request.user.id)
@@ -963,31 +921,105 @@ def export_cohort_to_bq(request, cohort_id=0):
             table = "isb_cgc_cohort_{}_{}_{}".format(cohort_id,re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),datetime.datetime.now().strftime("%Y%m%d_%H%M"))
 
         # Store cohort to BigQuery
-        samples = get_cohort_samples_for_export(cohort_id)
-        uuids = get_cohort_uuids(cohort_id)
-        bcs = BigQueryExportCohort(bq_proj_id, dataset, table, uuids)
-        bq_result = bcs.export_cohort_to_bq(samples)
+        bcs = BigQueryExportCohort(bq_proj_id, dataset, table)
 
-        # If BQ insertion fails, we warn the user
-        if 'insertErrors' in bq_result:
-            err_msg = ''
-            if len(bq_result['insertErrors']) > 1:
-                err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
-            else:
-                err_msg = 'There was an insertion error '
-            messages.error(request,
-                           err_msg + ' when exporting your cohort to BigQuery table {}. Creation of the BQ cohort has failed.'.format(table))
-        elif 'tableErrors' in bq_result:
-            messages.error(request,bq_result['tableErrors'])
+        query_string_base = """
+            SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_gdc_id as case_gdc_uuid, clin.project_short_name,
+              PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
+            FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
+            {biospec_clause}
+            JOIN `{deployment_project}.{metadata_dataset}.{clin_table}` clin
+            ON clin.case_barcode = cs.case_barcode
+            WHERE cs.cohort_id = {cohort_id} {filter_clause}
+        """
+
+        biospec_clause_base = """
+            JOIN `{deployment_project}.{metadata_dataset}.{biospec_table}` bios
+            ON bios.sample_barcode = cs.sample_barcode
+        """
+
+        filter_clause = ""
+        cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+        union_queries = []
+        inc_filters = json.loads(request.POST.get('filters', '{}'))
+        if len(inc_filters):
+            built_clause = build_where_clause(inc_filters, for_files=True)
+            filter_clause = 'AND ' + built_clause['query_str'].replace('%s',"'%s'") % built_clause['value_tuple']
+
+        date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        program_bq_tables = {
+            'TARGET': {
+                'dataset_id': 'TARGET_bioclin_v0',
+                'biospec': 'Biospecimen',
+                'clinical': 'Clinical'
+            },
+            'TCGA': {
+                'dataset_id': 'TCGA_bioclin_v0',
+                'biospec': 'Biospecimen',
+                'clinical': 'Clinical'
+            },
+            'CCLE': {
+                'dataset_id': 'CCLE_bioclin_v0',
+                'clinical': 'clinical_v0'
+            }
+        }
+
+        for program in cohort_programs:
+            biospec_clause = ""
+            if 'biospec' in program_bq_tables[program.name]:
+                biospec_clause = biospec_clause_base.format(
+                    deployment_project=settings.BIGQUERY_PROJECT_NAME,
+                    metadata_dataset=program_bq_tables[program.name]['dataset_id'],
+                    biospec_table=program_bq_tables[program.name]['biospec']
+                )
+
+            union_queries.append(
+                query_string_base.format(
+                    metadata_dataset=program_bq_tables[program.name]['dataset_id'],
+                    clin_table=program_bq_tables[program.name]['clinical'],
+                    deployment_project=settings.BIGQUERY_PROJECT_NAME,
+                    deployment_dataset=settings.COHORT_DATASET_ID,
+                    deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
+                    filter_clause=filter_clause,
+                    cohort_id=cohort_id,
+                    date_added=date_added,
+                    tz=settings.TIME_ZONE,
+                    biospec_clause=biospec_clause
+                )
+            )
+
+        query_string = ""
+
+        if len(union_queries) > 1:
+            query_string = ") UNION ALL (".join(union_queries)
+            query_string = '(' + query_string + ')'
         else:
-            messages.info(request, "Cohort {} was successfully exported to {}:{}:{}.".format(str(cohort_id),bq_proj_id,dataset,table))
+            query_string = union_queries[0]
+        query_string = '#standardSQL\n'+query_string
+
+        logger.debug("[STATUS] query to table export query: ")
+        logger.debug(query_string)
+
+        bq_result = bcs.export_cohort_query_to_bq(query_string, None, cohort_id)
+
+        if bq_result['status'] == 'error':
+            status='400'
+            if not 'message' in bq_result:
+                bq_result['message'] = "We were unable to export cohort {} to BigQuery table {}:{}.{}--please contact the administrator.".format(
+                    str(cohort_id), bq_proj_id, dataset, table
+                )
+        else:
+            status='200'
+            bq_result['message'] = "Cohort {} was successfully exported to {}:{}:{} ({} rows).".format(str(cohort_id),bq_proj_id,dataset,table,bq_result['message'])
 
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {} to BQ:".format(str(cohort_id)))
         logger.exception(e)
-        messages.error(request, "There was an error while trying to export your cohort - please contact the administrator.")
+        status='500'
+        bq_result['message'] = "There was an error while trying to export your cohort - please contact the administrator."
 
-    return redirect(redirect_url)
+    return JsonResponse(bq_result,status=status)
 
 
 @login_required
@@ -2477,7 +2509,7 @@ def export_file_list_to_gcs(request, cohort_id=0):
         if not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
 
-        # Store file list to BigQuery
+        # Store file list to GCS
         items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
 
     except Exception as e:
@@ -2624,9 +2656,13 @@ def export_file_list_to_bq(request, cohort_id=0):
                 )
             )
 
+        query_string = ""
+
         if len(union_queries) > 1:
             query_string = ") UNION ALL (".join(union_queries)
             query_string = '(' + query_string + ')'
+        else:
+            query_string = union_queries[0]
         query_string = '#standardSQL\n'+query_string
 
         logger.debug("[STATUS] query to table export query: ")
