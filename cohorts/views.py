@@ -1968,7 +1968,7 @@ def streaming_csv_view(request, cohort_id=0):
             return response
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the list of files for user {}:".format(request.user.id))
+        logger.error("[ERROR] While downloading the list of files for user {}:".format(str(request.user.id)))
         logger.exception(e)
         messages.error("There was an error while attempting to download your filelist--please contact the administrator.")
 
