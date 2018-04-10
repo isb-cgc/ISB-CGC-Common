@@ -2366,34 +2366,18 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             query = file_list_query.format(base_clause=base_clause, limit_clause=limit_clause,
                         offset_clause=offset_clause)
             logger.debug("[STATUS] Query for file listing: {}".format(query))
-            cursor.execute(query,params);
+            cursor.execute(query, params);
             stop = time.time()
-            logger.info("[STATUS] Time to get file-list: {}s".format(str((stop - start) / 1000)))
-
-            limit_index = cursor._last_executed.rfind("LIMIT")
+            logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
             if not files_only:
                 start = time.time()
-                counts = count_public_data_types(request.user, cohort_id, program, inc_filters,(type is not None and type != 'all'), build)
+                filter_counts = count_public_data_types(
+                    request.user, count_base_clause, inc_filters, cohort_programs,
+                    (type is not None and type != 'all'), build
+                )
                 stop = time.time()
-                logger.info("[STATUS] Time to count public data files for program {}: {}s".format(program.name, str(stop-start)))
-
-                # Group up our program-speciic filter counts
-                # If this is our first program, just assign it to the result
-                if not filter_counts:
-                    filter_counts = counts
-                # Otherwise loop through and add in the new values
-                else:
-                    for attr in counts:
-                        if attr not in filter_counts:
-                            filter_counts[attr] = {}
-                        for val in counts[attr]:
-                            if val not in filter_counts[attr]:
-                                filter_counts[attr][val] = counts[attr][val]
-                            else:
-                                filter_counts[attr][val] += counts[attr][val]
-            else:
-                filter_counts = {}
+                logger.info("[STATUS] Time to count public data files: {}s".format(str(stop-start)))
 
             if cursor.rowcount > 0:
                 for item in cursor.fetchall():
@@ -2428,14 +2412,11 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     })
 
             if not files_only:
-            # Add to the file total
+                # Add up the file total
                 for attr in filter_counts:
-                    if files_counted:
-                        continue
                     for val in filter_counts[attr]:
-                        if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                        if attr not in inc_filters or val in inc_filters[attr]:
                             total_file_count += int(filter_counts[attr][val])
-                    files_counted = True
 
         resp = {
             'total_file_count': total_file_count,
@@ -2559,9 +2540,7 @@ def export_file_list_to_bq(request, cohort_id=0):
     bq_result = None
 
     try:
-
         req_user = User.objects.get(id=request.user.id)
-
         dataset = None
         table = None
         bq_proj_id = None
@@ -2716,6 +2695,7 @@ def export_file_list_to_bq(request, cohort_id=0):
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
         logger.exception(e)
-        messages.error(request, "There was an error while trying to export your file list - please contact the administrator.")
+        status = 500
+        bq_result = {'status': 'error', 'message': "There was an error while trying to export your file list - please contact the administrator."}
 
-    return redirect(redirect_url)
+    return JsonResponse(bq_result, status=status)
