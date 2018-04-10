@@ -1889,6 +1889,11 @@ def streaming_csv_view(request, cohort_id=0):
     try:
         cohort = Cohort.objects.get(id=cohort_id)
         total_expected = int(request.GET.get('total'))
+
+        if total_expected == 0:
+            logger.warn("[ERROR] Didn't receive a total--using MAX_FILE_LIST_ENTRIES.")
+            total_expected = MAX_FILE_LIST_ENTRIES
+
         limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
         file_list = None
