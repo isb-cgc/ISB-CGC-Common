@@ -2361,8 +2361,10 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     offset_clause = ' OFFSET %s' % str(offset)
 
             start = time.time()
-            cursor.execute(file_list_query.format(base_clause=base_clause, limit_clause=limit_clause,
-                        offset_clause=offset_clause),params);
+            query = file_list_query.format(base_clause=base_clause, limit_clause=limit_clause,
+                        offset_clause=offset_clause)
+            logger.debug("[STATUS] Query for file listing: {}".format(query))
+            cursor.execute(query,params);
             stop = time.time()
             logger.info("[STATUS] Time to get file-list: {}s".format(str((stop - start) / 1000)))
 
