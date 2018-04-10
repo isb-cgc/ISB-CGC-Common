@@ -1920,7 +1920,12 @@ def streaming_csv_view(request, cohort_id=0):
 
     try:
         cohort = Cohort.objects.get(id=cohort_id)
-        total_expected = int(request.GET.get('total'))
+        total_expected = int(request.GET.get('total', '0'))
+
+        if total_expected == 0:
+            logger.warn("[ERROR] Didn't receive a total--using MAX_FILE_LIST_ENTRIES.")
+            total_expected = MAX_FILE_LIST_ENTRIES
+
         limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
         file_list = None
@@ -1963,8 +1968,9 @@ def streaming_csv_view(request, cohort_id=0):
             return response
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the list of files:")
+        logger.error("[ERROR] While downloading the list of files for user {}:".format(request.user.id))
         logger.exception(e)
+        messages.error("There was an error while attempting to download your filelist--please contact the administrator.")
 
     return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
