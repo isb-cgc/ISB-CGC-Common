@@ -2332,7 +2332,6 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
                 if len(program_data_tables) <= 0:
-                    filter_counts = {}
                     # This program has no metadata_data table for this build, or at all--skip
                     progs_without_files.append(program.name)
                     continue
