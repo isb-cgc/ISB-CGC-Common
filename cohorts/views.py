@@ -1920,7 +1920,12 @@ def streaming_csv_view(request, cohort_id=0):
 
     try:
         cohort = Cohort.objects.get(id=cohort_id)
-        total_expected = int(request.GET.get('total'))
+        total_expected = int(request.GET.get('total', '0'))
+
+        if total_expected == 0:
+            logger.warn("[ERROR] Didn't receive a total--using MAX_FILE_LIST_ENTRIES.")
+            total_expected = MAX_FILE_LIST_ENTRIES
+
         limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
         file_list = None
@@ -1963,8 +1968,9 @@ def streaming_csv_view(request, cohort_id=0):
             return response
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the list of files:")
+        logger.error("[ERROR] While downloading the list of files for user {}:".format(request.user.id))
         logger.exception(e)
+        messages.error("There was an error while attempting to download your filelist--please contact the administrator.")
 
     return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
@@ -2289,7 +2295,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
                   md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
- 
+
                  FROM {metadata_table} md
                  JOIN (
                      SELECT sample_barcode
@@ -2297,14 +2303,14 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.sample_barcode = md.sample_barcode
-                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}   
-                 ORDER BY md.sample_barcode         
+                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}
+                 ORDER BY md.sample_barcode
             """
 
             file_list_query = """
                 {base_clause}
                 {limit_clause}
-                {offset_clause}                
+                {offset_clause}
             """
 
             if type == 'igv':
@@ -2326,6 +2332,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
                 if len(program_data_tables) <= 0:
+                    # This program has no metadata_data table for this build, or at all--skip
                     progs_without_files.append(program.name)
                     continue
                 program_data_table = program_data_tables[0].data_table
@@ -2355,17 +2362,21 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                     offset_clause = ' OFFSET %s' % str(offset)
 
             start = time.time()
-            cursor.execute(file_list_query.format(base_clause=base_clause, limit_clause=limit_clause,
-                        offset_clause=offset_clause),params);
+            query = file_list_query.format(base_clause=base_clause, limit_clause=limit_clause,
+                        offset_clause=offset_clause)
+            logger.debug("[STATUS] Query for file listing: {}".format(query))
+            cursor.execute(query, params);
             stop = time.time()
-            logger.info("[STATUS] Time to get file-list: {}s".format(str((stop - start) / 1000)))
+            logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
-            limit_index = cursor._last_executed.rfind("LIMIT")
-            start = time.time()
-            counts = count_public_data_type(request.user, count_base_clause,
-                                            inc_filters, cohort_programs, (type is not None and type != 'all'), build)
-            stop = time.time()
-            logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
+            if not files_only:
+                start = time.time()
+                filter_counts = count_public_data_types(
+                    request.user, count_base_clause, inc_filters, cohort_programs,
+                    (type is not None and type != 'all'), build
+                )
+                stop = time.time()
+                logger.info("[STATUS] Time to count public data files: {}s".format(str(stop-start)))
 
             if cursor.rowcount > 0:
                 for item in cursor.fetchall():
@@ -2398,16 +2409,14 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         'project_short_name': (item['project_short_name'] or 'N/A'),
                         'cohort_id': cohort_id
                     })
-            filter_counts = counts
-            files_counted = False
-            # Add to the file total
-            for attr in filter_counts:
-                if files_counted:
-                    continue
-                for val in filter_counts[attr]:
-                    if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                        total_file_count += int(filter_counts[attr][val])
-                files_counted = True
+
+            if not files_only:
+                # Add up the file total
+                for attr in filter_counts:
+                    for val in filter_counts[attr]:
+                        if attr not in inc_filters or val in inc_filters[attr]:
+                            total_file_count += int(filter_counts[attr][val])
+
         resp = {
             'total_file_count': total_file_count,
             'page': page,

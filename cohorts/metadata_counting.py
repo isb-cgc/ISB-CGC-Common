@@ -165,7 +165,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19'):
+def count_public_data_types(user, data_query, inc_filters, program_list, filter_format=False, build='HG19'):
 
     db = None
     cursor = None
