@@ -2372,11 +2372,16 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
 
             limit_index = cursor._last_executed.rfind("LIMIT")
 
-            start = time.time()
-            counts = count_public_data_type(request.user, count_base_clause,
-                                            inc_filters, cohort_programs, (type is not None and type != 'all'), build)
-            stop = time.time()
-            logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
+            if not files_only:
+                start = time.time()
+                counts = count_public_data_type(request.user, count_base_clause,
+                                                inc_filters, cohort_programs, (type is not None and type != 'all'), build)
+                stop = time.time()
+                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
+                filter_counts = counts
+                files_counted = False
+            else:
+                filter_counts = {}
 
             if cursor.rowcount > 0:
                 for item in cursor.fetchall():
@@ -2409,8 +2414,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         'project_short_name': (item['project_short_name'] or 'N/A'),
                         'cohort_id': cohort_id
                     })
-            filter_counts = counts
-            files_counted = False
+
 
             if not files_only:
             # Add to the file total
