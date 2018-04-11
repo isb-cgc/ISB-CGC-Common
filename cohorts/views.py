@@ -1836,35 +1836,39 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         return HttpResponse(response_str, status=500)
 
     params = {}
-    if request.GET.get('page', None) is not None:
-        page = int(request.GET.get('page'))
-        offset = (page - 1) * 20
-        params['page'] = page
-        params['offset'] = offset
-    elif request.GET.get('offset', None) is not None:
-        offset = int(request.GET.get('offset'))
-        params['offset'] = offset
-    if request.GET.get('limit', None) is not None:
+    do_filter_count = True
+    if request.GET.get('files_per_page', None) is not None:
+        files_per_page = int(request.GET.get('files_per_page'))
+        params['limit'] = files_per_page
+        if request.GET.get('page', None) is not None:
+            do_filter_count = False
+            page = int(request.GET.get('page'))
+            params['page'] = page
+            offset = (page - 1) * files_per_page
+            params['offset'] = offset
+    elif request.GET.get('limit', None) is not None:
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
 
-    build = request.GET.get('build','HG19')
+    if request.GET.get('offset', None) is not None:
+        offset = int(request.GET.get('offset'))
+        params['offset'] = offset
 
-    metadata_data_attr = fetch_build_data_attr(build)
+    build = request.GET.get('build','HG19')
 
     has_access = auth_dataset_whitelists_for_user(request.user.id)
 
-    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, **params)
+    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
-    for attr in result['metadata_data_counts']:
-        for val in result['metadata_data_counts'][attr]:
-            metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
-        metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
-                                              metadata_data_attr[attr]['values']]
-
-    del result['metadata_data_counts']
-
-    result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
+    if do_filter_count:
+        metadata_data_attr = fetch_build_data_attr(build)
+        for attr in result['metadata_data_counts']:
+            for val in result['metadata_data_counts'][attr]:
+                metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+            metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
+                                                  metadata_data_attr[attr]['values']]
+        del result['metadata_data_counts']
+        result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
 
     return JsonResponse(result, status=200)
 
@@ -2163,7 +2167,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, files_only=False):
+def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', access=None, type=None, do_filter_count=True):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2295,7 +2299,7 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
                   md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
-
+ 
                  FROM {metadata_table} md
                  JOIN (
                      SELECT sample_barcode
@@ -2303,14 +2307,14 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.sample_barcode = md.sample_barcode
-                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}
-                 ORDER BY md.sample_barcode
+                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}   
+                 ORDER BY md.sample_barcode         
             """
 
             file_list_query = """
                 {base_clause}
                 {limit_clause}
-                {offset_clause}
+                {offset_clause}                
             """
 
             if type == 'igv':
@@ -2369,14 +2373,13 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
             stop = time.time()
             logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
-            if not files_only:
+            counts = {};
+            if do_filter_count:
                 start = time.time()
-                filter_counts = count_public_data_types(
-                    request.user, count_base_clause, inc_filters, cohort_programs,
-                    (type is not None and type != 'all'), build
-                )
+                counts = count_public_data_type(request.user, count_base_clause,
+                                            inc_filters, cohort_programs, (type is not None and type != 'all'), build)
                 stop = time.time()
-                logger.info("[STATUS] Time to count public data files: {}s".format(str(stop-start)))
+                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
 
             if cursor.rowcount > 0:
                 for item in cursor.fetchall():
@@ -2409,14 +2412,17 @@ def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', a
                         'project_short_name': (item['project_short_name'] or 'N/A'),
                         'cohort_id': cohort_id
                     })
-
-            if not files_only:
-                # Add up the file total
+            filter_counts = counts
+            files_counted = False
+            # Add to the file total
+            if do_filter_count:
                 for attr in filter_counts:
+                    if files_counted:
+                        continue
                     for val in filter_counts[attr]:
-                        if attr not in inc_filters or val in inc_filters[attr]:
+                        if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
                             total_file_count += int(filter_counts[attr][val])
-
+                    files_counted = True
         resp = {
             'total_file_count': total_file_count,
             'page': page,
