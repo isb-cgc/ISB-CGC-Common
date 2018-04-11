@@ -608,6 +608,15 @@ def format_for_display(item):
     return formatted_item
 
 
+# Builds a BQ API v2 QueryParameter set and WHERE clause string from a set of filters of the form:
+# {
+#     'field_name': [<value>,...]
+# }
+# Breaks out '<ATTR> IS NULL'
+# 2+ values are converted to IN (<value>,...)
+# Filters must already be pre-bucketed or formatted
+# TODO: add support for BETWEEN
+# TODO: add support for <>=
 def build_bq_filter_and_params(filters):
     result = {
         'filter_string': '',
