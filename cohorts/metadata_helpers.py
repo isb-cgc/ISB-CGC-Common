@@ -608,6 +608,51 @@ def format_for_display(item):
     return formatted_item
 
 
+def build_bq_filter_and_params(filters):
+    result = {
+        'filter_string': '',
+        'parameters': []
+    }
+
+    filter_set = []
+
+    for attr, values in filters.items():
+        filter_string = ''
+        query_param = {
+            'name': attr,
+            'parameterType': {
+
+            },
+            'parameterValue': {
+
+            }
+        }
+        if 'None' in values:
+            values.remove('None')
+            filter_string = "{} IS NULL".format(attr)
+
+        if len(values) > 0:
+            if len(filter_string):
+                filter_string += " OR "
+            if len(values) == 1:
+                # Scalar param
+                query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.]', re.UNICODE).search(values[0]) else 'INT64')
+                query_param['parameterValue']['value'] = values[0]
+                filter_string += "{} = @{}".format(attr, attr)
+            else:
+                # Array param
+                query_param['parameterType']['type'] = "ARRAY"
+                query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
+                query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(ur'[^0-9\.]', re.UNICODE).search(values[0]) else 'INT64')}
+                filter_string += "{} IN UNNEST(@{})".format(attr,attr)
+                filter_set.append('({})'.format(filter_string))
+
+        result['parameters'].append(query_param)
+
+    result['filter_string'] = " AND ".join(filter_set)
+
+    return result
+
 # Construct WHERE clauses for BigQuery and CloudSQL based on a set of filters
 # If the names of the columns differ across the 2 platforms, the alt_key_map can be
 # used to map a filter 'key' to a different column name

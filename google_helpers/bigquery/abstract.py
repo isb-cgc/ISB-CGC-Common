@@ -31,7 +31,7 @@ class BigQueryABC:
         pass
 
     @abstractmethod
-    def _query_to_table(self, query, parameters):
+    def _query_to_table(self, query, parameters, export_type, disposition):
         pass
 
 # Abstract Base Class extension which adds in Export-specific methods and table schema property
