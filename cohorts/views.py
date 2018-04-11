@@ -2167,7 +2167,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', access=None, type=None, do_filter_count=True, files_only=False):
+def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', access=None, type=None, do_filter_count=True):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2379,7 +2379,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
                 counts = count_public_data_type(request.user, count_base_clause,
                                             inc_filters, cohort_programs, (type is not None and type != 'all'), build)
                 stop = time.time()
-                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start)/1000)))
+                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
 
             if cursor.rowcount > 0:
                 for item in cursor.fetchall():
@@ -2415,13 +2415,14 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
             filter_counts = counts
             files_counted = False
             # Add to the file total
-            for attr in filter_counts:
-                if files_counted:
-                    continue
-                for val in filter_counts[attr]:
-                    if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                        total_file_count += int(filter_counts[attr][val])
-                files_counted = True
+            if do_filter_count:
+                for attr in filter_counts:
+                    if files_counted:
+                        continue
+                    for val in filter_counts[attr]:
+                        if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                            total_file_count += int(filter_counts[attr][val])
+                    files_counted = True
         resp = {
             'total_file_count': total_file_count,
             'page': page,
