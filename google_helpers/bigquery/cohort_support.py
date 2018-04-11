@@ -16,13 +16,9 @@ limitations under the License.
 
 """
 
-from copy import deepcopy
-import sys
 import logging
-import datetime
 from django.conf import settings
-from google_helpers.bigquery.service import get_bigquery_service
-from abstract import BigQueryABC
+from bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
@@ -38,50 +34,6 @@ COHORT_TABLES = {
     'prod': 'prod_cohorts',
     'staging': 'staging_cohorts'
 }
-
-
-class BigQuerySupport(BigQueryABC):
-
-    def __init__(self, project_id, dataset_id, table_id):
-        self.project_id = project_id
-        self.dataset_id = dataset_id
-        self.table_id = table_id
-
-    def _build_request_body_from_rows(self, rows):
-        insertable_rows = []
-        for row in rows:
-            insertable_rows.append({
-                'json': row
-            })
-
-        return {
-            "rows": insertable_rows
-        }
-
-    def _streaming_insert(self, rows):
-        bigquery_service = get_bigquery_service()
-        table_data = bigquery_service.tabledata()
-
-        index = 0
-        next = 0
-
-        while index < len(rows) and next is not None:
-            next = MAX_INSERT+index
-            body = None
-            if next > len(rows):
-                next = None
-                body = self._build_request_body_from_rows(rows[index:])
-            else:
-                body = self._build_request_body_from_rows(rows[index:next])
-
-            response = table_data.insertAll(projectId=self.project_id,
-                                            datasetId=self.dataset_id,
-                                            tableId=self.table_id,
-                                            body=body).execute()
-            index = next
-
-        return response
-
 
 class BigQueryCohortSupport(BigQuerySupport):
 

@@ -18,9 +18,14 @@ limitations under the License.
 
 from abc import ABCMeta, abstractmethod
 
-# Base Abstract class which defines the 3 main methods and properties used to place rows into BQ
+
+# Base Abstract class which defines the shared methods and properties for interaction with BigQuery
 class BigQueryABC:
     __metaclass__ = ABCMeta
+
+    @abstractmethod
+    def __init__(self):
+        pass
 
     @abstractmethod
     def _streaming_insert(self, rows):
@@ -29,9 +34,6 @@ class BigQueryABC:
     @abstractmethod
     def _build_request_body_from_rows(self, rows):
         pass
-
-# Abstract Base Class extension which adds in Export-specific methods and table schema property
-class BigQueryExportABC(BigQueryABC):
 
     @abstractmethod
     def _confirm_table_schema(self):
@@ -57,16 +59,12 @@ class BigQueryExportABC(BigQueryABC):
     def _confirm_dataset_and_table(self, desc):
         pass
 
+
+# Abstract Base Class extension which adds in Export-specific methods and table schema property
+class BigQueryExportABC(BigQueryABC):
+
     @abstractmethod
     def _build_rows(self, data):
-        pass
-
-    @abstractmethod
-    def get_tables(self):
-        pass
-
-    @abstractmethod
-    def get_schema(self):
         pass
 
     @abstractmethod
@@ -79,6 +77,10 @@ class BigQueryExportABC(BigQueryABC):
 
     @abstractmethod
     def _query_to_table(self, query, parameters, export_type, disposition):
+        pass
+
+    @abstractmethod
+    def _table_to_gcs(self, file_format, export_type):
         pass
 
 

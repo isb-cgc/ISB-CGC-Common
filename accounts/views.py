@@ -30,7 +30,7 @@ from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
-from google_helpers.bigquery.export_support import BigQueryExport
+from google_helpers.bigquery.bq_support import BigQuerySupport
 from googleapiclient.errors import HttpError
 from models import *
 from projects.models import User_Data_Tables
@@ -635,7 +635,7 @@ def get_user_datasets(request,user_id):
                     'datasets': {},
                     'name': gcp.project_id
                 }
-                bqs = BigQueryExport(gcp.project_id, None, None, None)
+                bqs = BigQuerySupport(gcp.project_id, None, None, None)
                 bq_tables = bqs.get_tables()
                 for table in bq_tables:
                     if table['dataset'] in bqds:
@@ -651,7 +651,7 @@ def get_user_datasets(request,user_id):
                 result = {
                     'status': 'error',
                     'msg': "No registered BigQuery datasets were found in your Google Cloud Projects. Please register "
-                        + "at least  one dataset in one of your projects before attempting to export your cohort."
+                        + "at least one dataset in one of your projects before attempting to export your cohort."
                 }
                 logger.info(
                     "[STATUS] No registered datasets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
