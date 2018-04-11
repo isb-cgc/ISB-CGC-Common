@@ -2631,9 +2631,11 @@ def export_file_list_to_bq(request, cohort_id=0):
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
         union_queries = []
         inc_filters = json.loads(request.POST.get('filters', '{}'))
+        filter_params = None
         if len(inc_filters):
-            built_clause = build_where_clause(inc_filters, for_files=True)
-            filter_clause = 'AND ' + built_clause['query_str'].replace('%s',"'%s'") % built_clause['value_tuple']
+            filter_and_params = build_bq_filter_and_params(inc_filters)
+            filter_params = filter_and_params['parameters']
+            filter_clause="AND {}".format(filter_and_params['filter_string'])
 
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -2680,10 +2682,7 @@ def export_file_list_to_bq(request, cohort_id=0):
             query_string = union_queries[0]
         query_string = '#standardSQL\n'+query_string
 
-        logger.debug("[STATUS] query to table export query: ")
-        logger.debug(query_string)
-
-        bq_result = bcs.export_file_list_query_to_bq(query_string, None, cohort_id)
+        bq_result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
 
         # If BQ insertion fails, we warn the user
         if bq_result['status'] == 'error':

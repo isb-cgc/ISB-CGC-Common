@@ -30,10 +30,6 @@ class BigQueryABC:
     def _build_request_body_from_rows(self, rows):
         pass
 
-    @abstractmethod
-    def _query_to_table(self, query, parameters):
-        pass
-
 # Abstract Base Class extension which adds in Export-specific methods and table schema property
 class BigQueryExportABC(BigQueryABC):
 
@@ -79,6 +75,10 @@ class BigQueryExportABC(BigQueryABC):
 
     @abstractmethod
     def export_query_to_bq(self, desc, rows):
+        pass
+
+    @abstractmethod
+    def _query_to_table(self, query, parameters, export_type, disposition):
         pass
 
 
