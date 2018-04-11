@@ -1837,18 +1837,22 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
     params = {}
     do_filter_count = True
-    if request.GET.get('page', None) is not None:
-        page = int(request.GET.get('page'))
-        offset = (page - 1) * 20
-        params['page'] = page
-        params['offset'] = offset
-        do_filter_count = False
-    elif request.GET.get('offset', None) is not None:
-        offset = int(request.GET.get('offset'))
-        params['offset'] = offset
-    if request.GET.get('limit', None) is not None:
+    if request.GET.get('files_per_page', None) is not None:
+        files_per_page = int(request.GET.get('files_per_page'))
+        params['limit'] = files_per_page
+        if request.GET.get('page', None) is not None:
+            do_filter_count = False
+            page = int(request.GET.get('page'))
+            params['page'] = page
+            offset = (page - 1) * files_per_page
+            params['offset'] = offset
+    elif request.GET.get('limit', None) is not None:
         limit = int(request.GET.get('limit'))
         params['limit'] = limit
+
+    if request.GET.get('offset', None) is not None:
+        offset = int(request.GET.get('offset'))
+        params['offset'] = offset
 
     build = request.GET.get('build','HG19')
 
@@ -2163,7 +2167,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=20, page=1, offset=0, build='HG38', access=None, type=None, do_filter_count=True, files_only=False):
+def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', access=None, type=None, do_filter_count=True, files_only=False):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
