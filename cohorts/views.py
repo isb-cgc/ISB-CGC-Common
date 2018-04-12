@@ -1281,7 +1281,7 @@ def share_cohort(request, cohort_id=0):
 
             already_shared = {}
             newly_shared = {}
-
+            owner_cohort_names = []
             for user in users:
                 for cohort in cohorts:
                     # Check to make sure this user has authority to grant sharing permission
@@ -1295,12 +1295,14 @@ def share_cohort(request, cohort_id=0):
                     try:
                         check = Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.READER)
                     except ObjectDoesNotExist:
-                        obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-                        obj.save()
-                        if cohort.id not in newly_shared:
-                            newly_shared[cohort.id] = []
-                        newly_shared[cohort.id].append(user.email)
-
+                        if user.email != req_user.email:
+                            obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+                            obj.save()
+                            if cohort.id not in newly_shared:
+                                newly_shared[cohort.id] = []
+                            newly_shared[cohort.id].append(user.email)
+                        else:
+                            owner_cohort_names.append(cohort.name)
                     if check:
                         if cohort.id not in already_shared:
                             already_shared[cohort.id] = []
@@ -1309,6 +1311,7 @@ def share_cohort(request, cohort_id=0):
             status = 'success'
             success_msg = ""
             note = ""
+
             if len(newly_shared.keys()):
                 user_set = set([y for x in newly_shared for y in newly_shared[x]])
                 success_msg = ('Cohort ID {} has'.format(str(newly_shared.keys()[0])) if len(newly_shared.keys()) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in newly_shared.keys()]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
@@ -1316,6 +1319,9 @@ def share_cohort(request, cohort_id=0):
             if len(already_shared):
                 user_set = set([y for x in already_shared for y in already_shared[x]])
                 note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in already_shared.keys()])) if len(already_shared.keys()) > 1 else "Cohort ID {} was".format(str(already_shared.keys()[0]))), "; ".join(user_set))
+
+            if len(owner_cohort_names):
+                note = "NOTE: User {} is the owner of cohort(s) [{}] and cannot be added to the share email list.".format(req_user.email, ", ".join(owner_cohort_names))
 
             if not len(success_msg):
                 success_msg = note
@@ -2308,7 +2314,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
                  ) cs
                  ON cs.sample_barcode = md.sample_barcode
                  WHERE md.file_uploaded='true' {type_clause} {filter_clause}   
-                 ORDER BY md.sample_barcode         
+                 ORDER BY md.case_barcode         
             """
 
             file_list_query = """
