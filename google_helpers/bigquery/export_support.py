@@ -160,7 +160,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return response
 
-    def _query_to_table(self, query, parameters, type):
+    def _query_to_table(self, query, parameters, export_type, write_disp):
         bq_service = get_bigquery_service()
         job_id = str(uuid4())
 
@@ -178,9 +178,13 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         'datasetId': self.dataset_id,
                         'tableId': self.table_id
                     },
+                    'writeDisposition': write_disp
                 }
             }
         }
+
+        if parameters:
+            query_data['configuration']['query']['queryParameters'] = parameters
 
         query_job = bq_service.jobs().insert(
             projectId=settings.BIGQUERY_PROJECT_NAME,
@@ -204,11 +208,11 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
                 msg = "Export of {} to table {}:{}.{} was unsuccessful, reason: {}".format(
-                    type, self.project_id, self.dataset_id, self.table_id, job_is_done['status']['errors'][0]['message'])
+                    export_type, self.project_id, self.dataset_id, self.table_id, job_is_done['status']['errors'][0]['message'])
                 logger.error("[ERROR] {}".format(msg))
                 result['status'] = 'error'
                 result['message'] = "Unable to export {} to table {}:{}.{}--please contact the administrator.".format(
-                    type, self.project_id, self.dataset_id, self.table_id)
+                    export_type, self.project_id, self.dataset_id, self.table_id)
             else:
                 # Check the table
                 export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
@@ -221,15 +225,15 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
                     result['status'] = 'error'
                     result['message'] = "Unable to export {} to table {}:{}.{}--please contact the administrator.".format(
-                        type, self.project_id, self.dataset_id, self.table_id)
+                        export_type, self.project_id, self.dataset_id, self.table_id)
                 else:
                     if int(export_table['numRows']) > 0:
-                        logger.info("[STATUS] Successfully exported {} into BQ table {}:{}.{}".format(type, self.project_id,self.dataset_id,self.table_id))
+                        logger.info("[STATUS] Successfully exported {} into BQ table {}:{}.{}".format(export_type, self.project_id,self.dataset_id,self.table_id))
                         result['status'] = 'success'
                         result['message'] = int(export_table['numRows'])
                     else:
                         msg = "Table {}:{}.{} created, but no rows found. Export of {} may not have succeeded".format(
-                            type,
+                            export_type,
                             self.project_id,
                             self.dataset_id,
                             self.table_id
@@ -351,21 +355,29 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     'tableErrors': "Unable to create table {} in project {} and dataset {} - please double-check your project's permissions for the ISB-CGC service account.".format(
                         self.table_id, self.project_id, self.dataset_id)
                 }
+            return {
+                'status': 'TABLE_MADE'
+            }
         elif not self._confirm_table_schema():
             return {
                 'tableErrors': "The table schema of {} does not match the required schema for cohort export. Please make a new table, or adjust this table's schema.".format(
                     self.table_id)
             }
-        return {}
+        else:
+            return {
+                'status': 'TABLE_EXISTS'
+            }
 
     def export_query_to_bq(self, desc, query, parameters, type):
-        logger.info("[STATUS] Initiating BQ query to table")
         check_dataset_table = self._confirm_dataset_and_table(desc)
+        write_disp = 'WRITE_EMPTY'
 
         if 'tableErrors' in check_dataset_table:
             return check_dataset_table
+        elif 'status' in check_dataset_table and check_dataset_table['status'] == 'TABLE_EXISTS':
+            write_disp = 'WRITE_APPEND'
 
-        return self._query_to_table(query, parameters, type)
+        return self._query_to_table(query, parameters, type, write_disp)
 
     # Export data to the BQ table referenced by project_id:dataset_id:table_id
     def export_rows_to_bq(self, desc, rows):
