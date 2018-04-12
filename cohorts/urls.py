@@ -32,7 +32,7 @@ urlpatterns = [
     url(r'^filelist_ajax/(?P<cohort_id>\d+)/$',     views.cohort_filelist_ajax, name='cohort_filelist_ajax'),
     url(r'^filelist_ajax/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
                                                     views.cohort_filelist_ajax, name='cohort_filelist_ajax_panel'),
-    url(r'^filelist/(?P<cohort_id>\d+)/export',     views.export_file_list_to_bq, name='export_cohort_filelist_to_bq'),
+    url(r'^filelist/(?P<cohort_id>\d+)/export',     views.export_file_list, name='export_cohort_filelist'),
     url(r'^save_cohort/',                           views.save_cohort, name='save_cohort'),
     url(r'^export_cohort/(?P<cohort_id>\d+)/',      views.export_cohort_to_bq, name='export_cohort'),
     url(r'^save_cohort_from_plot/',                 views.save_cohort_from_plot, name='save_cohort_from_plot'),

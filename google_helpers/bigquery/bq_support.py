@@ -155,6 +155,21 @@ class BigQuerySupport(BigQueryABC):
 
         return table_found
 
+    # Delete a table referenced by table_id in the dataset referenced by dataset_id and the
+    # project referenced by project_id
+    def _delete_table(self):
+        if self._table_exists():
+            bigquery_service = get_bigquery_service()
+            table_delete = bigquery_service.tables().delete(
+                projectId=self.project_id,
+                datasetId=self.dataset_id,
+                tableId=self.table_id
+            ).execute()
+            if 'errors' in table_delete:
+                logger.error("[ERROR] Couldn't delete table {}:{}.{}".format(
+                    self.project_id,self.dataset_id,self.table_id
+                ))
+
     # Insert an table, optionally providing a list of cohort IDs to include in the description
     def _insert_table(self, desc):
         bigquery_service = get_bigquery_service()

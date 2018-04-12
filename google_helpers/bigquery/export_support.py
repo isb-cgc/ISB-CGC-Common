@@ -118,10 +118,11 @@ COHORT_EXPORT_SCHEMA = {
 
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path, table_schema):
+    def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema):
         super(BigQueryExport, self).__init__(project_id, dataset_id, table_id)
         self.table_schema = table_schema
         self.bucket_path = bucket_path
+        self.file_name = file_name
 
     def _build_request_body_from_rows(self, rows):
         insertable_rows = []
@@ -161,7 +162,6 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         return response
 
     def _table_to_gcs(self, file_format, export_type):
-        file_name = self.table_id + (".json" if "JSON" in file_format else ".csv" if "CSV" in file_format else ".avro")
         bq_service = get_bigquery_service()
         job_id = str(uuid4())
 
@@ -213,35 +213,35 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     export_type, self.bucket)
             else:
                 # Check the file
-                exported_file = bq_service.tables().get(bucket=self.bucket_path, object=file_name).execute()
+                exported_file = bq_service.tables().get(bucket=self.bucket_path, object=self.file_name).execute()
                 if not exported_file:
-                    msg = "Export file {}/{} not found".format(self.bucket_path, file_name)
+                    msg = "Export file {}/{} not found".format(self.bucket_path, self.file_name)
                     logger.error("[ERROR] ".format({msg}))
                     export_result = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=export_job['jobReference']['jobId']).execute()
                     if 'errors' in export_result:
                         logger.error('[ERROR] Errors seen: {}'.format(export_result['errors'][0]['message']))
                     result['status'] = 'error'
                     result['message'] = "Unable to export {} to file {}/{}--please contact the administrator.".format(
-                        export_type, self.bucket_path, file_name)
+                        export_type, self.bucket_path, self.file_name)
                 else:
                     if int(exported_file['size']) > 0:
                         logger.info("[STATUS] Successfully exported {} into GCS file {}/{}".format(export_type,
                                                                                                       self.bucket_path,
-                                                                                                      file_name))
+                                                                                                      self.file_name))
                         result['status'] = 'success'
                         result['message'] = "{}MB".format(str((exported_file['size']/1000000)))
                     else:
                         msg = "File {}/{} created, but appears empty. Export of {} may not have succeeded".format(
                             export_type,
                             self.bucket_path,
-                            file_name
+                            self.file_name
                         )
                         logger.warn("[WARNING] {}.".format(msg))
                         result['status'] = 'error'
                         result['message'] = msg + "--please contact the administrator."
         else:
             logger.debug(str(job_is_done))
-            msg = "Export of {} to {}/{} did not complete in the time allowed".format(export_type, self.bucket_path, file_name)
+            msg = "Export of {} to {}/{} did not complete in the time allowed".format(export_type, self.bucket_path, self.file_name)
             logger.error("[ERROR] {}.".format(msg))
             result['status'] = 'error'
             result['message'] = msg + "--please contact the administrator."
@@ -377,8 +377,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
 class BigQueryExportFileList(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path=None):
-        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, FILE_LIST_EXPORT_SCHEMA)
+    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None):
+        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA)
 
     def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -441,7 +441,7 @@ class BigQueryExportCohort(BigQueryExport):
 
     def __init__(self, project_id, dataset_id, table_id, uuids=None):
         self._uuids = uuids
-        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, COHORT_EXPORT_SCHEMA)
+        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, None, None, COHORT_EXPORT_SCHEMA)
 
     def _build_row(self, sample):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

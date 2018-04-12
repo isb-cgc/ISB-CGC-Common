@@ -1809,7 +1809,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                            'export_url': reverse('export_cohort_filelist_to_bq', kwargs={'cohort_id': cohort_id}),
+                                            'export_url': reverse('export_cohort_filelist', kwargs={'cohort_id': cohort_id}),
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
@@ -2536,16 +2536,18 @@ def export_file_list_to_gcs(request, cohort_id=0):
 
 @login_required
 @csrf_protect
-def export_file_list_to_bq(request, cohort_id=0):
+def export_file_list(request, cohort_id=0):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
     redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
 
     status = 200
-    bq_result = None
+    result = None
 
     try:
         req_user = User.objects.get(id=request.user.id)
+        export_dest = request.POST.get('export-dest')
+
         dataset = None
         table = None
         bq_proj_id = None
@@ -2562,39 +2564,62 @@ def export_file_list_to_bq(request, cohort_id=0):
             messages.error(request, "You must be the owner of a cohort in order to export its file list.")
             return redirect(redirect_url)
 
-        dataset = request.POST.get('project-dataset', '').split(":")[1]
+        file_format = request.POST.get('file-format', 'CSV')
+        gcs_bucket = request.POST.get('gcs-bucket', None)
+
         table = None
+        file_name = None
 
-        if request.POST.get('table-type', '') == 'new':
-            table = request.POST.get('new-table-name', None)
-            if table:
-                # Check the user-provided table name against the whitelist for Google BQ table names
-                # truncate at max length regardless of what we received
-                table = request.POST.get('new-table-name', '')[0:1024]
-                tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
-                match = tbl_whitelist.search(unicode(table))
-                if match:
-                    messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
-                    return redirect(redirect_url)
-        else:
-            table = request.POST.get('table-name', None)
+        if export_dest == 'table':
+            dataset = request.POST.get('project-dataset', '').split(":")[1]
+            proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
-        proj_id = request.POST.get('project-dataset', '').split(":")[0]
-
-        if not len(proj_id):
-            messages.error(request, "You must provide a Google Cloud Project to which your cohort can be exported.")
-            return redirect(redirect_url)
-        else:
-            try:
-                gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
-            except ObjectDoesNotExist as e:
-                messages.error(request, "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+            if not len(dataset):
+                messages.error(request,
+                               "You must provide a Google Cloud Platform dataset to which your cohort file manifest can be exported.")
                 return redirect(redirect_url)
 
-        bq_proj_id = gcp.project_id
+            gcp = None
+            if not len(proj_id):
+                messages.error(request,
+                               "You must provide a Google Cloud Project to which your cohort file manifest can be exported.")
+                return redirect(redirect_url)
+            else:
+                try:
+                    gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
+                except ObjectDoesNotExist as e:
+                    messages.error(request,
+                                   "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+                    return redirect(redirect_url)
 
-        if not len(dataset):
-            dataset = "isb_cgc_cohort_file_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+            bq_proj_id = gcp.project_id
+
+            if request.POST.get('table-type', '') == 'new':
+                table = request.POST.get('new-table-name', None)
+                if table:
+                    # Check the user-provided table name against the whitelist for Google BQ table names
+                    # truncate at max length regardless of what we received
+                    table = request.POST.get('new-table-name', '')[0:1024]
+                    tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
+                    match = tbl_whitelist.search(unicode(table))
+                    if match:
+                        messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
+                        return redirect(redirect_url)
+                else:
+                    table = request.POST.get('table-name', None)
+
+        elif export_dest == 'gcs':
+            dataset = settings.BIGQUERY_EXPORT_DATASET
+            bq_proj_id = settings.PROJECT_NAME
+            file_name = request.POST.get('file-name', None)
+            if file_name:
+                file_name = request.POST.get('new-file-name', '')[0:1024]
+                file_whitelist = re.compile(ur'([^A-Za-z0-9_\-\.])', re.UNICODE)
+                match = file_whitelist.search(unicode(file_name))
+                if match:
+                    messages.error(request,
+                                   "There are invalid characters in your file name; only numbers, letters, periods (.), dashes, and underscores are permitted.")
+                    return redirect(redirect_url)
 
         if not table:
             table = "isb_cgc_cohort_files_{}_{}_{}".format(
@@ -2603,13 +2628,13 @@ def export_file_list_to_bq(request, cohort_id=0):
                 datetime.datetime.now().strftime("%Y%m%d_%H%M")
             )
 
+        if not file_name:
+            file_name = table + ('.json' if 'JSON' in file_format else '.csv')
+
         build = escape(request.POST.get('build', 'HG19')).lower()
 
         if not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
-
-        # Store file list to BigQuery
-        bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
 
         query_string_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
@@ -2682,18 +2707,28 @@ def export_file_list_to_bq(request, cohort_id=0):
             query_string = union_queries[0]
         query_string = '#standardSQL\n'+query_string
 
-        bq_result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
+        if export_dest == 'table':
+            # Store file manifest to BigQuery
+            bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+            result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
+        elif export_dest == 'gcs':
+            # Store file list to BigQuery
+            bcs = BigQueryExportFileList(bq_proj_id, dataset, table, gcs_bucket, file_name)
+            result = bcs.export_file_list_to_gcs(file_format, query_string, filter_params, cohort_id)
+        else:
+            raise Exception("File manifest export destination not recognized.")
 
-        # If BQ insertion fails, we warn the user
-        if bq_result['status'] == 'error':
+        # If export fails, we warn the user
+        if result['status'] == 'error':
             status = 400
-            if not 'message' in bq_result:
-                bq_result['message'] = "We were unable to export cohort {}'s file list to BigQuery table {}:{}.{}--please contact the administrator.".format(
+            if not 'message' in result:
+                result['message'] = "We were unable to export cohort {}'s file manifest--please contact the administrator.".format(
                     str(cohort_id), bq_proj_id, dataset, table
                 )
         else:
-            bq_result['message'] = "Cohort {}'s file list was successfully exported to table {}:{}.{} ({} rows).".format(
-                str(cohort_id), bq_proj_id, dataset, table, bq_result['message']
+            result['message'] = "Cohort {}'s file list was successfully exported to {}.".format(
+                "table {}:{}.{} ({} rows)".format(str(cohort_id), bq_proj_id, dataset, table, result['message'])
+                if export_dest == 'table' else "GCS file {}/{}".format(gcs_bucket,file_name)
             )
 
     except Exception as e:
@@ -2702,4 +2737,4 @@ def export_file_list_to_bq(request, cohort_id=0):
         status = 500
         bq_result = {'status': 'error', 'message': "There was an error while trying to export your file list - please contact the administrator."}
 
-    return JsonResponse(bq_result, status=status)
+    return JsonResponse(result, status=status)

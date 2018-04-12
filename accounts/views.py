@@ -25,6 +25,7 @@ from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
 from django.core.urlresolvers import reverse
+from django.views.decorators.csrf import csrf_protect
 from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.directory_service import get_directory_resource
@@ -597,6 +598,67 @@ def delete_bqdataset(request, user_id, bqdataset_id):
 
 
 @login_required
+@csrf_protect
+def get_user_buckets(request, user_id):
+    result = None
+    status = '200'
+
+    try:
+        if int(request.user.id) != int(user_id):
+            raise Exception("User {} is not the owner of the requested GCS buckets.".format(str(request.user.id)))
+
+        req_user = User.objects.get(id=request.user.id)
+
+        result = {
+            'status': '',
+            'data': {
+                'projects': []
+            }
+        }
+
+        gcps = GoogleProject.objects.filter(user=req_user, active=1)
+
+        if not gcps.count():
+            status = '500'
+            result = {
+                'status': 'error',
+                'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
+                    + "project and GCS bucket before attempting to export."
+            }
+            logger.info("[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
+        else:
+            for gcp in gcps:
+                this_proj = {
+                    'buckets': [x.bucket_name for x in gcp.bucket_set.all()],
+                    'name': gcp.project_id
+                }
+                if len(this_proj['buckets']):
+                    result['data']['projects'].append(this_proj)
+
+            if not len(result['data']['projects']):
+                status = '500'
+                result = {
+                    'status': 'error',
+                    'msg': "No registered GCS buckets were found in your Google Cloud Projects. Please register "
+                        + "at least one bucket in one of your projects before attempting to export."
+                }
+                logger.info(
+                    "[STATUS] No registered buckets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
+            else:
+                status = '200'
+                result['status'] = 'success'
+
+
+    except Exception as e:
+        logger.error("[ERROR] While retrieving user {}'s registered GCS buckets:".format(str(user_id)))
+        logger.exception(e)
+        result = {'message': "There was an error while retrieving your GCS buckets--please contact the administrator.".format(str(request.user.id)), 'status': 'error'}
+        status='500'
+
+    return JsonResponse(result, status=status)
+
+
+@login_required
 def get_user_datasets(request,user_id):
 
     result = None
@@ -604,8 +666,6 @@ def get_user_datasets(request,user_id):
 
     try:
         if int(request.user.id) != int(user_id):
-            logger.debug(str(request.user.id))
-            logger.debug(str(user_id))
             raise Exception("User {} is not the owner of the requested datasets.".format(str(request.user.id)))
 
         req_user = User.objects.get(id=request.user.id)
@@ -635,7 +695,7 @@ def get_user_datasets(request,user_id):
                     'datasets': {},
                     'name': gcp.project_id
                 }
-                bqs = BigQuerySupport(gcp.project_id, None, None, None)
+                bqs = BigQuerySupport(gcp.project_id, None, None)
                 bq_tables = bqs.get_tables()
                 for table in bq_tables:
                     if table['dataset'] in bqds:
@@ -663,7 +723,7 @@ def get_user_datasets(request,user_id):
     except Exception as e:
         logger.error("[ERROR] While retrieving user {}'s registered BQ datasets and tables:".format(str(user_id)))
         logger.exception(e)
-        result = {'message': "There was an error while retrieving user {}'s datasets and BQ tables. Please contact the administrator.".format(str(request.user.id)), 'status': 'error'}
+        result = {'message': "There was an error while retrieving your datasets and BQ tables. Please contact the administrator.".format(str(request.user.id)), 'status': 'error'}
         status='500'
 
     return JsonResponse(result, status=status)

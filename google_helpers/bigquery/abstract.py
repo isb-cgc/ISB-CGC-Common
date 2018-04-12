@@ -56,6 +56,10 @@ class BigQueryABC:
         pass
 
     @abstractmethod
+    def _delete_table(self):
+        pass
+
+    @abstractmethod
     def _confirm_dataset_and_table(self, desc):
         pass
 

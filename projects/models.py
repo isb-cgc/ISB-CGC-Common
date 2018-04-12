@@ -215,7 +215,7 @@ class Public_Data_Tables(models.Model):
     program = models.ForeignKey(Program, null=False)
     build = models.CharField(max_length=25, null=True)
     data_table = models.CharField(max_length=100)
-    bq_dataset = models.CharField(max_length=100, null=True)
+    # bq_dataset = models.CharField(max_length=100, null=True)
     annot2data_table = models.CharField(max_length=100, null=True)
 
     class Meta:
