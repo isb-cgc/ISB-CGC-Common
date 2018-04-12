@@ -45,5 +45,6 @@ urlpatterns = [
     url(r'^users/(?P<user_id>\d+)/register_bqdataset/(?P<gcp_id>\d+)/$', views.register_bqdataset, name='register_bqdataset'),
     url(r'^users/(?P<user_id>\d+)/delete_bqdataset/(?P<bqdataset_id>\d+)/$', views.delete_bqdataset, name='delete_bqdataset'),
     url(r'^users/(?P<user_id>\d+)/datasets/$', views.get_user_datasets, name='dataset_info'),
+    url(r'^users/(?P<user_id>\d+)/buckets/$', views.get_user_buckets, name='bucket_info'),
 ]
 
