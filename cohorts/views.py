@@ -2619,8 +2619,8 @@ def export_file_list(request, cohort_id=0):
             bq_proj_id = settings.PROJECT_NAME
             file_name = request.POST.get('file-name', None)
             if file_name:
-                file_name = request.POST.get('new-file-name', '')[0:1024]
-                file_whitelist = re.compile(ur'([^A-Za-z0-9_\-\.])', re.UNICODE)
+                file_name = request.POST.get('file-name', '')[0:1024]
+                file_whitelist = re.compile(ur'([^A-Za-z0-9_\-\./])', re.UNICODE)
                 match = file_whitelist.search(unicode(file_name))
                 if match:
                     messages.error(request,
@@ -2635,7 +2635,9 @@ def export_file_list(request, cohort_id=0):
             )
 
         if not file_name:
-            file_name = table + ('.json' if 'JSON' in file_format else '.csv')
+            file_name = table
+        file_name += ('.json' if 'JSON' in file_format else '.csv')
+
 
         build = escape(request.POST.get('build', 'HG19')).lower()
 
@@ -2720,7 +2722,7 @@ def export_file_list(request, cohort_id=0):
         elif export_dest == 'gcs':
             # Store file list to BigQuery
             bcs = BigQueryExportFileList(bq_proj_id, dataset, table, gcs_bucket, file_name)
-            result = bcs.export_file_list_to_gcs(file_format, query_string, filter_params, cohort_id)
+            result = bcs.export_file_list_to_gcs(file_format, query_string, filter_params)
         else:
             raise Exception("File manifest export destination not recognized.")
 
@@ -2733,14 +2735,15 @@ def export_file_list(request, cohort_id=0):
                 )
         else:
             result['message'] = "Cohort {}'s file list was successfully exported to {}.".format(
-                "table {}:{}.{} ({} rows)".format(str(cohort_id), bq_proj_id, dataset, table, result['message'])
-                if export_dest == 'table' else "GCS file {}/{}".format(gcs_bucket,file_name)
+                str(cohort_id),
+                "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(gcs_bucket, file_name, result['message'])
             )
 
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
         logger.exception(e)
         status = 500
-        bq_result = {'status': 'error', 'message': "There was an error while trying to export your file list - please contact the administrator."}
+        result = {'status': 'error', 'message': "There was an error while trying to export your file list - please contact the administrator."}
 
     return JsonResponse(result, status=status)

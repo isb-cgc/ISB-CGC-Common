@@ -23,6 +23,7 @@ from time import sleep
 from django.conf import settings
 from uuid import uuid4
 from google_helpers.bigquery.service import get_bigquery_service
+from google_helpers.storage_service import get_storage_resource
 from abstract import BigQueryExportABC
 from bq_support import BigQuerySupport
 
@@ -161,7 +162,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return response
 
-    def _table_to_gcs(self, file_format, export_type):
+    def _table_to_gcs(self, file_format, dataset_and_table, export_type):
         bq_service = get_bigquery_service()
         job_id = str(uuid4())
 
@@ -174,10 +175,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 'extract': {
                     'sourceTable': {
                         'projectId': self.project_id,
-                        'datasetId': self.dataset_id,
-                        'tableId': self.table_id
+                        'datasetId': dataset_and_table['dataset_id'],
+                        'tableId': dataset_and_table['table_id']
                     },
-                    'destinationUris': [self.bucket_path + '/' + self.file_name],
+                    'destinationUris': ['gs://{}/{}'.format(self.bucket_path, self.file_name)],
                     'destinationFormat': file_format,
                     'compression': 'NONE'
                 }
@@ -213,7 +214,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     export_type, self.bucket)
             else:
                 # Check the file
-                exported_file = bq_service.tables().get(bucket=self.bucket_path, object=self.file_name).execute()
+                exported_file = get_storage_resource().objects().get(bucket=self.bucket_path, object=self.file_name).execute()
                 if not exported_file:
                     msg = "Export file {}/{} not found".format(self.bucket_path, self.file_name)
                     logger.error("[ERROR] ".format({msg}))
@@ -225,13 +226,13 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         export_type, self.bucket_path, self.file_name)
                 else:
                     if int(exported_file['size']) > 0:
-                        logger.info("[STATUS] Successfully exported {} into GCS file {}/{}".format(export_type,
+                        logger.info("[STATUS] Successfully exported {} into GCS file gs://{}/{}".format(export_type,
                                                                                                       self.bucket_path,
                                                                                                       self.file_name))
                         result['status'] = 'success'
-                        result['message'] = "{}MB".format(str((exported_file['size']/1000000)))
+                        result['message'] = "{}MB".format(str(round((float(exported_file['size'])/1000000),2)))
                     else:
-                        msg = "File {}/{} created, but appears empty. Export of {} may not have succeeded".format(
+                        msg = "File gs://{}/{} created, but appears empty. Export of {} may not have succeeded".format(
                             export_type,
                             self.bucket_path,
                             self.file_name
@@ -241,14 +242,14 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['message'] = msg + "--please contact the administrator."
         else:
             logger.debug(str(job_is_done))
-            msg = "Export of {} to {}/{} did not complete in the time allowed".format(export_type, self.bucket_path, self.file_name)
+            msg = "Export of {} to gs://{}/{} did not complete in the time allowed".format(export_type, self.bucket_path, self.file_name)
             logger.error("[ERROR] {}.".format(msg))
             result['status'] = 'error'
             result['message'] = msg + "--please contact the administrator."
 
         return result
 
-    def _query_to_table(self, query, parameters, export_type, write_disp):
+    def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False):
         bq_service = get_bigquery_service()
         job_id = str(uuid4())
 
@@ -261,15 +262,17 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 'query': {
                     'query': query,
                     'priority': 'INTERACTIVE',
-                    'destinationTable': {
-                        'projectId': self.project_id,
-                        'datasetId': self.dataset_id,
-                        'tableId': self.table_id
-                    },
                     'writeDisposition': write_disp
                 }
             }
         }
+
+        if not to_temp:
+            query_data['configuration']['query']['destinationTable'] = {
+                'projectId': self.project_id,
+                'datasetId': self.dataset_id,
+                'tableId': self.table_id
+            }
 
         if parameters:
             query_data['configuration']['query']['queryParameters'] = parameters
@@ -295,13 +298,22 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
-                msg = "Export of {} to table {}:{}.{} was unsuccessful, reason: {}".format(
-                    export_type, self.project_id, self.dataset_id, self.table_id, job_is_done['status']['errors'][0]['message'])
-                logger.error("[ERROR] {}".format(msg))
                 result['status'] = 'error'
-                result['message'] = "Unable to export {} to table {}:{}.{}--please contact the administrator.".format(
-                    export_type, self.project_id, self.dataset_id, self.table_id)
-            else:
+                result['message'] = "Unable to export {} to ".format(export_type)
+                msg = ''
+                if to_temp:
+                    msg = "Export of {} to temporary table ".format(export_type)
+                    result['message'] += "temporary table--please contact the administrator."
+                else:
+                    msg = "Export of {} to table {}:{}.{} ".format(
+                        export_type, self.project_id, self.dataset_id, self.table_id
+                    )
+                    result['message'] += "table {}:{}.{}--please contact the administrator.".format(
+                        self.project_id, self.dataset_id, self.table_id
+                    )
+                msg += "was unsuccessful, reason: {}".format(job_is_done['status']['errors'][0]['message'])
+                logger.error("[ERROR] {}".format(msg))
+            elif not to_temp:
                 # Check the table
                 export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
                 if not export_table:
@@ -329,6 +341,12 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         logger.warn("[WARNING] {}.".format(msg))
                         result['status'] = 'error'
                         result['message'] = msg + "--please contact the administrator."
+            else:
+                result['status'] = 'success'
+                result['message'] = {
+                    'dataset_id': job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                    'table_id': job_is_done['configuration']['query']['destinationTable']['tableId']
+                }
         else:
             logger.debug(str(job_is_done))
             msg = "Export of table {}:{}.{} did not complete in the time allowed".format(self.project_id, self.dataset_id, self.table_id)
@@ -338,16 +356,19 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return result
 
-    def export_query_to_bq(self, desc, query, parameters, type):
-        check_dataset_table = self._confirm_dataset_and_table(desc)
-        write_disp = 'WRITE_EMPTY'
+    def export_query_to_bq(self, desc, query, parameters, type, is_temp=False):
+        if not is_temp:
+            check_dataset_table = self._confirm_dataset_and_table(desc)
+            write_disp = 'WRITE_EMPTY'
 
-        if 'tableErrors' in check_dataset_table:
-            return check_dataset_table
-        elif 'status' in check_dataset_table and check_dataset_table['status'] == 'TABLE_EXISTS':
-            write_disp = 'WRITE_APPEND'
+            if 'tableErrors' in check_dataset_table:
+                return check_dataset_table
+            elif 'status' in check_dataset_table and check_dataset_table['status'] == 'TABLE_EXISTS':
+                write_disp = 'WRITE_APPEND'
+        else:
+            write_disp = 'WRITE_EMPTY'
 
-        return self._query_to_table(query, parameters, type, write_disp)
+        return self._query_to_table(query, parameters, type, write_disp, is_temp)
 
     # Export data to the BQ table referenced by project_id:dataset_id:table_id
     def export_rows_to_bq(self, desc, rows):
@@ -419,15 +440,13 @@ class BigQueryExportFileList(BigQueryExport):
         return self.export_query_to_bq(desc, query, parameters, "cohort file manifest")
 
     # Export a GCS file to bucket_path from a parameterized BQ query, using a table as go-between
-    def export_file_list_to_gcs(self, file_format, query, parameters, cohort_id):
-        desc = "Temporary table for export of cohort {} file manifest".format(str(cohort_id))
-        self.table_id += "_tmp"
+    def export_file_list_to_gcs(self, file_format, query, parameters):
 
         # Export the query to our temp table
-        table_result = self.export_query_to_bq(desc, query, parameters, "cohort file manifest")
+        table_result = self.export_query_to_bq(None, query, parameters, "cohort file manifest", True)
 
         if table_result['status'] == 'success':
-            export_result = self._table_to_gcs(file_format, "cohort file manifest")
+            export_result = self._table_to_gcs(file_format, table_result['message'], "cohort file manifest")
             self._delete_table()
             return export_result
         else:
