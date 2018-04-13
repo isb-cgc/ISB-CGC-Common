@@ -1321,7 +1321,7 @@ def share_cohort(request, cohort_id=0):
                 note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in already_shared.keys()])) if len(already_shared.keys()) > 1 else "Cohort ID {} was".format(str(already_shared.keys()[0]))), "; ".join(user_set))
 
             if len(owner_cohort_names):
-                note = "NOTE: User {} is the owner of cohort(s) [{}] and cannot be added to the share email list.".format(req_user.email, ", ".join(owner_cohort_names))
+                note = "NOTE: User {} is the owner of cohort(s) [{}] and does not need to be added to the share email list to view.".format(req_user.email, ", ".join(owner_cohort_names))
 
             if not len(success_msg):
                 success_msg = note
