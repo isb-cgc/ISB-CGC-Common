@@ -443,16 +443,15 @@ class BigQueryExportFileList(BigQueryExport):
     def export_file_list_to_gcs(self, file_format, query, parameters):
 
         # Export the query to our temp table
-        table_result = self.export_query_to_bq(None, query, parameters, "cohort file manifest", True)
+        query_result = self.export_query_to_bq(None, query, parameters, "cohort file manifest", True)
 
-        if table_result['status'] == 'success':
-            export_result = self._table_to_gcs(file_format, table_result['message'], "cohort file manifest")
-            self._delete_table()
+        if query_result['status'] == 'success':
+            export_result = self._table_to_gcs(file_format, query_result['message'], "cohort file manifest")
             return export_result
         else:
             return {
                 'status': 'error',
-                'message': 'Unable to create temporary table for file manifest export--please contact to the administrator.'
+                'message': 'Unable to query BigQuery for file manifest export--please contact to the administrator.'
             }
 
 

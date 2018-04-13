@@ -948,36 +948,22 @@ def export_cohort_to_bq(request, cohort_id=0):
 
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        program_bq_tables = {
-            'TARGET': {
-                'dataset_id': 'TARGET_bioclin_v0',
-                'biospec': 'Biospecimen',
-                'clinical': 'Clinical'
-            },
-            'TCGA': {
-                'dataset_id': 'TCGA_bioclin_v0',
-                'biospec': 'Biospecimen',
-                'clinical': 'Clinical'
-            },
-            'CCLE': {
-                'dataset_id': 'CCLE_bioclin_v0',
-                'clinical': 'clinical_v0'
-            }
-        }
-
         for program in cohort_programs:
+
+            program_bq_tables = Public_Metadata_Tables.objects.filter(program=program)[0]
+
             biospec_clause = ""
-            if 'biospec' in program_bq_tables[program.name]:
+            if program_bq_tables.biospec_bq_table:
                 biospec_clause = biospec_clause_base.format(
                     deployment_project=settings.BIGQUERY_PROJECT_NAME,
-                    metadata_dataset=program_bq_tables[program.name]['dataset_id'],
-                    biospec_table=program_bq_tables[program.name]['biospec']
+                    metadata_dataset=program_bq_tables.bq_dataset,
+                    biospec_table=program_bq_tables.biospec_bq_table
                 )
 
             union_queries.append(
                 query_string_base.format(
-                    metadata_dataset=program_bq_tables[program.name]['dataset_id'],
-                    clin_table=program_bq_tables[program.name]['clinical'],
+                    metadata_dataset=program_bq_tables.bq_dataset,
+                    clin_table=program_bq_tables.clin_bq_table,
                     deployment_project=settings.BIGQUERY_PROJECT_NAME,
                     deployment_dataset=settings.COHORT_DATASET_ID,
                     deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
@@ -2570,32 +2556,34 @@ def export_file_list(request, cohort_id=0):
             messages.error(request, "You must be the owner of a cohort in order to export its file list.")
             return redirect(redirect_url)
 
+        # If destination is GCS
         file_format = request.POST.get('file-format', 'CSV')
         gcs_bucket = request.POST.get('gcs-bucket', None)
-
-        table = None
         file_name = None
+
+        # If destination is BQ
+        table = None
 
         if export_dest == 'table':
             dataset = request.POST.get('project-dataset', '').split(":")[1]
             proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
             if not len(dataset):
-                messages.error(request,
-                               "You must provide a Google Cloud Platform dataset to which your cohort file manifest can be exported.")
+                messages.error(request, "You must provide a Google Cloud Platform dataset to which your cohort file "
+                    + "manifest can be exported.")
                 return redirect(redirect_url)
 
             gcp = None
             if not len(proj_id):
-                messages.error(request,
-                               "You must provide a Google Cloud Project to which your cohort file manifest can be exported.")
+                messages.error(request, "You must provide a Google Cloud Project to which your cohort file manifest "
+                    + "can be exported.")
                 return redirect(redirect_url)
             else:
                 try:
                     gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
                 except ObjectDoesNotExist as e:
-                    messages.error(request,
-                                   "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
+                    messages.error(request,"A Google Cloud Project with that ID could not be located. Please be sure "
+                        + "to register your project first.")
                     return redirect(redirect_url)
 
             bq_proj_id = gcp.project_id
@@ -2609,13 +2597,13 @@ def export_file_list(request, cohort_id=0):
                     tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
                     match = tbl_whitelist.search(unicode(table))
                     if match:
-                        messages.error(request,"There are invalid characters in your table name; only numbers, letters, and underscores are permitted.")
+                        messages.error(request,"There are invalid characters in your table name; only numbers, "
+                           + "letters, and underscores are permitted.")
                         return redirect(redirect_url)
                 else:
                     table = request.POST.get('table-name', None)
 
         elif export_dest == 'gcs':
-            dataset = settings.BIGQUERY_EXPORT_DATASET
             bq_proj_id = settings.PROJECT_NAME
             file_name = request.POST.get('file-name', None)
             if file_name:
@@ -2623,8 +2611,8 @@ def export_file_list(request, cohort_id=0):
                 file_whitelist = re.compile(ur'([^A-Za-z0-9_\-\./])', re.UNICODE)
                 match = file_whitelist.search(unicode(file_name))
                 if match:
-                    messages.error(request,
-                                   "There are invalid characters in your file name; only numbers, letters, periods (.), dashes, and underscores are permitted.")
+                    messages.error(request, "There are invalid characters in your file name; only numbers, letters, "
+                        + " periods (.), slashes, dashes, and underscores are permitted.")
                     return redirect(redirect_url)
 
         if not table:
@@ -2636,8 +2624,7 @@ def export_file_list(request, cohort_id=0):
 
         if not file_name:
             file_name = table
-        file_name += ('.json' if 'JSON' in file_format else '.csv')
-
+        file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '')
 
         build = escape(request.POST.get('build', 'HG19')).lower()
 
@@ -2648,7 +2635,8 @@ def export_file_list(request, cohort_id=0):
                  SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
                   md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                   md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                  {cohort_id} as cohort_id, "{build}" as build, PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                  {cohort_id} as cohort_id, "{build}" as build,
+                  PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                  FROM `{metadata_table}` md
                  JOIN (
                      SELECT sample_barcode
@@ -2672,24 +2660,11 @@ def export_file_list(request, cohort_id=0):
 
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-        program_bq_tables = {
-            'TARGET': {
-                'dataset_id': 'metadata_export',
-                'table_id': 'target_metadata_data_'+build
-            },
-            'TCGA': {
-                'dataset_id': 'metadata_export',
-                'table_id': 'tcga_metadata_data_'+build
-            },
-            'CCLE': {
-                'dataset_id': 'metadata_export',
-                'table_id': 'ccle_metadata_data_'+build
-            }
-        }
-
         for program in cohort_programs:
+            program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper())[0]
             metadata_table = "{}.{}.{}".format(
-                "isb-cgc-test", program_bq_tables[program.name]['dataset_id'], program_bq_tables[program.name]['table_id'],
+                settings.BIGQUERY_PROJECT_NAME, program_bq_tables.bq_dataset,
+                program_bq_tables.data_table.lower(),
             )
 
             union_queries.append(
@@ -2721,7 +2696,7 @@ def export_file_list(request, cohort_id=0):
             result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
         elif export_dest == 'gcs':
             # Store file list to BigQuery
-            bcs = BigQueryExportFileList(bq_proj_id, dataset, table, gcs_bucket, file_name)
+            bcs = BigQueryExportFileList(bq_proj_id, None, None, gcs_bucket, file_name)
             result = bcs.export_file_list_to_gcs(file_format, query_string, filter_params)
         else:
             raise Exception("File manifest export destination not recognized.")
@@ -2731,19 +2706,24 @@ def export_file_list(request, cohort_id=0):
             status = 400
             if not 'message' in result:
                 result['message'] = "We were unable to export cohort {}'s file manifest--please contact the administrator.".format(
-                    str(cohort_id), bq_proj_id, dataset, table
+                    str(cohort_id)
                 )
         else:
             result['message'] = "Cohort {}'s file list was successfully exported to {}.".format(
                 str(cohort_id),
                 "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
-                if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(gcs_bucket, file_name, result['message'])
+                if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
+                    gcs_bucket, file_name, result['message']
+                )
             )
 
     except Exception as e:
         logger.error("[ERROR] While trying to export cohort {}'s file list to BQ:".format(str(cohort_id)))
         logger.exception(e)
         status = 500
-        result = {'status': 'error', 'message': "There was an error while trying to export your file list - please contact the administrator."}
+        result = {
+            'status': 'error',
+            'message': "There was an error while trying to export your file list - please contact the administrator."
+        }
 
     return JsonResponse(result, status=status)
