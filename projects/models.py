@@ -215,7 +215,7 @@ class Public_Data_Tables(models.Model):
     program = models.ForeignKey(Program, null=False)
     build = models.CharField(max_length=25, null=True)
     data_table = models.CharField(max_length=100)
-    # bq_dataset = models.CharField(max_length=100, null=True)
+    bq_dataset = models.CharField(max_length=100, null=True)
     annot2data_table = models.CharField(max_length=100, null=True)
 
     class Meta:
@@ -250,6 +250,9 @@ class Public_Metadata_Tables(models.Model):
     annot_tables = models.ForeignKey(Public_Annotation_Tables, null=True)
     sample_data_availability_table = models.CharField(max_length=100)
     sample_data_type_availability_table = models.CharField(max_length=100)
+    bq_dataset = models.CharField(max_length=100, null=True)
+    clin_bq_table = models.CharField(max_length=100, null=True)
+    biospec_bq_table = models.CharField(max_length=100, null=True)
 
     class Meta:
         verbose_name = "Public Metadata Table"
