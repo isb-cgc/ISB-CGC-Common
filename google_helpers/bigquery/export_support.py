@@ -333,10 +333,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['message'] = int(export_table['numRows'])
                     else:
                         msg = "Table {}:{}.{} created, but no rows found. Export of {} may not have succeeded".format(
-                            export_type,
                             self.project_id,
                             self.dataset_id,
-                            self.table_id
+                            self.table_id,
+                            export_type,
                         )
                         logger.warn("[WARNING] {}.".format(msg))
                         result['status'] = 'error'
