@@ -180,7 +180,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     },
                     'destinationUris': ['gs://{}/{}'.format(self.bucket_path, self.file_name)],
                     'destinationFormat': file_format,
-                    'compression': 'NONE'
+                    'compression': 'GZIP'
                 }
             }
         }
