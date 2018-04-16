@@ -204,6 +204,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             'message': None
         }
 
+        logger.debug("[STATUS] extraction job_is_done: {}".format(str(job_is_done)))
+
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
                 msg = "Export of {} to GCS bucket {} was unsuccessful, reason: {}".format(
@@ -291,8 +293,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
                               jobId=query_job['jobReference']['jobId']).execute()
 
-        logger.debug("[STATUS] job_is_done: {}".format(str(job_is_done)))
-        logger.debug("[STATUS] query_job: {}".format(str(query_job)))
+        logger.debug("[STATUS] query job_is_done: {}".format(str(job_is_done)))
 
         result = {
             'status': None,
@@ -345,6 +346,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['status'] = 'error'
                         result['message'] = msg + "--please contact the administrator."
             else:
+                #Check for 'too large'
                 result['status'] = 'success'
                 result['message'] = {
                     'dataset_id': job_is_done['configuration']['query']['destinationTable']['datasetId'],
