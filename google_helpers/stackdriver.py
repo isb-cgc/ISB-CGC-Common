@@ -72,13 +72,15 @@ class StackDriverLogger(object):
         }
 
         try:
-            response = client.entries().write(body=body).execute()
+            # try this a few times to avoid the deadline exceeded problem
+            response = client.entries().write(body=body).execute(num_retries=2)
 
             if response:
                 logger.error("Unexpected response from logging API: {}".format(response))
 
         except Exception as e:
-            logger.error("Exception while calling logging API.")
+            # If we still get an exception, figure out what the type is:
+            logger.error("Exception while calling logging API: {0}.".format(e.__class__.__name__))
             logger.exception(e)
 
     def write_struct_log_entry(self, log_name, log_entry, severity="DEFAULT"):

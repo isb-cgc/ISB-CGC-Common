@@ -22,6 +22,7 @@ import datetime
 import pytz
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+from django.utils.html import escape
 from googleapiclient.errors import HttpError
 from google_helpers.directory_service import get_directory_resource
 from django.contrib.auth.models import User
@@ -88,7 +89,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         sa = ServiceAccount.objects.get(service_account=service_account, active=1)
         if not is_adjust and not is_refresh:
             return {
-                'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(str(service_account)),
+                'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(escape(service_account)),
                 'level': 'error'
             }
 
@@ -116,13 +117,13 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
             if not reg_change:
                 return {
-                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(str(service_account),('re-registered' if not is_adjust else 'adjusted')),
+                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(escape(service_account),('re-registered' if not is_adjust else 'adjusted')),
                     'level': 'warning'
                 }
     except ObjectDoesNotExist:
         if is_refresh or is_adjust:
             return {
-                'message': 'Service account {} was not found so cannot be {}.'.format(str(service_account), ("adjusted" if is_adjust else "refreshed")),
+                'message': 'Service account {} was not found so cannot be {}.'.format(escape(service_account), ("adjusted" if is_adjust else "refreshed")),
                 'level': 'error'
             }
 
@@ -159,7 +160,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                 }
         else:
             return {
-                'message': 'Unable to retrieve project information for GCP {} when registering SA {}; the SA cannot be registered.'.format(str(gcp_id),service_account),
+                'message': 'Unable to retrieve project information for GCP {} when registering SA {}; the SA cannot be registered.'.format(str(gcp_id),escape(service_account)),
                 'level': 'error'
             }
     except Exception as e:
@@ -172,7 +173,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     if controlled_datasets.count() > 0 and \
             (not (service_account.startswith(projectNumber+'-') or project_id_re.search(service_account))
              or msa.is_managed(service_account)):
-        msg = "Service Account {} is ".format(service_account,)
+        msg = "Service Account {} is ".format(escape(service_account),)
         if msa.is_managed(service_account):
             msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
         else:
@@ -266,7 +267,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             logger.info(log_msg)
             st_logger.write_struct_log_entry(log_name, {'message': log_msg})
 
-            msg = 'Service Account {} belongs to project {}, which has one or more invalid members. Controlled data can only be accessed from GCPs with valid members. Members were invalid for the following reasons: '.format(service_account,gcp_id,"; ".join(invalid_members))
+            msg = 'Service Account {} belongs to project {}, which has one or more invalid members. Controlled data can only be accessed from GCPs with valid members. Members were invalid for the following reasons: '.format(escape(service_account),gcp_id,"; ".join(invalid_members))
             if len(invalid_members['keys_found']):
                 msg += " User-managed keys were found on service accounts ({}). User-managed keys on service accounts are not permitted.".format("; ".join(invalid_members['keys_found']))
             if len(invalid_members['sa_roles']):
@@ -287,7 +288,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             })
 
             return {
-                'message': 'You must be a member of a project in order to register its service accounts.',
+                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of a project in order to {} its service accounts.'.format(user_email, gcp_id, "refresh" if is_refresh else "register"),
                 'redirect': True,
                 'user_not_found': True
             }
@@ -301,7 +302,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             # return error that the service account doesn't exist in this project
             return {'message':
                 "Service Account ID '{}' wasn't found in Google Cloud Project {}. Please double-check the service account ID, and {}.".format(
-                    service_account,gcp_id,
+                    escape(service_account),gcp_id,
                     ("be sure that Compute Engine has been enabled for this project" if is_compute else "be sure it has been given at least one Role in the project")
                 )
             }
@@ -527,6 +528,12 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
             logger.warn(result['message'])
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
                                              {'message': '{0}: {1}'.format(user_sa, result['message'])})
+
+            # If the error is the user wasn't found on this GCP, remove them from it in the Web Application
+            if 'user_not_found' in result:
+                user_gcp.user.set(user_gcp.user.all().exclude(id=User.objects.get(email=user_email).id))
+                user_gcp.save()
+
         # Verification passed before but failed now
         elif not result['all_user_datasets_verified']:
             st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {

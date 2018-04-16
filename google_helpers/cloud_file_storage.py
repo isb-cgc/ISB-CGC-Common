@@ -35,7 +35,7 @@ class CloudFileStorage(Storage):
         ).execute()
         return bucket + '/' + name
 
-    def get_available_name(self, name):
+    def get_available_name(self, name, max_length):
         name = name.replace("./", "")
         filepath = name.split('/')
         bucket = filepath.pop(0)
@@ -44,7 +44,8 @@ class CloudFileStorage(Storage):
         random_str = ''.join(random.SystemRandom().choice(string.ascii_letters) for _ in range(8))
         name = time + '-' + random_str + '-' + name
         name = settings.MEDIA_FOLDER + name
-        return bucket + '/' + name
+        # Fix for 2283:
+        return (bucket + '/' + name)[:max_length]
 
     def deconstruct(self):
         return ('google_helpers.cloud_file_storage.CloudFileStorage', [], {})
