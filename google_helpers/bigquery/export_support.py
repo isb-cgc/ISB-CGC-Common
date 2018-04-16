@@ -291,6 +291,9 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
                               jobId=query_job['jobReference']['jobId']).execute()
 
+        logger.debug("[STATUS] job_is_done: {}".format(str(job_is_done)))
+        logger.debug("[STATUS] query_job: {}".format(str(query_job)))
+
         result = {
             'status': None,
             'message': None
@@ -333,10 +336,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['message'] = int(export_table['numRows'])
                     else:
                         msg = "Table {}:{}.{} created, but no rows found. Export of {} may not have succeeded".format(
-                            export_type,
                             self.project_id,
                             self.dataset_id,
-                            self.table_id
+                            self.table_id,
+                            export_type,
                         )
                         logger.warn("[WARNING] {}.".format(msg))
                         result['status'] = 'error'
@@ -439,7 +442,8 @@ class BigQueryExportFileList(BigQueryExport):
 
         return self.export_query_to_bq(desc, query, parameters, "cohort file manifest")
 
-    # Export a GCS file to bucket_path from a parameterized BQ query, using a table as go-between
+    # Export a cohort file manifest to the GCS bucket referenced by bucket_path from a parameterized
+    # BQ query, using the query's temp-table to perform the extract
     def export_file_list_to_gcs(self, file_format, query, parameters):
 
         # Export the query to our temp table
@@ -457,9 +461,9 @@ class BigQueryExportFileList(BigQueryExport):
 
 class BigQueryExportCohort(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, uuids=None):
+    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None):
         self._uuids = uuids
-        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, None, None, COHORT_EXPORT_SCHEMA)
+        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA)
 
     def _build_row(self, sample):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -486,6 +490,22 @@ class BigQueryExportCohort(BigQueryExport):
                                                   ", ".join([str(x) for x in cohorts]))
 
         return self.export_rows_to_bq(desc, self._build_rows(samples))
+
+    # Export a cohort to the GCS bucket referenced by bucket_path from a parameterized
+    # BQ query, using the query's temp-table to perform the extract
+    def export_cohort_to_gcs(self, file_format, query, parameters):
+
+        # Export the query to our temp table
+        query_result = self.export_query_to_bq(None, query, parameters, "cohort", True)
+
+        if query_result['status'] == 'success':
+            export_result = self._table_to_gcs(file_format, query_result['message'], "cohort")
+            return export_result
+        else:
+            return {
+                'status': 'error',
+                'message': 'Unable to query BigQuery for cohort export--please contact to the administrator.'
+            }
 
     def export_cohort_query_to_bq(self, query, parameters, cohort_id):
         desc = ""
