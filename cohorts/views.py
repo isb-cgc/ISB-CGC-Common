@@ -2475,7 +2475,7 @@ def export_data(request, cohort_id=0, export_type=None):
 
         if not file_name:
             file_name = table
-        file_name += "*" + ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '')
+        file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
 
         build = escape(request.POST.get('build', 'HG19')).lower()
 
