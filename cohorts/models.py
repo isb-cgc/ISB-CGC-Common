@@ -22,6 +22,7 @@ from django.db import models
 from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
+from django.utils.html import escape
 from projects.models import Project, Program, User_Feature_Definitions
 from sharing.models import Shared_Resource
 from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
@@ -266,24 +267,24 @@ class Cohort(models.Model):
                         prog_filters[cohort_filter['program']].append(cohort_filter)
                     revision_list.append({'type': 'filter', 'vals': prog_filters})
                 elif source.type == Source.CLONE:
-                    revision_list.append('Cloned from %s.' % source.parent.name)
+                    revision_list.append('Cloned from %s.' % escape(source.parent.name))
                 elif source.type == Source.PLOT_SEL:
-                    revision_list.append('Selected from plot of %s.' % source.parent.name)
+                    revision_list.append('Selected from plot of %s.' % escape(source.parent.name))
                 sources = Source.objects.filter(cohort=source.parent)
 
             # multiple parents
             if sources.count() > 1:
                 if sources[0].type == Source.SET_OPS:
-                    revision_list.append(sources[0].notes)
+                    revision_list.append(escape(sources[0].notes))
                 if sources[0].type == Source.PLOT_SEL:
                     ret_str = 'Selected from plot of '
                     first = True
                     for source in sources:
                         if first:
-                            ret_str += source.parent.name
+                            ret_str += escape(source.parent.name)
                             first = False
                         else:
-                            ret_str += ', ' + source.parent.name
+                            ret_str += ', ' + escape(source.parent.name)
                     revision_list.append(ret_str)
                 # TODO: Actually traverse the tree, but this will require a most sophisticated way of displaying
                 # Currently only getting parents history, and not grandparents history.
