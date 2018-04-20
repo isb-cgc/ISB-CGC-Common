@@ -1,6 +1,6 @@
 """
 
-Copyright 2015, Institute for Systems Biology
+Copyright 2015-2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +17,8 @@ limitations under the License.
 """
 
 from oauth2client.client import GoogleCredentials
-from googleapiclient import discovery
 from django.conf import settings
-import httplib2
+from utils import build_with_retries
 
 STORAGE_SCOPES = [
     'https://www.googleapis.com/auth/devstorage.read_only',
@@ -30,4 +29,5 @@ STORAGE_SCOPES = [
 
 def get_storage_resource():
     credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(STORAGE_SCOPES)
-    return discovery.build('storage', 'v1', credentials=credentials, cache_discovery=False)
+    service = build_with_retries('storage', 'v1', credentials, 2)
+    return service

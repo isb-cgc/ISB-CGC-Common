@@ -1,6 +1,6 @@
 """
 
-Copyright 2017, Institute for Systems Biology
+Copyright 2017-2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ from urllib2 import quote as urllib2_quote
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient import discovery
 from httplib2 import Http
+from .utils import execute_with_retries, build_with_retries
 
 
 class StackDriverLogger(object):
@@ -37,8 +38,7 @@ class StackDriverLogger(object):
 
     def _get_service(self):
         http_auth = self.credentials.authorize(Http())
-        service = discovery.build('logging', 'v2', http=http_auth, cache_discovery=False)
-
+        service = build_with_retries('logging', 'v2', None, 2, http=http_auth)
         return service, http_auth
 
     def write_log_entries(self, log_name, log_entry_array):
@@ -73,7 +73,8 @@ class StackDriverLogger(object):
 
         try:
             # try this a few times to avoid the deadline exceeded problem
-            response = client.entries().write(body=body).execute(num_retries=2)
+            request = client.entries().write(body=body)
+            response = execute_with_retries(request, 'WRITE_LOG_ENTRIES', 2)
 
             if response:
                 logger.error("Unexpected response from logging API: {}".format(response))
