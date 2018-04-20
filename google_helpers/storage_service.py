@@ -17,11 +17,8 @@ limitations under the License.
 """
 
 from oauth2client.client import GoogleCredentials
-from googleapiclient import discovery
 from django.conf import settings
-import logging
-
-logger = logging.getLogger('main_logger')
+from utils import build_with_retries
 
 STORAGE_SCOPES = [
     'https://www.googleapis.com/auth/devstorage.read_only',
@@ -32,13 +29,5 @@ STORAGE_SCOPES = [
 
 def get_storage_resource():
     credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(STORAGE_SCOPES)
-    retries = 2
-    service = None
-    while (retries > 0) and (service is None):
-        retries -= 1
-        try:
-            service = discovery.build('storage', 'v1', credentials=credentials, cache_discovery=False)
-        except Exception as e:
-            # If we get an exception, figure out what the type is:
-            logger.error("Exception during storage service discovery build: {0}.".format(e.__class__.__name__))
+    service = build_with_retries('storage', 'v1', credentials, 2)
     return service
