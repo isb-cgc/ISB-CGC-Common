@@ -47,7 +47,7 @@ def build_with_retries(service_tag, version_tag, creds, num_retries, http=None):
             else:
                 logger.error('{0} Exception: {1} : {2} : gave up {3}'.format(service_tag, str(type(e)), str(e), num_retries))
         except HttpError as e:
-            if e.resp.status == 503:  # worth a retry on a backend error...
+            if e.resp.status == 503 or e.resp.status == 500:  # worth a retry on a backend error...
                 if num_retries > 0:
                     logger.info('{0} HttpError: {1} : code {2} : trying {3}'.format(service_tag, str(e), e.resp.status,
                                                                                     num_retries))
@@ -88,7 +88,7 @@ def execute_with_retries(req, task, retries, http=None):
             else:
                 logger.error('{0} Exception: {1} : {2} : gave up {3}'.format(task, str(type(e)), str(e), num_retries))
         except HttpError as e:
-            if e.resp.status == 503:  # worth a retry on a backend error...
+            if e.resp.status == 503 or e.resp.status == 500:  # worth a retry on a backend error...
                 if num_retries > 0:
                     logger.info('{0} HttpError: {1} : code {2} : trying {3}'.format(task, str(e), e.resp.status,
                                                                                     num_retries))
