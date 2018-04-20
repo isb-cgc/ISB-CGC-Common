@@ -1692,6 +1692,13 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
     if request.GET.get('offset', None) is not None:
         offset = int(request.GET.get('offset'))
         params['offset'] = offset
+    if request.GET.get('sort_column', None) is not None:
+        sort_column = request.GET.get('sort_column')
+        params['sort_column'] = sort_column
+    if request.GET.get('sort_order', None) is not None:
+        sort_order = int(request.GET.get('sort_order'))
+        params['sort_order'] = sort_order
+
 
     build = request.GET.get('build','HG19')
 
@@ -2006,7 +2013,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
 
 @login_required
-def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', access=None, type=None, do_filter_count=True):
+def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG38', access=None, type=None, do_filter_count=True):
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
@@ -2051,8 +2058,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
                 JOIN [{data_project}:{tcga_bioclin_dataset}.{tcga_clin_table}] bc
                 ON bc.case_barcode=cs.case_barcode
                 WHERE cs.cohort_id = {cohort}
-                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
-                ORDER BY cs.case_barcode
+                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name                
             """.format(cohort_dataset=bq_cohort_dataset,
                 cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
                 data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
@@ -2060,6 +2066,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
 
             file_list_query = """
                 {base_clause}
+                {order_clause}
                 {limit_clause}
                 {offset_clause}
             """
@@ -2071,11 +2078,25 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
                 )
             """
 
+            # col_map: used in the sql ORDER BY clause
+            # key: html column attribute 'columnId'
+            # value: db table column name
+            col_map = {
+                'col-program': 'bc.project_short_name',
+                'col-barcode': 'cs.case_barcode',
+                'col-diseasecode': 'bc.disease_code',
+                'col-projectname': 'bc.project_short_name',
+                'col-studydesc': 'ds.StudyDescription',
+                'col-studyuid': 'ds.StudyInstanceUID'
+            }
+
             if limit > 0:
                 limit_clause = ' LIMIT %s' % str(limit)
                 # Offset is only valid when there is a limit
                 if offset > 0:
                     offset_clause = ' OFFSET %s' % str(offset)
+
+            order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
 
             bq_service = authorize_credentials_with_Google()
 
@@ -2104,7 +2125,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
             # Query the file list only if there was anything to find
             if total_file_count:
                 query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_list_query.format(
-                    base_clause=file_list_query_base, limit_clause=limit_clause, offset_clause=offset_clause)
+                    base_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause, offset_clause=offset_clause)
                 )
                 job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
 
@@ -2146,15 +2167,26 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.sample_barcode = md.sample_barcode
-                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}   
-                 ORDER BY md.case_barcode         
+                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}
             """
 
             file_list_query = """
                 {base_clause}
+                {order_clause}
                 {limit_clause}
                 {offset_clause}                
             """
+            col_map = {
+                'col-program': 'project_short_name',
+                'col-barcode': 'case_barcode',
+                'col-filename': 'index_file_name',
+                'col-diseasecode': 'disease_code',
+                'col-exp-strategy': 'experimental_strategy',
+                'col-platform': 'platform',
+                'col-datacat': 'data_category',
+                'col-datatype': 'data_type',
+                'col-dataformat': 'data_format'
+            }
 
             if type == 'igv':
                 type_clause = "AND md.data_format='BAM'"
@@ -2203,9 +2235,10 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, build='HG38', a
                 # Offset is only valid when there is a limit
                 if offset > 0:
                     offset_clause = ' OFFSET %s' % str(offset)
+            order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
 
             start = time.time()
-            query = file_list_query.format(base_clause=base_clause, limit_clause=limit_clause,
+            query = file_list_query.format(base_clause=base_clause, order_clause=order_clause, limit_clause=limit_clause,
                         offset_clause=offset_clause)
             logger.debug("[STATUS] Query for file listing: {}".format(query))
             cursor.execute(query, params);
