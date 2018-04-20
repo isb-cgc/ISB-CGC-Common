@@ -22,7 +22,7 @@ from urllib2 import quote as urllib2_quote
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient import discovery
 from httplib2 import Http
-from .utils import execute_with_retries
+from .utils import execute_with_retries, build_with_retries
 
 
 class StackDriverLogger(object):
@@ -38,16 +38,7 @@ class StackDriverLogger(object):
 
     def _get_service(self):
         http_auth = self.credentials.authorize(Http())
-        retries = 2
-        service = None
-        while (retries > 0) and (service is None):
-            retries -= 1
-            try:
-                service = discovery.build('logging', 'v2', http=http_auth, cache_discovery=False)
-            except Exception as e:
-                # If we get an exception, figure out what the type is:
-                logger.error("Exception during logging discovery build: {0}.".format(e.__class__.__name__))
-
+        service = build_with_retries('logging', 'v2', None, 2, http=http_auth)
         return service, http_auth
 
     def write_log_entries(self, log_name, log_entry_array):

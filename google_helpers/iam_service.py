@@ -17,12 +17,10 @@ limitations under the License.
 """
 
 from oauth2client.client import GoogleCredentials
-from googleapiclient import discovery
 from django.conf import settings
 import httplib2
-import logging
+from .utils import build_with_retries
 
-logger = logging.getLogger('main_logger')
 
 def get_iam_resource():
     """Returns an Identity Access Management service client for calling the API.
@@ -36,14 +34,5 @@ def get_iam_resource():
         settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(IAM_SCOPES)
     http = httplib2.Http()
     http = credentials.authorize(http)
-    retries = 2
-    service = None
-    while (retries > 0) and (service is None):
-        retries -= 1
-        try:
-            service = discovery.build('iam', 'v1', http=http, cache_discovery=False)
-        except Exception as e:
-            # If we get an exception, figure out what the type is:
-            logger.error("Exception during logging discovery build: {0}.".format(e.__class__.__name__))
-
+    service = build_with_retries('iam', 'v1', None, 2, http=http)
     return service
