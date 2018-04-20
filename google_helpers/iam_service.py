@@ -20,9 +20,9 @@ from oauth2client.client import GoogleCredentials
 from googleapiclient import discovery
 from django.conf import settings
 import httplib2
+import logging
 
-import logging as logger
-
+logger = logging.getLogger('main_logger')
 
 def get_iam_resource():
     """Returns an Identity Access Management service client for calling the API.

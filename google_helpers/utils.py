@@ -16,13 +16,14 @@ limitations under the License.
 
 """
 
-import logging as logger
-
 from googleapiclient.errors import HttpError
 from google.appengine.runtime.apiproxy_errors import DeadlineExceededError as APIDeadlineExceededError
 from google.appengine.api.urlfetch_errors import DeadlineExceededError as FetchDeadlineExceededError
 from google.appengine.api.remote_socket._remote_socket_error import error as GoogleSocketError
 from httplib import HTTPException
+import logging
+
+logger = logging.getLogger('main_logger')
 
 #
 # Use this in place of execute() to catch all the bogus Google errors!

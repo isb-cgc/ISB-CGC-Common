@@ -19,8 +19,9 @@ limitations under the License.
 from oauth2client.client import GoogleCredentials
 from googleapiclient import discovery
 from django.conf import settings
+import logging
 
-import logging as logger
+logger = logging.getLogger('main_logger')
 
 STORAGE_SCOPES = [
     'https://www.googleapis.com/auth/devstorage.read_only',
