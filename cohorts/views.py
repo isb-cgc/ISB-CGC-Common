@@ -2025,13 +2025,12 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     db = None
     cursor = None
     query_limit = limit
-    type_clause = ""
+    type_conditions = ""
     limit_clause = ""
     offset_clause = ""
 
     filter_counts = None
     file_list = []
-    progs_without_files = []
     total_file_count = 0
 
     try:
@@ -2065,7 +2064,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id)
 
             file_list_query = """
-                {base_clause}
+                {select_clause}
                 {order_clause}
                 {limit_clause}
                 {offset_clause}
@@ -2074,7 +2073,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             file_count_query = """
                 SELECT COUNT(*)
                 FROM (
-                  {base_clause}
+                  {select_clause}
                 )
             """
 
@@ -2101,7 +2100,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             bq_service = authorize_credentials_with_Google()
             if do_filter_count:
                 # Query the count
-                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_count_query.format(base_clause=file_list_query_base))
+                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_count_query.format(select_clause=file_list_query_base))
                 job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
                                                        query_job['jobReference']['jobId'])
                 retries = 0
@@ -2120,7 +2119,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             # Query the file list only if there was anything to find
             if (total_file_count and do_filter_count) or not do_filter_count:
                 query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_list_query.format(
-                    base_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause, offset_clause=offset_clause)
+                    select_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause, offset_clause=offset_clause)
                 )
                 job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
 
@@ -2150,7 +2149,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                         })
 
         else:
-            file_list_query_base = """
+            select_clause_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
                   md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
@@ -2162,11 +2161,11 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.sample_barcode = md.sample_barcode
-                 WHERE md.file_uploaded='true' {type_clause} {filter_clause}
+                 WHERE md.file_uploaded='true' {type_conditions} {filter_conditions}
             """
 
             file_list_query = """
-                {base_clause}
+                {select_clause}
                 {order_clause}
                 {limit_clause}
                 {offset_clause}                
@@ -2184,10 +2183,10 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             }
 
             if type == 'igv':
-                type_clause = "AND md.data_format='BAM'"
+                type_conditions = "AND md.data_format='BAM'"
                 inc_filters['data_format'] = ['BAM']
             elif type == 'camic':
-                type_clause = "AND md.data_format='SVS'"
+                type_conditions = "AND md.data_format='SVS'"
                 inc_filters['data_format'] = ['SVS']
 
             db = get_sql_connection()
@@ -2196,33 +2195,33 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
 
             params = ()
-            base_clause = ''
-            count_base_clause = ''
+            select_clause = ''
+            count_select_clause = ''
             first_program = True;
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
                 if len(program_data_tables) <= 0:
                     # This program has no metadata_data table for this build, or at all--skip
-                    progs_without_files.append(program.name)
                     continue
                 program_data_table = program_data_tables[0].data_table
-                filter_clause = ''
+                filter_conditions = ''
                 if len(inc_filters):
                     built_clause = build_where_clause(inc_filters, for_files=True)
-                    filter_clause = 'AND ' + built_clause['query_str']
+                    filter_conditions = 'AND ' + built_clause['query_str']
                     params += built_clause['value_tuple']
 
-                union_clause = (" UNION " if not first_program else "") + "(" + file_list_query_base + ")"
-                base_clause += union_clause.format(
+                union_template = (" UNION " if not first_program else "") + "(" + select_clause_base + ")"
+                select_clause += union_template.format(
                     cohort_id=cohort_id,
                     metadata_table=program_data_table,
-                    type_clause=type_clause,
-                    filter_clause=filter_clause)
-                count_base_clause += union_clause.format(
-                    cohort_id=cohort_id,
-                    metadata_table=program_data_table,
-                    type_clause=type_clause,
-                    filter_clause='')
+                    type_conditions=type_conditions,
+                    filter_conditions=filter_conditions)
+                if do_filter_count:
+                    count_select_clause += union_template.format(
+                        cohort_id=cohort_id,
+                        metadata_table=program_data_table,
+                        type_conditions=type_conditions,
+                        filter_conditions='')
                 first_program = False
 
             if limit > 0:
@@ -2233,7 +2232,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
 
             start = time.time()
-            query = file_list_query.format(base_clause=base_clause, order_clause=order_clause, limit_clause=limit_clause,
+            query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
                         offset_clause=offset_clause)
             logger.debug("[STATUS] Query for file listing: {}".format(query))
             cursor.execute(query, params);
@@ -2243,7 +2242,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             counts = {};
             if do_filter_count:
                 start = time.time()
-                counts = count_public_data_type(request.user, count_base_clause,
+                counts = count_public_data_type(request.user, count_select_clause,
                                             inc_filters, cohort_programs, (type is not None and type != 'all'), build)
                 stop = time.time()
                 logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
@@ -2295,7 +2294,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             'page': page,
             'file_list': file_list,
             'build': build,
-            'programs_no_files': progs_without_files, #is this used???
             'metadata_data_counts': filter_counts
         }
 
@@ -2510,7 +2508,7 @@ def export_data(request, cohort_id=0, export_type=None):
         if export_type == 'file_manifest' and not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
 
-        filter_clause = ""
+        filter_conditions = ""
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
         union_queries = []
         inc_filters = json.loads(request.POST.get('filters', '{}'))
@@ -2518,7 +2516,7 @@ def export_data(request, cohort_id=0, export_type=None):
         if len(inc_filters):
             filter_and_params = build_bq_filter_and_params(inc_filters)
             filter_params = filter_and_params['parameters']
-            filter_clause = "AND {}".format(filter_and_params['filter_string'])
+            filter_conditions = "AND {}".format(filter_and_params['filter_string'])
 
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -2537,7 +2535,7 @@ def export_data(request, cohort_id=0, export_type=None):
                          WHERE cohort_id = {cohort_id}
                      ) cs
                      ON cs.sample_barcode = md.sample_barcode
-                     WHERE md.file_uploaded {filter_clause}
+                     WHERE md.file_uploaded {filter_conditions}
                      ORDER BY md.sample_barcode
             """
 
@@ -2554,7 +2552,7 @@ def export_data(request, cohort_id=0, export_type=None):
                         deployment_project=settings.BIGQUERY_PROJECT_NAME,
                         deployment_dataset=settings.COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
-                        filter_clause=filter_clause,
+                        filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
                         date_added=date_added,
                         build=build,
@@ -2590,7 +2588,7 @@ def export_data(request, cohort_id=0, export_type=None):
                 {biospec_clause}
                 JOIN `{deployment_project}.{metadata_dataset}.{clin_table}` clin
                 ON clin.case_barcode = cs.case_barcode
-                WHERE cs.cohort_id = {cohort_id} {filter_clause}
+                WHERE cs.cohort_id = {cohort_id} {filter_conditions}
             """
 
             biospec_clause_base = """
@@ -2617,7 +2615,7 @@ def export_data(request, cohort_id=0, export_type=None):
                         deployment_project=settings.BIGQUERY_PROJECT_NAME,
                         deployment_dataset=settings.COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
-                        filter_clause=filter_clause,
+                        filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
                         date_added=date_added,
                         tz=settings.TIME_ZONE,
