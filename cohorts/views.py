@@ -2593,13 +2593,13 @@ def export_data(request, cohort_id=0, export_type=None):
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
                 {biospec_clause}
-                JOIN `{deployment_project}.{metadata_dataset}.{clin_table}` clin
+                JOIN `{metadata_project}.{metadata_dataset}.{clin_table}` clin
                 ON clin.case_barcode = cs.case_barcode
                 WHERE cs.cohort_id = {cohort_id} {filter_clause}
             """
 
             biospec_clause_base = """
-                JOIN `{deployment_project}.{metadata_dataset}.{biospec_table}` bios
+                JOIN `{metadata_project}.{metadata_dataset}.{biospec_table}` bios
                 ON bios.sample_barcode = cs.sample_barcode
             """
 
@@ -2610,13 +2610,14 @@ def export_data(request, cohort_id=0, export_type=None):
                 biospec_clause = ""
                 if program_bq_tables.biospec_bq_table:
                     biospec_clause = biospec_clause_base.format(
-                        deployment_project=settings.BIGQUERY_PROJECT_NAME,
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         biospec_table=program_bq_tables.biospec_bq_table
                     )
 
                 union_queries.append(
                     query_string_base.format(
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         clin_table=program_bq_tables.clin_bq_table,
                         deployment_project=settings.BIGQUERY_PROJECT_NAME,
