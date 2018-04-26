@@ -2319,86 +2319,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     return resp
 
 
-@login_required
-@csrf_protect
-def export_file_list_to_gcs(request, cohort_id=0):
-    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
-    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_details', args=[cohort_id])
-
-    try:
-        req_user = User.objects.get(id=request.user.id)
-        gcs_proj_id = None
-
-        if not cohort_id:
-            messages.error(request, "You must provide a valid cohort ID in order for it to be exported.")
-            return redirect(redirect_url)
-
-        cohort = Cohort.objects.get(id=cohort_id)
-
-        try:
-            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
-        except ObjectDoesNotExist as e:
-            messages.error(request, "You must be the owner of a cohort in order to export its file list.")
-            return redirect(redirect_url)
-
-        bucket = request.POST.get('project-bucket', '').split(":")[1]
-        file_name = None
-
-        if request.POST.get('file-type', '') == 'new':
-            file_name = request.POST.get('new-file-name', None)
-            if file_name:
-                # Check the user-provided file name against the whitelist for Google GCS files names
-                # truncate at max length regardless of what we received
-                file_name = request.POST.get('new-file-name', '')[0:1024]
-                file_whitelist = re.compile(ur'([^A-Za-z0-9_])', re.UNICODE)
-                match = file_whitelist.search(unicode(file_name))
-                if match:
-                    messages.error(request,
-                                   "There are invalid characters in your file name; only numbers, letters, and underscores are permitted.")
-                    return redirect(redirect_url)
-        else:
-            file_name = request.POST.get('file-name', None)
-
-        proj_id = request.POST.get('project-bucket', '').split(":")[0]
-
-        if not len(proj_id):
-            messages.error(request, "You must provide a Google Cloud Project to which your file list can be exported.")
-            return redirect(redirect_url)
-        else:
-            try:
-                gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
-            except ObjectDoesNotExist as e:
-                messages.error(request,
-                               "A Google Cloud Project with that ID could not be located. Please be sure to register your project first.")
-                return redirect(redirect_url)
-
-        gcs_proj_id = gcp.project_id
-
-        if not len(bucket):
-            bucket = "isb_cgc_cohort_file_dataset_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
-
-        if not file_name:
-            file_name = "isb_cgc_cohort_files_{}_{}_{}.csv".format(
-                cohort_id,
-                re.sub(r"[\s,\.'-]+", "_", req_user.email.split('@')[0].lower()),
-                datetime.datetime.now().strftime("%Y%m%d_%H%M")
-            )
-
-        build = escape(request.POST.get('build', 'HG19'))
-
-        if not re.compile(r'[Hh][Gg](19|38)').search(build):
-            raise Exception("Invalid build supplied")
-
-        # Store file list to GCS
-        items = cohort_files(request=request, cohort_id=cohort_id, limit=-1, build=build)
-
-    except Exception as e:
-        logger.error("[ERROR] While exporting file list to GCS for cohort {}: ".format(str(cohort_id)))
-        logger.exception(e)
-
-    return redirect(redirect_url)
-
-
+# Master method for exporting data types to BQ, GCS, etc.
 @login_required
 @csrf_protect
 def export_data(request, cohort_id=0, export_type=None):
@@ -2542,7 +2463,7 @@ def export_data(request, cohort_id=0, export_type=None):
             for program in cohort_programs:
                 program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper())[0]
                 metadata_table = "{}.{}.{}".format(
-                    settings.BIGQUERY_PROJECT_NAME, program_bq_tables.bq_dataset,
+                    settings.BIGQUERY_DATA_PROJECT_NAME, program_bq_tables.bq_dataset,
                     program_bq_tables.data_table.lower(),
                 )
 
@@ -2586,13 +2507,13 @@ def export_data(request, cohort_id=0, export_type=None):
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
                 {biospec_clause}
-                JOIN `{deployment_project}.{metadata_dataset}.{clin_table}` clin
+                JOIN `{metadata_project}.{metadata_dataset}.{clin_table}` clin
                 ON clin.case_barcode = cs.case_barcode
                 WHERE cs.cohort_id = {cohort_id} {filter_conditions}
             """
 
             biospec_clause_base = """
-                JOIN `{deployment_project}.{metadata_dataset}.{biospec_table}` bios
+                JOIN `{metadata_project}.{metadata_dataset}.{biospec_table}` bios
                 ON bios.sample_barcode = cs.sample_barcode
             """
 
@@ -2603,13 +2524,14 @@ def export_data(request, cohort_id=0, export_type=None):
                 biospec_clause = ""
                 if program_bq_tables.biospec_bq_table:
                     biospec_clause = biospec_clause_base.format(
-                        deployment_project=settings.BIGQUERY_PROJECT_NAME,
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         biospec_table=program_bq_tables.biospec_bq_table
                     )
 
                 union_queries.append(
                     query_string_base.format(
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         clin_table=program_bq_tables.clin_bq_table,
                         deployment_project=settings.BIGQUERY_PROJECT_NAME,
@@ -2635,6 +2557,7 @@ def export_data(request, cohort_id=0, export_type=None):
             logger.debug("[STATUS] query to table export query: ")
             logger.debug(query_string)
 
+            # Export the data
             if export_dest == 'table':
                 bcs = BigQueryExportCohort(bq_proj_id, dataset, table)
                 result = bcs.export_cohort_query_to_bq(query_string, None, cohort_id)
