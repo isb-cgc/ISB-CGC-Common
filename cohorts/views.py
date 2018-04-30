@@ -1654,6 +1654,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'img_thumbs_url': settings.IMG_THUMBS_URL,
+                                            'has_user_data': bool(cohort_sample_list.count() > 0),
                                             'build': build})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
