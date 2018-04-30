@@ -57,10 +57,6 @@ class Cohort(models.Model):
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
 
-    '''
-    Note that neither of these counts is unique; if a sample/case is present in a cohort more than once, it will
-    count as more than one
-    '''
     def sample_size(self):
         return self.samples_set.all().count()
 
@@ -72,7 +68,7 @@ class Cohort(models.Model):
         return Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct()
 
     def only_user_data(self):
-        return bool(Program.objects.filter(id__in=self.get_programs(), public=True).count() <= 0)
+        return bool(Program.objects.filter(id__in=self.get_programs(), is_public=True).count() <= 0)
 
     '''
     Sets the last viewed time for a cohort
