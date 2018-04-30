@@ -71,6 +71,9 @@ class Cohort(models.Model):
         projects = self.samples_set.values_list('project_id', flat=True).distinct()
         return Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct()
 
+    def only_user_data(self):
+        return bool(Program.objects.filter(id__in=self.get_programs(), public=True).count() <= 0)
+
     '''
     Sets the last viewed time for a cohort
     '''
