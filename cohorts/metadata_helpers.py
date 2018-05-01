@@ -654,8 +654,8 @@ def build_bq_filter_and_params(filters):
                 query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
                 query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(ur'[^0-9\.]', re.UNICODE).search(values[0]) else 'INT64')}
                 filter_string += "{} IN UNNEST(@{})".format(attr,attr)
-                filter_set.append('({})'.format(filter_string))
 
+        filter_set.append('({})'.format(filter_string))
         result['parameters'].append(query_param)
 
     result['filter_string'] = " AND ".join(filter_set)

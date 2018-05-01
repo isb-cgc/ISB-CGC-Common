@@ -293,8 +293,6 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
                               jobId=query_job['jobReference']['jobId']).execute()
 
-        logger.debug("[STATUS] query job_is_done: {}".format(str(job_is_done)))
-
         result = {
             'status': None,
             'message': None
