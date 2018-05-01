@@ -2235,7 +2235,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             start = time.time()
             query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
                         offset_clause=offset_clause)
-            logger.debug("[STATUS] Query for file listing: {}".format(query))
             cursor.execute(query, params);
             stop = time.time()
             logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
@@ -2462,7 +2461,16 @@ def export_data(request, cohort_id=0, export_type=None):
             """
 
             for program in cohort_programs:
-                program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper())[0]
+                try:
+                    program_bq_tables = Public_Data_Tables.objects.get(program=program,build=build.upper())
+                except ObjectDoesNotExist:
+                    # No table for this combination of program and build--skip
+                    logger.info("[STATUS] No BQ table found for {}, build {}--skipping.".format(program.name, build))
+                    continue
+                except MultipleObjectsReturned:
+                    logger.info("[STATUS] Multiple BQ tables found for {}, build {}--using the first one!".format(program.name, build))
+                    program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper()).first()
+
                 metadata_table = "{}.{}.{}".format(
                     settings.BIGQUERY_DATA_PROJECT_NAME, program_bq_tables.bq_dataset,
                     program_bq_tables.data_table.lower(),
