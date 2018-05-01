@@ -2174,7 +2174,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             col_map = {
                 'col-program': 'project_short_name',
                 'col-barcode': 'case_barcode',
-                'col-filename': 'index_file_name',
+                'col-filename': 'file_name',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
