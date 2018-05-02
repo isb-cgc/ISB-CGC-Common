@@ -1708,17 +1708,23 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
     result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
     # If nothing was found, our total file count will reflect that
-    if do_filter_count and result['total_file_count'] > 0:
+    if do_filter_count:
         metadata_data_attr = fetch_build_data_attr(build)
-        for attr in result['metadata_data_counts']:
-            for val in result['metadata_data_counts'][attr]:
-                metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+        if len(result['metadata_data_counts']):
+            for attr in result['metadata_data_counts']:
+                for val in result['metadata_data_counts'][attr]:
+                    metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+        else:
+            for attr in metadata_data_attr:
+                for val in metadata_data_attr[attr]['values']:
+                    metadata_data_attr[attr]['values'][val]['count'] = 0
+
+        for attr in metadata_data_attr:
             metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
                                                   metadata_data_attr[attr]['values']]
+
         del result['metadata_data_counts']
         result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
-    else:
-        result['metadata_data_attr'] = []
 
     return JsonResponse(result, status=200)
 
@@ -2241,11 +2247,11 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 start = time.time()
                 query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
                             offset_clause=offset_clause)
-                cursor.execute(query, params);
+                cursor.execute(query, params)
                 stop = time.time()
                 logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
-                counts = {};
+                counts = {}
                 if do_filter_count:
                     start = time.time()
                     counts = count_public_data_type(request.user, count_select_clause,
@@ -2295,6 +2301,8 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                             if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
                                 total_file_count += int(filter_counts[attr][val])
                         files_counted = True
+            else:
+                filter_counts = {}
         resp = {
             'total_file_count': total_file_count,
             'page': page,
