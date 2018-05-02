@@ -1707,8 +1707,6 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
     result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
-    logger.debug("[STATUS] filter counts: {}".format(str(result['metadata_data_counts'])))
-
     # If nothing was found, our total file count will reflect that
     if do_filter_count:
         metadata_data_attr = fetch_build_data_attr(build)
