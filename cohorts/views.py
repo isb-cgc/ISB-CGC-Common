@@ -2594,7 +2594,7 @@ def export_data(request, cohort_id=0, export_type=None):
         # If export fails, we warn the user
         if result['status'] == 'error':
             status = 400
-            if not 'message' in result:
+            if 'message' not in result:
                 result['message'] = "We were unable to export Cohort {}--please contact the administrator.".format(
                     str(cohort_id) + (
                         "'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""

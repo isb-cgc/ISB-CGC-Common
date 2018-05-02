@@ -351,11 +351,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     'table_id': job_is_done['configuration']['query']['destinationTable']['tableId']
                 }
         else:
-            logger.debug(str(job_is_done))
-            msg = "Export of table {}:{}.{} did not complete in the time allowed".format(self.project_id, self.dataset_id, self.table_id)
+            msg = "Export did not complete in the time allowed"
             logger.error("[ERROR] {}.".format(msg))
             result['status'] = 'error'
-            result['message'] = msg + "--please contact the administrator."
+            result['message'] = msg + "--please consider exporting a reduced set of data."
 
         return result
 
