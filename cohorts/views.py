@@ -1707,7 +1707,8 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
     result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
-    if do_filter_count:
+    # If nothing was found, our total file count will reflect that
+    if do_filter_count and result['total_file_count'] > 0:
         metadata_data_attr = fetch_build_data_attr(build)
         for attr in result['metadata_data_counts']:
             for val in result['metadata_data_counts'][attr]:
@@ -1716,6 +1717,8 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
                                                   metadata_data_attr[attr]['values']]
         del result['metadata_data_counts']
         result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
+    else:
+        result['metadata_data_attr'] = []
 
     return JsonResponse(result, status=200)
 
@@ -2198,10 +2201,11 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             params = ()
             select_clause = ''
             count_select_clause = ''
-            first_program = True;
+            first_program = True
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
                 if len(program_data_tables) <= 0:
+                    logger.debug("[STATUS] No metadata_data table for {}, build {}--skipping.".format(program.name,build))
                     # This program has no metadata_data table for this build, or at all--skip
                     continue
                 program_data_table = program_data_tables[0].data_table
@@ -2225,70 +2229,72 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                         filter_conditions='')
                 first_program = False
 
-            if limit > 0:
-                limit_clause = ' LIMIT %s' % str(limit)
-                # Offset is only valid when there is a limit
-                if offset > 0:
-                    offset_clause = ' OFFSET %s' % str(offset)
-            order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
+            # if first_program is still true, we found no programs with data tables for this build
+            if not first_program:
+                if limit > 0:
+                    limit_clause = ' LIMIT %s' % str(limit)
+                    # Offset is only valid when there is a limit
+                    if offset > 0:
+                        offset_clause = ' OFFSET %s' % str(offset)
+                order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
 
-            start = time.time()
-            query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
-                        offset_clause=offset_clause)
-            cursor.execute(query, params);
-            stop = time.time()
-            logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
-
-            counts = {};
-            if do_filter_count:
                 start = time.time()
-                counts = count_public_data_type(request.user, count_select_clause,
-                                            inc_filters, cohort_programs, (type is not None and type != 'all'), build)
+                query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
+                            offset_clause=offset_clause)
+                cursor.execute(query, params);
                 stop = time.time()
-                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
+                logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
-            if cursor.rowcount > 0:
-                for item in cursor.fetchall():
-                    whitelist_found = False
-                    # If this is a controlled-access entry, check for the user's access to it
-                    if item['access'] == 'controlled' and access:
-                        whitelists = item['acl'].split(',')
-                        for whitelist in whitelists:
-                            if whitelist in access:
-                                whitelist_found = True
+                counts = {};
+                if do_filter_count:
+                    start = time.time()
+                    counts = count_public_data_type(request.user, count_select_clause,
+                                                inc_filters, cohort_programs, (type is not None and type != 'all'), build)
+                    stop = time.time()
+                    logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
 
-                    file_list.append({
-                        'sample': item['sample_barcode'],
-                        'case': item['case_barcode'],
-                        'disease_code': item['disease_code'],
-                        'build': build.lower(),
-                        'cloudstorage_location': item['file_name_key'] or 'N/A',
-                        'index_name': item['index_file_name'] or 'N/A',
-                        'access': (item['access'] or 'N/A'),
-                        'user_access': str(item['access'] != 'controlled' or whitelist_found),
-                        'filename': item['file_name'] or 'N/A',
-                        'exp_strat': item['experimental_strategy'] or 'N/A',
-                        'platform': item['platform'] or 'N/A',
-                        'datacat': item['data_category'] or 'N/A',
-                        'datatype': (item['data_type'] or 'N/A'),
-                        'dataformat': (item['data_format'] or 'N/A'),
-                        'program': item['project_short_name'].split("-")[0],
-                        'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
-                        'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
-                        'project_short_name': (item['project_short_name'] or 'N/A'),
-                        'cohort_id': cohort_id
-                    })
-            filter_counts = counts
-            files_counted = False
-            # Add to the file total
-            if do_filter_count:
-                for attr in filter_counts:
-                    if files_counted:
-                        continue
-                    for val in filter_counts[attr]:
-                        if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                            total_file_count += int(filter_counts[attr][val])
-                    files_counted = True
+                if cursor.rowcount > 0:
+                    for item in cursor.fetchall():
+                        whitelist_found = False
+                        # If this is a controlled-access entry, check for the user's access to it
+                        if item['access'] == 'controlled' and access:
+                            whitelists = item['acl'].split(',')
+                            for whitelist in whitelists:
+                                if whitelist in access:
+                                    whitelist_found = True
+
+                        file_list.append({
+                            'sample': item['sample_barcode'],
+                            'case': item['case_barcode'],
+                            'disease_code': item['disease_code'],
+                            'build': build.lower(),
+                            'cloudstorage_location': item['file_name_key'] or 'N/A',
+                            'index_name': item['index_file_name'] or 'N/A',
+                            'access': (item['access'] or 'N/A'),
+                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
+                            'filename': item['file_name'] or 'N/A',
+                            'exp_strat': item['experimental_strategy'] or 'N/A',
+                            'platform': item['platform'] or 'N/A',
+                            'datacat': item['data_category'] or 'N/A',
+                            'datatype': (item['data_type'] or 'N/A'),
+                            'dataformat': (item['data_format'] or 'N/A'),
+                            'program': item['project_short_name'].split("-")[0],
+                            'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
+                            'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
+                            'project_short_name': (item['project_short_name'] or 'N/A'),
+                            'cohort_id': cohort_id
+                        })
+                filter_counts = counts
+                files_counted = False
+                # Add to the file total
+                if do_filter_count:
+                    for attr in filter_counts:
+                        if files_counted:
+                            continue
+                        for val in filter_counts[attr]:
+                            if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                                total_file_count += int(filter_counts[attr][val])
+                        files_counted = True
         resp = {
             'total_file_count': total_file_count,
             'page': page,
