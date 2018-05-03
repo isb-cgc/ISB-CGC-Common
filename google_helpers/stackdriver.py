@@ -1,5 +1,6 @@
 """
-Copyright 2017, Institute for Systems Biology
+
+Copyright 2017-2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +21,7 @@ from urllib2 import quote as urllib2_quote
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient import discovery
 from httplib2 import Http
+from .utils import execute_with_retries, build_with_retries
 
 
 class StackDriverLogger(object):
@@ -35,8 +37,7 @@ class StackDriverLogger(object):
 
     def _get_service(self):
         http_auth = self.credentials.authorize(Http())
-        service = discovery.build('logging', 'v2', http=http_auth, cache_discovery=False)
-
+        service = build_with_retries('logging', 'v2', None, 2, http=http_auth)
         return service, http_auth
 
     def write_log_entries(self, log_name, log_entry_array):
@@ -70,13 +71,16 @@ class StackDriverLogger(object):
         }
 
         try:
-            response = client.entries().write(body=body).execute()
+            # try this a few times to avoid the deadline exceeded problem
+            request = client.entries().write(body=body)
+            response = execute_with_retries(request, 'WRITE_LOG_ENTRIES', 2)
 
             if response:
                 logger.error("Unexpected response from logging API: {}".format(response))
 
         except Exception as e:
-            logger.error("Exception while calling logging API.")
+            # If we still get an exception, figure out what the type is:
+            logger.error("Exception while calling logging API: {0}.".format(e.__class__.__name__))
             logger.exception(e)
 
     def write_struct_log_entry(self, log_name, log_entry, severity="DEFAULT"):
