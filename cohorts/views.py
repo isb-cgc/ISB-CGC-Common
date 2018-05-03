@@ -2317,13 +2317,15 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
         resp = {'error': 'Error obtaining list of samples in cohort file list'}
 
     except ObjectDoesNotExist as e:
-        logger.error("[ERROR] Exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
+        logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
         logger.exception(e)
         resp = {'error': "User {} does not have permission to view cohort {}.".format(user_email, str(cohort_id))}
 
     except MultipleObjectsReturned as e:
-        logger.error("[ERROR] Exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
+        logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
         logger.exception(e)
+        perms = Cohort_Perms.objects.filter(cohort_id=cohort_id, user_id=user_id).values_list('cohort_id','user_id')
+        logger.error("[ERROR] Permissions found: {}".format(str(perms)))
         resp = {'error': "There was an error while retrieving cohort {}'s permissions--please contact the administrator.".format(str(cohort_id))}
 
     except Exception as e:
