@@ -74,66 +74,6 @@ def convert(data):
     else:
         return data
 
-
-# Given a cohort ID, fetches the case_gdc_id or uuid of its samples
-# As metadata_data tables are build specific, this checks all builds and coalesces the results; if more than one
-# nonnull result is found the first one is kept (though in practice all non-null values should be identical)
-def get_cohort_uuids(cohort_id):
-    if not cohort_id:
-        raise Exception("A cohort ID was not provided (value={}).".format("None" if cohort_id is None else str(cohort_id)))
-
-    cohort_progs = Cohort.objects.get(id=cohort_id).get_programs()
-
-    data_tables = Public_Data_Tables.objects.filter(program_id__in=cohort_progs)
-
-    uuid_query_base = """
-        SELECT cs.sample_barcode, COALESCE ({}) as uuid
-        FROM cohorts_samples cs
-        {}
-    """
-
-    result = {}
-
-    db = None
-    cursor = None
-
-    try:
-        db = get_sql_connection()
-        cursor = db.cursor()
-
-        query = uuid_query_base
-
-        # Because UUIDs are stored in the data tables, which are build specific, we need to check the values
-        # in all builds for a given program. If more than one build has a case_gdc_id they should match, but some could
-        # be null, so we need to coalesce them to find a non-null value
-        for prog in cohort_progs:
-            prog_data_tables = data_tables.filter(program_id=prog)
-            count=1
-            uuid_cols = []
-            joins = []
-            for data_table in prog_data_tables:
-                uuid_cols.append("ds{}.case_gdc_id".format(str(count)))
-                joins.append("""
-                    LEFT JOIN {} ds{}
-                    ON ds{}.sample_barcode = cs.sample_barcode
-                """.format(data_table.data_table,str(count),str(count),))
-                count+=1
-
-            cursor.execute(query.format(",".join(uuid_cols)," ".join(joins)) + " WHERE cs.cohort_id = %s;", (cohort_id,))
-
-            for row in cursor.fetchall():
-                if row[0] not in result:
-                    result[row[0]] = row[1]
-
-    except Exception as e:
-        logger.error("[ERROR] While fetching UUIDs for a cohort:")
-        logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-    return result
-
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
 
     if program_id is None and cohort_id is None:
