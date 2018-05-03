@@ -2316,10 +2316,15 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
         logger.exception(e)
         resp = {'error': 'Error obtaining list of samples in cohort file list'}
 
-    except (ObjectDoesNotExist, MultipleObjectsReturned), e:
-        logger.error("[ERROR] Exception when retrieving cohort file list:")
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
         logger.exception(e)
-        resp = {'error': "%s does not have permission to view cohort %d." % (user_email, cohort_id)}
+        resp = {'error': "User {} does not have permission to view cohort {}.".format(user_email, str(cohort_id))}
+
+    except MultipleObjectsReturned as e:
+        logger.error("[ERROR] Exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
+        logger.exception(e)
+        resp = {'error': "There was an error while retrieving cohort {}'s permissions--please contact the administrator.".format(user_email, str(cohort_id))}
 
     except Exception as e:
         logger.error("[ERROR] Exception obtaining file list and platform counts:")
