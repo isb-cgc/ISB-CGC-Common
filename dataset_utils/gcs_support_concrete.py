@@ -17,9 +17,7 @@ limitations under the License.
 """
 
 from oauth2client.client import GoogleCredentials
-from googleapiclient import discovery
-
-
+from google_helpers.utils import build_with_retries, execute_with_retries
 from dataset_utils.gcs_utils import get_gcs_bucket_and_object_from_path
 
 
@@ -34,10 +32,10 @@ class GCSSupportConcrete(object):
         self.credentials = credentials_instance
 
     def get_data_from_gcs_bucket_and_object(self, bucket_name, object_name):
-        storage_service = discovery.build('storage', 'v1', credentials=self.credentials, cache_discovery=False)
+        storage_service = build_with_retries('storage', 'v1', self.credentials, 2)
         req = storage_service.objects().get_media(bucket=bucket_name,
                                                   object=object_name)
-        object_contents = req.execute()
+        object_contents = execute_with_retries(req, 'GET_MEDIA', 2)
         return object_contents
 
     def get_data_from_gcs_path(self, gcs_path):
