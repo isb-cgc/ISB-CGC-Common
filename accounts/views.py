@@ -40,6 +40,19 @@ from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
                      do_nih_unlink, deactivate_nih_add_to_open
 
+
+import requests
+import random
+import string
+
+from django.http import HttpResponseRedirect
+from django.contrib.auth.decorators import login_required
+from allauth.socialaccount.models import SocialApp, SocialToken
+
+from oauthlib.oauth2 import WebApplicationClient
+
+
+
 import json
 
 logger = logging.getLogger('main_logger')
@@ -49,6 +62,10 @@ SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
+
+DCF_AUTH_URL = settings.DCF_AUTH_URL
+DCF_TOKEN_URL = settings.DCF_TOKEN_URL
+DCF_USER_URL = settings.DCF_USER_URL
 
 @login_required
 def extended_logout_view(request):
@@ -727,3 +744,67 @@ def get_user_datasets(request,user_id):
         status='500'
 
     return JsonResponse(result, status=status)
+
+@login_required
+def oauth2_login(request):
+    callback_url = reverse('dcf_callback')
+    print 'li request user: {}'.format(str(request.user), callback_url)
+
+    social_account = SocialApp.objects.get(provider='dcf')
+
+    rando = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(10))
+
+    wac = WebApplicationClient(social_account.client_id)
+
+    ruri = wac.prepare_request_uri(DCF_AUTH_URL,
+                                   redirect_uri='http://localhost:8100/accounts/dcf/login/callback/',
+                                   state=rando, scope=['openid', 'user'])
+    return HttpResponseRedirect(ruri)
+
+@login_required
+def oauth2_callback(request):
+    callback_url = reverse('dcf_callback')
+    print 'cb request user: {} : {}'.format(str(request.user.id), callback_url)
+    data = {
+        'redirect_uri': 'http://localhost:8100/accounts/dcf/login/callback/',
+        'grant_type': 'authorization_code',
+        'code': request.GET['code']}
+
+    social_app = SocialApp.objects.get(provider='dcf')
+
+    auth = requests.auth.HTTPBasicAuth(social_app.client_id, social_app.secret)
+
+    resp = requests.request('POST', DCF_TOKEN_URL, data=data, auth=auth)
+    token_data = json.loads(resp.text)
+    expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data["expires_in"]))
+    print expiration_time
+
+    print "AT {} : {} : {} : {}".format(resp.status_code, resp.request, resp.text, str(token_data));
+
+    headers = {'Authorization': 'Bearer {}'.format(token_data['access_token'])}
+    resp = requests.get(DCF_USER_URL, headers=headers)
+    user_data = json.loads(resp.text)
+
+    # Note we also get back an "id_token" which is an encrypted JWT.
+    # Note we also get back a "token_type" which had better be "Bearer".
+
+    print "AT {} : {} : {}".format(resp.status_code, resp.request, resp.text);
+
+    # Note the logic here. If a different User shows up and logs in to get back the same uid from dcf that
+    # another User had associated, the uid now becomes linked to the new user:
+    social_account, created = SocialAccount.objects.update_or_create(uid = user_data['user_id'],
+                                                                     provider = 'dcf',
+                                                                     defaults={
+                                                                         'user_id' : request.user.id,
+                                                                         'extra_data': resp.text.rstrip()
+                                                                     })
+
+    " seeing: Duplicate entry '2-2' for key 'socialaccount_socialtoken_app_id_account_id_fca4e0ac_uniq'"
+    social_token, created = SocialToken.objects.update_or_create(account_id=social_account.id,
+                                                                 app_id=social_app.id,
+                                                                 defaults= {
+                                                                     'token' : token_data['access_token'],
+                                                                     'token_secret' : token_data['refresh_token'],
+                                                                     'expires_at' : expiration_time
+                                                                 })
+    return redirect('dashboard')

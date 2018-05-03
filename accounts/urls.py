@@ -28,6 +28,8 @@ urlpatterns = [
     url(r'^logout', views.extended_logout_view, name='account_logout'),
     url(r'^login/$', google_views.oauth2_login, name='account_login'),
     # url(r'^nih_login/$', views.nih_login, name='nih_login'),
+    url(r'^dcf/login/callback/$', views.oauth2_callback, name='dcf_callback'),
+    url(r'^dcf_login/$', views.oauth2_login, name='dcf_login'),
     url(r'^unlink_accounts/', views.unlink_accounts, name='unlink_accounts'),
 
     # Google Cloud Project related
