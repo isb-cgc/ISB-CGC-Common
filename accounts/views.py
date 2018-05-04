@@ -50,6 +50,9 @@ from django.contrib.auth.decorators import login_required
 from allauth.socialaccount.models import SocialApp, SocialToken
 
 from oauthlib.oauth2 import WebApplicationClient
+from requests_oauthlib.oauth2_session import OAuth2Session
+import os
+os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
 
 
@@ -745,50 +748,68 @@ def get_user_datasets(request,user_id):
 
     return JsonResponse(result, status=status)
 
+hackie_state = None
+
 @login_required
 def oauth2_login(request):
-    callback_url = reverse('dcf_callback')
-    print 'li request user: {}'.format(str(request.user), callback_url)
+    full_callback = request.build_absolute_uri(reverse('dcf_callback'))
 
     social_account = SocialApp.objects.get(provider='dcf')
 
     rando = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(10))
 
-    wac = WebApplicationClient(social_account.client_id)
+    # Should provide a state string that gets stashed in sessions!
+    oauth = OAuth2Session(social_account.client_id, redirect_uri=full_callback, scope=['openid', 'user'])
+    authorization_url, state = oauth.authorization_url(DCF_AUTH_URL)
+    # stash the state string in the session!
+    hackie_state = state
+    return HttpResponseRedirect(authorization_url)
 
-    ruri = wac.prepare_request_uri(DCF_AUTH_URL,
-                                   redirect_uri='http://localhost:8100/accounts/dcf/login/callback/',
-                                   state=rando, scope=['openid', 'user'])
-    return HttpResponseRedirect(ruri)
+    # wac = WebApplicationClient(social_account.client_id)
+    #
+    # ruri = wac.prepare_request_uri(DCF_AUTH_URL,
+    #                                redirect_uri=full_callback,
+    #                                state=rando, scope=['openid', 'user'])
+    # return HttpResponseRedirect(ruri)
 
 @login_required
 def oauth2_callback(request):
-    callback_url = reverse('dcf_callback')
-    print 'cb request user: {} : {}'.format(str(request.user.id), callback_url)
+    full_callback = request.build_absolute_uri(reverse('dcf_callback'))
+    print 'cb request user: {} : {}'.format(str(request.user.id), full_callback)
     data = {
-        'redirect_uri': 'http://localhost:8100/accounts/dcf/login/callback/',
+        'redirect_uri': full_callback,
         'grant_type': 'authorization_code',
         'code': request.GET['code']}
 
     social_app = SocialApp.objects.get(provider='dcf')
 
-    auth = requests.auth.HTTPBasicAuth(social_app.client_id, social_app.secret)
+    # You MUST provide the callback here to get it into the fetch request
+    dcf = OAuth2Session(social_app.client_id, state=hackie_state, redirect_uri=full_callback)
 
-    resp = requests.request('POST', DCF_TOKEN_URL, data=data, auth=auth)
-    token_data = json.loads(resp.text)
+    # You MUST provide the client_id here in order to get this to do basic auth! Plus we need to provide
+    # the authorization_response argument intead of a parsed-out code argument:
+    token_data = dcf.fetch_token(DCF_TOKEN_URL, client_secret=social_app.secret, client_id=social_app.client_id,
+                                 authorization_response=request.get_full_path())
+
+#    auth = requests.auth.HTTPBasicAuth(social_app.client_id, social_app.secret)
+
+ #   resp = requests.request('POST', DCF_TOKEN_URL, data=data, auth=auth)
+  #  token_data = json.loads(resp.text)
     expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data["expires_in"]))
-    print expiration_time
+   # print expiration_time
 
-    print "AT {} : {} : {} : {}".format(resp.status_code, resp.request, resp.text, str(token_data));
+  #  print "AT {} : {} : {} : {}".format(resp.status_code, resp.request, resp.text, str(token_data));
 
-    headers = {'Authorization': 'Bearer {}'.format(token_data['access_token'])}
-    resp = requests.get(DCF_USER_URL, headers=headers)
+   # headers = {'Authorization': 'Bearer {}'.format(token_data['access_token'])}
+   # resp = requests.get(DCF_USER_URL, headers=headers)
+
+    resp = dcf.get(DCF_USER_URL)
     user_data = json.loads(resp.text)
 
     # Note we also get back an "id_token" which is an encrypted JWT.
     # Note we also get back a "token_type" which had better be "Bearer".
 
-    print "AT {} : {} : {}".format(resp.status_code, resp.request, resp.text);
+    print "AT {} : {} : {}".format(resp.status_code, resp.request, " ".join(resp.text.split()))
 
     # Note the logic here. If a different User shows up and logs in to get back the same uid from dcf that
     # another User had associated, the uid now becomes linked to the new user:
@@ -796,10 +817,10 @@ def oauth2_callback(request):
                                                                      provider = 'dcf',
                                                                      defaults={
                                                                          'user_id' : request.user.id,
-                                                                         'extra_data': resp.text.rstrip()
+                                                                         'extra_data': json.loads(" ".join(resp.text.split()))
                                                                      })
-
-    " seeing: Duplicate entry '2-2' for key 'socialaccount_socialtoken_app_id_account_id_fca4e0ac_uniq'"
+    # Note how update_or_create works. You match on the named parameter values, and update with the values in the defaults.
+    # If it doesn't exist, the named parameter values are used to create the row.
     social_token, created = SocialToken.objects.update_or_create(account_id=social_account.id,
                                                                  app_id=social_app.id,
                                                                  defaults= {
