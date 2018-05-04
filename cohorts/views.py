@@ -2319,7 +2319,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     except ObjectDoesNotExist as e:
         logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
         logger.exception(e)
-        resp = {'error': "User {} does not have permission to view cohort {}.".format(user_email, str(cohort_id))}
+        resp = {'error': "User {} does not have permission to view cohort {}, and so cannot export it or its file manifest.".format(user_email, str(cohort_id))}
 
     except MultipleObjectsReturned as e:
         logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
@@ -2370,9 +2370,9 @@ def export_data(request, cohort_id=0, export_type=None):
         cohort = Cohort.objects.get(id=cohort_id)
 
         try:
-            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort)
         except ObjectDoesNotExist as e:
-            messages.error(request, "You must be the owner of a cohort in order to export its data.")
+            messages.error(request, "You must be the owner of a cohort, or have been granted access by the owner, in order to export its data.")
             return redirect(redirect_url)
 
         # If destination is GCS
