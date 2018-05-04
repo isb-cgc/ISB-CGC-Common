@@ -595,7 +595,10 @@ def unregister_all_gcp_sa(user_id, gcp_id):
 def unregister_sa(user_id, sa_name):
     st_logger = StackDriverLogger.build_from_django_settings()
 
-    sa = ServiceAccount.objects.get(service_account=sa_name, active=1)
+    sa = ServiceAccount.objects.get(service_account=sa_name)
+    # papid multi-clicks on button can cause this sa to be inactive already. Nothing to be done...
+    if not sa.active:
+        return
     saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
 
     st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME, "[STATUS] User {} is unregistering SA {}".format(
@@ -629,7 +632,7 @@ def unregister_sa(user_id, sa_name):
                     'message': '[ERROR] There was an error in removing SA {0} from Google Group {1}.'.format(
                         str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[ERROR] {}}.'.format(str(e))})
+                    'message': '[ERROR] {}.'.format(str(e))})
                 logger.error('[ERROR] There was an error in removing SA {0} from Google Group {1}: {2}'.format(
                     str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
                 logger.exception(e)
