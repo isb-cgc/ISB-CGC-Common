@@ -1654,6 +1654,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'img_thumbs_url': settings.IMG_THUMBS_URL,
+                                            'has_user_data': bool(cohort_sample_list.count() > 0),
                                             'build': build})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -1706,13 +1707,22 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
     result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
+    # If nothing was found, our total file count will reflect that
     if do_filter_count:
         metadata_data_attr = fetch_build_data_attr(build)
-        for attr in result['metadata_data_counts']:
-            for val in result['metadata_data_counts'][attr]:
-                metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+        if len(result['metadata_data_counts']):
+            for attr in result['metadata_data_counts']:
+                for val in result['metadata_data_counts'][attr]:
+                    metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+        else:
+            for attr in metadata_data_attr:
+                for val in metadata_data_attr[attr]['values']:
+                    metadata_data_attr[attr]['values'][val]['count'] = 0
+
+        for attr in metadata_data_attr:
             metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
                                                   metadata_data_attr[attr]['values']]
+
         del result['metadata_data_counts']
         result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
 
@@ -2173,7 +2183,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             col_map = {
                 'col-program': 'project_short_name',
                 'col-barcode': 'case_barcode',
-                'col-filename': 'index_file_name',
+                'col-filename': 'file_name',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
@@ -2197,10 +2207,11 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             params = ()
             select_clause = ''
             count_select_clause = ''
-            first_program = True;
+            first_program = True
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
                 if len(program_data_tables) <= 0:
+                    logger.debug("[STATUS] No metadata_data table for {}, build {}--skipping.".format(program.name,build))
                     # This program has no metadata_data table for this build, or at all--skip
                     continue
                 program_data_table = program_data_tables[0].data_table
@@ -2224,71 +2235,74 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                         filter_conditions='')
                 first_program = False
 
-            if limit > 0:
-                limit_clause = ' LIMIT %s' % str(limit)
-                # Offset is only valid when there is a limit
-                if offset > 0:
-                    offset_clause = ' OFFSET %s' % str(offset)
-            order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
+            # if first_program is still true, we found no programs with data tables for this build
+            if not first_program:
+                if limit > 0:
+                    limit_clause = ' LIMIT %s' % str(limit)
+                    # Offset is only valid when there is a limit
+                    if offset > 0:
+                        offset_clause = ' OFFSET %s' % str(offset)
+                order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
 
-            start = time.time()
-            query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
-                        offset_clause=offset_clause)
-            logger.debug("[STATUS] Query for file listing: {}".format(query))
-            cursor.execute(query, params);
-            stop = time.time()
-            logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
-
-            counts = {};
-            if do_filter_count:
                 start = time.time()
-                counts = count_public_data_type(request.user, count_select_clause,
-                                            inc_filters, cohort_programs, (type is not None and type != 'all'), build)
+                query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
+                            offset_clause=offset_clause)
+                cursor.execute(query, params)
                 stop = time.time()
-                logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
+                logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
-            if cursor.rowcount > 0:
-                for item in cursor.fetchall():
-                    whitelist_found = False
-                    # If this is a controlled-access entry, check for the user's access to it
-                    if item['access'] == 'controlled' and access:
-                        whitelists = item['acl'].split(',')
-                        for whitelist in whitelists:
-                            if whitelist in access:
-                                whitelist_found = True
+                counts = {}
+                if do_filter_count:
+                    start = time.time()
+                    counts = count_public_data_type(request.user, count_select_clause,
+                                                inc_filters, cohort_programs, (type is not None and type != 'all'), build)
+                    stop = time.time()
+                    logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
 
-                    file_list.append({
-                        'sample': item['sample_barcode'],
-                        'case': item['case_barcode'],
-                        'disease_code': item['disease_code'],
-                        'build': build.lower(),
-                        'cloudstorage_location': item['file_name_key'] or 'N/A',
-                        'index_name': item['index_file_name'] or 'N/A',
-                        'access': (item['access'] or 'N/A'),
-                        'user_access': str(item['access'] != 'controlled' or whitelist_found),
-                        'filename': item['file_name'] or 'N/A',
-                        'exp_strat': item['experimental_strategy'] or 'N/A',
-                        'platform': item['platform'] or 'N/A',
-                        'datacat': item['data_category'] or 'N/A',
-                        'datatype': (item['data_type'] or 'N/A'),
-                        'dataformat': (item['data_format'] or 'N/A'),
-                        'program': item['project_short_name'].split("-")[0],
-                        'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
-                        'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
-                        'project_short_name': (item['project_short_name'] or 'N/A'),
-                        'cohort_id': cohort_id
-                    })
-            filter_counts = counts
-            files_counted = False
-            # Add to the file total
-            if do_filter_count:
-                for attr in filter_counts:
-                    if files_counted:
-                        continue
-                    for val in filter_counts[attr]:
-                        if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                            total_file_count += int(filter_counts[attr][val])
-                    files_counted = True
+                if cursor.rowcount > 0:
+                    for item in cursor.fetchall():
+                        whitelist_found = False
+                        # If this is a controlled-access entry, check for the user's access to it
+                        if item['access'] == 'controlled' and access:
+                            whitelists = item['acl'].split(',')
+                            for whitelist in whitelists:
+                                if whitelist in access:
+                                    whitelist_found = True
+
+                        file_list.append({
+                            'sample': item['sample_barcode'],
+                            'case': item['case_barcode'],
+                            'disease_code': item['disease_code'],
+                            'build': build.lower(),
+                            'cloudstorage_location': item['file_name_key'] or 'N/A',
+                            'index_name': item['index_file_name'] or 'N/A',
+                            'access': (item['access'] or 'N/A'),
+                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
+                            'filename': item['file_name'] or 'N/A',
+                            'exp_strat': item['experimental_strategy'] or 'N/A',
+                            'platform': item['platform'] or 'N/A',
+                            'datacat': item['data_category'] or 'N/A',
+                            'datatype': (item['data_type'] or 'N/A'),
+                            'dataformat': (item['data_format'] or 'N/A'),
+                            'program': item['project_short_name'].split("-")[0],
+                            'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
+                            'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
+                            'project_short_name': (item['project_short_name'] or 'N/A'),
+                            'cohort_id': cohort_id
+                        })
+                filter_counts = counts
+                files_counted = False
+                # Add to the file total
+                if do_filter_count:
+                    for attr in filter_counts:
+                        if files_counted:
+                            continue
+                        for val in filter_counts[attr]:
+                            if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
+                                total_file_count += int(filter_counts[attr][val])
+                        files_counted = True
+            else:
+                filter_counts = {}
         resp = {
             'total_file_count': total_file_count,
             'page': page,
@@ -2302,10 +2316,17 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
         logger.exception(e)
         resp = {'error': 'Error obtaining list of samples in cohort file list'}
 
-    except (ObjectDoesNotExist, MultipleObjectsReturned), e:
-        logger.error("[ERROR] Exception when retrieving cohort file list:")
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
         logger.exception(e)
-        resp = {'error': "%s does not have permission to view cohort %d." % (user_email, cohort_id)}
+        resp = {'error': "User {} does not have permission to view cohort {}, and so cannot export it or its file manifest.".format(user_email, str(cohort_id))}
+
+    except MultipleObjectsReturned as e:
+        logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
+        logger.exception(e)
+        perms = Cohort_Perms.objects.filter(cohort_id=cohort_id, user_id=user_id).values_list('cohort_id','user_id')
+        logger.error("[ERROR] Permissions found: {}".format(str(perms)))
+        resp = {'error': "There was an error while retrieving cohort {}'s permissions--please contact the administrator.".format(str(cohort_id))}
 
     except Exception as e:
         logger.error("[ERROR] Exception obtaining file list and platform counts:")
@@ -2349,9 +2370,9 @@ def export_data(request, cohort_id=0, export_type=None):
         cohort = Cohort.objects.get(id=cohort_id)
 
         try:
-            Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+            Cohort_Perms.objects.get(user=req_user, cohort=cohort)
         except ObjectDoesNotExist as e:
-            messages.error(request, "You must be the owner of a cohort in order to export its data.")
+            messages.error(request, "You must be the owner of a cohort, or have been granted access by the owner, in order to export its data.")
             return redirect(redirect_url)
 
         # If destination is GCS
@@ -2461,7 +2482,16 @@ def export_data(request, cohort_id=0, export_type=None):
             """
 
             for program in cohort_programs:
-                program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper())[0]
+                try:
+                    program_bq_tables = Public_Data_Tables.objects.get(program=program,build=build.upper())
+                except ObjectDoesNotExist:
+                    # No table for this combination of program and build--skip
+                    logger.info("[STATUS] No BQ table found for {}, build {}--skipping.".format(program.name, build))
+                    continue
+                except MultipleObjectsReturned:
+                    logger.info("[STATUS] Multiple BQ tables found for {}, build {}--using the first one!".format(program.name, build))
+                    program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper()).first()
+
                 metadata_table = "{}.{}.{}".format(
                     settings.BIGQUERY_DATA_PROJECT_NAME, program_bq_tables.bq_dataset,
                     program_bq_tables.data_table.lower(),
@@ -2571,7 +2601,7 @@ def export_data(request, cohort_id=0, export_type=None):
         # If export fails, we warn the user
         if result['status'] == 'error':
             status = 400
-            if not 'message' in result:
+            if 'message' not in result:
                 result['message'] = "We were unable to export Cohort {}--please contact the administrator.".format(
                     str(cohort_id) + (
                         "'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""
