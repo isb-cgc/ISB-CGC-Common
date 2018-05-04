@@ -598,6 +598,9 @@ def unregister_sa(user_id, sa_name):
     sa = ServiceAccount.objects.get(service_account=sa_name)
     # papid multi-clicks on button can cause this sa to be inactive already. Nothing to be done...
     if not sa.active:
+        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+            'message': '[STATUS] Attempted to remove INACTIVE SA {0} from Google Group {1}.'.
+                                         format(str(sa.service_account))})
         return
     saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
 
