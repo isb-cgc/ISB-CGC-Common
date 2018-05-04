@@ -17,8 +17,8 @@ limitations under the License.
 """
 
 from oauth2client.client import GoogleCredentials
-from googleapiclient.discovery import build
 from django.conf import settings
+from .utils import build_with_retries
 
 CRM_SCOPES = ['https://www.googleapis.com/auth/cloud-platform']
 
@@ -28,8 +28,8 @@ def get_crm_resource():
     Returns: a Cloud Resource Manager service client for calling the API.
     """
     credentials = GoogleCredentials.get_application_default()
-    return build('cloudresourcemanager', 'v1beta1', credentials=credentials, cache_discovery=False)
-
+    service = build_with_retries('cloudresourcemanager', 'v1beta1', credentials, 2)
+    return service
 
 def get_special_crm_resource():
     """
@@ -39,4 +39,5 @@ def get_special_crm_resource():
     """
     credentials = GoogleCredentials.from_stream(
         settings.USER_GCP_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
-    return build('cloudresourcemanager', 'v1beta1', credentials=credentials, cache_discovery=False)
+    service = build_with_retries('cloudresourcemanager', 'v1beta1', credentials, 2)
+    return service
