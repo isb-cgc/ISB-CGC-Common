@@ -31,6 +31,8 @@ urlpatterns = [
     url(r'^dcf/login/callback/$', views.oauth2_callback, name='dcf_callback'),
     url(r'^dcf_login/$', views.oauth2_login, name='dcf_login'),
     url(r'^unlink_accounts/', views.unlink_accounts, name='unlink_accounts'),
+    url(r'^dcf/test', views.test_the_dcf, name='dcf_test'),
+
 
     # Google Cloud Project related
     url(r'^users/(?P<user_id>\d+)/gcp_list/$', views.user_gcp_list, name='user_gcp_list'),

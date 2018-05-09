@@ -157,3 +157,11 @@ class ServiceAccountAuthorizedDatasets(models.Model):
     service_account = models.ForeignKey(ServiceAccount, null=False)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
     authorized_date = models.DateTimeField(auto_now=True)
+
+
+class DCFToken(models.Model):
+    nih_user = models.OneToOneField(NIH_User, null=False)
+    dcf_user = models.CharField(max_length=128, null=False)
+    access_token = models.TextField(null=False)
+    refresh_token = models.TextField(null=False)
+    expires_at = models.DateTimeField(null=False)

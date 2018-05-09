@@ -33,26 +33,24 @@ from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from googleapiclient.errors import HttpError
+from django.contrib.auth.models import User
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
-                     do_nih_unlink, deactivate_nih_add_to_open
-
-
-import requests
-import random
-import string
+                     do_nih_unlink, deactivate_nih_add_to_open, handle_user_db_entry, \
+                     found_linking_problems, DemoLoginResults, handle_user_for_dataset
 
 from django.http import HttpResponseRedirect
-from django.contrib.auth.decorators import login_required
-from allauth.socialaccount.models import SocialApp, SocialToken
-
-from oauthlib.oauth2 import WebApplicationClient
 from requests_oauthlib.oauth2_session import OAuth2Session
 import os
-os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
+from base64 import urlsafe_b64decode
+import jwt
+from jwt.contrib.algorithms.pycrypto import RSAAlgorithm
+from json import dumps as json_dumps
+from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
+from dataset_utils.dataset_config import DatasetGoogleGroupPair
 
 
 
@@ -748,84 +746,301 @@ def get_user_datasets(request,user_id):
 
     return JsonResponse(result, status=status)
 
-hackie_state = None
-
 @login_required
 def oauth2_login(request):
+    """
+    First step of OAuth2 login ro DCF. Just build the URL that we send back to the browser in the refresh request
+    """
     full_callback = request.build_absolute_uri(reverse('dcf_callback'))
 
-    social_account = SocialApp.objects.get(provider='dcf')
+    # OAuth2Session ENFORCES https unless this environment variable is set. For local dev, we want that off
+    # so we can talk to localhost over http. But let's turn it on/off to minimize, and make it only active in
+    # development:
 
-    rando = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(10))
+    if settings.IS_DEV and full_callback.startswith('http://localhost'):
+        os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-    # Should provide a state string that gets stashed in sessions!
-    oauth = OAuth2Session(social_account.client_id, redirect_uri=full_callback, scope=['openid', 'user'])
+    dcf_secrets = _read_dict(settings.DCF_CLIENT_SECRETS)
+
+    # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
+    # to do data queries. Starting to recognize a pattern here...
+    oauth = OAuth2Session(dcf_secrets['DCF_CLIENT_ID'], redirect_uri=full_callback, scope=['openid', 'user', 'data'])
     authorization_url, state = oauth.authorization_url(DCF_AUTH_URL)
     # stash the state string in the session!
-    hackie_state = state
+    request.session['dcfOAuth2State'] = state
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
     return HttpResponseRedirect(authorization_url)
 
+    # For future reference, this also worked, using underlying oauthlib.oauth2 library:
+    # from oauthlib.oauth2 import WebApplicationClient
     # wac = WebApplicationClient(social_account.client_id)
-    #
-    # ruri = wac.prepare_request_uri(DCF_AUTH_URL,
-    #                                redirect_uri=full_callback,
-    #                                state=rando, scope=['openid', 'user'])
+    # rando = ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(10))
+    # ruri = wac.prepare_request_uri(DCF_AUTH_URL, redirect_uri=full_callback, state=rando, scope=['openid', 'user'])
     # return HttpResponseRedirect(ruri)
 
 @login_required
 def oauth2_callback(request):
+    """
+    Second step of OAuth2 login to DCF. Takes the response redirect URL that DCF returned to the user's browser,
+    parse out the auth code, use it to get a token, then get user info from DCF using the token
+    """
     full_callback = request.build_absolute_uri(reverse('dcf_callback'))
-    print 'cb request user: {} : {}'.format(str(request.user.id), full_callback)
-    data = {
-        'redirect_uri': full_callback,
-        'grant_type': 'authorization_code',
-        'code': request.GET['code']}
 
-    social_app = SocialApp.objects.get(provider='dcf')
+    # For future reference, this also worked, using underlying requests library:
+    # data = { 'redirect_uri': full_callback, 'grant_type': 'authorization_code', 'code': request.GET['code']}
+    # auth = requests.auth.HTTPBasicAuth(social_app.client_id, social_app.secret)
+    # resp = requests.request('POST', DCF_TOKEN_URL, data=data, auth=auth)
+    # token_data = json.loads(resp.text)
+    # headers = {'Authorization': 'Bearer {}'.format(token_data['access_token'])}
+    # resp = requests.get(DCF_USER_URL, headers=headers)
 
-    # You MUST provide the callback here to get it into the fetch request
-    dcf = OAuth2Session(social_app.client_id, state=hackie_state, redirect_uri=full_callback)
+    # OAuth2Session ENFORCES https unless this environment variable is set. FOr local dev, we want that off
+    # so we can talk to localhost over http. But let's turn it on/off to minimize, and make it only active in
+    # development:
 
-    # You MUST provide the client_id here in order to get this to do basic auth! Plus we need to provide
-    # the authorization_response argument intead of a parsed-out code argument:
-    token_data = dcf.fetch_token(DCF_TOKEN_URL, client_secret=social_app.secret, client_id=social_app.client_id,
-                                 authorization_response=request.get_full_path())
+    if settings.IS_DEV and full_callback.startswith('http://localhost'):
+        os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-#    auth = requests.auth.HTTPBasicAuth(social_app.client_id, social_app.secret)
+    dcf_secrets = _read_dict(settings.DCF_CLIENT_SECRETS)
 
- #   resp = requests.request('POST', DCF_TOKEN_URL, data=data, auth=auth)
-  #  token_data = json.loads(resp.text)
-    expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(seconds=token_data["expires_in"]))
-   # print expiration_time
+    if 'dcfOAuth2State' in request.session:
+        saved_state = request.session['dcfOAuth2State']
+    else:
+        """Do something here to report the error"""
 
-  #  print "AT {} : {} : {} : {}".format(resp.status_code, resp.request, resp.text, str(token_data));
+    # You MUST provide the callback *here* to get it into the fetch request
+    dcf = OAuth2Session(dcf_secrets['DCF_CLIENT_ID'], state=saved_state, redirect_uri=full_callback)
 
-   # headers = {'Authorization': 'Bearer {}'.format(token_data['access_token'])}
-   # resp = requests.get(DCF_USER_URL, headers=headers)
-
-    resp = dcf.get(DCF_USER_URL)
-    user_data = json.loads(resp.text)
-
-    # Note we also get back an "id_token" which is an encrypted JWT.
+    # You MUST provide the client_id *here* (again!) in order to get this to do basic auth! DCF will not authorize
+    # unless we use basic auth (i.e. client ID and secret in the header, not the body). Plus we need to provide
+    # the authorization_response argument intead of a parsed-out code argument since this is a WebApplication flow.
+    # Note we also get back an "id_token" which is a base64-encoded JWT.
     # Note we also get back a "token_type" which had better be "Bearer".
 
-    print "AT {} : {} : {}".format(resp.status_code, resp.request, " ".join(resp.text.split()))
+    token_data = dcf.fetch_token(DCF_TOKEN_URL, client_secret=dcf_secrets['DCF_CLIENT_SECRET'],
+                                 client_id=dcf_secrets['DCF_CLIENT_ID'],
+                                 authorization_response=request.get_full_path())
 
-    # Note the logic here. If a different User shows up and logs in to get back the same uid from dcf that
-    # another User had associated, the uid now becomes linked to the new user:
-    social_account, created = SocialAccount.objects.update_or_create(uid = user_data['user_id'],
-                                                                     provider = 'dcf',
-                                                                     defaults={
-                                                                         'user_id' : request.user.id,
-                                                                         'extra_data': json.loads(" ".join(resp.text.split()))
-                                                                     })
-    # Note how update_or_create works. You match on the named parameter values, and update with the values in the defaults.
-    # If it doesn't exist, the named parameter values are used to create the row.
-    social_token, created = SocialToken.objects.update_or_create(account_id=social_account.id,
-                                                                 app_id=social_app.id,
-                                                                 defaults= {
-                                                                     'token' : token_data['access_token'],
-                                                                     'token_secret' : token_data['refresh_token'],
-                                                                     'expires_at' : expiration_time
-                                                                 })
-    return redirect('dashboard')
+    if token_data['token_type'] != 'Bearer':
+        """Do something here to report the error"""
+
+    #
+    # Although user data can be extracted from the /user endpoint, DCF instructs us to pull the user information
+    # out of the JWT in the id_token. They also recommend we check that the JWT validates using the public
+    # key provided by their endpoint using the pyjwt package to do the work.
+    #
+
+    id_token_b64 = token_data['id_token']
+
+    #
+    # PyJWT happens to want the cryptography package, but that involves C code, so we use the provided fallback of
+    # pycrypto, which we do use. The steps below are how they say to use the pycrypto implmentation, but note that
+    # we appear to need to create a new PyJWT() object so that it does not complain about previously registered
+    # algorithm, but also doesn't like is we unregister non-registered algorithms, or appear to provide an easy
+    # way to get at the global list of registered algorithms?
+    #
+
+    my_jwt = jwt.PyJWT()
+    my_jwt.register_algorithm('RS256', RSAAlgorithm(RSAAlgorithm.SHA256))
+
+    #
+    # DCF's key endpoint provides a list of keys they use. Right now, only one, but to future-proof, we want
+    # to choose the right one from the list. But that means we need to parse the first element of the JWT tuple
+    # to know which key to use, even though we need the key to decode the tuple. (There has to be a better way
+    # that I am missing.) So, we need to break the id_token at the "." delimiting the tuples (base64decode PUKES
+    # on the "."). Then take the first element of the JWT and decode it:
+    #
+
+    id_tokens_b64 = id_token_b64.split('.')
+    i64 = id_tokens_b64[0]
+    padded = i64 + '=' * (-len(i64) % 4)  # Pad with =; Weird Python % with -length
+    id_token = urlsafe_b64decode(padded.encode("ascii"))
+    jwt_header = json.loads(id_token)
+    kid = jwt_header['kid']
+
+    #
+    # Get the key list from the endpoint and choose which one was used in the JWT:
+    #
+
+    resp = dcf.get('https://qa.dcf.planx-pla.net/user/jwt/keys')
+    key_data = json.loads(resp.text)
+    key_list = key_data['keys']
+    use_key = None
+    for key in key_list:
+        if key[0] == kid:
+            use_key = key[1]
+
+    if use_key is None:
+        """Do something here to report the error"""
+
+    #
+    # Decode the JWT!
+    #
+
+    try:
+        alg_list = ['RS256']
+        decoded_jwt = my_jwt.decode(id_token_b64, key=use_key, algorithms=alg_list,
+                                    audience=['openid', 'user', 'data', dcf_secrets['DCF_CLIENT_ID']])
+    except Exception as e:
+        """Do something here to report the error"""
+
+    #
+    # For reference, this is what I am seeing in the JWT:
+    #
+    # comp = {u'aud': [u'openid', u'user', u'data', u'Client ID'],
+    #         u'iss': u'https://qa.dcf.planx-pla.net/user',
+    #         u'iat': 1525732539,
+    #         u'jti': u'big hex string with dashes',
+    #         u'context': {u'user': {u'phone_number': u'',
+    #                                u'display_name': u'',
+    #                                u'name': u'email of NIH Username',
+    #                                u'is_admin': False,
+    #                                u'email': u'email address',
+    #                                u'projects': {u'qa': [u'read', u'read-storage'],
+    #                                              u'test': [u'read', u'read-storage']}}},
+    #         u'auth_time': 1525732539,
+    #         u'azp': u'Client ID',
+    #         u'exp': 1525733739,
+    #         u'pur': u'id',
+    #         u'sub': u'integer use key'}
+
+    nih_from_dcf = decoded_jwt['context']['user']['name']
+    dcf_user_id = decoded_jwt['sub']
+    dict_o_projects = decoded_jwt['context']['user']['projects']
+
+    #
+    # This also works to get user info from the DCF, though you need to have 'user' in the audience as well:
+    #
+    # resp = dcf.get(DCF_USER_URL)
+    # user_data = json.loads(resp.text)
+    # nih_from_dcf = user_data['username']
+    #
+
+    #
+    # For development, let's pretend that DCF actually returns an ERACommons ID:
+    #
+
+    if nih_from_dcf == dcf_secrets['DEV_1_EMAIL']:
+        nih_from_dcf = dcf_secrets['DEV_1_NIH']
+
+    # We now have the NIH User ID back from DCF. We check that we don't have linking issues!
+    results = DemoLoginResults()
+    st_logger = StackDriverLogger.build_from_django_settings()
+    user_email = User.objects.get(id=request.user.id).email
+    if found_linking_problems(nih_from_dcf, request.user.id, user_email, st_logger, results):
+        """return the linking problem!"""
+        return redirect('dashboard')
+
+    ## This is the place to link to Google??? But lotsa stuff needs to go into the session to be stored later?
+
+    # We now will have the NIH User ID back from DCF.
+
+    login_expiration_seconds = settings.LOGIN_EXPIRATION_MINUTES * 60
+    nih_assertion_expiration = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
+        seconds=login_expiration_seconds))
+
+    nih_user, warnings = handle_user_db_entry(request.user.id, nih_from_dcf, user_email, json_dumps(decoded_jwt),
+                                              len(dict_o_projects), nih_assertion_expiration, st_logger)
+
+    _token_storage(token_data, nih_user.id, dcf_user_id)
+
+    authorized_datasets = []
+    all_datasets = []
+    for project, perm_list in dict_o_projects.iteritems():
+        if project == 'qa':
+            project = 'phs000178'
+            goog = 'isb-cgc-dev-cntl@isb-cgc.org'
+        elif project == 'test':
+            project = 'phs000218'
+            goog = 'isb-cgc-dev-cntl-target@isb-cgc.org'
+        ad = AuthorizedDataset.objects.get(whitelist_id=project)
+        authorized_datasets.append(DatasetGoogleGroupPair(project, goog)) #ad.acl_google_group))
+        all_datasets.append(DatasetGoogleGroupPair(project, goog))
+
+
+   # das = DatasetAccessSupportFactory.from_webapp_django_settings()
+   # all_datasets = das.get_all_datasets_and_google_groups()
+
+    for dataset in all_datasets:
+        handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, False, None, None, st_logger)
+
+    if warnings:
+        messages.warning(request, warnings)
+    os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
+    return redirect('/users/' + str(request.user.id))
+
+
+def _token_storage(token_dict, nih_pk, dcf_uid):
+
+    if token_dict.has_key('expires_at'):
+        expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
+    else:
+        print "Have to build an expiration time"
+        expiration_time = pytz.utc.localize(
+            datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
+
+    DCFToken.objects.update_or_create(nih_user_id=nih_pk,
+                                      defaults={
+                                          'dcf_user': dcf_uid,
+                                          'access_token': token_dict['access_token'],
+                                          'refresh_token': token_dict['refresh_token'],
+                                          'expires_at': expiration_time
+                                      })
+
+@login_required
+def test_the_dcf(request):
+    """
+    Use this to test that we can call the DCF and get back useful info. Also, use as a template for doing all
+    DCF calls
+    """
+    file_uuid = 'ffcc4f7d-471a-4ad0-b199-53d992217986'
+    resp = _dcf_call('https://qa.dcf.planx-pla.net/user/data/download/{}'.format(file_uuid), request.user.id)
+    result = {'uri': resp.text}
+    return JsonResponse(result, status=resp.status_code)
+
+
+def _dcf_call(full_url, user_id):
+    """
+    All the stuff around a DCF call that handles token management and refreshes
+    """
+
+    dcf_secrets = _read_dict(settings.DCF_CLIENT_SECRETS)
+
+    nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
+    dcf_token = DCFToken.objects.get(nih_user=nih_user.id)
+
+    expires_in = (dcf_token.expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
+    print "Expiration : {} seconds".format(expires_in)
+
+    token_dict = {
+        'access_token' : dcf_token.access_token,
+        'refresh_token' : dcf_token.refresh_token,
+        'token_type' : 'Bearer',
+        'expires_in' : expires_in
+    }
+    extra_dict = {
+        'client_id' : dcf_secrets['DCF_CLIENT_ID'],
+        'client_secret': dcf_secrets['DCF_CLIENT_SECRET']
+    }
+
+    def token_storage_for_user(my_token_dict):
+        _token_storage(my_token_dict, user_id, dcf_token.dcf_user)
+
+    dcf = OAuth2Session(dcf_secrets['DCF_CLIENT_ID'], token=token_dict, auto_refresh_url=DCF_TOKEN_URL,
+                        auto_refresh_kwargs=extra_dict, token_updater=token_storage_for_user)
+
+    # Hoo boy! You *MUST* provide the client_id and client_secret in the call itself to insure an OAuth2Session token
+    # refresh call uses HTTPBasicAuth!
+    resp = dcf.get(full_url, client_id=dcf_secrets['DCF_CLIENT_ID'], client_secret=dcf_secrets['DCF_CLIENT_SECRET'])
+    return resp
+
+
+def _read_dict(my_file_name):
+    retval = {}
+    with open(my_file_name, 'r') as f:
+        for line in f:
+            if '=' not in line:
+                continue
+            split_line = line.split('=')
+            retval[split_line[0].strip()] = split_line[1].strip()
+    return retval
