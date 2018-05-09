@@ -2106,11 +2106,11 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
  
                  FROM {metadata_table} md
                  JOIN (
-                     SELECT sample_barcode
+                     SELECT DISTINCT case_barcode
                      FROM cohorts_samples
                      WHERE cohort_id = {cohort_id}
                  ) cs
-                 ON cs.sample_barcode = md.sample_barcode
+                 ON cs.case_barcode = md.case_barcode
                  WHERE md.file_uploaded='true' {type_conditions} {filter_conditions}
             """
 

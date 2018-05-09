@@ -224,7 +224,6 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
         if db and db.open: db.close()
 
 
-
 # Tally counts for metadata filters of public programs
 def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19'):
 
