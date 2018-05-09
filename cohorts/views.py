@@ -2103,7 +2103,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
                   md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
- 
                  FROM {metadata_table} md
                  JOIN (
                      SELECT DISTINCT case_barcode
