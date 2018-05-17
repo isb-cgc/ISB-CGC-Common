@@ -26,6 +26,7 @@ import re
 from metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery.service import authorize_credentials_with_Google
+from google_helpers.bigquery.cohort_support import BigQuerySupport
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
 BQ_ATTEMPT_MAX = 10
@@ -377,25 +378,13 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                           hugo_symbol=str(params['gene']), var_class=params['var_class'],
                                           cohort_dataset=bq_cohort_dataset, cohort_table=bq_cohort_table, cohort=cohort)
 
-            bq_service = authorize_credentials_with_Google()
-            query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, query)
-            job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
-
             barcodes = []
-            retries = 0
 
             start = time.time()
-            while not job_is_done and retries < BQ_ATTEMPT_MAX:
-                retries += 1
-                sleep(1)
-                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
+            results = BigQuerySupport.execute_query_and_fetch_results(query)
             stop = time.time()
 
             logger.debug('[BENCHMARKING] Time to query BQ for mutation data: '+(stop - start).__str__())
-
-            results = get_bq_job_results(bq_service, query_job['jobReference'])
-
-            # for-each result, add to list
 
             if len(results) > 0:
                 for barcode in results:

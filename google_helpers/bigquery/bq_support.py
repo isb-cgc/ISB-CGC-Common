@@ -18,12 +18,15 @@ limitations under the License.
 
 import logging
 from django.conf import settings
+from time import sleep
 from google_helpers.bigquery.service import get_bigquery_service
 from abstract import BigQueryABC
+from uuid import uuid4
 
 logger = logging.getLogger('main_logger')
 
 MAX_INSERT = settings.MAX_BQ_INSERT
+BQ_ATTEMPT_MAX = 10
 
 COHORT_DATASETS = {
     'prod': 'cloud_deployment_cohorts',
@@ -214,3 +217,155 @@ class BigQuerySupport(BigQueryABC):
             return {
                 'status': 'TABLE_EXISTS'
             }
+
+    # Runs a basic, optionally parameterized query
+    # If self.project_id, self.dataset_id, and self.table_id are set they
+    # will be used as the destination table for the query
+    # WRITE_DISPOSITION is assumed to be for an empty table unless specified
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY'):
+
+        query_results = None
+
+        # Make yourself a job ID
+        job_id = str(uuid4())
+
+        # Generate a BQ service to use in submitting/checking on/fetching the job
+        bqs = get_bigquery_service()
+
+        # Build your job description
+        job_desc = {
+            'jobReference': {
+                'projectId': settings.BIGQUERY_PROJECT_NAME,  # This is the project which will *execute* the query
+                'job_id': job_id
+            },
+            'configuration': {
+                'query': {
+                    'query': query,
+                    'priority': 'INTERACTIVE'
+                }
+            }
+        }
+
+        if parameters:
+            job_desc['configuration']['query']['queryParameters'] = parameters
+
+        if self.project_id and self.dataset_id and self.table_id:
+            job_desc['configuration']['query']['destinationTable'] = {
+                'projectId': self.project_id,
+                'datasetId': self.dataset_id,
+                'tableId': self.table_id
+            }
+            job_desc['configuration']['query']['writeDisposition'] = write_disposition
+
+        query_job = bqs.jobs().insert(
+            projectId=settings.BIGQUERY_PROJECT_NAME,
+            body=job_desc).execute(num_retries=5)
+
+        job_is_done = bqs.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
+                                     jobId=query_job['jobReference']['jobId']).execute()
+
+        retries = 0
+
+        while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
+            retries += 1
+            sleep(1)
+            job_is_done = bqs.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
+                                         jobId=query_job['jobReference']['jobId']).execute()
+
+        # Parse the final disposition
+        if job_is_done and job_is_done['status']['state'] == 'DONE':
+            if 'status' in job_is_done and 'errors' in job_is_done['status']:
+                logger.error("[ERROR] During query job {}: {}".format(job_id,str(job_is_done['status']['errors'])))
+            else:
+                logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
+                query_results = BigQuerySupport.get_job_results(bqs, query_job['jobReference'])
+                logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)),job_id))
+        else:
+            logger.error("[ERROR] Query {} took longer than the allowed time to execute--" +
+                         "if you check job ID {} manually you can wait for it to finish.".format(job_id))
+
+        return query_results
+
+    # Execute a query to be saved on a temp table (shorthand to instance method above), optionally parameterized
+    @classmethod
+    def execute_query_and_fetch_results(cls, query, parameters=None):
+        bqs = cls(None, None, None)
+        return bqs.execute_query(query, parameters)
+
+    # Given a BQ service and a job reference, fetch out the results
+    @staticmethod
+    def get_job_results(bq_service, job_reference):
+            result = []
+            page_token = None
+
+            while True:
+                page = bq_service.jobs().getQueryResults(
+                    pageToken=page_token,
+                    **job_reference).execute(num_retries=2)
+
+                if int(page['totalRows']) == 0:
+                    break
+
+                rows = page['rows']
+                result.extend(rows)
+
+                page_token = page.get('pageToken')
+                if not page_token:
+                    break
+
+            return result
+
+    # Builds a BQ API v2 QueryParameter set and WHERE clause string from a set of filters of the form:
+    # {
+    #     'field_name': [<value>,...]
+    # }
+    # Breaks out '<ATTR> IS NULL'
+    # 2+ values are converted to IN (<value>,...)
+    # Filters must already be pre-bucketed or formatted
+    # TODO: add support for BETWEEN
+    # TODO: add support for <>=
+    @staticmethod
+    def build_bq_filter_and_params(filters):
+        result = {
+            'filter_string': '',
+            'parameters': []
+        }
+
+        filter_set = []
+
+        for attr, values in filters.items():
+            filter_string = ''
+            query_param = {
+                'name': attr,
+                'parameterType': {
+
+                },
+                'parameterValue': {
+
+                }
+            }
+            if 'None' in values:
+                values.remove('None')
+                filter_string = "{} IS NULL".format(attr)
+
+            if len(values) > 0:
+                if len(filter_string):
+                    filter_string += " OR "
+                if len(values) == 1:
+                    # Scalar param
+                    query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
+                    query_param['parameterValue']['value'] = values[0]
+                    filter_string += "{} = @{}".format(attr, attr)
+                else:
+                    # Array param
+                    query_param['parameterType']['type'] = "ARRAY"
+                    query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
+                    query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')}
+                    filter_string += "{} IN UNNEST(@{})".format(attr,attr)
+
+            filter_set.append('({})'.format(filter_string))
+            result['parameters'].append(query_param)
+
+        result['filter_string'] = " AND ".join(filter_set)
+
+        return result
