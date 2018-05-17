@@ -262,7 +262,7 @@ class BigQuerySupport(BigQueryABC):
             body=job_desc).execute(num_retries=5)
 
         job_is_done = bqs.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
-                                     obId=query_job['jobReference']['jobId']).execute()
+                                     jobId=query_job['jobReference']['jobId']).execute()
 
         retries = 0
 
@@ -284,14 +284,13 @@ class BigQuerySupport(BigQueryABC):
             logger.error("[ERROR] Query {} took longer than the allowed time to execute--" +
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
 
-
         return query_results
 
-    # Execute a query to be saved on a temp table (shorthand to instance method above)
+    # Execute a query to be saved on a temp table (shorthand to instance method above), optionally parameterized
     @classmethod
-    def execute_query_and_fetch_results(cls, query, parameters=None, write_disposition='WRITE_EMPTY'):
+    def execute_query_and_fetch_results(cls, query, parameters=None):
         bqs = cls(None, None, None)
-        return bqs.execute_query(query, parameters, write_disposition)
+        return bqs.execute_query(query, parameters)
 
     # Given a BQ service and a job reference, fetch out the results
     @staticmethod
