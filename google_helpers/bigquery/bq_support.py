@@ -42,9 +42,14 @@ COHORT_TABLES = {
 
 class BigQuerySupport(BigQueryABC):
 
-    def __init__(self, project_id, dataset_id, table_id):
+    def __init__(self, project_id, dataset_id, table_id, executing_project=None):
+        # Project which will execute any jobs run by this class
+        self.executing_project = executing_project or settings.BIGQUERY_PROJECT_NAME
+        # Destination project
         self.project_id = project_id
+        # Destination dataset
         self.dataset_id = dataset_id
+        # Destination table
         self.table_id = table_id
 
     def _build_request_body_from_rows(self, rows):
@@ -235,7 +240,7 @@ class BigQuerySupport(BigQueryABC):
         # Build your job description
         job_desc = {
             'jobReference': {
-                'projectId': settings.BIGQUERY_PROJECT_NAME,  # This is the project which will *execute* the query
+                'projectId': self.executing_project,  # This is the project which will *execute* the query
                 'job_id': job_id
             },
             'configuration': {
@@ -258,10 +263,10 @@ class BigQuerySupport(BigQueryABC):
             job_desc['configuration']['query']['writeDisposition'] = write_disposition
 
         query_job = bqs.jobs().insert(
-            projectId=settings.BIGQUERY_PROJECT_NAME,
+            projectId=self.executing_project,
             body=job_desc).execute(num_retries=5)
 
-        job_is_done = bqs.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
+        job_is_done = bqs.jobs().get(projectId=self.executing_project,
                                      jobId=query_job['jobReference']['jobId']).execute()
 
         retries = 0
@@ -269,7 +274,7 @@ class BigQuerySupport(BigQueryABC):
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bqs.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
+            job_is_done = bqs.jobs().get(projectId=self.executing_project,
                                          jobId=query_job['jobReference']['jobId']).execute()
 
         # Parse the final disposition
