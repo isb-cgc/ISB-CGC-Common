@@ -23,6 +23,7 @@ import datetime
 import time
 
 import django
+from google_helpers.bigquery.cohort_support import BigQuerySupport
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
 from django.contrib import messages
@@ -292,23 +293,10 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 cohort_dataset=bq_cohort_dataset,cohort_table=bq_cohort_table, cohort=cohort
             )
 
-            bq_service = authorize_credentials_with_Google()
-            query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, query)
-            job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                   query_job['jobReference']['jobId'])
-
             barcodes = []
-            retries = 0
+            results = BigQuerySupport.execute_query_and_fetch_results(query)
 
-            while not job_is_done and retries < BQ_ATTEMPT_MAX:
-                retries += 1
-                sleep(1)
-                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                       query_job['jobReference']['jobId'])
-
-            results = get_bq_job_results(bq_service, query_job['jobReference'])
-
-            if len(results) > 0:
+            if results and len(results) > 0:
                 for barcode in results:
                     barcodes.append(str(barcode['f'][0]['v']))
 
@@ -2047,45 +2035,27 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
 
             order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
 
-            bq_service = authorize_credentials_with_Google()
             if do_filter_count:
                 # Query the count
-                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_count_query.format(select_clause=file_list_query_base))
-                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                       query_job['jobReference']['jobId'])
-                retries = 0
                 start = time.time()
-                while not job_is_done and retries < BQ_ATTEMPT_MAX:
-                    retries += 1
-                    sleep(1)
-                    job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                           query_job['jobReference']['jobId'])
+                results = BigQuerySupport.execute_query_and_fetch_results(file_count_query.format(select_clause=file_list_query_base))
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
-                results = get_bq_job_results(bq_service, query_job['jobReference'])
                 for entry in results:
                     total_file_count = int(entry['f'][0]['v'])
 
             # Query the file list only if there was anything to find
             if (total_file_count and do_filter_count) or not do_filter_count:
-                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_list_query.format(
-                    select_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause, offset_clause=offset_clause)
-                )
-                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
-
-                retries = 0
-
                 start = time.time()
-                while not job_is_done and retries < BQ_ATTEMPT_MAX:
-                    retries += 1
-                    sleep(1)
-                    job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                           query_job['jobReference']['jobId'])
+                results = BigQuerySupport.execute_query_and_fetch_results(
+                    file_list_query.format(
+                        select_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause,
+                        offset_clause=offset_clause
+                    )
+                )
                 stop = time.time()
 
                 logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + (stop - start).__str__())
-
-                results = get_bq_job_results(bq_service, query_job['jobReference'])
 
                 if len(results) > 0:
                     for entry in results:
@@ -2395,7 +2365,7 @@ def export_data(request, cohort_id=0, export_type=None):
         inc_filters = json.loads(request.POST.get('filters', '{}'))
         filter_params = None
         if len(inc_filters):
-            filter_and_params = build_bq_filter_and_params(inc_filters)
+            filter_and_params = BigQuerySupport.build_bq_filter_and_params(inc_filters)
             filter_params = filter_and_params['parameters']
             filter_conditions = "AND {}".format(filter_and_params['filter_string'])
 
