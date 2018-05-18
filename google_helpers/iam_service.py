@@ -1,6 +1,6 @@
 """
 
-Copyright 2015, Institute for Systems Biology
+Copyright 2015-2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,9 +17,10 @@ limitations under the License.
 """
 
 from oauth2client.client import GoogleCredentials
-from googleapiclient import discovery
 from django.conf import settings
 import httplib2
+from .utils import build_with_retries
+
 
 def get_iam_resource():
     """Returns an Identity Access Management service client for calling the API.
@@ -33,4 +34,5 @@ def get_iam_resource():
         settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(IAM_SCOPES)
     http = httplib2.Http()
     http = credentials.authorize(http)
-    return discovery.build('iam', 'v1', http=http, cache_discovery=False)
+    service = build_with_retries('iam', 'v1', None, 2, http=http)
+    return service
