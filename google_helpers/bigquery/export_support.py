@@ -120,8 +120,7 @@ COHORT_EXPORT_SCHEMA = {
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
     def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema):
-        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id)
-        self.table_schema = table_schema
+        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema)
         self.bucket_path = bucket_path
         self.file_name = file_name
 

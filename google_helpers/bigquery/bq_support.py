@@ -17,11 +17,12 @@ limitations under the License.
 """
 
 import logging
-from django.conf import settings
+import re
 from time import sleep
+from uuid import uuid4
+from django.conf import settings
 from google_helpers.bigquery.service import get_bigquery_service
 from abstract import BigQueryABC
-from uuid import uuid4
 
 logger = logging.getLogger('main_logger')
 
@@ -42,7 +43,7 @@ COHORT_TABLES = {
 
 class BigQuerySupport(BigQueryABC):
 
-    def __init__(self, project_id, dataset_id, table_id, executing_project=None):
+    def __init__(self, project_id, dataset_id, table_id, executing_project=None, table_schema=None):
         # Project which will execute any jobs run by this class
         self.executing_project = executing_project or settings.BIGQUERY_PROJECT_NAME
         # Destination project
@@ -51,6 +52,8 @@ class BigQuerySupport(BigQueryABC):
         self.dataset_id = dataset_id
         # Destination table
         self.table_id = table_id
+        self.bq_service = get_bigquery_service()
+        self.table_schema = table_schema
 
     def _build_request_body_from_rows(self, rows):
         insertable_rows = []
@@ -64,11 +67,11 @@ class BigQuerySupport(BigQueryABC):
         }
 
     def _streaming_insert(self, rows):
-        bigquery_service = get_bigquery_service()
-        table_data = bigquery_service.tabledata()
 
+        table_data = self.bq_service.tabledata()
         index = 0
         next = 0
+        response = None
 
         while index < len(rows) and next is not None:
             next = MAX_INSERT+index
@@ -82,7 +85,7 @@ class BigQuerySupport(BigQueryABC):
             response = table_data.insertAll(projectId=self.project_id,
                                             datasetId=self.dataset_id,
                                             tableId=self.table_id,
-                                            body=body).execute()
+                                            body=body).execute(num_retries=5)
             index = next
 
         return response
@@ -90,13 +93,14 @@ class BigQuerySupport(BigQueryABC):
     # Get all the tables for this object's project ID
     def get_tables(self):
         bq_tables = []
-        bigquery_service = get_bigquery_service()
-        datasets = bigquery_service.datasets().list(projectId=self.project_id).execute()
+        datasets = self.bq_service.datasets().list(projectId=self.project_id).execute(num_retries=5)
 
         if datasets and 'datasets' in datasets:
             for dataset in datasets['datasets']:
-                tables = bigquery_service.tables().list(projectId=self.project_id,
-                                                        datasetId=dataset['datasetReference']['datasetId']).execute()
+                tables = self.bq_service.tables().list(projectId=self.project_id,
+                                                       datasetId=dataset['datasetReference']['datasetId']).execute(
+                    num_retries=5
+                )
                 if 'tables' not in tables:
                     bq_tables.append({'dataset': dataset['datasetReference']['datasetId'],
                                       'table_id': None})
@@ -109,8 +113,7 @@ class BigQuerySupport(BigQueryABC):
 
     # Check if the dataset referenced by dataset_id exists in the project referenced by project_id
     def _dataset_exists(self):
-        bigquery_service = get_bigquery_service()
-        datasets = bigquery_service.datasets().list(projectId=self.project_id).execute()
+        datasets = self.bq_service.datasets().list(projectId=self.project_id).execute(num_retries=5)
         dataset_found = False
 
         for dataset in datasets['datasets']:
@@ -129,9 +132,8 @@ class BigQuerySupport(BigQueryABC):
     # Note this only confirms that fields required by table_schema are found in the proposed table with the appropriate
     # type, and that no 'required' fields in the proposed table are absent from table_schema
     def _confirm_table_schema(self):
-        bigquery_service = get_bigquery_service()
-        table = bigquery_service.tables().get(projectId=self.project_id, datasetId=self.dataset_id,
-                                              tableId=self.table_id).execute()
+        table = self.bq_service.tables().get(projectId=self.project_id, datasetId=self.dataset_id,
+                                             tableId=self.table_id).execute(num_retries=5)
         table_fields = table['schema']['fields']
 
         proposed_schema = {x['name']: x['type'] for x in table_fields}
@@ -152,8 +154,9 @@ class BigQuerySupport(BigQueryABC):
     # Check if the table referenced by table_id exists in the dataset referenced by dataset_id and the
     # project referenced by project_id
     def _table_exists(self):
-        bigquery_service = get_bigquery_service()
-        tables = bigquery_service.tables().list(projectId=self.project_id, datasetId=self.dataset_id).execute()
+        tables = self.bq_service.tables().list(projectId=self.project_id, datasetId=self.dataset_id).execute(
+            num_retries=5
+        )
         table_found = False
 
         if 'tables' in tables:
@@ -167,21 +170,19 @@ class BigQuerySupport(BigQueryABC):
     # project referenced by project_id
     def _delete_table(self):
         if self._table_exists():
-            bigquery_service = get_bigquery_service()
-            table_delete = bigquery_service.tables().delete(
+            table_delete = self.bq_service.tables().delete(
                 projectId=self.project_id,
                 datasetId=self.dataset_id,
                 tableId=self.table_id
-            ).execute()
+            ).execute(num_retries=5)
             if 'errors' in table_delete:
                 logger.error("[ERROR] Couldn't delete table {}:{}.{}".format(
-                    self.project_id,self.dataset_id,self.table_id
+                    self.project_id, self.dataset_id, self.table_id
                 ))
 
     # Insert an table, optionally providing a list of cohort IDs to include in the description
     def _insert_table(self, desc):
-        bigquery_service = get_bigquery_service()
-        tables = bigquery_service.tables()
+        tables = self.bq_service.tables()
 
         response = tables.insert(projectId=self.project_id, datasetId=self.dataset_id, body={
             'friendlyName': self.table_id,
@@ -193,7 +194,7 @@ class BigQuerySupport(BigQueryABC):
                 'projectId': self.project_id,
                 'tableId': self.table_id
             }
-        }).execute()
+        }).execute(num_retries=5)
 
         return response
 
@@ -207,16 +208,18 @@ class BigQuerySupport(BigQueryABC):
             table_result = self._insert_table(desc)
             if 'tableReference' not in table_result:
                 return {
-                    'tableErrors': "Unable to create table {} in project {} and dataset {} - please double-check your project's permissions for the ISB-CGC service account.".format(
-                        self.table_id, self.project_id, self.dataset_id)
+                    'tableErrors': "Unable to create table {} in project {} and dataset {} - please ".format(
+                        self.table_id, self.project_id, self.dataset_id
+                    ) + "double-check your project's permissions for the ISB-CGC service account."
                 }
             return {
                 'status': 'TABLE_MADE'
             }
         elif not self._confirm_table_schema():
             return {
-                'tableErrors': "The table schema of {} does not match the required schema for cohort export. Please make a new table, or adjust this table's schema.".format(
-                    self.table_id)
+                'tableErrors': "The table schema of {} does not match the required schema for cohort export.".format(
+                    self.table_id
+                ) + "Please make a new table, or adjust this table's schema."
             }
         else:
             return {
@@ -227,15 +230,12 @@ class BigQuerySupport(BigQueryABC):
     # If self.project_id, self.dataset_id, and self.table_id are set they
     # will be used as the destination table for the query
     # WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY'):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
 
         query_results = None
 
         # Make yourself a job ID
         job_id = str(uuid4())
-
-        # Generate a BQ service to use in submitting/checking on/fetching the job
-        bqs = get_bigquery_service()
 
         # Build your job description
         job_desc = {
@@ -262,34 +262,68 @@ class BigQuerySupport(BigQueryABC):
             }
             job_desc['configuration']['query']['writeDisposition'] = write_disposition
 
-        query_job = bqs.jobs().insert(
+        if cost_est:
+            job_desc['configuration']['dryRun'] = True
+
+        query_job = self.bq_service.jobs().insert(
             projectId=self.executing_project,
             body=job_desc).execute(num_retries=5)
 
-        job_is_done = bqs.jobs().get(projectId=self.executing_project,
-                                     jobId=query_job['jobReference']['jobId']).execute()
+        # Cost Estimates don't actually run as fully-fledged jobs, and won't be inserted as such,
+        # so we just get back the estimate immediately
+        if cost_est:
+            if query_job['status']['state'] == 'DONE':
+                return {
+                    'total_bytes_billed': query_job['statistics']['query']['totalBytesBilled'],
+                    'total_bytes_processed': query_job['statistics']['query']['totalBytesProcessed']
+                }
+
+        job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
+                                                 jobId=job_id).execute(num_retries=5)
 
         retries = 0
 
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bqs.jobs().get(projectId=self.executing_project,
-                                         jobId=query_job['jobReference']['jobId']).execute()
+            job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
+                                                     jobId=job_id).execute(num_retries=5)
 
         # Parse the final disposition
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
-                logger.error("[ERROR] During query job {}: {}".format(job_id,str(job_is_done['status']['errors'])))
+                logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done['status']['errors'])))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
-                query_results = BigQuerySupport.get_job_results(bqs, query_job['jobReference'])
-                logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)),job_id))
+                query_results = self.fetch_job_results(query_job['jobReference'])
+                logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
         else:
             logger.error("[ERROR] Query {} took longer than the allowed time to execute--" +
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
 
         return query_results
+
+    # Fetch the results of a job based on the reference provided
+    def fetch_job_results(self, job_ref):
+        result = []
+        page_token = None
+
+        while True:
+            page = self.bq_service.jobs().getQueryResults(
+                pageToken=page_token,
+                **job_ref).execute(num_retries=2)
+
+            if int(page['totalRows']) == 0:
+                break
+
+            rows = page['rows']
+            result.extend(rows)
+
+            page_token = page.get('pageToken')
+            if not page_token:
+                break
+
+        return result
 
     # Execute a query to be saved on a temp table (shorthand to instance method above), optionally parameterized
     @classmethod
@@ -297,28 +331,17 @@ class BigQuerySupport(BigQueryABC):
         bqs = cls(None, None, None)
         return bqs.execute_query(query, parameters)
 
+    # Do a 'dry run' query, which estimates the cost
+    @classmethod
+    def estimate_query_cost(cls, query, parameters=None):
+        bqs = cls(None, None, None)
+        return bqs.execute_query(query, parameters, cost_est=True)
+
     # Given a BQ service and a job reference, fetch out the results
-    @staticmethod
-    def get_job_results(bq_service, job_reference):
-            result = []
-            page_token = None
-
-            while True:
-                page = bq_service.jobs().getQueryResults(
-                    pageToken=page_token,
-                    **job_reference).execute(num_retries=2)
-
-                if int(page['totalRows']) == 0:
-                    break
-
-                rows = page['rows']
-                result.extend(rows)
-
-                page_token = page.get('pageToken')
-                if not page_token:
-                    break
-
-            return result
+    @classmethod
+    def get_job_results(cls, job_reference):
+        bqs = cls(None, None, None)
+        return bqs.fetch_job_results(job_reference)
 
     # Builds a BQ API v2 QueryParameter set and WHERE clause string from a set of filters of the form:
     # {
