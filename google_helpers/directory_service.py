@@ -17,9 +17,9 @@ limitations under the License.
 """
 
 from oauth2client.service_account import ServiceAccountCredentials
-from googleapiclient import discovery
 from django.conf import settings
 from httplib2 import Http
+from utils import build_with_retries
 
 
 GOOGLE_GROUP_ADMIN = settings.GOOGLE_GROUP_ADMIN
@@ -41,8 +41,7 @@ def get_directory_resource():
         GOOGLE_APPLICATION_CREDENTIALS, DIRECTORY_SCOPES)
     delegated_credentials = credentials.create_delegated(GOOGLE_GROUP_ADMIN)
 
-
     http_auth = delegated_credentials.authorize(Http())
+    service = build_with_retries('admin', 'directory_v1', None, 2, http=http_auth)
 
-    service = discovery.build('admin', 'directory_v1', http=http_auth, cache_discovery=False)
     return service, http_auth
