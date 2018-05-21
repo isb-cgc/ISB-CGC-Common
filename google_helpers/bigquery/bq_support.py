@@ -241,7 +241,7 @@ class BigQuerySupport(BigQueryABC):
         job_desc = {
             'jobReference': {
                 'projectId': self.executing_project,  # This is the project which will *execute* the query
-                'job_id': job_id
+                'jobId': job_id
             },
             'configuration': {
                 'query': {
@@ -250,6 +250,7 @@ class BigQuerySupport(BigQueryABC):
                 }
             }
         }
+
 
         if parameters:
             job_desc['configuration']['query']['queryParameters'] = parameters
