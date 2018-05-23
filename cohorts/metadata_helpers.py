@@ -1055,7 +1055,7 @@ def submit_bigquery_job(bq_service, project_id, query_body, batch=False):
     job_data = {
         'jobReference': {
             'projectId': project_id,
-            'job_id': str(uuid4())
+            'jobId': str(uuid4())
         },
         'configuration': {
             'query': {
