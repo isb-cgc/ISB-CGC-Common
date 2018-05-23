@@ -251,7 +251,6 @@ class BigQuerySupport(BigQueryABC):
             }
         }
 
-
         if parameters:
             job_desc['configuration']['query']['queryParameters'] = parameters
 
