@@ -45,7 +45,8 @@ from dataset_utils.dataset_config import DatasetGoogleGroupPair
 
 import httplib as http_client
 
-http_client.HTTPConnection.debuglevel = 1
+# Shut this up unless we need to do debug of HTTP request contents
+# http_client.HTTPConnection.debuglevel = 1
 
 logger = logging.getLogger('main_logger')
 

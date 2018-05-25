@@ -39,24 +39,8 @@ from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
-                     do_nih_unlink, deactivate_nih_add_to_open, handle_user_db_entry, \
-                     found_linking_problems, DemoLoginResults, handle_user_for_dataset,\
-                     handle_user_db_update_for_dcf_linking, \
-                     unlink_account_in_db_for_dcf, get_dcf_auth_key_remaining_seconds
-
-from django.http import HttpResponseRedirect
-from requests_oauthlib.oauth2_session import OAuth2Session
-import os
-from base64 import urlsafe_b64decode
-import jwt
-from jwt.contrib.algorithms.pycrypto import RSAAlgorithm
-from json import loads as json_loads, dumps as json_dumps
-from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
-from dataset_utils.dataset_config import DatasetGoogleGroupPair
-import requests
-import httplib as http_client
-
-http_client.HTTPConnection.debuglevel = 1
+                     do_nih_unlink, deactivate_nih_add_to_open
+from json import loads as json_loads
 
 logger = logging.getLogger('main_logger')
 
@@ -65,13 +49,6 @@ SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
-
-DCF_AUTH_URL = settings.DCF_AUTH_URL
-DCF_TOKEN_URL = settings.DCF_TOKEN_URL
-DCF_USER_URL = settings.DCF_USER_URL
-DCF_REVOKE_URL = settings.DCF_REVOKE_URL
-DCF_GOOGLE_URL = settings.DCF_GOOGLE_URL
-DCF_TOKEN_REFRESH_WINDOW_SECONDS = settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
 
 @login_required
 def extended_logout_view(request):
