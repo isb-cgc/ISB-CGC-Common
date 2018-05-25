@@ -160,8 +160,17 @@ class ServiceAccountAuthorizedDatasets(models.Model):
 
 
 class DCFToken(models.Model):
-    nih_user = models.OneToOneField(NIH_User, null=False)
+    user = models.OneToOneField(User, null=False)
+    nih_username = models.TextField(null=False)
+    nih_username_lower = models.CharField(max_length=128, null=False) # Must be limited to include in constraint
     dcf_user = models.CharField(max_length=128, null=False)
     access_token = models.TextField(null=False)
     refresh_token = models.TextField(null=False)
+    user_token = models.TextField(null=False)
+    decoded_jwt = models.TextField(null=False)
     expires_at = models.DateTimeField(null=False)
+    refresh_expires_at = models.DateTimeField(null=False)
+    google_id = models.TextField(null=True)
+
+    class Meta:
+        unique_together = (("user", "nih_username_lower"),)
