@@ -120,8 +120,7 @@ COHORT_EXPORT_SCHEMA = {
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
     def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema):
-        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id)
-        self.table_schema = table_schema
+        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema)
         self.bucket_path = bucket_path
         self.file_name = file_name
 
@@ -190,14 +189,14 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             body=export_config).execute(num_retries=5)
 
         job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
-                                            jobId=export_job['jobReference']['jobId']).execute()
+                                            jobId=job_id).execute()
 
         retries = 0
 
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=export_job['jobReference']['jobId']).execute()
+            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=job_id).execute()
 
         result = {
             'status': None,
@@ -220,7 +219,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 if not exported_file:
                     msg = "Export file {}/{} not found".format(self.bucket_path, self.file_name)
                     logger.error("[ERROR] ".format({msg}))
-                    export_result = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=export_job['jobReference']['jobId']).execute()
+                    export_result = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=job_id).execute()
                     if 'errors' in export_result:
                         logger.error('[ERROR] Errors seen: {}'.format(export_result['errors'][0]['message']))
                     result['status'] = 'error'
@@ -258,7 +257,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         query_data = {
             'jobReference': {
                 'projectId': settings.BIGQUERY_PROJECT_NAME,
-                'job_id': job_id
+                'jobId': job_id
             },
             'configuration': {
                 'query': {
@@ -283,7 +282,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             projectId=settings.BIGQUERY_PROJECT_NAME,
             body=query_data).execute(num_retries=5)
 
-        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=query_job['jobReference']['jobId']).execute()
+        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=job_id).execute()
 
         retries = 0
 
@@ -291,7 +290,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             retries += 1
             sleep(1)
             job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
-                              jobId=query_job['jobReference']['jobId']).execute()
+                              jobId=job_id).execute()
 
         result = {
             'status': None,
@@ -322,7 +321,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     msg = "Export table {}:{}.{} not found".format(self.project_id,self.dataset_id,self.table_id)
                     logger.error("[ERROR] ".format({msg}))
                     bq_result = bq_service.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_NAME,
-                                  jobId=query_job['jobReference']['jobId']).execute()
+                                  jobId=job_id).execute()
                     if 'errors' in bq_result:
                         logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
                     result['status'] = 'error'
