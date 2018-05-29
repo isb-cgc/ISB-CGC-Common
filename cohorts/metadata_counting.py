@@ -332,6 +332,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         if mutation_filters:
             build_queries = {}
 
+            # Split the filters into 'not any' and 'all other filters'
             for mut_filt in mutation_filters:
                 build = mut_filt.split(':')[1]
 
@@ -339,10 +340,20 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                     build_queries[build] = {
                         'raw_filters': {},
                         'filter_str_params': [],
-                        'queries': []
+                        'queries': [],
+                        'not_any': None
                     }
-                build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
 
+                if 'NOT:' in mut_filt and 'category' in mut_filt and 'any' in mutation_filters[mut_filt]:
+                    if not build_queries[build]['not_any']:
+                        build_queries[build]['not_any'] = {}
+                    build_queries[build]['not_any'][mut_filt] = mutation_filters[mut_filt]
+                else:
+                    build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
+
+            # If the combination is with AND, further split the 'not-not-any' filters, because they must be
+            # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
+            # a single query.
             for build in build_queries:
                 if comb_mut_filters == 'AND':
                     filter_num = 0
@@ -353,18 +364,12 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                             this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
                         ))
                         filter_num += 1
-                else:
+                elif comb_mut_filters == 'OR':
                     build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
                         build_queries[build]['raw_filters'], comb_mut_filters, build
                     ))
 
-            cohort_join_str = ''
-            cohort_where_str = ''
-            bq_cohort_table = ''
-            bq_cohort_dataset = ''
-            bq_cohort_project_id = ''
-            cohort = ''
-
+            # Create the queries and their parameters
             for build in build_queries:
                 bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
                 sample_barcode_col = bq_table_info['sample_barcode_col']
@@ -372,58 +377,55 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 bq_table = bq_table_info['table']
                 bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
 
-                cohort_param = None
-
-                query_template = None
-
-                if cohort_id is not None:
-                    query_template = \
-                        ("SELECT ct.sample_barcode"
-                         " FROM `{cohort_project_id}.{cohort_dataset}.{cohort_table}` ct"
-                         " JOIN (SELECT sample_barcode_tumor AS barcode "
-                         " FROM `{data_project_id}.{dataset_name}.{table_name}`"
-                         " WHERE {where_clause}"
-                         " GROUP BY barcode) mt"
-                         " ON mt.barcode = ct.sample_barcode"
-                         " WHERE ct.cohort_id = @cohort")
-
-                    cohort_param = {
-                        'name': 'cohort',
-                        'parameterType': {
-                            'type': 'STRING'
-                        },
-                        'parameterValue': {
-                            'value': cohort_id
-                        }
-                    }
-
-                    bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-                    bq_cohort_dataset = settings.COHORT_DATASET_ID
-                    bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
-                else:
-                    query_template = \
-                        ("SELECT {barcode_col}"
-                         " FROM `{data_project_id}.{dataset_name}.{table_name}`"
-                         " WHERE {where_clause}"
-                         " GROUP BY {barcode_col} ")
+                # Build the query for any filter which *isn't* a not-any query.
+                query_template = \
+                    ("SELECT {barcode_col}"
+                     " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                     " WHERE {where_clause}"
+                     " GROUP BY {barcode_col} ")
 
                 for filter_str_param in build_queries[build]['filter_str_params']:
                     build_queries[build]['queries'].append(
-                        query_template.format(dataset_name=bq_dataset, cohort_project_id=bq_cohort_project_id,
-                                              data_project_id=bq_data_project_id, table_name=bq_table,
-                                              barcode_col=sample_barcode_col, cohort_dataset=bq_cohort_dataset,
-                                              cohort_table=bq_cohort_table, where_clause=filter_str_param['filter_string']))
+                        query_template.format(dataset_name=bq_dataset, data_project_id=bq_data_project_id,
+                                              table_name=bq_table, barcode_col=sample_barcode_col,
+                                              where_clause=filter_str_param['filter_string']))
 
-                    cohort_param and filter_str_param['parameters'].append(cohort_param)
+                # Here we build not-any queries
+                if build_queries[build]['not_any']:
+                    query_template = \
+                            ("SELECT {barcode_col}"
+                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                             " WHERE {barcode_col} NOT IN ("
+                             "SELECT {barcode_col}"
+                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                             " WHERE {where_clause}"
+                             " GROUP BY {barcode_col}) "
+                             " GROUP BY {barcode_col}")
 
+                    any_count = 0
+                    for not_any in build_queries[build]['not_any']:
+                        filter = not_any.replace("NOT:","")
+                        any_filter = {}
+                        any_filter[filter] = build_queries[build]['not_any'][not_any]
+                        filter_str_param = BigQuerySupport.build_bq_filter_and_params(
+                            any_filter,param_suffix=build+'_any_{}'.format(any_count)
+                        )
 
+                        build_queries[build]['filter_str_params'].append(filter_str_param)
+
+                        any_count += 1
+
+                        build_queries[build]['queries'].append(query_template.format(
+                            dataset_name=bq_dataset, data_project_id=bq_data_project_id, table_name=bq_table,
+                            barcode_col=sample_barcode_col, where_clause=filter_str_param['filter_string']))
 
             query = None
+            # Collect the queries for chaining below with UNION or JOIN
             queries = [q for build in build_queries for q in build_queries[build]['queries']]
+            # Because our parameters are uniquely named, they can be combined into a single list
             params = [z for build in build_queries for y in build_queries[build]['filter_str_params'] for z in y['parameters']]
 
             if len(queries) > 1:
-                logger.debug("comb_mut_filters: {}".format(str(comb_mut_filters)))
                 if comb_mut_filters == 'OR':
                     query = """ UNION DISTINCT """.join(queries)
                 else:
@@ -447,7 +449,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             else:
                 query = queries[0]
 
-            logger.debug("mutation query: {}".format(query))
             barcodes = []
 
             start = time.time()
@@ -469,7 +470,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
-                   tumor_sample_id VARCHAR(100)
+                  tumor_sample_id VARCHAR(100)
                );
             """ % tmp_mut_table
 
@@ -513,10 +514,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 make_tmp_table_str += (' JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode ' % data_avail_sample_subquery)
                 params_tuple += data_type_where_clause['value_tuple']
 
-            # Cohorts are built into the mutation table, so we don't need to filter on the cohort if we made a mutation table
             if tmp_mut_table:
                 make_tmp_table_str += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
-            elif cohort_id:
+
+            if cohort_id:
                 make_tmp_table_str += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
                 params_tuple += (cohort_id,)
 
@@ -540,6 +541,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             if len(data_type_filters) > 0:
                 make_tmp_table_str += (' JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode' % data_avail_sample_subquery)
                 params_tuple += data_type_where_clause['value_tuple']
+
+            if cohort_id:
+                make_tmp_table_str += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
+                params_tuple += (cohort_id,)
 
             make_tmp_table_str += ';'
 
