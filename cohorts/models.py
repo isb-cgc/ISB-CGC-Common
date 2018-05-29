@@ -24,7 +24,7 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
 from projects.models import Project, Program, User_Feature_Definitions
-
+from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
 
