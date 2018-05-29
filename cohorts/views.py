@@ -75,7 +75,7 @@ def convert(data):
     else:
         return data
 
-def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
+def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 
     if program_id is None and cohort_id is None:
         # We must always have a program_id or a cohort_id - we cannot have neither, because then
@@ -96,7 +96,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     mutation_filters = None
     user_data_filters = None
     data_type_filters = False
-    mutation_where_clause = None
 
     if inc_filters is None:
         inc_filters = {}
@@ -106,8 +105,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         if 'MUT:' in key:
             if not mutation_filters:
                 mutation_filters = {}
-            mutation_filters[key] = inc_filters[key]
-            build = key.split(':')[1]
+            mutation_filters[key] = inc_filters[key]['values']
+
         elif 'user_' in key:
             if not user_data_filters:
                 user_data_filters = {}
@@ -191,9 +190,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         return samples_and_cases
         # end user_data
 
-    if mutation_filters:
-        mutation_where_clause = build_where_clause(mutation_filters)
-
     cohort_query = """
         SELECT sample_barcode cs_sample_barcode, project_id
         FROM cohorts_samples
@@ -244,57 +240,128 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
-        if mutation_where_clause:
-            cohort_join_str = ''
-            cohort_where_str = ''
-            bq_cohort_table = ''
-            bq_cohort_dataset = ''
-            bq_cohort_project_id = ''
-            cohort = ''
-            query_template = None
+        if mutation_filters:
+            build_queries = {}
 
-            bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
-            sample_barcode_col = bq_table_info['sample_barcode_col']
-            bq_dataset = bq_table_info['dataset']
-            bq_table = bq_table_info['table']
-            bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
+            # Split the filters into 'not any' and 'all other filters'
+            for mut_filt in mutation_filters:
+                build = mut_filt.split(':')[1]
 
-            query_template = None
+                if build not in build_queries:
+                    build_queries[build] = {
+                        'raw_filters': {},
+                        'filter_str_params': [],
+                        'queries': [],
+                        'not_any': None
+                    }
 
-            if cohort_id is not None:
-                query_template = \
-                    ("SELECT ct.sample_barcode"
-                     " FROM [{project_id}:{cohort_dataset}.{cohort_table}] ct"
-                     " JOIN (SELECT sample_barcode_tumor AS barcode "
-                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
-                     " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY barcode) mt"
-                     " ON mt.barcode = ct.sample_barcode"
-                     " WHERE ct.cohort_id = {cohort};")
+                if 'NOT:' in mut_filt and 'category' in mut_filt and 'any' in mutation_filters[mut_filt]:
+                    if not build_queries[build]['not_any']:
+                        build_queries[build]['not_any'] = {}
+                    build_queries[build]['not_any'][mut_filt] = mutation_filters[mut_filt]
+                else:
+                    build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
 
+            # If the combination is with AND, further split the 'not-not-any' filters, because they must be
+            # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
+            # a single query.
+            for build in build_queries:
+                if comb_mut_filters == 'AND':
+                    filter_num = 0
+                    for filter in build_queries[build]['raw_filters']:
+                        this_filter = {}
+                        this_filter[filter] = build_queries[build]['raw_filters'][filter]
+                        build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                            this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
+                        ))
+                        filter_num += 1
+                elif comb_mut_filters == 'OR':
+                    build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                        build_queries[build]['raw_filters'], comb_mut_filters, build
+                    ))
 
-                bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-                bq_cohort_dataset = settings.COHORT_DATASET_ID
-                bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
-                cohort = cohort_id
+            # Create the queries and their parameters
+            for build in build_queries:
+                bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+                sample_barcode_col = bq_table_info['sample_barcode_col']
+                bq_dataset = bq_table_info['dataset']
+                bq_table = bq_table_info['table']
+                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
 
-            else:
+                # Build the query for any filter which *isn't* a not-any query.
                 query_template = \
                     ("SELECT {barcode_col}"
-                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
-                     " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY {barcode_col}; ")
+                     " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                     " WHERE {where_clause}"
+                     " GROUP BY {barcode_col} ")
 
-            params = mutation_where_clause['value_tuple'][0]
+                for filter_str_param in build_queries[build]['filter_str_params']:
+                    build_queries[build]['queries'].append(
+                        query_template.format(dataset_name=bq_dataset, data_project_id=bq_data_project_id,
+                                              table_name=bq_table, barcode_col=sample_barcode_col,
+                                              where_clause=filter_str_param['filter_string']))
 
-            query = query_template.format(
-                dataset_name=bq_dataset, project_id=bq_cohort_project_id, table_name=bq_table, barcode_col=sample_barcode_col,
-                hugo_symbol=str(params['gene']), data_project_id=bq_data_project_id,  var_class=params['var_class'],
-                cohort_dataset=bq_cohort_dataset,cohort_table=bq_cohort_table, cohort=cohort
-            )
+                # Here we build not-any queries
+                if build_queries[build]['not_any']:
+                    query_template = \
+                            ("SELECT {barcode_col}"
+                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                             " WHERE {barcode_col} NOT IN ("
+                             "SELECT {barcode_col}"
+                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                             " WHERE {where_clause}"
+                             " GROUP BY {barcode_col}) "
+                             " GROUP BY {barcode_col}")
+
+                    any_count = 0
+                    for not_any in build_queries[build]['not_any']:
+                        filter = not_any.replace("NOT:","")
+                        any_filter = {}
+                        any_filter[filter] = build_queries[build]['not_any'][not_any]
+                        filter_str_param = BigQuerySupport.build_bq_filter_and_params(
+                            any_filter,param_suffix=build+'_any_{}'.format(any_count)
+                        )
+
+                        build_queries[build]['filter_str_params'].append(filter_str_param)
+
+                        any_count += 1
+
+                        build_queries[build]['queries'].append(query_template.format(
+                            dataset_name=bq_dataset, data_project_id=bq_data_project_id, table_name=bq_table,
+                            barcode_col=sample_barcode_col, where_clause=filter_str_param['filter_string']))
+
+            query = None
+            # Collect the queries for chaining below with UNION or JOIN
+            queries = [q for build in build_queries for q in build_queries[build]['queries']]
+            # Because our parameters are uniquely named, they can be combined into a single list
+            params = [z for build in build_queries for y in build_queries[build]['filter_str_params'] for z in y['parameters']]
+
+            if len(queries) > 1:
+                if comb_mut_filters == 'OR':
+                    query = """ UNION DISTINCT """.join(queries)
+                else:
+                    query_template = """
+                        SELECT q0.sample_barcode_tumor
+                        FROM ({query1}) q0
+                        {join_clauses}
+                    """
+
+                    join_template = """
+                        JOIN ({query}) q{ct}
+                        ON q{ct}.sample_barcode_tumor = q0.sample_barcode_tumor
+                    """
+
+                    joins = []
+
+                    for i,val in enumerate(queries[1:]):
+                        joins.append(join_template.format(query=val, ct=str(i+1)))
+
+                    query = query_template.format(query1=queries[0], join_clauses=" ".join(joins))
+            else:
+                query = queries[0]
 
             barcodes = []
-            results = BigQuerySupport.execute_query_and_fetch_results(query)
+            results = BigQuerySupport.execute_query_and_fetch_results(query, params)
 
             if results and len(results) > 0:
                 for barcode in results:
@@ -811,6 +878,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             apply_filters = request.POST.getlist('apply-filters')
             apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
+            mut_comb_with = request.POST.get('mut_filter_combine')
 
             # we only deactivate the source if we are applying filters to a previously-existing
             # source cohort
@@ -857,12 +925,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             results = {}
 
             for prog in filter_obj:
-                results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog)
+                results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog, comb_mut_filters=mut_comb_with)
 
             if cohort_progs:
                 for prog in cohort_progs:
                     if prog.id not in results:
-                        results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
+                        results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id, comb_mut_filters=mut_comb_with)
 
             if len(barcodes) > 0:
                 for program in barcodes:
@@ -2265,8 +2333,6 @@ def export_data(request, cohort_id=0, export_type=None):
         req_user = User.objects.get(id=request.user.id)
         export_dest = request.POST.get('export-dest', None)
 
-        logger.debug("export_type is {}".format("None" if not export_type else export_type))
-
         if not export_type or not export_dest:
             raise Exception("Can't perform export--destination and/or export type weren't provided!")
 
@@ -2493,9 +2559,6 @@ def export_data(request, cohort_id=0, export_type=None):
             else:
                 query_string = union_queries[0]
             query_string = '#standardSQL\n' + query_string
-
-            logger.debug("[STATUS] query to table export query: ")
-            logger.debug(query_string)
 
             # Export the data
             if export_dest == 'table':

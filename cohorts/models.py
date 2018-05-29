@@ -320,8 +320,15 @@ class Cohort(models.Model):
                 prog_data_types = prog_dts[prog_id]
 
             if 'MUT:' in cohort_filter['name']:
-                cohort_filter['displ_name'] = cohort_filter['name'].split(':')[2].upper() + ' [' + cohort_filter['name'].split(':')[1].upper() + ',' + string.capwords(cohort_filter['name'].split(':')[3])
-                cohort_filter['displ_val'] = (MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[3] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) + ']'
+                cohort_filter['displ_name'] = ("NOT(" if 'NOT:' in cohort_filter['name'] else '') \
+                      + cohort_filter['name'].split(':')[2].upper() \
+                      + ' [' + cohort_filter['name'].split(':')[1].upper() + ',' \
+                      + string.capwords(cohort_filter['name'].split(':')[-1])
+                cohort_filter['displ_val'] = (
+                    MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[-1] != 'category'
+                    else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) \
+                    + ']' \
+                    + (")" if 'NOT:' in cohort_filter['name'] else '')
             elif cohort_filter['name'] == 'data_type':
                 cohort_filter['displ_name'] = 'Data Type'
                 cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
