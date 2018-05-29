@@ -609,18 +609,20 @@ def format_for_display(item):
 # Construct WHERE clauses for BigQuery and CloudSQL based on a set of filters
 # If the names of the columns differ across the 2 platforms, the alt_key_map can be
 # used to map a filter 'key' to a different column name
-def build_where_clause(filters, alt_key_map=False, program=None, for_files=False):
+def build_where_clause(filters, alt_key_map=False, program=None, for_files=False, comb_with='OR'):
     first = True
     query_str = ''
     big_query_str = ''  # todo: make this work for non-string values -- use {}.format
     value_tuple = ()
     key_order = []
     keyType = None
-    gene = None
 
     grouped_filters = None
 
     for key, value in filters.items():
+        gene = None
+        invert = False
+
         if isinstance(value, dict) and 'values' in value:
             value = value['values']
 
@@ -639,6 +641,7 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
             keyType = key.split(':')[0]
             if keyType == 'MUT':
                 gene = key.split(':')[2]
+                invert = bool(key.split(':')[3] == 'NOT')
             key = key.split(':')[-1]
 
         # Multitable filter lists don't come in as string as they can contain arbitrary text in values
@@ -658,20 +661,20 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
             if first:
                 first = False
             else:
-                big_query_str += ' AND'
+                big_query_str += ' {}'.format(comb_with)
 
-            big_query_str += " %s = '{hugo_symbol}' AND " % 'Hugo_Symbol'
+            big_query_str += " (%s = '{hugo_symbol}' AND " % 'Hugo_Symbol'
             params['gene'] = gene
 
             if(key == 'category'):
                 if value == 'any':
-                    big_query_str += '%s IS NOT NULL' % 'Variant_Classification'
+                    big_query_str += '%s IS NOT NULL)' % 'Variant_Classification'
                     params['var_class'] = ''
                 else:
-                    big_query_str += '%s IN ({var_class})' % 'Variant_Classification'
+                    big_query_str += '%s {}IN ({var_class}))'.format('Variant_Classification', "NOT " if invert else "")
                     values = MOLECULAR_CATEGORIES[value]['attrs']
             else:
-                big_query_str += '%s IN ({var_class})' % 'Variant_Classification'
+                big_query_str += '%s {}IN ({var_class}))'.format('Variant_Classification', "NOT " if invert else "")
                 values = value
 
             if value != 'any':

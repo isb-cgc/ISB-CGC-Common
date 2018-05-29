@@ -1826,6 +1826,7 @@ def unshare_cohort(request, cohort_id=0):
 @login_required
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
+    comb_mut_filters = request.GET.get('mut_filter_combine', 'OR')
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
     program_id = request.GET.get('program_id', None)
@@ -1835,7 +1836,7 @@ def get_metadata(request):
     user = Django_User.objects.get(id=request.user.id)
 
     if program_id is not None and program_id > 0:
-        results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit)
+        results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit, comb_mut_filters=comb_mut_filters)
 
         # If there is an extent cohort, to get the cohort's new totals per applied filters
         # we have to check the unfiltered programs for their numbers and tally them in

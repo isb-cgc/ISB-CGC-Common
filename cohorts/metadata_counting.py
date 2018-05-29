@@ -226,7 +226,8 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
 
 
 # Tally counts for metadata filters of public programs
-def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19'):
+def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19', comb_mut_filters='OR'):
+    comb_mut_filters = comb_mut_filters.upper()
 
     counts_and_total = {
         'counts': [],
@@ -270,15 +271,11 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         if 'MUT:' in key:
             if not mutation_filters:
                 mutation_filters = {}
-            mutation_filters[key] = inc_filters[key]
-            build = key.split(':')[1]
+            mutation_filters[key] = inc_filters[key]['values']
         elif 'data_type' in key:
             data_type_filters[key.split(':')[-1]] = inc_filters[key]
         else:
             filters[key.split(':')[-1]] = inc_filters[key]
-
-    if mutation_filters:
-        mutation_where_clause = build_where_clause(mutation_filters)
 
     data_avail_sample_subquery = None
 
@@ -332,7 +329,35 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
-        if mutation_where_clause:
+        if mutation_filters:
+            build_queries = {}
+
+            for mut_filt in mutation_filters:
+                build = mut_filt.split(':')[1]
+
+                if build not in build_queries:
+                    build_queries[build] = {
+                        'raw_filters': {},
+                        'filter_str_params': [],
+                        'queries': []
+                    }
+                build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
+
+            for build in build_queries:
+                if comb_mut_filters == 'AND':
+                    filter_num = 0
+                    for filter in build_queries[build]['raw_filters']:
+                        this_filter = {}
+                        this_filter[filter] = build_queries[build]['raw_filters'][filter]
+                        build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                            this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
+                        ))
+                        filter_num += 1
+                else:
+                    build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                        build_queries[build]['raw_filters'], comb_mut_filters, build
+                    ))
+
             cohort_join_str = ''
             cohort_where_str = ''
             bq_cohort_table = ''
@@ -340,48 +365,93 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             bq_cohort_project_id = ''
             cohort = ''
 
-            bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
-            sample_barcode_col = bq_table_info['sample_barcode_col']
-            bq_dataset = bq_table_info['dataset']
-            bq_table = bq_table_info['table']
-            bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
+            for build in build_queries:
+                bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+                sample_barcode_col = bq_table_info['sample_barcode_col']
+                bq_dataset = bq_table_info['dataset']
+                bq_table = bq_table_info['table']
+                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
 
-            query_template = None
+                cohort_param = None
 
-            if cohort_id is not None:
-                query_template = \
-                    ("SELECT ct.sample_barcode"
-                     " FROM [{cohort_project_id}:{cohort_dataset}.{cohort_table}] ct"
-                     " JOIN (SELECT sample_barcode_tumor AS barcode "
-                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
-                     " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY barcode) mt"
-                     " ON mt.barcode = ct.sample_barcode"
-                     " WHERE ct.cohort_id = {cohort};")
+                query_template = None
 
-                bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-                bq_cohort_dataset = settings.COHORT_DATASET_ID
-                bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
+                if cohort_id is not None:
+                    query_template = \
+                        ("SELECT ct.sample_barcode"
+                         " FROM `{cohort_project_id}.{cohort_dataset}.{cohort_table}` ct"
+                         " JOIN (SELECT sample_barcode_tumor AS barcode "
+                         " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                         " WHERE {where_clause}"
+                         " GROUP BY barcode) mt"
+                         " ON mt.barcode = ct.sample_barcode"
+                         " WHERE ct.cohort_id = @cohort")
 
-                cohort = cohort_id
+                    cohort_param = {
+                        'name': 'cohort',
+                        'parameterType': {
+                            'type': 'STRING'
+                        },
+                        'parameterValue': {
+                            'value': cohort_id
+                        }
+                    }
+
+                    bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
+                    bq_cohort_dataset = settings.COHORT_DATASET_ID
+                    bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
+                else:
+                    query_template = \
+                        ("SELECT {barcode_col}"
+                         " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                         " WHERE {where_clause}"
+                         " GROUP BY {barcode_col} ")
+
+                for filter_str_param in build_queries[build]['filter_str_params']:
+                    build_queries[build]['queries'].append(
+                        query_template.format(dataset_name=bq_dataset, cohort_project_id=bq_cohort_project_id,
+                                              data_project_id=bq_data_project_id, table_name=bq_table,
+                                              barcode_col=sample_barcode_col, cohort_dataset=bq_cohort_dataset,
+                                              cohort_table=bq_cohort_table, where_clause=filter_str_param['filter_string']))
+
+                    cohort_param and filter_str_param['parameters'].append(cohort_param)
+
+
+
+            query = None
+            queries = [q for build in build_queries for q in build_queries[build]['queries']]
+            params = [z for build in build_queries for y in build_queries[build]['filter_str_params'] for z in y['parameters']]
+
+            if len(queries) > 1:
+                logger.debug("comb_mut_filters: {}".format(str(comb_mut_filters)))
+                if comb_mut_filters == 'OR':
+                    query = """ UNION DISTINCT """.join(queries)
+                else:
+                    query_template = """
+                        SELECT q0.sample_barcode_tumor
+                        FROM ({query1}) q0
+                        {join_clauses}
+                    """
+
+                    join_template = """
+                        JOIN ({query}) q{ct}
+                        ON q{ct}.sample_barcode_tumor = q0.sample_barcode_tumor
+                    """
+
+                    joins = []
+
+                    for i,val in enumerate(queries[1:]):
+                        joins.append(join_template.format(query=val, ct=str(i+1)))
+
+                    query = query_template.format(query1=queries[0], join_clauses=" ".join(joins))
             else:
-                query_template = \
-                    ("SELECT {barcode_col}"
-                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
-                     " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY {barcode_col}; ")
+                query = queries[0]
 
-            params = mutation_where_clause['value_tuple'][0]
-
-            query = query_template.format(dataset_name=bq_dataset, cohort_project_id=bq_cohort_project_id,
-                                          data_project_id=bq_data_project_id, table_name=bq_table, barcode_col=sample_barcode_col,
-                                          hugo_symbol=str(params['gene']), var_class=params['var_class'],
-                                          cohort_dataset=bq_cohort_dataset, cohort_table=bq_cohort_table, cohort=cohort)
-
+            logger.debug("mutation query: {}".format(query))
             barcodes = []
 
             start = time.time()
-            results = BigQuerySupport.execute_query_and_fetch_results(query)
+            results = BigQuerySupport.execute_query_and_fetch_results(query, params)
             stop = time.time()
 
             logger.debug('[BENCHMARKING] Time to query BQ for mutation data: '+(stop - start).__str__())
@@ -785,14 +855,12 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         if db and db.open: db.close()
 
 
-def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None):
+def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None, comb_mut_filters='OR'):
     filters = {}
 
     if req_filters is not None:
         try:
             for key in req_filters:
-                # mutation filters do not insert column names into queries, so they don't need to be
-                # validated
                 if not validate_filter_key(key, program_id):
                     raise Exception('Invalid filter key received: ' + key)
                 this_filter = req_filters[key]
@@ -806,7 +874,7 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None)
             raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
     start = time.time()
-    counts_and_total = count_public_metadata(user, cohort_id, filters, program_id)
+    counts_and_total = count_public_metadata(user, cohort_id, filters, program_id, comb_mut_filters=comb_mut_filters)
     # parsets_items = build_data_avail_plot_data(user, cohort_id, filters, program_id)
 
     stop = time.time()
