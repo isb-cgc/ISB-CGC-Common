@@ -236,7 +236,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
     }
 
     mutation_filters = None
-    mutation_where_clause = None
     data_type_where_clause = None
     filters = {}
     data_type_filters = {}

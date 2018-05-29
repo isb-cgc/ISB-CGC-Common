@@ -372,7 +372,6 @@ class BigQuerySupport(BigQueryABC):
     @staticmethod
     def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None):
 
-        logger.debug("filters received: {}".format(str(filters)))
         result = {
             'filter_string': '',
             'parameters': []
@@ -472,7 +471,5 @@ class BigQuerySupport(BigQueryABC):
             result['parameters'].append(query_param)
 
         result['filter_string'] = " {} ".format(comb_with).join(filter_set)
-
-        logger.debug("bq filter builder result: {}".format(str(result)))
 
         return result
