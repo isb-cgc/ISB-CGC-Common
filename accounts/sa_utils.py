@@ -1152,7 +1152,6 @@ def get_nih_user_details(user_id):
 
 def verify_user_is_in_gcp(user_id, gcp_id):
     user_in_gcp = False
-
     user_email = User.objects.get(id=user_id)
 
     try:
