@@ -46,7 +46,7 @@ from dataset_utils.dataset_config import DatasetGoogleGroupPair
 import httplib as http_client
 
 # Shut this up unless we need to do debug of HTTP request contents
-# http_client.HTTPConnection.debuglevel = 1
+http_client.HTTPConnection.debuglevel = 1
 
 logger = logging.getLogger('main_logger')
 
@@ -249,6 +249,8 @@ def oauth2_callback(request):
         # out if the user is linked!
         #
 
+        print decoded_jwt
+
         the_user_for_google_link = decoded_jwt['context']['user']
 
         gotta_google_link = the_user_for_google_link.has_key('google') and \
@@ -417,8 +419,9 @@ def _finish_the_link(user_id, user_email, st_logger):
     dict_o_projects = the_user['project_access']
     authorized_datasets = []
     for project, perm_list in dict_o_projects.iteritems():
-        ad = AuthorizedDataset.objects.get(whitelist_id=project)
-        authorized_datasets.append(DatasetGoogleGroupPair(project, ad.acl_google_group))
+        adqs = AuthorizedDataset.objects.filter(whitelist_id=project)
+        if len(adqs) == 1:
+            authorized_datasets.append(DatasetGoogleGroupPair(project, adqs.first().acl_google_group))
 
     das = DatasetAccessSupportFactory.from_webapp_django_settings()
     all_datasets = das.get_all_datasets_and_google_groups()
@@ -445,6 +448,9 @@ def _massage_user_data_for_dev(the_user):
     """
 
     dcf_secrets = _read_dict(settings.DCF_CLIENT_SECRETS)
+    if not dcf_secrets.has_key('DEV_1_EMAIL'):
+        return the_user
+
     nih_from_dcf = the_user['username']
     if nih_from_dcf == dcf_secrets['DEV_1_EMAIL']:
         nih_from_dcf = dcf_secrets['DEV_1_NIH']
@@ -482,7 +488,7 @@ def dcf_link_extend(request):
         messages.warning(request, "Unexpected response ({}) from DCF during linking. "
                                   "Please contact the ISB-CGC administrator.".format(resp.status_code))
 
-
+    print resp.text
 
     # Until we get back user expiration time, we calculate it:
     login_expiration_seconds = settings.LOGIN_EXPIRATION_MINUTES * 60
@@ -603,6 +609,16 @@ def _refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_fro
                                       })
 
 
+def print_dict(dictionary, ident = '', braces=1):
+    """ Recursively prints nested dictionaries."""
+
+    for key, value in dictionary.iteritems():
+        if isinstance(value, dict):
+            print '%s%s%s%s' %(ident,braces*'[',key,braces*']')
+            print_dict(value, ident+'  ', braces+1)
+        else:
+            print ident+'%s = %s' %(key, value)
+
 def _access_token_storage(token_dict, cgc_uid):
     """
     This call just replaces the access key part of the DCF record. Used when we use the
@@ -618,6 +634,15 @@ def _access_token_storage(token_dict, cgc_uid):
         logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
 
     print 'Token storage. New token expires at {}'.format(str(expiration_time))
+
+    print_dict(token_dict)
+    id_token = token_dict['id_token']
+    id_tokens_b64 = id_token.split('.')
+    i64 = id_tokens_b64[1]
+    padded = i64 + '=' * (-len(i64) % 4)  # Pad with =; Weird Python % with -length
+    id_token_decoded = urlsafe_b64decode(padded.encode("ascii"))
+    id_token_dict = json_loads(id_token_decoded)
+    print_dict(id_token_dict)
 
     dcf_token = DCFToken.objects.get(user_id=cgc_uid)
     dcf_token.access_token = token_dict['access_token']
@@ -706,21 +731,73 @@ def dcf_disconnect_user(request):
     dcf_token = DCFToken.objects.get(user_id=request.user.id)
     dcf_token.delete()
 
+    logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
+
+    callback = '{}?next_url={}'.format('https://qa.dcf.planx-pla.net/user/logout', logout_callback)
+    return HttpResponseRedirect(callback)
+
+    # redirect to user detail page
+    # return redirect(reverse('user_detail', args=[request.user.id]))
+
+
+@login_required
+def dcf_user_data_from_token(request):
+    """
+    Seems that we should be able to get full user info from the user endpoint, but it turns out that
+    the information in the token refresh is more complete.
+    """
+
+
+    #
+    # OAuth2Session handles token refreshes under the covers. Here we want to do it explicitly not
+    # that we care about the refresh (we don't care about it), but we want the id_token contents.
+
+    dcf_token = DCFToken.objects.get(user_id=request.user.id)
+
+    client_id, client_secret  = _get_secrets()
+
+    data = {
+        'grant_type': 'refresh_token',
+        'refresh_token': dcf_token.refresh_token,
+        'client_id': client_id
+    }
+    auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+    resp = requests.request('POST', DCF_TOKEN_URL, data=data, auth=auth)
+    client_id = None
+    client_secret = None
+
+    token_dict = json_loads(resp.text)
+    print_dict(token_dict)
+    id_token = token_dict['id_token']
+    id_tokens_b64 = id_token.split('.')
+    i64 = id_tokens_b64[1]
+    padded = i64 + '=' * (-len(i64) % 4)  # Pad with =; Weird Python % with -length
+    id_token_decoded = urlsafe_b64decode(padded.encode("ascii"))
+    id_token_dict = json_loads(id_token_decoded)
+    print_dict(id_token_dict)
+
+    if resp.status_code != 200:
+        messages.warning(request, 'Token acquisition problem: {} : {}'.format(resp.status_code, resp.text))
+
+    messages.warning(request, 'TDCF Responded with {}'.format(id_token_decoded))
+
     # redirect to user detail page
     return redirect(reverse('user_detail', args=[request.user.id]))
-
 
 @login_required
 def dcf_get_user_data(request):
     """
     Use for QC and development
     """
-    resp = _dcf_call(DCF_USER_URL, request.user.id)
-    user_data = json_loads(resp.text)
 
-    remaining_token_time = get_dcf_auth_key_remaining_seconds(request.user.id)
-    messages.warning(request, 'TDCF Responded with {}: {}'.format(user_data, remaining_token_time))
-    return redirect(reverse('user_detail', args=[request.user.id]))
+    return dcf_user_data_from_token(request)
+
+    # resp = _dcf_call(DCF_USER_URL, request.user.id)
+    # user_data = json_loads(resp.text)
+    #
+    # remaining_token_time = get_dcf_auth_key_remaining_seconds(request.user.id)
+    # messages.warning(request, 'TDCF Responded with {}: {}'.format(user_data, remaining_token_time))
+    # return redirect(reverse('user_detail', args=[request.user.id]))
 
 
 def _dcf_call(full_url, user_id, mode='get', post_body=None):
@@ -736,7 +813,7 @@ def _dcf_call(full_url, user_id, mode='get', post_body=None):
         'access_token' : dcf_token.access_token,
         'refresh_token' : dcf_token.refresh_token,
         'token_type' : 'Bearer',
-        'expires_in' : expires_in
+        'expires_in' : -100
     }
 
     def token_storage_for_user(my_token_dict):
