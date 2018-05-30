@@ -1096,6 +1096,7 @@ def demo_process_success(auth, user_id, saml_response):
             st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
                                            "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
 
+        retval.messages.append(warn_message)
         return retval
 
 
