@@ -595,7 +595,12 @@ def unregister_all_gcp_sa(user_id, gcp_id):
 def unregister_sa(user_id, sa_name):
     st_logger = StackDriverLogger.build_from_django_settings()
 
-    sa = ServiceAccount.objects.get(service_account=sa_name, active=1)
+    sa = ServiceAccount.objects.get(service_account=sa_name)
+    # papid multi-clicks on button can cause this sa to be inactive already. Nothing to be done...
+    if not sa.active:
+        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+            'message': '[STATUS] Attempted to remove INACTIVE SA {0}'.format(str(sa.service_account))})
+        return
     saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
 
     st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME, "[STATUS] User {} is unregistering SA {}".format(
@@ -629,7 +634,7 @@ def unregister_sa(user_id, sa_name):
                     'message': '[ERROR] There was an error in removing SA {0} from Google Group {1}.'.format(
                         str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[ERROR] {}}.'.format(str(e))})
+                    'message': '[ERROR] {}.'.format(str(e))})
                 logger.error('[ERROR] There was an error in removing SA {0} from Google Group {1}: {2}'.format(
                     str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
                 logger.exception(e)
@@ -1091,8 +1096,8 @@ def demo_process_success(auth, user_id, saml_response):
             st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
                                            "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
 
+        retval.messages.append(warn_message)
         return retval
-
 
 
 def deactivate_nih_add_to_open(user_id, user_email):
@@ -1146,3 +1151,33 @@ def get_nih_user_details(user_id):
     return user_details
 
 
+def verify_user_is_in_gcp(user_id, gcp_id):
+    user_in_gcp = False
+    user_email = None
+    try:
+        user_email = User.objects.get(id=user_id).email
+        crm_service = get_special_crm_resource()
+
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        for val in bindings:
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    if user_email.lower() == member.split(':')[1].lower():
+                        user_in_gcp = True
+
+    except Exception as e:
+        user = None
+        if type(e) is ObjectDoesNotExist:
+            user = str(user_id)
+            logger.error("[ERROR] While validating user {} membership in GCP {}:".format(user, gcp_id))
+            logger.error("Could not find user with ID {}!".format(user))
+        else:
+            user = user_email
+            logger.error("[ERROR] While validating user {} membership in GCP {}:".format(user, gcp_id))
+            logger.exception(e)
+        logger.warn("[WARNING] Because we can't confirm if user {} is in GCP {} we must assume they're not.".format(user, gcp_id))
+        user_in_gcp = False
+
+    return user_in_gcp

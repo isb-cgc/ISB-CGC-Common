@@ -53,7 +53,7 @@ def load_table(bigquery, project_id, dataset_id, table_name, source_schema,
     job_data = {
         'jobReference': {
             'projectId': project_id,
-            'job_id': str(uuid.uuid4())
+            'jobId': str(uuid.uuid4())
         },
         'configuration': {
             'load': {
