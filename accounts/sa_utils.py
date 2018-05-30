@@ -1099,7 +1099,6 @@ def demo_process_success(auth, user_id, saml_response):
         return retval
 
 
-
 def deactivate_nih_add_to_open(user_id, user_email):
     try:
         nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
@@ -1151,3 +1150,27 @@ def get_nih_user_details(user_id):
     return user_details
 
 
+def verify_user_is_in_gcp(user_id, gcp_id):
+    user_in_gcp = False
+
+    user_email = User.objects.get(id=user_id)
+
+    try:
+        crm_service = get_special_crm_resource()
+
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        for val in bindings:
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    if user_email.lower() == member.split(':')[1].lower():
+                        user_in_gcp = True
+
+    except Exception as e:
+        logger.error("[ERROR] While validating user {} membership in GCP {}:".format(str(user_id),gcp_id))
+        logger.exception(e)
+        logger.warn("[WARNING] Because we can't confirm if user {} is in GCP {} we must assume they're not.".format(str(user_id),gcp_id))
+        user_in_gcp = False
+
+    return user_in_gcp
