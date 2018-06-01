@@ -326,6 +326,10 @@ class BigQuerySupport(BigQueryABC):
         logger.debug("State: {}".format(str(job_is_done['status']['state']) if job_is_done and 'status' in job_is_done and 'state' in job_is_done['status'] else 'N/A'))
         logger.debug("Exeucting project: {}".format(self.executing_project))
         logger.debug("jobId: {}".format(job_is_done['jobReference']['jobId']))
+        if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
+                job_is_done['statistics']['query']:
+            for timeline in job_is_done['statistics']['query']['timeline']:
+                logger.debug("Elapsed: {}".format(str(timeline['elapsedMs'])))
 
         return query_results
 
