@@ -318,6 +318,11 @@ class BigQuerySupport(BigQueryABC):
             logger.error("[ERROR] Query took longer than the allowed time to execute--" +
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
 
+        logger.debug("[STATUS] Logging statements for test debug:")
+        logger.debug("State: {}".format(str(job_is_done['status']['state']) if job_is_done and 'status' in job_is_done and 'state' in job_is_done['status'] else 'N/A'))
+        logger.debug("Exeucting project: {}".format(self.executing_project))
+        logger.debug("jobId: {}".format(job_is_done['jobReference']['jobId']))
+
         return query_results
 
     # Fetch the results of a job based on the reference provided
