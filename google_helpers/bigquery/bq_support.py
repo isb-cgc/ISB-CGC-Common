@@ -305,6 +305,7 @@ class BigQuerySupport(BigQueryABC):
             sleep(1)
             job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
                                                      jobId=job_id).execute(num_retries=5)
+            
             if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
                     job_is_done['statistics']['query']:
                 for timeline in job_is_done['statistics']['query']['timeline']:
@@ -326,7 +327,7 @@ class BigQuerySupport(BigQueryABC):
         logger.debug("State: {}".format(str(job_is_done['status']['state']) if job_is_done and 'status' in job_is_done and 'state' in job_is_done['status'] else 'N/A'))
         logger.debug("Exeucting project: {}".format(self.executing_project))
         logger.debug("jobId: {}".format(job_is_done['jobReference']['jobId']))
-        
+
         if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
                 job_is_done['statistics']['query']:
             for timeline in job_is_done['statistics']['query']['timeline']:
