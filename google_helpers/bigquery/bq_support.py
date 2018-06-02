@@ -27,7 +27,7 @@ from abstract import BigQueryABC
 logger = logging.getLogger('main_logger')
 
 MAX_INSERT = settings.MAX_BQ_INSERT
-BQ_ATTEMPT_MAX = 10
+BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
 
 COHORT_DATASETS = {
     'prod': 'cloud_deployment_cohorts',
@@ -305,11 +305,6 @@ class BigQuerySupport(BigQueryABC):
             sleep(1)
             job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
                                                      jobId=job_id).execute(num_retries=5)
-            
-            if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
-                    job_is_done['statistics']['query']:
-                for timeline in job_is_done['statistics']['query']['timeline']:
-                    logger.debug("Elapsed: {}".format(str(timeline['elapsedMs'])))
 
         # Parse the final disposition
         if job_is_done and job_is_done['status']['state'] == 'DONE':
@@ -330,8 +325,7 @@ class BigQuerySupport(BigQueryABC):
 
         if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
                 job_is_done['statistics']['query']:
-            for timeline in job_is_done['statistics']['query']['timeline']:
-                logger.debug("Elapsed: {}".format(str(timeline['elapsedMs'])))
+            logger.debug("Elapsed: {}".format(str(job_is_done['statistics']['query']['timeline'][-1]['elapsedMs'])))
 
         return query_results
 
