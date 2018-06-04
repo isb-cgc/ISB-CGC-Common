@@ -2452,7 +2452,7 @@ def export_data(request, cohort_id=0, export_type=None):
                          FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
                          WHERE cohort_id = {cohort_id}
                      ) cs
-                     ON (cs.sample_barcode = md.sample_barcode OR md.case_barcode=cs.case_barcode)
+                     ON (cs.sample_barcode = md.sample_barcode OR (md.sample_barcode IS NULL AND md.case_barcode=cs.case_barcode))
                      WHERE md.file_uploaded {filter_conditions}
                      ORDER BY md.sample_barcode
             """
