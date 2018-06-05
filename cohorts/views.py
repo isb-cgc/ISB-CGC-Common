@@ -2321,7 +2321,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
 # Master method for exporting data types to BQ, GCS, etc.
 @login_required
 @csrf_protect
-def export_data(request, cohort_id=0, export_type=None):
+def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
     redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
@@ -2439,22 +2439,28 @@ def export_data(request, cohort_id=0, export_type=None):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Exporting File Manifest
+        # Some files only have case barcodes, but some have sample barcodes. We have to make sure
+        # to export any files linked to a case if any sample from that case is in the cohort, but
+        # if files are linked to a sample, we only export them if the specific sample is in the cohort.
         if export_type == 'file_manifest':
             query_string_base = """
-                     SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
-                      md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                      {cohort_id} as cohort_id, "{build}" as build,
-                      PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
-                     FROM `{metadata_table}` md
-                     JOIN (
-                         SELECT sample_barcode, case_barcode
-                         FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
-                         WHERE cohort_id = {cohort_id}
-                     ) cs
-                     ON (cs.sample_barcode = md.sample_barcode OR (md.sample_barcode IS NULL AND md.case_barcode=cs.case_barcode))
-                     WHERE md.file_uploaded {filter_conditions}
-                     ORDER BY md.sample_barcode
+                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
+                  md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                  md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                  {cohort_id} as cohort_id, "{build}" as build,
+                  PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                 FROM `{metadata_table}` md
+                 JOIN (SELECT case_barcode, sample_barcode
+                     FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
+                     WHERE cohort_id = {cohort_id}
+                     GROUP BY case_barcode, sample_barcode
+                 ) cs
+                 ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
+                 WHERE md.file_uploaded {filter_conditions}
+                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location,
+                  md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
+                 ORDER BY md.sample_barcode
             """
 
             for program in cohort_programs:
@@ -2563,7 +2569,7 @@ def export_data(request, cohort_id=0, export_type=None):
             # Export the data
             if export_dest == 'table':
                 bcs = BigQueryExportCohort(bq_proj_id, dataset, table)
-                result = bcs.export_cohort_query_to_bq(query_string, None, cohort_id)
+                result = bcs.export_cohort_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
                 bcs = BigQueryExportCohort(bq_proj_id, None, None, None, gcs_bucket, file_name)
