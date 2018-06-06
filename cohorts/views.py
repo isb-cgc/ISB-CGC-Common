@@ -1640,6 +1640,8 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                 "This functionality is currently being worked on and will become available in a future release."
             )
 
+        logger.debug("[STATUS] Returning response from cohort_filelist")
+
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
@@ -1652,6 +1654,9 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'img_thumbs_url': settings.IMG_THUMBS_URL,
                                             'has_user_data': bool(cohort_sample_list.count() > 0),
                                             'build': build})
+
+        logger.debug("[STATUS] Returning response from cohort_filelist, with exception")
+
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
@@ -1661,68 +1666,79 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-    if cohort_id == 0:
-        response_str = '<div class="row">' \
-                    '<div class="col-lg-12">' \
-                    '<div class="alert alert-danger alert-dismissible">' \
-                    '<button type="button" class="close" data-dismiss="alert"><span aria-hidden="true">&times;</span><span class="sr-only">Close</span></button>' \
-                    'Cohort provided does not exist.' \
-                    '</div></div></div>'
-        return HttpResponse(response_str, status=500)
+    status=200
 
-    params = {}
-    do_filter_count = True
-    if request.GET.get('files_per_page', None) is not None:
-        files_per_page = int(request.GET.get('files_per_page'))
-        params['limit'] = files_per_page
-        if request.GET.get('page', None) is not None:
-            do_filter_count = False
-            page = int(request.GET.get('page'))
-            params['page'] = page
-            offset = (page - 1) * files_per_page
+    try:
+        if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+        if cohort_id == 0:
+            response_str = '<div class="row">' \
+                        '<div class="col-lg-12">' \
+                        '<div class="alert alert-danger alert-dismissible">' \
+                        '<button type="button" class="close" data-dismiss="alert"><span aria-hidden="true">&times;</span><span class="sr-only">Close</span></button>' \
+                        'Cohort provided does not exist.' \
+                        '</div></div></div>'
+            return HttpResponse(response_str, status=500)
+
+        params = {}
+        do_filter_count = True
+        if request.GET.get('files_per_page', None) is not None:
+            files_per_page = int(request.GET.get('files_per_page'))
+            params['limit'] = files_per_page
+            if request.GET.get('page', None) is not None:
+                do_filter_count = False
+                page = int(request.GET.get('page'))
+                params['page'] = page
+                offset = (page - 1) * files_per_page
+                params['offset'] = offset
+        elif request.GET.get('limit', None) is not None:
+            limit = int(request.GET.get('limit'))
+            params['limit'] = limit
+
+        if request.GET.get('offset', None) is not None:
+            offset = int(request.GET.get('offset'))
             params['offset'] = offset
-    elif request.GET.get('limit', None) is not None:
-        limit = int(request.GET.get('limit'))
-        params['limit'] = limit
-
-    if request.GET.get('offset', None) is not None:
-        offset = int(request.GET.get('offset'))
-        params['offset'] = offset
-    if request.GET.get('sort_column', None) is not None:
-        sort_column = request.GET.get('sort_column')
-        params['sort_column'] = sort_column
-    if request.GET.get('sort_order', None) is not None:
-        sort_order = int(request.GET.get('sort_order'))
-        params['sort_order'] = sort_order
+        if request.GET.get('sort_column', None) is not None:
+            sort_column = request.GET.get('sort_column')
+            params['sort_column'] = sort_column
+        if request.GET.get('sort_order', None) is not None:
+            sort_order = int(request.GET.get('sort_order'))
+            params['sort_order'] = sort_order
 
 
-    build = request.GET.get('build','HG19')
+        build = request.GET.get('build','HG19')
 
-    has_access = auth_dataset_whitelists_for_user(request.user.id)
+        has_access = auth_dataset_whitelists_for_user(request.user.id)
 
-    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
-    # If nothing was found, our total file count will reflect that
-    if do_filter_count:
-        metadata_data_attr = fetch_build_data_attr(build)
-        if len(result['metadata_data_counts']):
-            for attr in result['metadata_data_counts']:
-                for val in result['metadata_data_counts'][attr]:
-                    metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
-        else:
+        # If nothing was found, our total file count will reflect that
+        if do_filter_count:
+            metadata_data_attr = fetch_build_data_attr(build)
+            if len(result['metadata_data_counts']):
+                for attr in result['metadata_data_counts']:
+                    for val in result['metadata_data_counts'][attr]:
+                        metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+            else:
+                for attr in metadata_data_attr:
+                    for val in metadata_data_attr[attr]['values']:
+                        metadata_data_attr[attr]['values'][val]['count'] = 0
+
             for attr in metadata_data_attr:
-                for val in metadata_data_attr[attr]['values']:
-                    metadata_data_attr[attr]['values'][val]['count'] = 0
+                metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
+                                                      metadata_data_attr[attr]['values']]
 
-        for attr in metadata_data_attr:
-            metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
-                                                  metadata_data_attr[attr]['values']]
+            del result['metadata_data_counts']
+            result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
 
-        del result['metadata_data_counts']
-        result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
+        logger.debug("[STATUS] Returning response from cohort_filelist_ajax")
 
-    return JsonResponse(result, status=200)
+    except Exception as e:
+        logger.error("[ERROR] While retrieving cohort file data for AJAX call:")
+        logger.exception(e)
+        status=500
+        result={'redirect': reverse('cohort_details', args=[cohort_id]), 'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+
+    return JsonResponse(result, status=status)
 
 
 @login_required
@@ -2314,6 +2330,8 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
+
+    logger.debug("[STATUS] Returning response from cohort_files")
 
     return resp
 
