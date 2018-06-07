@@ -350,6 +350,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 else:
                     build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
 
+            logger.debug("filters: {}".format(str(build_queries)))
+
             # If the combination is with AND, further split the 'not-not-any' filters, because they must be
             # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
             # a single query.
@@ -357,12 +359,22 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 if comb_mut_filters == 'AND':
                     filter_num = 0
                     for filter in build_queries[build]['raw_filters']:
-                        this_filter = {}
-                        this_filter[filter] = build_queries[build]['raw_filters'][filter]
-                        build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
-                            this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
-                        ))
-                        filter_num += 1
+                        # Individual selection filters need to be broken out if we're ANDing
+                        if ':specific' in filter:
+                            for indiv_selex in build_queries[build]['raw_filters'][filter]:
+                                this_filter = {}
+                                this_filter[filter] = [indiv_selex,]
+                                build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                                    this_filter, comb_mut_filters, build + '_{}'.format(str(filter_num))
+                                ))
+                                filter_num += 1
+                        else:
+                            this_filter = {}
+                            this_filter[filter] = build_queries[build]['raw_filters'][filter]
+                            build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                                this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
+                            ))
+                            filter_num += 1
                 elif comb_mut_filters == 'OR':
                     build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
                         build_queries[build]['raw_filters'], comb_mut_filters, build
@@ -449,6 +461,9 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 query = queries[0]
 
             barcodes = []
+
+            logger.debug("Mutation query: {}".format(query))
+            logger.debug("Params: {}".format(params))
 
             start = time.time()
             results = BigQuerySupport.execute_query_and_fetch_results(query, params)
