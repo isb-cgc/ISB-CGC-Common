@@ -581,10 +581,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 subquery = base_table
                 excl_params_tuple = ()
 
-                # Cohorts are built into the mutation table, so we don't need to check for the cohort if there is one
                 if tmp_mut_table:
                     subquery += (' JOIN %s ON tumor_sample_id = sample_barcode ' % tmp_mut_table)
-                elif cohort_id:
+
+                if cohort_id:
                     subquery += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
                     excl_params_tuple += (cohort_id,)
 
