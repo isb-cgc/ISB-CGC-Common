@@ -350,8 +350,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 else:
                     build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
 
-            logger.debug("filters: {}".format(str(build_queries)))
-
             # If the combination is with AND, further split the 'not-not-any' filters, because they must be
             # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
             # a single query.
@@ -376,9 +374,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                             ))
                             filter_num += 1
                 elif comb_mut_filters == 'OR':
-                    build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
-                        build_queries[build]['raw_filters'], comb_mut_filters, build
-                    ))
+                    if len(build_queries[build]['raw_filters']):
+                        build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                            build_queries[build]['raw_filters'], comb_mut_filters, build
+                        ))
 
             # Create the queries and their parameters
             for build in build_queries:
@@ -403,32 +402,33 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
                 # Here we build not-any queries
                 if build_queries[build]['not_any']:
-                    query_template = \
-                            ("SELECT {barcode_col}"
-                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
-                             " WHERE {barcode_col} NOT IN ("
-                             "SELECT {barcode_col}"
-                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
-                             " WHERE {where_clause}"
-                             " GROUP BY {barcode_col}) "
-                             " GROUP BY {barcode_col}")
+                    query_template = """
+                        SELECT {barcode_col}
+                        FROM `{data_project_id}.{dataset_name}.{table_name}`
+                        WHERE {barcode_col} NOT IN (
+                          SELECT {barcode_col}
+                          FROM `{data_project_id}.{dataset_name}.{table_name}`
+                          WHERE {where_clause}
+                          GROUP BY {barcode_col})
+                        GROUP BY {barcode_col}
+                    """
 
                     any_count = 0
                     for not_any in build_queries[build]['not_any']:
-                        filter = not_any.replace("NOT:","")
+                        filter = not_any.replace("NOT:", "")
                         any_filter = {}
                         any_filter[filter] = build_queries[build]['not_any'][not_any]
-                        filter_str_param = BigQuerySupport.build_bq_filter_and_params(
+                        any_filter_str_param = BigQuerySupport.build_bq_filter_and_params(
                             any_filter,param_suffix=build+'_any_{}'.format(any_count)
                         )
 
-                        build_queries[build]['filter_str_params'].append(filter_str_param)
+                        build_queries[build]['filter_str_params'].append(any_filter_str_param)
 
                         any_count += 1
 
                         build_queries[build]['queries'].append(query_template.format(
                             dataset_name=bq_dataset, data_project_id=bq_data_project_id, table_name=bq_table,
-                            barcode_col=sample_barcode_col, where_clause=filter_str_param['filter_string']))
+                            barcode_col=sample_barcode_col, where_clause=any_filter_str_param['filter_string']))
 
             query = None
             # Collect the queries for chaining below with UNION or JOIN
@@ -461,9 +461,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 query = queries[0]
 
             barcodes = []
-
-            logger.debug("Mutation query: {}".format(query))
-            logger.debug("Params: {}".format(params))
 
             start = time.time()
             results = BigQuerySupport.execute_query_and_fetch_results(query, params)
