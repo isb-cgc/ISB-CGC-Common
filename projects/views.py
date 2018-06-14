@@ -34,6 +34,7 @@ from projects.models import User_Feature_Definitions, User_Feature_Counts, Progr
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
 from googleapiclient.errors import HttpError
+from accounts.sa_utils import verify_user_is_in_gcp
 
 import json
 import requests
@@ -180,6 +181,8 @@ def upload_files(request):
 
     try:
 
+        req_user = User.objects.get(id=request.user.id)
+
         # TODO: Validation
         blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
 
@@ -274,6 +277,9 @@ def upload_files(request):
             bucket = Bucket.objects.get(id=request.POST['bucket'])
             dataset = BqDataset.objects.get(id=request.POST['dataset'])
             google_project = bucket.google_project
+
+            if not verify_user_is_in_gcp(request.user.id, google_project.project_id):
+                raise Exception("User {} is not a member of GCP {} and so cannot write to its buckets or datasets!".format(req_user.email,google_project.project_id))
 
             # TODO: This has to be done at the same time as the user data processor
             config = {
@@ -480,7 +486,7 @@ def upload_files(request):
             logger.info(e)
 
     except Exception as e:
-        print >> sys.stdout, "[ERROR] Exception in upload_files:"
+        logger.error("[ERROR] Exception in upload_files:")
         logger.exception(e)
 
         project.delete()

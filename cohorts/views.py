@@ -23,6 +23,7 @@ import datetime
 import time
 
 import django
+from google_helpers.bigquery.cohort_support import BigQuerySupport
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
 from django.contrib import messages
@@ -74,67 +75,7 @@ def convert(data):
     else:
         return data
 
-
-# Given a cohort ID, fetches the case_gdc_id or uuid of its samples
-# As metadata_data tables are build specific, this checks all builds and coalesces the results; if more than one
-# nonnull result is found the first one is kept (though in practice all non-null values should be identical)
-def get_cohort_uuids(cohort_id):
-    if not cohort_id:
-        raise Exception("A cohort ID was not provided (value={}).".format("None" if cohort_id is None else str(cohort_id)))
-
-    cohort_progs = Cohort.objects.get(id=cohort_id).get_programs()
-
-    data_tables = Public_Data_Tables.objects.filter(program_id__in=cohort_progs)
-
-    uuid_query_base = """
-        SELECT cs.sample_barcode, COALESCE ({}) as uuid
-        FROM cohorts_samples cs
-        {}
-    """
-
-    result = {}
-
-    db = None
-    cursor = None
-
-    try:
-        db = get_sql_connection()
-        cursor = db.cursor()
-
-        query = uuid_query_base
-
-        # Because UUIDs are stored in the data tables, which are build specific, we need to check the values
-        # in all builds for a given program. If more than one build has a case_gdc_id they should match, but some could
-        # be null, so we need to coalesce them to find a non-null value
-        for prog in cohort_progs:
-            prog_data_tables = data_tables.filter(program_id=prog)
-            count=1
-            uuid_cols = []
-            joins = []
-            for data_table in prog_data_tables:
-                uuid_cols.append("ds{}.case_gdc_id".format(str(count)))
-                joins.append("""
-                    LEFT JOIN {} ds{}
-                    ON ds{}.sample_barcode = cs.sample_barcode
-                """.format(data_table.data_table,str(count),str(count),))
-                count+=1
-
-            cursor.execute(query.format(",".join(uuid_cols)," ".join(joins)) + " WHERE cs.cohort_id = %s;", (cohort_id,))
-
-            for row in cursor.fetchall():
-                if row[0] not in result:
-                    result[row[0]] = row[1]
-
-    except Exception as e:
-        logger.error("[ERROR] While fetching UUIDs for a cohort:")
-        logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-    return result
-
-def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19'):
+def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 
     if program_id is None and cohort_id is None:
         # We must always have a program_id or a cohort_id - we cannot have neither, because then
@@ -155,7 +96,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     mutation_filters = None
     user_data_filters = None
     data_type_filters = False
-    mutation_where_clause = None
 
     if inc_filters is None:
         inc_filters = {}
@@ -165,8 +105,8 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         if 'MUT:' in key:
             if not mutation_filters:
                 mutation_filters = {}
-            mutation_filters[key] = inc_filters[key]
-            build = key.split(':')[1]
+            mutation_filters[key] = inc_filters[key]['values']
+
         elif 'user_' in key:
             if not user_data_filters:
                 user_data_filters = {}
@@ -250,9 +190,6 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         return samples_and_cases
         # end user_data
 
-    if mutation_filters:
-        mutation_where_clause = build_where_clause(mutation_filters)
-
     cohort_query = """
         SELECT sample_barcode cs_sample_barcode, project_id
         FROM cohorts_samples
@@ -303,72 +240,130 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # If there is a mutation filter, make a temporary table from the sample barcodes that this query
         # returns
-        if mutation_where_clause:
-            cohort_join_str = ''
-            cohort_where_str = ''
-            bq_cohort_table = ''
-            bq_cohort_dataset = ''
-            bq_cohort_project_id = ''
-            cohort = ''
-            query_template = None
+        if mutation_filters:
+            build_queries = {}
 
-            bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
-            sample_barcode_col = bq_table_info['sample_barcode_col']
-            bq_dataset = bq_table_info['dataset']
-            bq_table = bq_table_info['table']
-            bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
+            # Split the filters into 'not any' and 'all other filters'
+            for mut_filt in mutation_filters:
+                build = mut_filt.split(':')[1]
 
-            query_template = None
+                if build not in build_queries:
+                    build_queries[build] = {
+                        'raw_filters': {},
+                        'filter_str_params': [],
+                        'queries': [],
+                        'not_any': None
+                    }
 
-            if cohort_id is not None:
-                query_template = \
-                    ("SELECT ct.sample_barcode"
-                     " FROM [{project_id}:{cohort_dataset}.{cohort_table}] ct"
-                     " JOIN (SELECT sample_barcode_tumor AS barcode "
-                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
-                     " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY barcode) mt"
-                     " ON mt.barcode = ct.sample_barcode"
-                     " WHERE ct.cohort_id = {cohort};")
+                if 'NOT:' in mut_filt and 'category' in mut_filt and 'any' in mutation_filters[mut_filt]:
+                    if not build_queries[build]['not_any']:
+                        build_queries[build]['not_any'] = {}
+                    build_queries[build]['not_any'][mut_filt] = mutation_filters[mut_filt]
+                else:
+                    build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
 
+            # If the combination is with AND, further split the 'not-not-any' filters, because they must be
+            # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
+            # a single query.
+            for build in build_queries:
+                if comb_mut_filters == 'AND':
+                    filter_num = 0
+                    for filter in build_queries[build]['raw_filters']:
+                        this_filter = {}
+                        this_filter[filter] = build_queries[build]['raw_filters'][filter]
+                        build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                            this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
+                        ))
+                        filter_num += 1
+                elif comb_mut_filters == 'OR':
+                    build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                        build_queries[build]['raw_filters'], comb_mut_filters, build
+                    ))
 
-                bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-                bq_cohort_dataset = settings.COHORT_DATASET_ID
-                bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
-                cohort = cohort_id
+            # Create the queries and their parameters
+            for build in build_queries:
+                bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+                sample_barcode_col = bq_table_info['sample_barcode_col']
+                bq_dataset = bq_table_info['dataset']
+                bq_table = bq_table_info['table']
+                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
 
-            else:
+                # Build the query for any filter which *isn't* a not-any query.
                 query_template = \
                     ("SELECT {barcode_col}"
-                     " FROM [{data_project_id}:{dataset_name}.{table_name}]"
-                     " WHERE " + mutation_where_clause['big_query_str'] +
-                     " GROUP BY {barcode_col}; ")
+                     " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                     " WHERE {where_clause}"
+                     " GROUP BY {barcode_col} ")
 
-            params = mutation_where_clause['value_tuple'][0]
+                for filter_str_param in build_queries[build]['filter_str_params']:
+                    build_queries[build]['queries'].append(
+                        query_template.format(dataset_name=bq_dataset, data_project_id=bq_data_project_id,
+                                              table_name=bq_table, barcode_col=sample_barcode_col,
+                                              where_clause=filter_str_param['filter_string']))
 
-            query = query_template.format(
-                dataset_name=bq_dataset, project_id=bq_cohort_project_id, table_name=bq_table, barcode_col=sample_barcode_col,
-                hugo_symbol=str(params['gene']), data_project_id=bq_data_project_id,  var_class=params['var_class'],
-                cohort_dataset=bq_cohort_dataset,cohort_table=bq_cohort_table, cohort=cohort
-            )
+                # Here we build not-any queries
+                if build_queries[build]['not_any']:
+                    query_template = \
+                            ("SELECT {barcode_col}"
+                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                             " WHERE {barcode_col} NOT IN ("
+                             "SELECT {barcode_col}"
+                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                             " WHERE {where_clause}"
+                             " GROUP BY {barcode_col}) "
+                             " GROUP BY {barcode_col}")
 
-            bq_service = authorize_credentials_with_Google()
-            query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, query)
-            job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                   query_job['jobReference']['jobId'])
+                    any_count = 0
+                    for not_any in build_queries[build]['not_any']:
+                        filter = not_any.replace("NOT:","")
+                        any_filter = {}
+                        any_filter[filter] = build_queries[build]['not_any'][not_any]
+                        filter_str_param = BigQuerySupport.build_bq_filter_and_params(
+                            any_filter,param_suffix=build+'_any_{}'.format(any_count)
+                        )
+
+                        build_queries[build]['filter_str_params'].append(filter_str_param)
+
+                        any_count += 1
+
+                        build_queries[build]['queries'].append(query_template.format(
+                            dataset_name=bq_dataset, data_project_id=bq_data_project_id, table_name=bq_table,
+                            barcode_col=sample_barcode_col, where_clause=filter_str_param['filter_string']))
+
+            query = None
+            # Collect the queries for chaining below with UNION or JOIN
+            queries = [q for build in build_queries for q in build_queries[build]['queries']]
+            # Because our parameters are uniquely named, they can be combined into a single list
+            params = [z for build in build_queries for y in build_queries[build]['filter_str_params'] for z in y['parameters']]
+
+            if len(queries) > 1:
+                if comb_mut_filters == 'OR':
+                    query = """ UNION DISTINCT """.join(queries)
+                else:
+                    query_template = """
+                        SELECT q0.sample_barcode_tumor
+                        FROM ({query1}) q0
+                        {join_clauses}
+                    """
+
+                    join_template = """
+                        JOIN ({query}) q{ct}
+                        ON q{ct}.sample_barcode_tumor = q0.sample_barcode_tumor
+                    """
+
+                    joins = []
+
+                    for i,val in enumerate(queries[1:]):
+                        joins.append(join_template.format(query=val, ct=str(i+1)))
+
+                    query = query_template.format(query1=queries[0], join_clauses=" ".join(joins))
+            else:
+                query = queries[0]
 
             barcodes = []
-            retries = 0
+            results = BigQuerySupport.execute_query_and_fetch_results(query, params)
 
-            while not job_is_done and retries < BQ_ATTEMPT_MAX:
-                retries += 1
-                sleep(1)
-                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                       query_job['jobReference']['jobId'])
-
-            results = get_bq_job_results(bq_service, query_job['jobReference'])
-
-            if len(results) > 0:
+            if results and len(results) > 0:
                 for barcode in results:
                     barcodes.append(str(barcode['f'][0]['v']))
 
@@ -883,6 +878,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             apply_filters = request.POST.getlist('apply-filters')
             apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
+            mut_comb_with = request.POST.get('mut_filter_combine')
 
             # we only deactivate the source if we are applying filters to a previously-existing
             # source cohort
@@ -929,12 +925,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             results = {}
 
             for prog in filter_obj:
-                results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog)
+                results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog, comb_mut_filters=mut_comb_with)
 
             if cohort_progs:
                 for prog in cohort_progs:
                     if prog.id not in results:
-                        results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id)
+                        results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id, comb_mut_filters=mut_comb_with)
 
             if len(barcodes) > 0:
                 for program in barcodes:
@@ -1644,6 +1640,8 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                 "This functionality is currently being worked on and will become available in a future release."
             )
 
+        logger.debug("[STATUS] Returning response from cohort_filelist")
+
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
@@ -1656,6 +1654,9 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'img_thumbs_url': settings.IMG_THUMBS_URL,
                                             'has_user_data': bool(cohort_sample_list.count() > 0),
                                             'build': build})
+
+        logger.debug("[STATUS] Returning response from cohort_filelist, with exception")
+
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
@@ -1665,68 +1666,79 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-    if cohort_id == 0:
-        response_str = '<div class="row">' \
-                    '<div class="col-lg-12">' \
-                    '<div class="alert alert-danger alert-dismissible">' \
-                    '<button type="button" class="close" data-dismiss="alert"><span aria-hidden="true">&times;</span><span class="sr-only">Close</span></button>' \
-                    'Cohort provided does not exist.' \
-                    '</div></div></div>'
-        return HttpResponse(response_str, status=500)
+    status=200
 
-    params = {}
-    do_filter_count = True
-    if request.GET.get('files_per_page', None) is not None:
-        files_per_page = int(request.GET.get('files_per_page'))
-        params['limit'] = files_per_page
-        if request.GET.get('page', None) is not None:
-            do_filter_count = False
-            page = int(request.GET.get('page'))
-            params['page'] = page
-            offset = (page - 1) * files_per_page
+    try:
+        if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+        if cohort_id == 0:
+            response_str = '<div class="row">' \
+                        '<div class="col-lg-12">' \
+                        '<div class="alert alert-danger alert-dismissible">' \
+                        '<button type="button" class="close" data-dismiss="alert"><span aria-hidden="true">&times;</span><span class="sr-only">Close</span></button>' \
+                        'Cohort provided does not exist.' \
+                        '</div></div></div>'
+            return HttpResponse(response_str, status=500)
+
+        params = {}
+        do_filter_count = True
+        if request.GET.get('files_per_page', None) is not None:
+            files_per_page = int(request.GET.get('files_per_page'))
+            params['limit'] = files_per_page
+            if request.GET.get('page', None) is not None:
+                do_filter_count = False
+                page = int(request.GET.get('page'))
+                params['page'] = page
+                offset = (page - 1) * files_per_page
+                params['offset'] = offset
+        elif request.GET.get('limit', None) is not None:
+            limit = int(request.GET.get('limit'))
+            params['limit'] = limit
+
+        if request.GET.get('offset', None) is not None:
+            offset = int(request.GET.get('offset'))
             params['offset'] = offset
-    elif request.GET.get('limit', None) is not None:
-        limit = int(request.GET.get('limit'))
-        params['limit'] = limit
-
-    if request.GET.get('offset', None) is not None:
-        offset = int(request.GET.get('offset'))
-        params['offset'] = offset
-    if request.GET.get('sort_column', None) is not None:
-        sort_column = request.GET.get('sort_column')
-        params['sort_column'] = sort_column
-    if request.GET.get('sort_order', None) is not None:
-        sort_order = int(request.GET.get('sort_order'))
-        params['sort_order'] = sort_order
+        if request.GET.get('sort_column', None) is not None:
+            sort_column = request.GET.get('sort_column')
+            params['sort_column'] = sort_column
+        if request.GET.get('sort_order', None) is not None:
+            sort_order = int(request.GET.get('sort_order'))
+            params['sort_order'] = sort_order
 
 
-    build = request.GET.get('build','HG19')
+        build = request.GET.get('build','HG19')
 
-    has_access = auth_dataset_whitelists_for_user(request.user.id)
+        has_access = auth_dataset_whitelists_for_user(request.user.id)
 
-    result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
-    # If nothing was found, our total file count will reflect that
-    if do_filter_count:
-        metadata_data_attr = fetch_build_data_attr(build)
-        if len(result['metadata_data_counts']):
-            for attr in result['metadata_data_counts']:
-                for val in result['metadata_data_counts'][attr]:
-                    metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
-        else:
+        # If nothing was found, our total file count will reflect that
+        if do_filter_count:
+            metadata_data_attr = fetch_build_data_attr(build)
+            if len(result['metadata_data_counts']):
+                for attr in result['metadata_data_counts']:
+                    for val in result['metadata_data_counts'][attr]:
+                        metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+            else:
+                for attr in metadata_data_attr:
+                    for val in metadata_data_attr[attr]['values']:
+                        metadata_data_attr[attr]['values'][val]['count'] = 0
+
             for attr in metadata_data_attr:
-                for val in metadata_data_attr[attr]['values']:
-                    metadata_data_attr[attr]['values'][val]['count'] = 0
+                metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
+                                                      metadata_data_attr[attr]['values']]
 
-        for attr in metadata_data_attr:
-            metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
-                                                  metadata_data_attr[attr]['values']]
+            del result['metadata_data_counts']
+            result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
 
-        del result['metadata_data_counts']
-        result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
+        logger.debug("[STATUS] Returning response from cohort_filelist_ajax")
 
-    return JsonResponse(result, status=200)
+    except Exception as e:
+        logger.error("[ERROR] While retrieving cohort file data for AJAX call:")
+        logger.exception(e)
+        status=500
+        result={'redirect': reverse('cohort_details', args=[cohort_id]), 'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+
+    return JsonResponse(result, status=status)
 
 
 @login_required
@@ -1830,7 +1842,7 @@ def streaming_csv_view(request, cohort_id=0):
     except Exception as e:
         logger.error("[ERROR] While downloading the list of files for user {}:".format(str(request.user.id)))
         logger.exception(e)
-        messages.error("There was an error while attempting to download your filelist--please contact the administrator.")
+        messages.error(request,"There was an error while attempting to download your filelist--please contact the administrator.")
 
     return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
 
@@ -1898,6 +1910,7 @@ def unshare_cohort(request, cohort_id=0):
 @login_required
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
+    comb_mut_filters = request.GET.get('mut_filter_combine', 'OR')
     cohort = request.GET.get('cohort_id', None)
     limit = request.GET.get('limit', None)
     program_id = request.GET.get('program_id', None)
@@ -1907,7 +1920,7 @@ def get_metadata(request):
     user = Django_User.objects.get(id=request.user.id)
 
     if program_id is not None and program_id > 0:
-        results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit)
+        results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit, comb_mut_filters=comb_mut_filters)
 
         # If there is an extent cohort, to get the cohort's new totals per applied filters
         # we have to check the unfiltered programs for their numbers and tally them in
@@ -2067,7 +2080,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 JOIN [{data_project}:{tcga_bioclin_dataset}.{tcga_clin_table}] bc
                 ON bc.case_barcode=cs.case_barcode
                 WHERE cs.cohort_id = {cohort}
-                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
+                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name                
             """.format(cohort_dataset=bq_cohort_dataset,
                 cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
                 data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
@@ -2107,45 +2120,27 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
 
             order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
 
-            bq_service = authorize_credentials_with_Google()
             if do_filter_count:
                 # Query the count
-                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_count_query.format(select_clause=file_list_query_base))
-                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                       query_job['jobReference']['jobId'])
-                retries = 0
                 start = time.time()
-                while not job_is_done and retries < BQ_ATTEMPT_MAX:
-                    retries += 1
-                    sleep(1)
-                    job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                           query_job['jobReference']['jobId'])
+                results = BigQuerySupport.execute_query_and_fetch_results(file_count_query.format(select_clause=file_list_query_base))
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
-                results = get_bq_job_results(bq_service, query_job['jobReference'])
                 for entry in results:
                     total_file_count = int(entry['f'][0]['v'])
 
             # Query the file list only if there was anything to find
             if (total_file_count and do_filter_count) or not do_filter_count:
-                query_job = submit_bigquery_job(bq_service, settings.BQ_PROJECT_ID, file_list_query.format(
-                    select_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause, offset_clause=offset_clause)
-                )
-                job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID, query_job['jobReference']['jobId'])
-
-                retries = 0
-
                 start = time.time()
-                while not job_is_done and retries < BQ_ATTEMPT_MAX:
-                    retries += 1
-                    sleep(1)
-                    job_is_done = is_bigquery_job_finished(bq_service, settings.BQ_PROJECT_ID,
-                                                           query_job['jobReference']['jobId'])
+                results = BigQuerySupport.execute_query_and_fetch_results(
+                    file_list_query.format(
+                        select_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause,
+                        offset_clause=offset_clause
+                    )
+                )
                 stop = time.time()
 
                 logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + (stop - start).__str__())
-
-                results = get_bq_job_results(bq_service, query_job['jobReference'])
 
                 if len(results) > 0:
                     for entry in results:
@@ -2163,14 +2158,13 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
                   md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
-
                  FROM {metadata_table} md
                  JOIN (
-                     SELECT sample_barcode
+                     SELECT DISTINCT case_barcode
                      FROM cohorts_samples
                      WHERE cohort_id = {cohort_id}
                  ) cs
-                 ON cs.sample_barcode = md.sample_barcode
+                 ON cs.case_barcode = md.case_barcode
                  WHERE md.file_uploaded='true' {type_conditions} {filter_conditions}
             """
 
@@ -2178,7 +2172,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 {select_clause}
                 {order_clause}
                 {limit_clause}
-                {offset_clause}
+                {offset_clause}                
             """
             col_map = {
                 'col-program': 'project_short_name',
@@ -2337,13 +2331,15 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+    logger.debug("[STATUS] Returning response from cohort_files")
+
     return resp
 
 
 # Master method for exporting data types to BQ, GCS, etc.
 @login_required
 @csrf_protect
-def export_data(request, cohort_id=0, export_type=None):
+def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
     redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
@@ -2354,8 +2350,6 @@ def export_data(request, cohort_id=0, export_type=None):
     try:
         req_user = User.objects.get(id=request.user.id)
         export_dest = request.POST.get('export-dest', None)
-
-        logger.debug("export_type is {}".format("None" if not export_type else export_type))
 
         if not export_type or not export_dest:
             raise Exception("Can't perform export--destination and/or export type weren't provided!")
@@ -2456,29 +2450,35 @@ def export_data(request, cohort_id=0, export_type=None):
         inc_filters = json.loads(request.POST.get('filters', '{}'))
         filter_params = None
         if len(inc_filters):
-            filter_and_params = build_bq_filter_and_params(inc_filters)
+            filter_and_params = BigQuerySupport.build_bq_filter_and_params(inc_filters)
             filter_params = filter_and_params['parameters']
             filter_conditions = "AND {}".format(filter_and_params['filter_string'])
 
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         # Exporting File Manifest
+        # Some files only have case barcodes, but some have sample barcodes. We have to make sure
+        # to export any files linked to a case if any sample from that case is in the cohort, but
+        # if files are linked to a sample, we only export them if the specific sample is in the cohort.
         if export_type == 'file_manifest':
             query_string_base = """
-                     SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
-                      md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                      {cohort_id} as cohort_id, "{build}" as build,
-                      PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
-                     FROM `{metadata_table}` md
-                     JOIN (
-                         SELECT sample_barcode
-                         FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
-                         WHERE cohort_id = {cohort_id}
-                     ) cs
-                     ON cs.sample_barcode = md.sample_barcode
-                     WHERE md.file_uploaded {filter_conditions}
-                     ORDER BY md.sample_barcode
+                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
+                  md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                  md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                  {cohort_id} as cohort_id, "{build}" as build,
+                  PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                 FROM `{metadata_table}` md
+                 JOIN (SELECT case_barcode, sample_barcode
+                     FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
+                     WHERE cohort_id = {cohort_id}
+                     GROUP BY case_barcode, sample_barcode
+                 ) cs
+                 ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
+                 WHERE md.file_uploaded {filter_conditions}
+                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location,
+                  md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
+                 ORDER BY md.sample_barcode
             """
 
             for program in cohort_programs:
@@ -2584,13 +2584,10 @@ def export_data(request, cohort_id=0, export_type=None):
                 query_string = union_queries[0]
             query_string = '#standardSQL\n' + query_string
 
-            logger.debug("[STATUS] query to table export query: ")
-            logger.debug(query_string)
-
             # Export the data
             if export_dest == 'table':
                 bcs = BigQueryExportCohort(bq_proj_id, dataset, table)
-                result = bcs.export_cohort_query_to_bq(query_string, None, cohort_id)
+                result = bcs.export_cohort_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
                 bcs = BigQueryExportCohort(bq_proj_id, None, None, None, gcs_bucket, file_name)

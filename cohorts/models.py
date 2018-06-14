@@ -24,6 +24,7 @@ from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
 from projects.models import Project, Program, User_Feature_Definitions
+from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
 
@@ -301,23 +302,38 @@ class Cohort(models.Model):
         prog_data_types = None
 
         for cohort_filter in filters:
-            prog_id = Program.objects.get(name=cohort_filter['program'], is_public=True, active=True).id
-            if prog_id not in prog_vals:
-                prog_vals[prog_id] = fetch_metadata_value_set(prog_id)
-            if prog_id not in prog_dts:
-                prog_dts[prog_id] = fetch_program_data_types(prog_id, True)
+            prog = None
+            prog_id = None
+            is_private = False
+            try:
+                prog_id = Program.objects.get(name=cohort_filter['program'], is_public=True, active=True).id
+            except ObjectDoesNotExist:
+                is_private = True
 
-            prog_values = prog_vals[prog_id]
-            prog_data_types = prog_dts[prog_id]
+            if not is_private:
+                if prog_id not in prog_vals:
+                    prog_vals[prog_id] = fetch_metadata_value_set(prog_id)
+                if prog_id not in prog_dts:
+                    prog_dts[prog_id] = fetch_program_data_types(prog_id, True)
+
+                prog_values = prog_vals[prog_id]
+                prog_data_types = prog_dts[prog_id]
 
             if 'MUT:' in cohort_filter['name']:
-                cohort_filter['displ_name'] = cohort_filter['name'].split(':')[2].upper() + ' [' + cohort_filter['name'].split(':')[1].upper() + ',' + string.capwords(cohort_filter['name'].split(':')[3])
-                cohort_filter['displ_val'] = (MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[3] != 'category' else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) + ']'
+                cohort_filter['displ_name'] = ("NOT(" if 'NOT:' in cohort_filter['name'] else '') \
+                      + cohort_filter['name'].split(':')[2].upper() \
+                      + ' [' + cohort_filter['name'].split(':')[1].upper() + ',' \
+                      + string.capwords(cohort_filter['name'].split(':')[-1])
+                cohort_filter['displ_val'] = (
+                    MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[-1] != 'category'
+                    else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) \
+                    + ']' \
+                    + (")" if 'NOT:' in cohort_filter['name'] else '')
             elif cohort_filter['name'] == 'data_type':
                 cohort_filter['displ_name'] = 'Data Type'
                 cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
             else:
-                if cohort_filter['name'] not in prog_values:
+                if not prog_values or cohort_filter['name'] not in prog_values:
                     cohort_filter['displ_name'] = cohort_filter['name']
                     cohort_filter['displ_val'] = cohort_filter['value']
                 else:
