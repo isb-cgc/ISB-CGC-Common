@@ -1,6 +1,6 @@
 """
 
-Copyright 2017, Institute for Systems Biology
+Copyright 2017-2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@ limitations under the License.
 
 """
 
+from google_helpers.utils import execute_with_retries
+
 
 class DatasetAuthorizationList(object):
     @classmethod
@@ -29,7 +31,7 @@ class DatasetAuthorizationList(object):
         storage_service = get_storage_resource()
         req = storage_service.objects().get_media(bucket=bucket_name,
                                                   object=object_name)
-        file_contents = req.execute()
+        file_contents = execute_with_retries(req, 'GET_MEDIA', 2)
         return file_contents
     
     @classmethod
