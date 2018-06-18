@@ -1011,7 +1011,7 @@ def get_dcf_auth_key_remaining_seconds(user_id):
     return remaining_seconds
 
 
-def handle_user_db_update_for_dcf_linking(user_id, user_data, nih_assertion_expiration, st_logger):
+def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion_expiration, st_logger):
     """
     When user logs into DCF using iTrust and links via DCF, we create an NIH record for them and link them to to their data.
     """
@@ -1026,7 +1026,7 @@ def handle_user_db_update_for_dcf_linking(user_id, user_data, nih_assertion_expi
             'linked': True
         }
 
-        nih_user, created = NIH_User.objects.update_or_create(NIH_username=user_data['username'],
+        nih_user, created = NIH_User.objects.update_or_create(NIH_username=user_data_dict['name'],
                                                               user_id=user_id,
                                                               defaults=updated_values)
 
@@ -1037,7 +1037,7 @@ def handle_user_db_update_for_dcf_linking(user_id, user_data, nih_assertion_expi
                                            str(nih_user.NIH_username), str(created)))
 
         our_user = User.objects.get(id=user_id)
-        dict_o_projects = user_data['project_access']
+        dict_o_projects = user_data_dict['projects']
 
         logger.info("[STATUS] NIH_User.objects updated nih_user for linking: {}".format(
             str(nih_user.NIH_username)))
@@ -1297,6 +1297,7 @@ def deactivate_nih_add_to_open(user_id, user_email):
 
 def get_nih_user_details(user_id):
     user_details = {}
+
     #
     # Now with DCF, we can have a user logged in as an NIH user, but not be linked (which means DCF does not
     # have an association between NIH ID and Google ID). So while we previously did a get on a linked user,
@@ -1306,21 +1307,28 @@ def get_nih_user_details(user_id):
 
     dcf_tokens = DCFToken.objects.filter(user_id=user_id)
     if len(dcf_tokens) == 0:
-        return user_details
+        return user_details # i.e. empty dict
     elif len(dcf_tokens) > 1:
         logger.error("[ERROR] MULTIPLE DCF RECORDS FOR USER {}. ".format(str(user_id)))
-        return user_details
+        return user_details  # i.e. empty dict
 
     dcf_token = dcf_tokens.first()
+    # FIXME? IS THERE AN ISSUE HERE WITH NIH USERNAME CASE SENSITIVITY??
     nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username=dcf_token.nih_username)
 
     if len(nih_users) == 0:
-        return user_details
+        return user_details  # i.e. empty dict
 
     elif len(nih_users) == 1:
         nih_user = nih_users.first()
 
     else:
+        #
+        # Multiple NIH user rows for the current user for the same nih_username. We want the one that is linked.
+        # If more than one (is that possible??) take the one with the most recent usage. If nobody is linked,
+        # again take the one with the most recent usage. Some of these cases should not be possible (?) but
+        # trying to be bombproof here:
+        #
         nih_user = None
         freshest_linked = None
         freshest_linked_stamp = None
@@ -1346,7 +1354,29 @@ def get_nih_user_details(user_id):
             nih_user = freshest_unlinked
         else:
             logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
-            return user_details
+            return user_details  # i.e. empty dict
+
+    #
+    # With the user_details page, we now need to check with DCF about current status before we display information
+    # to the user, as our database view could be stale.
+    #
+    # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
+    # flag. This is the *minimun* we chould be doing, no matter what. Note that in DCF-based Brave New World, we no
+    # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
+    # need to give the user an accurate picture of the state when they hit this page.
+    #
+
+    if nih_user.active:
+        expired_time = nih_user.NIH_assertion_expiration
+        # If we need to have the access expire in just a few minutes for testing, this is one way to fake it:
+        # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
+        # expired_time = expired_time + testing_expire_hack
+        now_time = pytz.utc.localize(datetime.datetime.utcnow())
+        print "times", expired_time, now_time
+        if now_time >= expired_time:
+            nih_user.active = False
+            nih_user.NIH_assertion_expiration = now_time
+            nih_user.save()
 
     user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
     user_details['NIH_username'] = nih_user.NIH_username
