@@ -1313,10 +1313,12 @@ def get_nih_user_details(user_id):
         return user_details  # i.e. empty dict
 
     dcf_token = dcf_tokens.first()
-    # FIXME? IS THERE AN ISSUE HERE WITH NIH USERNAME CASE SENSITIVITY??
-    nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username=dcf_token.nih_username)
+
+    curr_user = User.objects.get(id=user_id)
+    nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username__iexact=dcf_token.nih_username)
 
     if len(nih_users) == 0:
+        user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
         return user_details  # i.e. empty dict
 
     elif len(nih_users) == 1:
@@ -1354,6 +1356,7 @@ def get_nih_user_details(user_id):
             nih_user = freshest_unlinked
         else:
             logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
+            user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
             return user_details  # i.e. empty dict
 
     #
@@ -1385,6 +1388,7 @@ def get_nih_user_details(user_id):
     user_details['dbGaP_has_datasets'] = (len(user_auth_datasets) > 0)
     user_details['dbGaP_authorized'] = (len(user_auth_datasets) > 0) and nih_user.active
     logger.debug("[DEBUG] User {} has access to {} dataset(s) and is {}".format(nih_user.NIH_username, str(len(user_auth_datasets)), ('not active' if not nih_user.active else 'active')))
+    user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
     user_details['NIH_active'] = nih_user.active
     user_details['NIH_DCF_linked'] = nih_user.linked
     user_details['refresh_key_ok'] = get_dcf_auth_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
