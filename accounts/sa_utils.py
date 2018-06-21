@@ -1261,6 +1261,44 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
             else:
                 logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
 
+                    logger.info(result)
+                    logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+                    st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                                   "[STATUS] User {} added to {}.".format(user_email,
+                                                                                          dataset.google_group_name))
+
+        # Add task in queue to deactivate NIH_User entry after NIH_assertion_expiration has passed.
+        try:
+            full_topic_name = get_full_topic_name(PUBSUB_TOPIC_ERA_LOGIN)
+            logger.info("Full topic name: {}".format(full_topic_name))
+            client = get_pubsub_service()
+            params = {
+                'event_type': 'era_login',
+                'user_id': user_id,
+                'deployment': CRON_MODULE
+            }
+            message = json_dumps(params)
+
+            body = {
+                'messages': [
+                    {
+                        'data': base64.b64encode(message.encode('utf-8'))
+                    }
+                ]
+            }
+            client.projects().topics().publish(topic=full_topic_name, body=body).execute()
+            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                           "[STATUS] Notification sent to PubSub topic: {}".format(full_topic_name))
+
+        except Exception as e:
+            logger.error("[ERROR] Failed to publish to PubSub topic")
+            logger.exception(e)
+            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                           "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
+
+        retval.messages.append(warn_message)
+        return retval
+
 
 def deactivate_nih_add_to_open(user_id, user_email):
     # 5/14/18 NO! active flag has nothing to do with user logout, but instead is set to zero when user expires off of ACL group
@@ -1397,3 +1435,33 @@ def get_nih_user_details(user_id):
     return user_details
 
 
+def verify_user_is_in_gcp(user_id, gcp_id):
+    user_in_gcp = False
+    user_email = None
+    try:
+        user_email = User.objects.get(id=user_id).email
+        crm_service = get_special_crm_resource()
+
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        for val in bindings:
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    if user_email.lower() == member.split(':')[1].lower():
+                        user_in_gcp = True
+
+    except Exception as e:
+        user = None
+        if type(e) is ObjectDoesNotExist:
+            user = str(user_id)
+            logger.error("[ERROR] While validating user {} membership in GCP {}:".format(user, gcp_id))
+            logger.error("Could not find user with ID {}!".format(user))
+        else:
+            user = user_email
+            logger.error("[ERROR] While validating user {} membership in GCP {}:".format(user, gcp_id))
+            logger.exception(e)
+        logger.warn("[WARNING] Because we can't confirm if user {} is in GCP {} we must assume they're not.".format(user, gcp_id))
+        user_in_gcp = False
+
+    return user_in_gcp
