@@ -1,5 +1,5 @@
 """
-Copyright 2017, Institute for Systems Biology
+Copyright 2017-2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,14 +33,14 @@ from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from googleapiclient.errors import HttpError
+from django.contrib.auth.models import User
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
                      do_nih_unlink, deactivate_nih_add_to_open
-
-import json
+from json import loads as json_loads
 
 logger = logging.getLogger('main_logger')
 
@@ -52,6 +52,7 @@ MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 @login_required
 def extended_logout_view(request):
+
     response = None
     try:
         # deactivate NIH_username entry if exists
@@ -500,7 +501,7 @@ def register_bucket(request, user_id, gcp_id):
                 messages.error(request, 'Access to the bucket {0} in Google Cloud Project {1} was denied.'.format(
                     bucket_name, gcp.project_id))
             elif e.resp.get('content-type', '').startswith('application/json'):
-                err_val = json.loads(e.content).get('error')
+                err_val = json_loads(e.content).get('error')
                 if err_val:
                     e_message = err_val.get('message')
                 else:
