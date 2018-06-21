@@ -1261,43 +1261,43 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
             else:
                 logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
 
-                    logger.info(result)
-                    logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-                    st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                                   "[STATUS] User {} added to {}.".format(user_email,
-                                                                                          dataset.google_group_name))
+                # logger.info(result)
+                # logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+                # st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                #                                "[STATUS] User {} added to {}.".format(user_email,
+                #                                                                       dataset.google_group_name))
 
         # Add task in queue to deactivate NIH_User entry after NIH_assertion_expiration has passed.
-        try:
-            full_topic_name = get_full_topic_name(PUBSUB_TOPIC_ERA_LOGIN)
-            logger.info("Full topic name: {}".format(full_topic_name))
-            client = get_pubsub_service()
-            params = {
-                'event_type': 'era_login',
-                'user_id': user_id,
-                'deployment': CRON_MODULE
-            }
-            message = json_dumps(params)
-
-            body = {
-                'messages': [
-                    {
-                        'data': base64.b64encode(message.encode('utf-8'))
-                    }
-                ]
-            }
-            client.projects().topics().publish(topic=full_topic_name, body=body).execute()
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[STATUS] Notification sent to PubSub topic: {}".format(full_topic_name))
-
-        except Exception as e:
-            logger.error("[ERROR] Failed to publish to PubSub topic")
-            logger.exception(e)
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
-
-        retval.messages.append(warn_message)
-        return retval
+        # try:
+        #     full_topic_name = get_full_topic_name(PUBSUB_TOPIC_ERA_LOGIN)
+        #     logger.info("Full topic name: {}".format(full_topic_name))
+        #     client = get_pubsub_service()
+        #     params = {
+        #         'event_type': 'era_login',
+        #         'user_id': user_id,
+        #         'deployment': CRON_MODULE
+        #     }
+        #     message = json_dumps(params)
+        #
+        #     body = {
+        #         'messages': [
+        #             {
+        #                 'data': base64.b64encode(message.encode('utf-8'))
+        #             }
+        #         ]
+        #     }
+        #     client.projects().topics().publish(topic=full_topic_name, body=body).execute()
+        #     st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+        #                                    "[STATUS] Notification sent to PubSub topic: {}".format(full_topic_name))
+        #
+        # except Exception as e:
+        #     logger.error("[ERROR] Failed to publish to PubSub topic")
+        #     logger.exception(e)
+        #     st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+        #                                    "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
+        #
+        # retval.messages.append(warn_message)
+        # return retval
 
 
 def deactivate_nih_add_to_open(user_id, user_email):
