@@ -1260,10 +1260,9 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                                                                                                   ad.whitelist_id))
             else:
                 logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
-
-                    logger.info(result)
-                    logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-                    st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                logger.info(result)
+                logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+                st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
                                                    "[STATUS] User {} added to {}.".format(user_email,
                                                                                           dataset.google_group_name))
 
