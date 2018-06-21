@@ -16,8 +16,10 @@ limitations under the License.
 
 import re
 import base64
-from json import dumps as json_dumps
+from json import dumps as json_dumps, loads as json_loads
+from base64 import urlsafe_b64decode
 import traceback
+import time
 import datetime
 import pytz
 
@@ -687,6 +689,7 @@ class UnlinkAccountsResult(object):
     def __repr__(self):
         return self.__str__()
 
+
 def do_nih_unlink(user_id):
     unlink_accounts_result, message = unlink_accounts_and_get_acl_tasks(user_id)
     if message:
@@ -695,6 +698,7 @@ def do_nih_unlink(user_id):
     if next_message:
         return next_message
     return None
+
 
 def _process_actions(unlink_accounts_result):
     directory_service, http_auth = get_directory_resource()
@@ -820,6 +824,65 @@ class DemoLoginResults(object):
     def __repr_(self):
         return self.__str__()
 
+
+def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, results):
+    # 1. check if this google identity is currently linked to other NIH usernames
+    # note: the NIH username exclusion is case-insensitive so this will not return a false positive
+    # e.g. if this google identity is linked to 'NIHUSERNAME1' but just authenticated with 'nihusername1',
+    # it will still pass this test
+    nih_usernames_already_linked_to_this_google_identity = NIH_User.objects.filter(
+        user_id=user_id, linked=True).exclude(NIH_username__iexact=NIH_username)
+    for nih_user in nih_usernames_already_linked_to_this_google_identity:
+        if nih_user.NIH_username.lower() != NIH_username.lower():
+            logger.warn(
+                "User {} is already linked to the eRA commons identity {} and attempted authentication"
+                " with the eRA commons identity {}."
+                    .format(user_email, nih_user.NIH_username, NIH_username))
+            my_st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] {}".format(
+                "User {} is already linked to the eRA commons identity {} and attempted authentication"
+                " with the eRA commons identity {}."
+                    .format(user_email, nih_user.NIH_username, NIH_username)))
+
+            results.messages.append("User {} is already linked to the eRA commons identity {}. "
+                                    "Please unlink these before authenticating with the eRA commons "
+                                    "identity {}.".format(user_email, nih_user.NIH_username,
+                                                          NIH_username))
+            return True
+
+    # 2. check if there are other google identities that are still linked to this NIH_username
+    # note: the NIH username match is case-insensitive so this will not return a false negative.
+    # e.g. if a different google identity is linked to 'NIHUSERNAME1' and this google identity just authenticated with 'nihusername1',
+    # this will fail the test and return to the /users/ url with a warning message
+    preexisting_nih_users = NIH_User.objects.filter(
+        NIH_username__iexact=NIH_username, linked=True).exclude(user_id=user_id)
+
+    if len(preexisting_nih_users) > 0:
+        preexisting_nih_user_user_ids = [preexisting_nih_user.user_id for preexisting_nih_user in
+                                         preexisting_nih_users]
+        prelinked_user_email_list = [user.email for user in
+                                     User.objects.filter(id__in=preexisting_nih_user_user_ids)]
+        prelinked_user_emails = ', '.join(prelinked_user_email_list)
+
+        logger.warn(
+            "User {} tried to log into the NIH account {} that is already linked to user(s) {}".format(
+                user_email,
+                NIH_username,
+                prelinked_user_emails + '.'
+            ))
+        my_st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                          "User {} tried to log into the NIH account {} that is already linked to user(s) {}".format(
+                                           user_email,
+                                           NIH_username,
+                                           prelinked_user_emails + '.'
+                                          ))
+
+        results.messages.append(
+            "You tried to link your email address to NIH account {}, but it is already linked to {}.".format(
+                NIH_username, prelinked_user_emails))
+        return True
+    return False
+
+
 def demo_process_success(auth, user_id, saml_response):
     retval = DemoLoginResults()
     st_logger = StackDriverLogger.build_from_django_settings()
@@ -857,58 +920,7 @@ def demo_process_success(auth, user_id, saml_response):
 
             user_email = User.objects.get(id=user_id).email
 
-            # 1. check if this google identity is currently linked to other NIH usernames
-            # note: the NIH username exclusion is case-insensitive so this will not return a false positive
-            # e.g. if this google identity is linked to 'NIHUSERNAME1' but just authenticated with 'nihusername1',
-            # it will still pass this test
-            nih_usernames_already_linked_to_this_google_identity = NIH_User.objects.filter(
-                user_id=user_id, linked=True).exclude(NIH_username__iexact=NIH_username)
-            for nih_user in nih_usernames_already_linked_to_this_google_identity:
-                if nih_user.NIH_username.lower() != NIH_username.lower():
-                    logger.warn(
-                        "User {} is already linked to the eRA commons identity {} and attempted authentication"
-                        " with the eRA commons identity {}."
-                            .format(user_email, nih_user.NIH_username, NIH_username))
-                    st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] {}".format(
-                        "User {} is already linked to the eRA commons identity {} and attempted authentication"
-                        " with the eRA commons identity {}."
-                            .format(user_email, nih_user.NIH_username, NIH_username)))
-
-                    retval.messages.append("User {} is already linked to the eRA commons identity {}. "
-                                              "Please unlink these before authenticating with the eRA commons "
-                                              "identity {}.".format(user_email, nih_user.NIH_username,
-                                                                    NIH_username))
-                    return retval
-
-            # 2. check if there are other google identities that are still linked to this NIH_username
-            # note: the NIH username match is case-insensitive so this will not return a false negative.
-            # e.g. if a different google identity is linked to 'NIHUSERNAME1' and this google identity just authenticated with 'nihusername1',
-            # this will fail the test and return to the /users/ url with a warning message
-            preexisting_nih_users = NIH_User.objects.filter(
-                NIH_username__iexact=NIH_username, linked=True).exclude(user_id=user_id)
-
-            if len(preexisting_nih_users) > 0:
-                preexisting_nih_user_user_ids = [preexisting_nih_user.user_id for preexisting_nih_user in
-                                                 preexisting_nih_users]
-                prelinked_user_email_list = [user.email for user in
-                                             User.objects.filter(id__in=preexisting_nih_user_user_ids)]
-                prelinked_user_emails = ', '.join(prelinked_user_email_list)
-
-                logger.warn(
-                    "User {} tried to log into the NIH account {} that is already linked to user(s) {}".format(
-                        user_email,
-                        NIH_username,
-                        prelinked_user_emails + '.'
-                    ))
-                st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                               "User {} tried to log into the NIH account {} that is already linked to user(s) {}".format(
-                                                   user_email,
-                                                   NIH_username,
-                                                   prelinked_user_emails + '.'
-                                               ))
-
-                retval.messages.append("You tried to link your email address to NIH account {}, but it is already linked to {}.".format(
-                                        NIH_username, prelinked_user_emails))
+            if found_linking_problems(NIH_username, user_id, user_email, st_logger, retval):
                 return retval
 
         except Exception as e:
@@ -916,49 +928,14 @@ def demo_process_success(auth, user_id, saml_response):
                                            "[ERROR] Exception while finding user email: {}".format(str(e)))
             logger.exception(e)
 
+        # This stuff used to live sprinkled into the Django update code that is now in
+        # handle_user_db_entry. But it is not useful for us with DCF, so break it out, but
+        # handle exception as before:
+        no_exception = True
         try:
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] Updating Django model")
-
             authorized_datasets = das.get_datasets_for_era_login(NIH_username)
-
-            #saml_response = None if 'SAMLResponse' not in req['post_data'] else req['post_data']['SAMLResponse']
-            saml_response = saml_response.replace('\r\n', '')
-
-            # AppEngine Flex appears to return a datetime.datetime.now() of the server's local timezone, and not
-            # UTC as on AppEngine Standard; use utcnow() to ensure UTC.
-            NIH_assertion_expiration = datetime.datetime.utcnow() + datetime.timedelta(
-                seconds=login_expiration_seconds)
-
-            updated_values = {
-                'NIH_assertion': saml_response,
-                'NIH_assertion_expiration': pytz.utc.localize(NIH_assertion_expiration),
-                'user_id': user_id,
-                'active': 1,
-                'linked': True
-            }
-
-            nih_user, created = NIH_User.objects.update_or_create(NIH_username=NIH_username,
-                                                                  user_id=user_id,
-                                                                  defaults=updated_values)
-
-            logger.info("[STATUS] NIH_User.objects.update_or_create() returned nih_user: {} and created: {}".format(
-                str(nih_user.NIH_username), str(created)))
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[STATUS] NIH_User.objects.update_or_create() returned nih_user: {} and created: {}".format(
-                                               str(nih_user.NIH_username), str(created)))
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[STATUS] NIH_User {} associated with email {} and logged in with assertion: {}".format(
-                                               str(nih_user.NIH_username), str(user_email), str(saml_response)))
-
             # add or remove user from ACL_GOOGLE_GROUP if they are or are not dbGaP authorized
             directory_client, http_auth = get_directory_resource()
-            # default warn message is for eRA Commons users who are not dbGaP authorized
-            warn_message = '''
-                <h3>WARNING NOTICE</h3>
-                <p>You are accessing a US Government web site which may contain information that must be protected under the US Privacy Act or other sensitive information and is intended for Government authorized use only.</p>
-                <p>Unauthorized attempts to upload information, change information, or use of this web site may result in disciplinary action, civil, and/or criminal penalties. Unauthorized users of this website should have no expectation of privacy regarding any communications or data processed by this website.</p>
-                <p>Anyone accessing this website expressly consents to monitoring of their actions and all communications or data transiting or stored on related to this website and is advised that if such monitoring reveals possible evidence of criminal activity, NIH may provide that evidence to law enforcement officials.</p>
-                '''
 
         except Exception as e:
             st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
@@ -966,100 +943,323 @@ def demo_process_success(auth, user_id, saml_response):
             logger.error("[ERROR] Exception while finding user email: ")
             logger.exception(e)
             warn_message = ""
+            no_exception = False
 
-        if len(authorized_datasets) > 0:
-            # if user has access to one or more datasets, warn message is different
-            warn_message += '<p>You are reminded that when accessing controlled information you are bound by the dbGaP DATA USE CERTIFICATION AGREEMENT (DUCA) for each dataset.</p>'
+        if no_exception:
+            #saml_response = None if 'SAMLResponse' not in req['post_data'] else req['post_data']['SAMLResponse']
+            saml_response = saml_response.replace('\r\n', '')
+            num_auth_datasets = len(authorized_datasets)
+            # AppEngine Flex appears to return a datetime.datetime.now() of the server's local timezone, and not
+            # UTC as on AppEngine Standard; use utcnow() to ensure UTC.
+            NIH_assertion_expiration = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
+                seconds=login_expiration_seconds))
+
+            nih_user, warn_message = handle_user_db_entry(user_id, NIH_username, user_email, saml_response,
+                                                          num_auth_datasets, NIH_assertion_expiration, st_logger)
 
         all_datasets = das.get_all_datasets_and_google_groups()
 
         for dataset in all_datasets:
-            ad = None
-            try:
-                ad = AuthorizedDataset.objects.get(whitelist_id=dataset.dataset_id,
-                                                   acl_google_group=dataset.google_group_name)
-            except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
-                logger.error((
-                                 "[ERROR] " + (
-                                 "More than one dataset " if type(e) is MultipleObjectsReturned else "No dataset ") +
-                                 "found for this ID and Google Group Name in the database: %s, %s") % (
-                             dataset.dataset_id, dataset.google_group_name)
-                             )
-                continue
+            handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, True,
+                                    directory_client, http_auth, st_logger)
 
-            uad = UserAuthorizedDatasets.objects.filter(nih_user=nih_user, authorized_dataset=ad)
-            dataset_in_auth_set = next((ds for ds in authorized_datasets if (
-            ds.dataset_id == dataset.dataset_id and ds.google_group_name == dataset.google_group_name)), None)
+        # Add task in queue to deactivate NIH_User entry after NIH_assertion_expiration has passed.
+        try:
+            full_topic_name = get_full_topic_name(PUBSUB_TOPIC_ERA_LOGIN)
+            logger.info("Full topic name: {}".format(full_topic_name))
+            client = get_pubsub_service()
+            params = {
+                'event_type': 'era_login',
+                'user_id': user_id,
+                'deployment': CRON_MODULE
+            }
+            message = json_dumps(params)
 
-            logger.debug("[STATUS] UserAuthorizedDatasets for {}: {}".format(nih_user.NIH_username, str(uad)))
-
-            try:
-                result = directory_client.members().get(groupKey=dataset.google_group_name,
-                                                        memberKey=user_email).execute(http=http_auth)
-
-                # If we found them in the ACL but they're not currently authorized for it, remove them from it and the table
-                if len(result) and not dataset_in_auth_set:
-                    directory_client.members().delete(groupKey=dataset.google_group_name,
-                                                      memberKey=user_email).execute(http=http_auth)
-                    logger.warn(
-                        "User {} was deleted from group {} because they don't have dbGaP authorization.".format(
-                            user_email, dataset.google_group_name
-                        )
-                    )
-                    st_logger.write_text_log_entry(
-                        LOG_NAME_ERA_LOGIN_VIEW,
-                        "[WARN] User {} was deleted from group {} because they don't have dbGaP authorization.".format(
-                            user_email, dataset.google_group_name
-                        )
-                    )
-
-                if len(uad) and not dataset_in_auth_set:
-                    uad.delete()
-                # Sometimes an account is in the Google Group but not the database - add them if they should
-                # have access
-                elif not len(uad) and len(result) and dataset_in_auth_set:
-                    logger.info(
-                        "User {} was was found in group {} but not the database--adding them.".format(
-                            user_email, dataset.google_group_name
-                        )
-                    )
-                    st_logger.write_text_log_entry(
-                        LOG_NAME_ERA_LOGIN_VIEW,
-                        "[WARN] User {} was was found in group {} but not the database--adding them.".format(
-                            user_email, dataset.google_group_name
-                        )
-                    )
-                    uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
-                                                                                   authorized_dataset=ad)
-                    if not created:
-                        logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
-                                                                                                          ad.whitelist_id))
-                    else:
-                        logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
-
-            # if the user_email doesn't exist in the google group an HttpError will be thrown...
-            except HttpError:
-                # Check for their need to be in the ACL, and add them
-                if dataset_in_auth_set:
-                    body = {
-                        "email": user_email,
-                        "role": "MEMBER"
+            body = {
+                'messages': [
+                    {
+                        'data': base64.b64encode(message.encode('utf-8'))
                     }
+                ]
+            }
+            client.projects().topics().publish(topic=full_topic_name, body=body).execute()
+            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                           "[STATUS] Notification sent to PubSub topic: {}".format(full_topic_name))
 
-                    result = directory_client.members().insert(
-                        groupKey=dataset.google_group_name,
-                        body=body
-                    ).execute(http=http_auth)
+        except Exception as e:
+            logger.error("[ERROR] Failed to publish to PubSub topic")
+            logger.exception(e)
+            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                           "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
 
-                    # Then add then to the database as well
-                    if not len(uad):
-                        uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
-                                                                                       authorized_dataset=ad)
-                        if not created:
-                            logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
-                                                                                                              ad.whitelist_id))
-                        else:
-                            logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
+        retval.messages.append(warn_message)
+        return retval
+
+
+def get_dcf_auth_key_remaining_seconds(user_id):
+    """
+    We need to know how many seconds are left before the user needs to log back in to NIH to get
+    a new refresh token, which will expire every 30 days.
+    """
+
+    dcf_token = DCFToken.objects.get(user_id=user_id)
+
+    remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
+    logger.info('[INFO] user {} has {} seconds remaining on refresh token'.
+                format(dcf_token.nih_username, remaining_seconds))
+
+    return remaining_seconds
+
+
+def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion_expiration, st_logger):
+    """
+    When user logs into DCF using iTrust and links via DCF, we create an NIH record for them and link them to to their data.
+    """
+    nih_user = None
+    try:
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] Updating Django model for DCF")
+
+        updated_values = {
+            'NIH_assertion': None, # Unused
+            'NIH_assertion_expiration': nih_assertion_expiration,
+            'active': 1,
+            'linked': True
+        }
+
+        nih_user, created = NIH_User.objects.update_or_create(NIH_username=user_data_dict['name'],
+                                                              user_id=user_id,
+                                                              defaults=updated_values)
+
+        logger.info("[STATUS] NIH_User.objects.update_or_create() returned nih_user: {} and created: {}".format(
+            str(nih_user.NIH_username), str(created)))
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                       "[STATUS] NIH_User.objects.update_or_create() returned nih_user: {} and created: {}".format(
+                                           str(nih_user.NIH_username), str(created)))
+
+        our_user = User.objects.get(id=user_id)
+        dict_o_projects = user_data_dict['projects']
+
+        logger.info("[STATUS] NIH_User.objects updated nih_user for linking: {}".format(
+            str(nih_user.NIH_username)))
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                       "[STATUS] NIH_User.objects updated nih_user for linking: {}".format(
+            str(nih_user.NIH_username)))
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                       "[STATUS] NIH_User {} associated with email {}".format(
+                                           str(nih_user.NIH_username), our_user.email))
+
+        # default warn message is for eRA Commons users who are not dbGaP authorized
+        warn_message = '''
+            <h3>WARNING NOTICE</h3>
+            <p>You are accessing a US Government web site which may contain information that must be protected under the US Privacy Act or other sensitive information and is intended for Government authorized use only.</p>
+            <p>Unauthorized attempts to upload information, change information, or use of this web site may result in disciplinary action, civil, and/or criminal penalties. Unauthorized users of this website should have no expectation of privacy regarding any communications or data processed by this website.</p>
+            <p>Anyone accessing this website expressly consents to monitoring of their actions and all communications or data transiting or stored on related to this website and is advised that if such monitoring reveals possible evidence of criminal activity, NIH may provide that evidence to law enforcement officials.</p>
+            '''
+
+    except Exception as e:
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                       "[ERROR] Exception while installing DCF linking: {}".format(str(e)))
+        logger.error("[ERROR] Exception while installing DCF linking: ")
+        logger.exception(e)
+        warn_message = ""
+
+    if len(dict_o_projects) > 0:
+        # if user has access to one or more datasets, warn message is different
+        warn_message += '<p>You are reminded that when accessing controlled information you are bound by the dbGaP DATA USE CERTIFICATION AGREEMENT (DUCA) for each dataset.</p>'
+
+    return nih_user, warn_message
+
+
+def unlink_account_in_db_for_dcf(user_id):
+    """
+    This function modifies the 'NIH_User' objects!
+
+    We find the NIH user(s) linked to the user_id, and set the Linked and Active states to False. We then remove their
+    authorized dataset records. This should only have to deal with one user, but we are set up to handle multiple users
+    to be safe.
+
+    """
+
+    user_email = User.objects.get(id=user_id).email
+    nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
+    num_linked = len(nih_user_query_set)
+
+    # If nobody is linked, we are actually done. There is nothing to do.
+    if num_linked == 0:
+        return None
+    elif num_linked > 1:
+        logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
+
+    for nih_account_to_unlink in nih_user_query_set:
+        nih_account_to_unlink.linked = False
+        nih_account_to_unlink.active = False
+        nih_account_to_unlink.save()
+        nih_account_to_unlink.delete_all_auth_datasets()
+        logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
+
+    return None
+
+
+def handle_user_db_entry(user_id, NIH_username, user_email, auth_response, num_auth_datasets,
+                         NIH_assertion_expiration, st_logger):
+
+    try:
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] Updating Django model for DCF")
+
+        updated_values = {
+            'NIH_assertion': auth_response,
+            'NIH_assertion_expiration': NIH_assertion_expiration,
+            'user_id': user_id,
+            'active': 1,
+            'linked': True
+        }
+
+        nih_user, created = NIH_User.objects.update_or_create(NIH_username=NIH_username,
+                                                              user_id=user_id,
+                                                              defaults=updated_values)
+
+        logger.info("[STATUS] NIH_User.objects.update_or_create() returned nih_user: {} and created: {}".format(
+            str(nih_user.NIH_username), str(created)))
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                       "[STATUS] NIH_User.objects.update_or_create() returned nih_user: {} and created: {}".format(
+                                           str(nih_user.NIH_username), str(created)))
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                       "[STATUS] NIH_User {} associated with email {} and logged in with assertion: {}".format(
+                                           str(nih_user.NIH_username), str(user_email), str(auth_response)))
+
+        # default warn message is for eRA Commons users who are not dbGaP authorized
+        warn_message = '''
+            <h3>WARNING NOTICE</h3>
+            <p>You are accessing a US Government web site which may contain information that must be protected under the US Privacy Act or other sensitive information and is intended for Government authorized use only.</p>
+            <p>Unauthorized attempts to upload information, change information, or use of this web site may result in disciplinary action, civil, and/or criminal penalties. Unauthorized users of this website should have no expectation of privacy regarding any communications or data processed by this website.</p>
+            <p>Anyone accessing this website expressly consents to monitoring of their actions and all communications or data transiting or stored on related to this website and is advised that if such monitoring reveals possible evidence of criminal activity, NIH may provide that evidence to law enforcement officials.</p>
+            '''
+
+    except Exception as e:
+        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                       "[ERROR] Exception while finding user email: {}".format(str(e)))
+        logger.error("[ERROR] Exception while finding user email: ")
+        logger.exception(e)
+        warn_message = ""
+
+    if num_auth_datasets > 0:
+        # if user has access to one or more datasets, warn message is different
+        warn_message += '<p>You are reminded that when accessing controlled information you are bound by the dbGaP DATA USE CERTIFICATION AGREEMENT (DUCA) for each dataset.</p>'
+
+    return nih_user, warn_message
+
+
+def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, handle_acls,
+                            directory_client, http_auth, st_logger):
+    try:
+        ad = AuthorizedDataset.objects.get(whitelist_id=dataset.dataset_id,
+                                           acl_google_group=dataset.google_group_name)
+    except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
+        logger.error(("[ERROR] " + (
+                         "More than one dataset " if type(e) is MultipleObjectsReturned else "No dataset ") +
+                         "found for this ID and Google Group Name in the database: %s, %s") % (
+                     dataset.dataset_id, dataset.google_group_name)
+                     )
+        return
+
+    uad = UserAuthorizedDatasets.objects.filter(nih_user=nih_user, authorized_dataset=ad)
+    dataset_in_auth_set = next((ds for ds in authorized_datasets if
+                                (ds.dataset_id == dataset.dataset_id and
+                                 ds.google_group_name == dataset.google_group_name)), None)
+
+    logger.debug("[STATUS] UserAuthorizedDatasets for {}: {}".format(nih_user.NIH_username, str(uad)))
+
+    need_to_add = False
+    if handle_acls:
+        try:
+            result = directory_client.members().get(groupKey=dataset.google_group_name,
+                                                    memberKey=user_email).execute(http=http_auth)
+
+            # If we found them in the ACL but they're not currently authorized for it, remove them from it and the table
+            if len(result) and not dataset_in_auth_set:
+                directory_client.members().delete(groupKey=dataset.google_group_name,
+                                                  memberKey=user_email).execute(http=http_auth)
+                logger.warn(
+                    "User {} was deleted from group {} because they don't have dbGaP authorization.".format(
+                        user_email, dataset.google_group_name
+                    )
+                )
+                st_logger.write_text_log_entry(
+                    LOG_NAME_ERA_LOGIN_VIEW,
+                    "[WARN] User {} was deleted from group {} because they don't have dbGaP authorization.".format(
+                        user_email, dataset.google_group_name
+                    )
+                )
+        except HttpError:
+            # if the user_email doesn't exist in the google group an HttpError will be thrown...
+            need_to_add = True
+    else:
+        need_to_add = (len(uad) == 0) and dataset_in_auth_set
+
+    #
+    # Either remove them from the table, or add them to the table.
+    #
+
+    if len(uad) and not dataset_in_auth_set:
+        st_logger.write_text_log_entry(
+            LOG_NAME_ERA_LOGIN_VIEW,
+            "[WARN] User {} being deleted from UserAuthorizedDatasets table {} because they don't have dbGaP authorization.".format(
+                nih_user.NIH_username, dataset.dataset_id
+            )
+        )
+        uad.delete()
+
+    # Sometimes an account is in the Google Group but not the database - add them if they should
+    # have access.
+    # May 2018: Not handling ACL groups anymore, we skip this step (added handle_acls condition)
+    elif not len(uad) and handle_acls and len(result) and dataset_in_auth_set:
+        logger.info(
+            "User {} was was found in group {} but not the database--adding them.".format(
+                user_email, dataset.google_group_name
+            )
+        )
+        st_logger.write_text_log_entry(
+            LOG_NAME_ERA_LOGIN_VIEW,
+            "[WARN] User {} was was found in group {} but not the database--adding them.".format(
+                user_email, dataset.google_group_name
+            )
+        )
+        uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
+                                                                       authorized_dataset=ad)
+        if not created:
+            logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
+                                                                                              ad.whitelist_id))
+        else:
+            logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
+
+    if need_to_add:
+        if handle_acls:
+            # Check for their need to be in the ACL, and add them
+            if dataset_in_auth_set:
+                body = {
+                    "email": user_email,
+                    "role": "MEMBER"
+                }
+
+                result = directory_client.members().insert(
+                    groupKey=dataset.google_group_name,
+                    body=body
+                ).execute(http=http_auth)
+
+                logger.info(result)
+                logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+                st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                               "[STATUS] User {} added to {}.".format(user_email,
+                                                                                  dataset.google_group_name))
+        # Add them to the database as well
+        if not len(uad):
+            uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
+                                                                           authorized_dataset=ad)
+            if not created:
+                logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
+                                                                                                  ad.whitelist_id))
+            else:
+                logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
 
                     logger.info(result)
                     logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
@@ -1101,22 +1301,24 @@ def demo_process_success(auth, user_id, saml_response):
 
 
 def deactivate_nih_add_to_open(user_id, user_email):
-    try:
-        nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
-        nih_user.active = False
-        nih_user.save()
-        logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
-
-    except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
-        if type(e) is MultipleObjectsReturned:
-            logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), user_id))
-            nih_users = NIH_User.objects.filter(user_id=user_id)
-            for nih_user in nih_users:
-                nih_user.active = False
-                nih_user.save()
-                nih_user.delete_all_auth_datasets()
-        else:
-            logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user_email))
+    # 5/14/18 NO! active flag has nothing to do with user logout, but instead is set to zero when user expires off of ACL group
+    # after 24 hours:
+    # try:
+    #     nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
+    #     nih_user.active = False
+    #     nih_user.save()
+    #     logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
+    #
+    # except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
+    #     if type(e) is MultipleObjectsReturned:
+    #         logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), user_id))
+    #         nih_users = NIH_User.objects.filter(user_id=user_id)
+    #         for nih_user in nih_users:
+    #             nih_user.active = False
+    #             nih_user.save()
+    #             nih_user.delete_all_auth_datasets()
+    #     else:
+    #         logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user_email))
 
     directory_service, http_auth = get_directory_resource()
 
@@ -1133,20 +1335,102 @@ def deactivate_nih_add_to_open(user_id, user_email):
 
 def get_nih_user_details(user_id):
     user_details = {}
-    try:
-        nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
-        user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-        user_details['NIH_username'] = nih_user.NIH_username
-        user_details['NIH_assertion_expiration'] = nih_user.NIH_assertion_expiration
-        user_details['dbGaP_authorized'] = (len(user_auth_datasets) > 0) and nih_user.active
-        logger.debug("[DEBUG] User {} has access to {} dataset(s) and is {}".format(nih_user.NIH_username, str(len(user_auth_datasets)), ('not active' if not nih_user.active else 'active')))
-        user_details['NIH_active'] = nih_user.active
-        user_details['auth_datasets'] = [] if len(user_auth_datasets) <= 0 else AuthorizedDataset.objects.filter(id__in=user_auth_datasets.values_list('authorized_dataset',flat=True))
-    except (MultipleObjectsReturned, ObjectDoesNotExist), e:
-        if type(e) is MultipleObjectsReturned:
-            # in this case there is more than one nih_username linked to the same google identity
-            logger.warn("Error when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
-            # todo: add code to unlink all accounts?
+
+    #
+    # Now with DCF, we can have a user logged in as an NIH user, but not be linked (which means DCF does not
+    # have an association between NIH ID and Google ID). So while we previously did a get on a linked user,
+    # now we need to filter. If one of the users is linked, that is who we use. Otherwise, we can resolve the
+    # issue by looking at the current DCF token attached to the user to see who they are associated with.
+    #
+
+    dcf_tokens = DCFToken.objects.filter(user_id=user_id)
+    if len(dcf_tokens) == 0:
+        return user_details # i.e. empty dict
+    elif len(dcf_tokens) > 1:
+        logger.error("[ERROR] MULTIPLE DCF RECORDS FOR USER {}. ".format(str(user_id)))
+        return user_details  # i.e. empty dict
+
+    dcf_token = dcf_tokens.first()
+
+    curr_user = User.objects.get(id=user_id)
+    nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username__iexact=dcf_token.nih_username)
+
+    if len(nih_users) == 0:
+        user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
+        return user_details  # i.e. empty dict
+
+    elif len(nih_users) == 1:
+        nih_user = nih_users.first()
+
+    else:
+        #
+        # Multiple NIH user rows for the current user for the same nih_username. We want the one that is linked.
+        # If more than one (is that possible??) take the one with the most recent usage. If nobody is linked,
+        # again take the one with the most recent usage. Some of these cases should not be possible (?) but
+        # trying to be bombproof here:
+        #
+        nih_user = None
+        freshest_linked = None
+        freshest_linked_stamp = None
+        freshest_unlinked = None
+        freshest_unlinked_stamp = None
+        for user in nih_users:
+            if user.linked:
+                if (freshest_linked_stamp is None) or (freshest_linked_stamp < user.NIH_assertion_expiration):
+                    freshest_linked_stamp = user.NIH_assertion_expiration
+                    freshest_linked = user
+                if nih_user is None:
+                    nih_user = nih_users.first()
+                else:
+                    logger.error("[ERROR] Multiple linked nih users retrieved nih_user with user_id {}.".format(user_id))
+            else:
+                if (freshest_unlinked_stamp is None) or (freshest_unlinked_stamp < user.NIH_assertion_expiration):
+                    freshest_unlinked_stamp = user.NIH_assertion_expiration
+                    freshest_unlinked = user
+
+        if freshest_linked:
+            nih_user = freshest_linked
+        elif freshest_unlinked:
+            nih_user = freshest_unlinked
+        else:
+            logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
+            user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
+            return user_details  # i.e. empty dict
+
+    #
+    # With the user_details page, we now need to check with DCF about current status before we display information
+    # to the user, as our database view could be stale.
+    #
+    # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
+    # flag. This is the *minimun* we chould be doing, no matter what. Note that in DCF-based Brave New World, we no
+    # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
+    # need to give the user an accurate picture of the state when they hit this page.
+    #
+
+    if nih_user.active:
+        expired_time = nih_user.NIH_assertion_expiration
+        # If we need to have the access expire in just a few minutes for testing, this is one way to fake it:
+        # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
+        # expired_time = expired_time + testing_expire_hack
+        now_time = pytz.utc.localize(datetime.datetime.utcnow())
+        print "times", expired_time, now_time
+        if now_time >= expired_time:
+            nih_user.active = False
+            nih_user.NIH_assertion_expiration = now_time
+            nih_user.save()
+
+    user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+    user_details['NIH_username'] = nih_user.NIH_username
+    user_details['NIH_assertion_expiration'] = nih_user.NIH_assertion_expiration
+    # Add a separate field to break out program count from active:
+    user_details['dbGaP_has_datasets'] = (len(user_auth_datasets) > 0)
+    user_details['dbGaP_authorized'] = (len(user_auth_datasets) > 0) and nih_user.active
+    logger.debug("[DEBUG] User {} has access to {} dataset(s) and is {}".format(nih_user.NIH_username, str(len(user_auth_datasets)), ('not active' if not nih_user.active else 'active')))
+    user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
+    user_details['NIH_active'] = nih_user.active
+    user_details['NIH_DCF_linked'] = nih_user.linked
+    user_details['refresh_key_ok'] = get_dcf_auth_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
+    user_details['auth_datasets'] = [] if len(user_auth_datasets) <= 0 else AuthorizedDataset.objects.filter(id__in=user_auth_datasets.values_list('authorized_dataset',flat=True))
 
     return user_details
 
