@@ -66,6 +66,8 @@ def oauth2_login(request):
     First step of OAuth2 login to DCF. Just build the URL that we send back to the browser in the refresh request
     """
     try:
+        logger.info("[INFO] OAuth1 a")
+
         full_callback = request.build_absolute_uri(reverse('dcf_callback'))
 
         # OAuth2Session ENFORCES https unless this environment variable is set. For local dev, we want that off
@@ -77,12 +79,15 @@ def oauth2_login(request):
 
         client_id, _ = _get_secrets()
 
+        logger.info("[INFO] OAuth1 b")
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
         # to do data queries. Starting to recognize a pattern here...
         oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'data'])
         authorization_url, state = oauth.authorization_url(DCF_AUTH_URL)
+        logger.info("[INFO] OAuth1 c")
         # stash the state string in the session!
         request.session['dcfOAuth2State'] = state
+        logger.info("[INFO] OAuth1 d")
         return HttpResponseRedirect(authorization_url)
 
     finally:
