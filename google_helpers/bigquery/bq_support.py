@@ -242,13 +242,8 @@ class BigQuerySupport(BigQueryABC):
                 'status': 'TABLE_EXISTS'
             }
 
-    # Runs a basic, optionally parameterized query
-    # If self.project_id, self.dataset_id, and self.table_id are set they
-    # will be used as the destination table for the query
-    # WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
-
-        query_results = None
+    # Build and insert a BQ job
+    def insert_bq_query_job(self, query,parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
 
         # Make yourself a job ID
         job_id = str(uuid4())
@@ -282,9 +277,20 @@ class BigQuerySupport(BigQueryABC):
         if cost_est:
             job_desc['configuration']['dryRun'] = True
 
-        query_job = self.bq_service.jobs().insert(
+        return self.bq_service.jobs().insert(
             projectId=self.executing_project,
             body=job_desc).execute(num_retries=5)
+
+
+    # Runs a basic, optionally parameterized query
+    # If self.project_id, self.dataset_id, and self.table_id are set they
+    # will be used as the destination table for the query
+    # WRITE_DISPOSITION is assumed to be for an empty table unless specified
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
+
+        query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
+
+        job_id = query_job['jobReference']['jobId']
 
         # Cost Estimates don't actually run as fully-fledged jobs, and won't be inserted as such,
         # so we just get back the estimate immediately
@@ -329,6 +335,13 @@ class BigQuerySupport(BigQueryABC):
 
         return query_results
 
+    # Check to see if query job is done
+    def job_is_done(self, query_job):
+        job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
+                                                 jobId=query_job['jobReference']['jobId']).execute(num_retries=5)
+
+        return job_is_done and job_is_done['status']['state'] == 'DONE'
+
     # Fetch the results of a job based on the reference provided
     def fetch_job_results(self, job_ref):
         result = []
@@ -352,10 +365,24 @@ class BigQuerySupport(BigQueryABC):
         return result
 
     # Execute a query to be saved on a temp table (shorthand to instance method above), optionally parameterized
+    # and fetch its results
     @classmethod
     def execute_query_and_fetch_results(cls, query, parameters=None):
         bqs = cls(None, None, None)
         return bqs.execute_query(query, parameters)
+
+    # Insert a BQ job for a query to be saved on a temp table (shorthand to instance method above), optionally
+    # parameterized, and return the job reference
+    @classmethod
+    def insert_query_job(cls, query, parameters=None):
+        bqs = cls(None, None, None)
+        return bqs.insert_bq_query_job(query, parameters)
+
+    # Check the status of a BQ job
+    @classmethod
+    def check_job_is_done(cls, job_ref):
+        bqs = cls(None, None, None)
+        return bqs.job_is_done(job_ref)
 
     # Do a 'dry run' query, which estimates the cost
     @classmethod
@@ -379,12 +406,14 @@ class BigQuerySupport(BigQueryABC):
     # TODO: add support for BETWEEN
     # TODO: add support for <>=
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None):
-
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False):
         result = {
             'filter_string': '',
             'parameters': []
         }
+
+        if with_count_toggle:
+            result['count_params'] = {}
 
         filter_set = []
 
@@ -475,6 +504,19 @@ class BigQuerySupport(BigQueryABC):
                     query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
                     query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')}
                     filter_string += "{} IN UNNEST(@{})".format(attr, param_name)
+
+            if with_count_toggle:
+                filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
+                result['count_params'][param_name] = {
+                    'name': param_name+'_filtering',
+                    'parameterType': {
+                        'type': 'STRING'
+                    },
+                    'parameterValue': {
+                        'value': 'filtering'
+                    }
+                }
+                result['parameters'].append(result['count_params'][param_name])
 
             filter_set.append('({})'.format(filter_string))
             result['parameters'].append(query_param)
