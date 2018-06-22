@@ -109,6 +109,7 @@ def oauth2_callback(request):
     """
 
     try:
+        logger.info("[INFO] OAuthCB a")
         full_callback = request.build_absolute_uri(reverse('dcf_callback'))
 
         # For future reference, this also worked, using underlying requests library:
@@ -138,7 +139,7 @@ def oauth2_callback(request):
         # so we can talk to localhost over http. But let's turn it on/off to minimize, and make it only active in
         # development:
         #
-
+        logger.info("[INFO] OAuthCB b")
         if settings.IS_DEV and full_callback.startswith('http://localhost'):
             os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
@@ -150,7 +151,7 @@ def oauth2_callback(request):
             return redirect(reverse('user_detail', args=[request.user.id]))
 
         client_id, client_secret = _get_secrets()
-
+        logger.info("[INFO] OAuthCB c")
         # You MUST provide the callback *here* to get it into the fetch request
         dcf = OAuth2Session(client_id, state=saved_state, redirect_uri=full_callback)
 
@@ -164,7 +165,7 @@ def oauth2_callback(request):
                                      client_id=client_id,
                                      authorization_response=request.get_full_path())
         client_secret = None # clear this in case we are in Debug mode to keep this out of the browser
-
+        logger.info("[INFO] OAuthCB d")
         if token_data['token_type'] != 'Bearer':
             logger.error("[ERROR] Token type returned was not 'Bearer'")
             messages.error(request, "There was an internal error logging in. Please contact the ISB-CGC administrator.")
@@ -180,7 +181,7 @@ def oauth2_callback(request):
 
         my_jwt = jwt.PyJWT()
         my_jwt.register_algorithm('RS256', RSAAlgorithm(RSAAlgorithm.SHA256))
-
+        logger.info("[INFO] OAuthCB e")
         #
         # DCF's key endpoint provides a list of keys they use. Right now, only one, but to future-proof, we want
         # to choose the right one from the list. But that means we need to parse the first element of the JWT tuple
@@ -199,7 +200,7 @@ def oauth2_callback(request):
         #
         # Get the key list from the endpoint and choose which one was used in the JWT:
         #
-
+        logger.info("[INFO] OAuthCB f")
         resp = dcf.get(settings.DCF_KEY_URL)
         key_data = json_loads(resp.text)
         key_list = key_data['keys']
@@ -216,7 +217,7 @@ def oauth2_callback(request):
         #
         # Decode the JWT!
         #
-
+        logger.info("[INFO] OAuthCB g")
         try:
             alg_list = ['RS256']
             decoded_jwt_id = my_jwt.decode(token_data['id_token'], key=use_key, algorithms=alg_list,
@@ -247,7 +248,7 @@ def oauth2_callback(request):
         #         u'exp': 1525733739,
         #         u'pur': u'id', (The "purpose" of the token. This is an ID. Refresh tokens say "refresh")
         #         u'sub': u'integer user key'}
-
+        logger.info("[INFO] OAuthCB h")
         dcf_user_id = decoded_jwt_id['sub']
 
         #
@@ -261,7 +262,7 @@ def oauth2_callback(request):
         nih_from_dcf = _get_nih_id_from_user_dict(user_data_dict)
 
         google_link = _get_google_link_from_user_dict(user_data_dict)
-
+        logger.info("[INFO] OAuthCB i")
         # We now have the NIH User ID back from DCF; we also might now know the Google ID they have linked to previously
         # (it comes back in the user_id). Note that this routine is going to get called every 30 days or so when we
         # need to get a new refresh token, so it is possible that e.g. the first time they logged in as their PI and
@@ -277,7 +278,7 @@ def oauth2_callback(request):
             for warn in results.messages:
                 messages.warning(request, warn)
             return redirect(reverse('user_detail', args=[request.user.id]))
-
+        logger.info("[INFO] OAuthCB j")
         #
         # We now have the minimum we need to store the tokens from DCF, so stick that in the database. We DO NOT yet
         # make the entry in the NIH_User table, since we need to now either establish or refresh the DCF-Google ID link:
@@ -291,7 +292,7 @@ def oauth2_callback(request):
         # those cases where an unlink has been called.) So here is where the control flow diverges. For the
         # GET, we wrap things up in the callback. For the PATCH, we wrap things up immediately:
         #
-
+        logger.info("[INFO] OAuthCB k")
         if google_link:
 
             #
@@ -304,6 +305,7 @@ def oauth2_callback(request):
 
             link_mismatch = False
             req_user = User.objects.get(id=request.user.id)
+            logger.info("[INFO] OAuthCB l")
             if google_link != req_user.email:
                 message = "Please unlink ID {} and use your ISB-CGC login email ({}) to link with the DCF".format(
                     google_link, req_user.email)
@@ -313,7 +315,7 @@ def oauth2_callback(request):
 
             #
             # The link matches. So we use PATCH, and if it goes smoothly, we write the new link to the database:
-
+            logger.info("[INFO] OAuthCB m")
             if not link_mismatch:
                 resp = _dcf_call(DCF_GOOGLE_URL, request.user.id, mode='patch')
                 if resp.status_code == 404:
@@ -324,13 +326,14 @@ def oauth2_callback(request):
                     messages.warning(request, "Unexpected response ({}, {}) from DCF during linking. "
                                               "Please contact the ISB-CGC administrator.".format(resp.status_code, resp.text))
 
+                logger.info("[INFO] OAuthCB n")
                 print 'response {}'.format(str(resp.text))
                 print 'PATCH ONLY RETURNS e.g. {"exp": 1528509163}'
 
             login_expiration_seconds = settings.LOGIN_EXPIRATION_MINUTES * 60
             calc_expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
                 seconds=login_expiration_seconds))
-
+            logger.info("[INFO] OAuthCB o")
             warning = _finish_the_link(request.user.id, req_user.email, calc_expiration_time, st_logger, link_mismatch)
             messages.warning(request, warning)
             return redirect(reverse('user_detail', args=[request.user.id]))
@@ -339,7 +342,7 @@ def oauth2_callback(request):
         # User has not yet been linked, so start the redirect flow with the user and DCF that will result
         # in us getting the callback below to finish the process:
         #
-
+        logger.info("[INFO] OAuthCB p")
         link_callback = request.build_absolute_uri(reverse('dcf_link_callback'))
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
