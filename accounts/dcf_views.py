@@ -47,7 +47,7 @@ from dataset_utils.dataset_config import DatasetGoogleGroupPair
 import httplib as http_client
 
 # Shut this up unless we need to do debug of HTTP request contents
-http_client.HTTPConnection.debuglevel = 1
+#http_client.HTTPConnection.debuglevel = 1
 
 logger = logging.getLogger('main_logger')
 
@@ -154,6 +154,7 @@ def oauth2_callback(request):
         logger.info("[INFO] OAuthCB c")
         # You MUST provide the callback *here* to get it into the fetch request
         dcf = OAuth2Session(client_id, state=saved_state, redirect_uri=full_callback)
+        logger.info("[INFO] OAuthCB c1")
 
         # You MUST provide the client_id *here* (again!) in order to get this to do basic auth! DCF will not authorize
         # unless we use basic auth (i.e. client ID and secret in the header, not the body). Plus we need to provide
@@ -161,9 +162,14 @@ def oauth2_callback(request):
         # Note we also get back an "id_token" which is a base64-encoded JWT.
         # Note we also get back a "token_type" which had better be "Bearer".
 
-        token_data = dcf.fetch_token(DCF_TOKEN_URL, client_secret=client_secret,
-                                     client_id=client_id,
-                                     authorization_response=request.get_full_path())
+        try:
+            token_data = dcf.fetch_token(DCF_TOKEN_URL, client_secret=client_secret,
+                                         client_id=client_id,
+                                         authorization_response=request.get_full_path())
+        except Exception as e:
+            logger.error("[ERROR] dcf.fetch_token")
+            logger.exception(e)
+
         client_secret = None # clear this in case we are in Debug mode to keep this out of the browser
         logger.info("[INFO] OAuthCB d")
         if token_data['token_type'] != 'Bearer':
