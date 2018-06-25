@@ -155,6 +155,7 @@ def oauth2_callback(request):
         # You MUST provide the callback *here* to get it into the fetch request
         dcf = OAuth2Session(client_id, state=saved_state, redirect_uri=full_callback)
         logger.info("[INFO] OAuthCB c1")
+        auth_response = request.build_absolute_uri(request.get_full_path())
 
         # You MUST provide the client_id *here* (again!) in order to get this to do basic auth! DCF will not authorize
         # unless we use basic auth (i.e. client ID and secret in the header, not the body). Plus we need to provide
@@ -165,10 +166,10 @@ def oauth2_callback(request):
         try:
             token_data = dcf.fetch_token(DCF_TOKEN_URL, client_secret=client_secret,
                                          client_id=client_id,
-                                         authorization_response=request.get_full_path())
+                                         authorization_response=auth_response)
         except Exception as e:
             logger.error("[ERROR] dcf.fetch_token")
-            logger.error('DCF_TOKEN_URL: {} / authresp: {} / full_callback: {}'.format(DCF_TOKEN_URL, request.get_full_path(), full_callback))
+            logger.error('DCF_TOKEN_URL: {} / authresp: {} / full_callback: {}'.format(DCF_TOKEN_URL, auth_response, full_callback))
             logger.exception(e)
 
         client_secret = None # clear this in case we are in Debug mode to keep this out of the browser
