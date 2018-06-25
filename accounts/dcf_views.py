@@ -168,6 +168,7 @@ def oauth2_callback(request):
                                          authorization_response=request.get_full_path())
         except Exception as e:
             logger.error("[ERROR] dcf.fetch_token")
+            logger.error('DCF_TOKEN_URL: {} / authresp: {} / full_callback: {}'.format(DCF_TOKEN_URL, request.get_full_path(), full_callback))
             logger.exception(e)
 
         client_secret = None # clear this in case we are in Debug mode to keep this out of the browser
