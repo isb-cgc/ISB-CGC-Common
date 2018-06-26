@@ -36,7 +36,6 @@ urlpatterns = [
     url(r'^dcf_user_data/$', dcf_views.dcf_get_user_data, name='dcf_get_user_data'),
     url(r'^dcf_unlink/$', dcf_views.dcf_unlink, name='dcf_unlink'),
     url(r'^dcf_login/$', dcf_views.oauth2_login, name='dcf_login'),
-    url(r'^dcf/test', dcf_views.test_the_dcf, name='dcf_test'),
     url(r'^unlink_accounts/', views.unlink_accounts, name='unlink_accounts'),
 
 
