@@ -358,6 +358,15 @@ def oauth2_callback(request):
     finally:
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
 
+@login_required
+def dcf_link_redo(request):
+    """
+    If the user needs to redo their google, link, this is what does it.
+    """
+
+    link_callback =  request.build_absolute_uri(reverse('dcf_link_callback'))
+    callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
+    return HttpResponseRedirect(callback)
 
 @login_required
 def dcf_link_callback(request):
@@ -445,14 +454,13 @@ def dcf_link_callback(request):
                                   'to the ISB-CGC administrator')
         return redirect(reverse('user_detail', args=[request.user.id]))
 
-    link_mismatch = False
     req_user = User.objects.get(id=request.user.id)
     if google_link != req_user.email:
         _unlink_internals(request.user.id, True)
         message = "Please use your ISB-CGC login email ({}) to link with the DCF instead of ({})".format(
             req_user.email, google_link)
         messages.warning(request, message)
-        link_mismatch = True
+        return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
     # If all is well, this is where we add the user to the NIH_User table and link the user to the various data sets.
@@ -1135,72 +1143,83 @@ def dcf_disconnect_user(request):
     # First thing ya gotta do is tell DCF to unlink the user, which will get them out of
     # access control groups. BUT ONLY IF THEY ARE ACTUALLY CURRENTLY LINKED!
 
-    msg_list = []
+    try:
+        msg_list = []
 
-    dcf_token = DCFToken.objects.get(user_id=request.user.id)
-    the_user_dict = _user_data_token_to_user_dict(dcf_token.user_token)
+        dcf_token = DCFToken.objects.get(user_id=request.user.id)
+        the_user_dict = _user_data_token_to_user_dict(dcf_token.user_token)
 
-    print the_user_dict, type(the_user_dict)
-    google_link = _get_google_link_from_user_dict(the_user_dict)
+        print the_user_dict, type(the_user_dict)
+        google_link = _get_google_link_from_user_dict(the_user_dict)
 
-    if google_link:
-        resp = _dcf_call(DCF_GOOGLE_URL, request.user.id, mode='delete')
-        if resp.status_code == 404:
-            msg_list.append("No linked Google account found for user, code {}".format(resp.status_code))
-        elif resp.status_code == 400:
-            delete_response = json_loads(resp.text)
-            error = delete_response['error']
-            message = delete_response['error_description']
-            msg_list.append("Error in unlinking: {} : {} : {}".format(error, message, resp.status_code))
-        elif resp.status_code == 200:
-            pass
-        else:
-            msg_list.append(request, "Unexpected response from DCF {}".format(resp.status_code))
+        logger.info("[INFO] DDU A")
 
-    #
-    # The revoke call is unlike other DCF endpoints in that it is special!
-    # Token revocation is described here: https://tools.ietf.org/html/rfc7009#section-2.1
-    # So we do not provide a bearer access token, but the client ID and secret in a Basic Auth
-    # framework. Not seeing that inside the OAuthSession framework, so we roll our own by hand:
-    #
+        if google_link:
+            resp = _dcf_call(DCF_GOOGLE_URL, request.user.id, mode='delete')
+            if resp.status_code == 404:
+                msg_list.append("No linked Google account found for user, code {}".format(resp.status_code))
+            elif resp.status_code == 400:
+                delete_response = json_loads(resp.text)
+                error = delete_response['error']
+                message = delete_response['error_description']
+                msg_list.append("Error in unlinking: {} : {} : {}".format(error, message, resp.status_code))
+            elif resp.status_code == 200:
+                pass
+            else:
+                msg_list.append(request, "Unexpected response from DCF {}".format(resp.status_code))
 
-    client_id, client_secret  = _get_secrets()
+        #
+        # The revoke call is unlike other DCF endpoints in that it is special!
+        # Token revocation is described here: https://tools.ietf.org/html/rfc7009#section-2.1
+        # So we do not provide a bearer access token, but the client ID and secret in a Basic Auth
+        # framework. Not seeing that inside the OAuthSession framework, so we roll our own by hand:
+        #
 
-    data = {
-        'token': dcf_token.refresh_token
-    }
-    auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
-    resp = requests.request('POST', DCF_REVOKE_URL, data=data, auth=auth)
-    client_id = None
-    client_secret = None
+        client_id, client_secret  = _get_secrets()
 
-    if resp.status_code != 200 and resp.status_code != 204:
-        messages.warning(request, 'Revocation problem: {} : {}'.format(resp.status_code, resp.text))
+        data = {
+            'token': dcf_token.refresh_token
+        }
+        logger.info("[INFO] DDU B")
 
-    for msg in msg_list:
-        messages.warning(request, msg)
+        auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+        resp = requests.request('POST', DCF_REVOKE_URL, data=data, auth=auth)
+        client_id = None
+        client_secret = None
 
-    #
-    # OK, NOW we detach the user in our NIH tables, and detach the user from data permissions.
-    #
+        logger.info("[INFO] DDU C")
 
-    unlink_account_in_db_for_dcf(request.user.id)
+        if resp.status_code != 200 and resp.status_code != 204:
+            messages.warning(request, 'Revocation problem: {} : {}'.format(resp.status_code, resp.text))
 
-    #
-    # Next, we clear out our tokens for the user (which allows them to appear to DCF as the
-    # logged-in NIH user; we cannot keep them around:
-    #
+        for msg in msg_list:
+            messages.warning(request, msg)
 
-    dcf_token.delete()
+        #
+        # OK, NOW we detach the user in our NIH tables, and detach the user from data permissions.
+        #
 
-    #
-    # Finally, we need to send the user to logout from the DCF, which is needed to clear the
-    # cookies DCF has dumped into their browser, which will allow them to log in to NIH again.
-    #
+        unlink_account_in_db_for_dcf(request.user.id)
 
-    logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
+        #
+        # Next, we clear out our tokens for the user (which allows them to appear to DCF as the
+        # logged-in NIH user; we cannot keep them around:
+        #
 
-    callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+        dcf_token.delete()
+
+        #
+        # Finally, we need to send the user to logout from the DCF, which is needed to clear the
+        # cookies DCF has dumped into their browser, which will allow them to log in to NIH again.
+        #
+
+        logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
+        logger.info("[INFO] DDU D")
+        callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+    except Exception as e:
+        logger.error("[ERROR] While disconnect:")
+        logger.exception(e)
+        raise e
     return HttpResponseRedirect(callback)
 
 
@@ -1227,14 +1246,14 @@ def dcf_get_user_data(request):
     Use for QC and development
     """
 
-    return _dcf_user_data_from_token(request)
+    udft = _dcf_user_data_from_token(request)
 
-    # resp = _dcf_call(DCF_USER_URL, request.user.id)
-    # user_data = json_loads(resp.text)
-    #
-    # remaining_token_time = get_dcf_auth_key_remaining_seconds(request.user.id)
-    # messages.warning(request, 'TDCF Responded with {}: {}'.format(user_data, remaining_token_time))
-    # return redirect(reverse('user_detail', args=[request.user.id]))
+    resp = _dcf_call(DCF_USER_URL, request.user.id)
+    user_data = json_loads(resp.text)
+
+    remaining_token_time = get_dcf_auth_key_remaining_seconds(request.user.id)
+    messages.warning(request, 'EPDCF Responded with {}: {} plus {}'.format(user_data, remaining_token_time, udft))
+    return redirect(reverse('user_detail', args=[request.user.id]))
 
 
 def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False):
