@@ -31,6 +31,7 @@ urlpatterns = [
     url(r'^dcf/login/callback/$', dcf_views.oauth2_callback, name='dcf_callback'),
     url(r'^dcf_link_callback/$', dcf_views.dcf_link_callback, name='dcf_link_callback'),
     url(r'^dcf_link_extend/$', dcf_views.dcf_link_extend, name='dcf_link_extend'),
+    url(r'^dcf_link_redo/$', dcf_views.dcf_link_redo, name='dcf_link_redo'),
     url(r'^dcf_disconnect_user/$', dcf_views.dcf_disconnect_user, name='dcf_disconnect_user'),
     url(r'^dcf_user_data/$', dcf_views.dcf_get_user_data, name='dcf_get_user_data'),
     url(r'^dcf_unlink/$', dcf_views.dcf_unlink, name='dcf_unlink'),
