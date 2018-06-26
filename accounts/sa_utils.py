@@ -200,7 +200,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             members = val['members']
             for member in members:
                 if member.startswith('user:'):
-                    email = member.split(':')[1]
+                    email = member.split(':')[1].lower()
                     if email not in roles:
                         roles[email] = {}
                         registered_user = bool(User.objects.filter(email=email).first())
@@ -280,7 +280,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             return {'message': msg}
 
         # 4. Verify that the current user is on the GCP project
-        if not user_email in roles:
+        if not user_email.lower() in roles:
             log_msg = '[STATUS] While verifying SA {0}: User email {1} is not in the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
             logger.info(log_msg)
             st_logger.write_struct_log_entry(log_name, {
