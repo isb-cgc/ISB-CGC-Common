@@ -200,7 +200,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             members = val['members']
             for member in members:
                 if member.startswith('user:'):
-                    email = member.split(':')[1]
+                    email = member.split(':')[1].lower()
                     if email not in roles:
                         roles[email] = {}
                         registered_user = bool(User.objects.filter(email=email).first())
