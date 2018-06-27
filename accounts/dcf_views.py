@@ -100,6 +100,18 @@ def oauth2_login(request):
     # ruri = wac.prepare_request_uri(DCF_AUTH_URL, redirect_uri=full_callback, state=rando, scope=['openid', 'user'])
     # return HttpResponseRedirect(ruri)
 
+@login_required
+def dcf_simple_logout(request):
+    '''
+    If the user is trying to login with an NIH idea already in use by somebody else, or if they are already linked
+    with a different NIH ID, we immediately reject the response from DCF and tell the user they need to logout to
+    try again. This involves simply sending them back to DCF; the user's DCF session cookies do the rest to let
+    DCF know who they are. Note we also clear the session key we are using to record the error.
+    '''
+    request.session.pop('dcfForcedLogout', None)
+    logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
+    callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+    return HttpResponseRedirect(callback)
 
 @login_required
 def oauth2_callback(request):
@@ -271,6 +283,7 @@ def oauth2_callback(request):
 
         google_link = _get_google_link_from_user_dict(user_data_dict)
         logger.info("[INFO] OAuthCB i")
+
         # We now have the NIH User ID back from DCF; we also might now know the Google ID they have linked to previously
         # (it comes back in the user_id). Note that this routine is going to get called every 30 days or so when we
         # need to get a new refresh token, so it is possible that e.g. the first time they logged in as their PI and
@@ -281,11 +294,19 @@ def oauth2_callback(request):
         results = DemoLoginResults()
         st_logger = StackDriverLogger.build_from_django_settings()
         user_email = User.objects.get(id=request.user.id).email
-        # FIXME This old test is not what we really want to use...
+        #
+        # Looks for cases where we have another user with this NIH ID, or that this user is currently linked
+        # with another ID. If either case is true, we tell the user they will need to logout of DCF and try
+        # again; note we use a session key to remember this fact and will use it to generate the user data
+        # that will configure the user_detail page:
+        #
         if found_linking_problems(nih_from_dcf, request.user.id, user_email, st_logger, results):
             for warn in results.messages:
                 messages.warning(request, warn)
+            # stash the requirement to only show a logout link in the session!
+            request.session['dcfForcedLogout'] = nih_from_dcf
             return redirect(reverse('user_detail', args=[request.user.id]))
+
         logger.info("[INFO] OAuthCB j")
         #
         # We now have the minimum we need to store the tokens from DCF, so stick that in the database. We DO NOT yet
