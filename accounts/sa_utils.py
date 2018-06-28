@@ -1011,7 +1011,9 @@ def get_dcf_auth_key_remaining_seconds(user_id):
     a new refresh token, which will expire every 30 days.
     """
 
-    dcf_token = DCFToken.objects.get(user_id=user_id)
+    dcf_token = get_stored_dcf_token(user_id)
+    if not dcf_token:
+        return -1  # ? No token? They expire immediately!
 
     remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
     logger.info('[INFO] user {} has {} seconds remaining on refresh token'.
@@ -1276,39 +1278,6 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                 #                                "[STATUS] User {} added to {}.".format(user_email,
                 #                                                                       dataset.google_group_name))
 
-        # Add task in queue to deactivate NIH_User entry after NIH_assertion_expiration has passed.
-        # try:
-        #     full_topic_name = get_full_topic_name(PUBSUB_TOPIC_ERA_LOGIN)
-        #     logger.info("Full topic name: {}".format(full_topic_name))
-        #     client = get_pubsub_service()
-        #     params = {
-        #         'event_type': 'era_login',
-        #         'user_id': user_id,
-        #         'deployment': CRON_MODULE
-        #     }
-        #     message = json_dumps(params)
-        #
-        #     body = {
-        #         'messages': [
-        #             {
-        #                 'data': base64.b64encode(message.encode('utf-8'))
-        #             }
-        #         ]
-        #     }
-        #     client.projects().topics().publish(topic=full_topic_name, body=body).execute()
-        #     st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-        #                                    "[STATUS] Notification sent to PubSub topic: {}".format(full_topic_name))
-        #
-        # except Exception as e:
-        #     logger.error("[ERROR] Failed to publish to PubSub topic")
-        #     logger.exception(e)
-        #     st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-        #                                    "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
-        #
-        # retval.messages.append(warn_message)
-        # return retval
-
-
 def deactivate_nih_add_to_open(user_id, user_email):
     # 5/14/18 NO! active flag has nothing to do with user logout, but instead is set to zero when user expires off of ACL group
     # after 24 hours:
@@ -1329,17 +1298,34 @@ def deactivate_nih_add_to_open(user_id, user_email):
     #     else:
     #         logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user_email))
 
-    directory_service, http_auth = get_directory_resource()
+    if not settings.DCF_TEST:
+        directory_service, http_auth = get_directory_resource()
+        # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
+        try:
+            body = {"email": user_email, "role": "MEMBER"}
+            directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
+            logger.info("[STATUS] Attempting to insert user {} into group {}. "
+                        .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
+        except HttpError as e:
+            logger.info(e)
 
 
-    # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
-    try:
-        body = {"email": user_email, "role": "MEMBER"}
-        directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-        logger.info("[STATUS] Attempting to insert user {} into group {}. "
-                    .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
-    except HttpError as e:
-        logger.info(e)
+def get_stored_dcf_token(user_id):
+    """
+    When a user breaks their connection with DCF, we flush out the revoked tokens. But if they have a
+    session running in another browser, they might still be clicking on links that expect a token. So
+    we need to be bulletproof on maybe not getting back a token.  May return None
+    """
+    dcf_tokens = DCFToken.objects.filter(user_id)
+    num_tokens = len(dcf_tokens)
+    if num_tokens != 1:
+        if num_tokens > 1:
+            logger.error('[ERROR] Unexpected Server Error: Multiple tokens found for user {}'.format(user_id))
+        else:
+            logger.info('[INFO] User {} tried to use a flushed token'.format(user_id))
+        return None
+    dcf_token = dcf_tokens.first()
+    return dcf_token
 
 
 def get_nih_user_details(user_id, force_logout):
@@ -1359,17 +1345,11 @@ def get_nih_user_details(user_id, force_logout):
         # issue by looking at the current DCF token attached to the user to see who they are associated with.
         #
 
-        dcf_tokens = DCFToken.objects.filter(user_id=user_id)
-        if len(dcf_tokens) == 0:
+        dcf_token = get_stored_dcf_token(user_id)
+        if not dcf_token:
             return user_details # i.e. empty dict
-        elif len(dcf_tokens) > 1:
-            logger.error("[ERROR] MULTIPLE DCF RECORDS FOR USER {}. ".format(str(user_id)))
-            return user_details  # i.e. empty dict
-
-        dcf_token = dcf_tokens.first()
 
         curr_user = User.objects.get(id=user_id)
-
 
         nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username__iexact=dcf_token.nih_username)
 
@@ -1431,17 +1411,19 @@ def get_nih_user_details(user_id, force_logout):
             # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
             # expired_time = expired_time + testing_expire_hack
             now_time = pytz.utc.localize(datetime.datetime.utcnow())
-            print "times", expired_time, now_time
             if now_time >= expired_time:
+                logger.info("[INFO] Expired user hit user info page and was deactivated {}.".format(expired_time, now_time))
                 nih_user.active = False
                 nih_user.NIH_assertion_expiration = now_time
                 nih_user.save()
     else:
         try:
             nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
-        except (MultipleObjectsReturned, ObjectDoesNotExist), e:
-            if type(e) is MultipleObjectsReturned:
-                logger.warn("Error when retrieving noh_user with user_id {}. {}".format(str(user_id), str(e)))
+        except MultipleObjectsReturned as e:
+            logger.warn("Multiple objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
+            return user_details
+        except ObjectDoesNotExist as e:
+            logger.warn("No objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
             return user_details
 
     user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
@@ -1456,7 +1438,6 @@ def get_nih_user_details(user_id, force_logout):
 
     if settings.DCF_TEST:
         user_details['link_mismatch'] = (dcf_token.google_id is None) or (dcf_token.google_id != curr_user.email)
-        user_details['NIH_DCF_linked'] = nih_user.linked
         user_details['refresh_key_ok'] = get_dcf_auth_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
         user_details['force_DCF_logout'] = False
 
