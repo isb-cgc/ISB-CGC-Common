@@ -2055,7 +2055,8 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     filter_counts = None
     file_list = []
     total_file_count = 0
-
+    case_barcode = request.GET.get('case_barcode', '')
+    case_barcode_condition = '' if not case_barcode else "AND cs.case_barcode ='" + case_barcode + "'"
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
@@ -2079,12 +2080,12 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 ON cs.case_barcode = ds.PatientID
                 JOIN [{data_project}:{tcga_bioclin_dataset}.{tcga_clin_table}] bc
                 ON bc.case_barcode=cs.case_barcode
-                WHERE cs.cohort_id = {cohort}
+                WHERE cs.cohort_id = {cohort} {case_barcode_condition}
                 GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name                
             """.format(cohort_dataset=bq_cohort_dataset,
                 cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
                 data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
-                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id)
+                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id, case_barcode_condition=case_barcode_condition)
 
             file_list_query = """
                 {select_clause}
@@ -2165,7 +2166,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.case_barcode = md.case_barcode
-                 WHERE md.file_uploaded='true' {type_conditions} {filter_conditions}
+                 WHERE md.file_uploaded='true' {type_conditions} {filter_conditions} {case_barcode_condition}
             """
 
             file_list_query = """
@@ -2197,7 +2198,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
             cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-
             params = ()
             select_clause = ''
             count_select_clause = ''
@@ -2220,17 +2220,20 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                     cohort_id=cohort_id,
                     metadata_table=program_data_table,
                     type_conditions=type_conditions,
-                    filter_conditions=filter_conditions)
+                    filter_conditions=filter_conditions,
+                    case_barcode_condition=case_barcode_condition)
                 if do_filter_count:
                     count_select_clause += union_template.format(
                         cohort_id=cohort_id,
                         metadata_table=program_data_table,
                         type_conditions=type_conditions,
-                        filter_conditions='')
+                        filter_conditions='',
+                        case_barcode_condition=case_barcode_condition)
                 first_program = False
 
             # if first_program is still true, we found no programs with data tables for this build
             if not first_program:
+
                 if limit > 0:
                     limit_clause = ' LIMIT %s' % str(limit)
                     # Offset is only valid when there is a limit
