@@ -199,7 +199,7 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
             subfilter[filter] = inc_filters[filter]
 
             built_clause = build_where_clause(subfilter, for_files=True)
-            filter_clauses[filter]['where_clause'] = built_clause['query_str']
+            filter_clauses[filter]['where_clause'] = built_clause['query_str'].replace("%s", "'{}'")
             filter_clauses[filter]['parameters'] = built_clause['value_tuple']
 
         for attr in metadata_data_attr:
@@ -207,10 +207,10 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
             where_clause = ""
             filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
             if len(filter_clause):
+                filter_clause = filter_clause.format(*[y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format')])
                 where_clause = "AND ( {} )".format(filter_clause)
-            paramter_tuple = tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format'))
             query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr)
-            cursor.execute(query, paramter_tuple)
+            cursor.execute(query)
             for row in cursor.fetchall():
                 val = "None" if not row[0] else row[0]
                 counts[attr][val] = row[1]

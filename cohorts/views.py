@@ -2068,7 +2068,8 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     file_list = []
     total_file_count = 0
     case_barcode = request.GET.get('case_barcode', '')
-    case_barcode_condition = '' if not case_barcode else "AND cs.case_barcode ='" + case_barcode + "'"
+    #case_barcode_condition = '' if not case_barcode else "AND cs.case_barcode ='" + case_barcode + "'"
+    case_barcode_condition = '' if not case_barcode else "AND cs.case_barcode like '%" + case_barcode + "%'"
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
@@ -2126,10 +2127,12 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             }
 
             if limit > 0:
-                limit_clause = ' LIMIT %s' % str(limit)
+                #limit_clause = ' LIMIT %s' % str(limit)
+                limit_clause = ' LIMIT {}'.format(str(limit))
                 # Offset is only valid when there is a limit
                 if offset > 0:
-                    offset_clause = ' OFFSET %s' % str(offset)
+                    #offset_clause = ' OFFSET %s' % str(offset)
+                    offset_clause = ' OFFSET {}'.format(str(offset))
 
             order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
 
@@ -2210,7 +2213,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
             cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-            params = ()
+            #params = ()
             select_clause = ''
             count_select_clause = ''
             first_program = True
@@ -2225,7 +2228,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 if len(inc_filters):
                     built_clause = build_where_clause(inc_filters, for_files=True)
                     filter_conditions = 'AND ' + built_clause['query_str']
-                    params += built_clause['value_tuple']
+                    filter_conditions = filter_conditions.replace("%s", "'{}'").format(*built_clause['value_tuple'])
 
                 union_template = (" UNION " if not first_program else "") + "(" + select_clause_base + ")"
                 select_clause += union_template.format(
@@ -2247,16 +2250,22 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             if not first_program:
 
                 if limit > 0:
-                    limit_clause = ' LIMIT %s' % str(limit)
+                    #limit_clause = ' LIMIT %s' % str(limit)
+                    limit_clause = ' LIMIT {}'.format(str(limit))
                     # Offset is only valid when there is a limit
                     if offset > 0:
-                        offset_clause = ' OFFSET %s' % str(offset)
+                        #offset_clause = ' OFFSET %s' % str(offset)
+                        offset_clause = ' OFFSET {}'.format(str(offset))
                 order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
 
                 start = time.time()
                 query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
                             offset_clause=offset_clause)
-                cursor.execute(query, params)
+                #final_query = query % params
+                #cursor.execute(query, params)
+                #print(final_query)
+                #print(params)
+                cursor.execute(query)
                 stop = time.time()
                 logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
