@@ -84,7 +84,7 @@ class GoogleProject(models.Model):
 
 class Bucket(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
-    bucket_name = models.CharField(null=True,max_length=155)
+    bucket_name = models.CharField(null=True,max_length=155, unique=True)
     bucket_permissions = models.TextField(null=True)
 
     def __str__(self):
@@ -93,6 +93,9 @@ class Bucket(models.Model):
 class BqDataset(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     dataset_name = models.CharField(null=False, max_length=155)
+
+    class Meta:
+        unique_together = (("google_project", "dataset_name"),)
 
 
 class AuthorizedDataset(models.Model):
