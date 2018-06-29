@@ -48,6 +48,17 @@ SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
+
+class TokenFailure(Exception):
+    """Thrown if we have problems with our access/refresh tokens """
+
+
+class RefreshTokenExpired(Exception):
+    """Thrown if our refresh token is no longer valid and user must log in """
+
+    def __init__(self, seconds):
+        self.seconds = seconds
+
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
 
     # Only verify for protected datasets
@@ -1005,23 +1016,6 @@ def demo_process_success(auth, user_id, saml_response):
         return retval
 
 
-def get_dcf_auth_key_remaining_seconds(user_id):
-    """
-    We need to know how many seconds are left before the user needs to log back in to NIH to get
-    a new refresh token, which will expire every 30 days.
-    """
-
-    dcf_token = get_stored_dcf_token(user_id)
-    if not dcf_token:
-        return -1  # ? No token? They expire immediately!
-
-    remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
-    logger.info('[INFO] user {} has {} seconds remaining on refresh token'.
-                format(dcf_token.nih_username, remaining_seconds))
-
-    return remaining_seconds
-
-
 def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion_expiration, st_logger):
     """
     When user logs into DCF using iTrust and links via DCF, we create an NIH record for them and link them to to their data.
@@ -1054,7 +1048,7 @@ def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion
             str(nih_user.NIH_username)))
         st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
                                        "[STATUS] NIH_User.objects updated nih_user for linking: {}".format(
-            str(nih_user.NIH_username)))
+                                           str(nih_user.NIH_username)))
         st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
                                        "[STATUS] NIH_User {} associated with email {}".format(
                                            str(nih_user.NIH_username), our_user.email))
@@ -1310,11 +1304,34 @@ def deactivate_nih_add_to_open(user_id, user_email):
             logger.info(e)
 
 
+def get_dcf_refresh_key_remaining_seconds(user_id):
+    """
+    We need to know how many seconds are left before the user needs to log back in to NIH to get
+    a new refresh token, which will expire every 30 days.
+    """
+
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except TokenFailure:
+        return -1  # ? No token? They expire immediately!
+    except RefreshTokenExpired as e:
+        return e.seconds
+
+    remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
+    logger.info('[INFO] user {} has {} seconds remaining on refresh token'.
+                format(dcf_token.nih_username, remaining_seconds))
+
+    return remaining_seconds
+
+
 def get_stored_dcf_token(user_id):
     """
     When a user breaks their connection with DCF, we flush out the revoked tokens. But if they have a
     session running in another browser, they might still be clicking on links that expect a token. So
-    we need to be bulletproof on maybe not getting back a token.  May return None
+    we need to be bulletproof on maybe not getting back a token.
+
+    :raises TokenFailure:
+    :raises RefreshTokenExpired:
     """
     dcf_tokens = DCFToken.objects.filter(user_id)
     num_tokens = len(dcf_tokens)
@@ -1323,15 +1340,27 @@ def get_stored_dcf_token(user_id):
             logger.error('[ERROR] Unexpected Server Error: Multiple tokens found for user {}'.format(user_id))
         else:
             logger.info('[INFO] User {} tried to use a flushed token'.format(user_id))
-        return None
+        raise TokenFailure()
+
     dcf_token = dcf_tokens.first()
+    remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
+    if remaining_seconds <= 60:
+        raise RefreshTokenExpired(remaining_seconds)
+
     return dcf_token
 
 
 def get_nih_user_details(user_id, force_logout):
+    """
+    :param user_id:
+    :param force_logout:
+    :return:
+    """
     user_details = {}
 
     if settings.DCF_TEST:
+        # FIXME: Check in with DCF for info, throw DCFCommError if we have problems
+        # FIXME: If refresh token is expired, we cannot show any info until they log back in!
 
         if force_logout:
             user_details['force_DCF_logout'] = True
@@ -1345,9 +1374,14 @@ def get_nih_user_details(user_id, force_logout):
         # issue by looking at the current DCF token attached to the user to see who they are associated with.
         #
 
-        dcf_token = get_stored_dcf_token(user_id)
-        if not dcf_token:
-            return user_details # i.e. empty dict
+        user_details['refresh_required'] = False
+        try:
+            dcf_token = get_stored_dcf_token(user_id)
+        except TokenFailure:
+            return user_details  # i.e. empty dict
+        except RefreshTokenExpired:
+            user_details['refresh_required'] = True
+            return user_details
 
         curr_user = User.objects.get(id=user_id)
 
@@ -1438,7 +1472,7 @@ def get_nih_user_details(user_id, force_logout):
 
     if settings.DCF_TEST:
         user_details['link_mismatch'] = (dcf_token.google_id is None) or (dcf_token.google_id != curr_user.email)
-        user_details['refresh_key_ok'] = get_dcf_auth_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
+        user_details['refresh_key_ok'] = get_dcf_refresh_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
         user_details['force_DCF_logout'] = False
 
     return user_details
