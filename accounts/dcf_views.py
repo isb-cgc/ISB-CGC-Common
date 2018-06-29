@@ -100,6 +100,18 @@ def oauth2_login(request):
     # ruri = wac.prepare_request_uri(DCF_AUTH_URL, redirect_uri=full_callback, state=rando, scope=['openid', 'user'])
     # return HttpResponseRedirect(ruri)
 
+@login_required
+def dcf_simple_logout(request):
+    '''
+    If the user is trying to login with an NIH idea already in use by somebody else, or if they are already linked
+    with a different NIH ID, we immediately reject the response from DCF and tell the user they need to logout to
+    try again. This involves simply sending them back to DCF; the user's DCF session cookies do the rest to let
+    DCF know who they are. Note we also clear the session key we are using to record the error.
+    '''
+    request.session.pop('dcfForcedLogout', None)
+    logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
+    callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+    return HttpResponseRedirect(callback)
 
 @login_required
 def oauth2_callback(request):
@@ -271,6 +283,7 @@ def oauth2_callback(request):
 
         google_link = _get_google_link_from_user_dict(user_data_dict)
         logger.info("[INFO] OAuthCB i")
+
         # We now have the NIH User ID back from DCF; we also might now know the Google ID they have linked to previously
         # (it comes back in the user_id). Note that this routine is going to get called every 30 days or so when we
         # need to get a new refresh token, so it is possible that e.g. the first time they logged in as their PI and
@@ -281,11 +294,19 @@ def oauth2_callback(request):
         results = DemoLoginResults()
         st_logger = StackDriverLogger.build_from_django_settings()
         user_email = User.objects.get(id=request.user.id).email
-        # FIXME This old test is not what we really want to use...
+        #
+        # Looks for cases where we have another user with this NIH ID, or that this user is currently linked
+        # with another ID. If either case is true, we tell the user they will need to logout of DCF and try
+        # again; note we use a session key to remember this fact and will use it to generate the user data
+        # that will configure the user_detail page:
+        #
         if found_linking_problems(nih_from_dcf, request.user.id, user_email, st_logger, results):
             for warn in results.messages:
                 messages.warning(request, warn)
+            # stash the requirement to only show a logout link in the session!
+            request.session['dcfForcedLogout'] = nih_from_dcf
             return redirect(reverse('user_detail', args=[request.user.id]))
+
         logger.info("[INFO] OAuthCB j")
         #
         # We now have the minimum we need to store the tokens from DCF, so stick that in the database. We DO NOT yet
@@ -335,14 +356,11 @@ def oauth2_callback(request):
                                           "Please contact the ISB-CGC administrator.".format(resp.status_code, resp.text))
 
             logger.info("[INFO] OAuthCB n")
-            print 'response {}'.format(str(resp.text))
-            print 'PATCH ONLY RETURNS e.g. {"exp": 1528509163}'
+            returned_expiration_str = json_loads(resp.text)['exp']
+            use_expiration_time = _calc_expiration_time(returned_expiration_str)
 
-            login_expiration_seconds = settings.LOGIN_EXPIRATION_MINUTES * 60
-            calc_expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
-                seconds=login_expiration_seconds))
             logger.info("[INFO] OAuthCB o")
-            warning = _finish_the_link(request.user.id, req_user.email, calc_expiration_time, st_logger)
+            warning = _finish_the_link(request.user.id, req_user.email, use_expiration_time, st_logger)
             messages.warning(request, warning)
             return redirect(reverse('user_detail', args=[request.user.id]))
 
@@ -407,24 +425,7 @@ def dcf_link_callback(request):
     returned_expiration_str = request.GET.get('exp', None)
     returned_google_link = request.GET.get('linked_email', None)
 
-    returned_expiration_time = None
-    if returned_expiration_str:
-        exp_secs = float(returned_expiration_str)
-        returned_expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(exp_secs))
-
-    login_expiration_seconds = settings.LOGIN_EXPIRATION_MINUTES * 60
-    calc_expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
-        seconds=login_expiration_seconds))
-    if returned_expiration_time:
-        diff = returned_expiration_time - calc_expiration_time
-        secs = abs((diff.days * (3600 * 24)) + diff.seconds)
-        if secs > 30:
-            logger.error("WARNING: DCF RETURNED TIME SKEW OF {} SECONDS".format(secs))
-        else:
-            logger.info("DCF expiration skew was {} seconds".format(secs))
-            calc_expiration_time = returned_expiration_time
-    else:
-        logger.error("No expiration time provided by DCF")
+    use_expiration_time = _calc_expiration_time(returned_expiration_str)
 
     #
     # At this point, we need to wrestle with the possible problem that the user has linked
@@ -466,10 +467,34 @@ def dcf_link_callback(request):
     # If all is well, this is where we add the user to the NIH_User table and link the user to the various data sets.
     #
 
-    warning = _finish_the_link(request.user.id, google_link, calc_expiration_time, st_logger)
+    warning = _finish_the_link(request.user.id, google_link, use_expiration_time, st_logger)
     if warning:
         messages.warning(request, warning)
     return redirect(reverse('user_detail', args=[request.user.id]))
+
+
+def _calc_expiration_time(returned_expiration_str):
+
+    returned_expiration_time = None
+    if returned_expiration_str:
+        exp_secs = float(returned_expiration_str)
+        returned_expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(exp_secs))
+
+    login_expiration_seconds = settings.DCF_LOGIN_EXPIRATION_SECONDS
+    calc_expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
+        seconds=login_expiration_seconds))
+    if returned_expiration_time:
+        diff = returned_expiration_time - calc_expiration_time
+        secs = abs((diff.days * (3600 * 24)) + diff.seconds)
+        if secs > 30:
+            logger.error("WARNING: DCF RETURNED TIME SKEW OF {} SECONDS".format(secs))
+        else:
+            logger.info("DCF expiration skew was {} seconds".format(secs))
+            calc_expiration_time = returned_expiration_time
+    else:
+        logger.error("No expiration time provided by DCF")
+
+    return calc_expiration_time
 
 
 def _finish_the_link(user_id, user_email, expiration_time, st_logger):
@@ -876,20 +901,14 @@ def dcf_link_extend(request):
         messages.warning(request, "Unexpected response ({}) from DCF during linking. "
                                   "Please contact the ISB-CGC administrator.".format(resp.status_code))
 
-    print resp.text
-    print 'PATCH ONLY RETURNS e.g. {"exp": 1528509163}'
-    print "NO! TIME TO USE THE EXPIRATION"
-
-    # Until we get back user expiration time, we calculate it:
-    login_expiration_seconds = settings.LOGIN_EXPIRATION_MINUTES * 60
-    nih_assertion_expiration = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
-        seconds=login_expiration_seconds))
+    returned_expiration_str = json_loads(resp.text)['exp']
+    use_expiration_time = _calc_expiration_time(returned_expiration_str)
 
     # User data set permissions might have changed, so we call and find out what they are:
     user_data_token_string = _get_user_data_token_string(request.user.id)
     user_data_dict = _user_data_token_to_user_dict(user_data_token_string)
 
-    _, warning = handle_user_db_update_for_dcf_linking(request.user.id, user_data_dict, nih_assertion_expiration, st_logger)
+    _, warning = handle_user_db_update_for_dcf_linking(request.user.id, user_data_dict, use_expiration_time, st_logger)
 
     if warning:
         messages.warning(request, warning)
@@ -1115,24 +1134,6 @@ def _decode_token(token):
 
 
 @login_required
-def test_the_dcf(request):
-    """
-    Use this to test that we can call the DCF and get back useful info. Also, use as a template for doing all
-    DCF calls
-    """
-    file_uuid = 'ffcc4f7d-471a-4ad0-b199-53d992217986'
-    resp = _dcf_call('{}/{}'.format(DCF_URL_URL, file_uuid), request.user.id)
-    result = {
-        'uri': resp.text,
-        'code': resp.status_code
-    }
-    messages.warning(request, 'TDCF Responded with {}: {}'.format(resp.status_code, resp.text))
-
-    # redirect to user detail page
-    return redirect(reverse('user_detail', args=[request.user.id]))
-
-
-@login_required
 def dcf_disconnect_user(request):
     """
     In the new DCF world, to 'unlink' means we both need to tell DCF to 'unlink' the user,
@@ -1145,8 +1146,18 @@ def dcf_disconnect_user(request):
 
     try:
         msg_list = []
+        #
+        # If user is sitting on this page in one browser, and logs out via another, we would have
+        # no DCF token anymore. Catch that case and silently no-op:
+        #
+        dcf_tokens = DCFToken.objects.filter(user_id=request.user.id)
+        num_tokens = len(dcf_tokens)
+        if num_tokens != 1:
+            if num_tokens > 1:
+                messages.warning(request, 'Unexpected Server Error: Multiple tokens found')
+            return redirect(reverse('user_detail', args=[request.user.id]))
+        dcf_token = dcf_tokens.first()
 
-        dcf_token = DCFToken.objects.get(user_id=request.user.id)
         the_user_dict = _user_data_token_to_user_dict(dcf_token.user_token)
 
         print the_user_dict, type(the_user_dict)

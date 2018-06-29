@@ -828,31 +828,38 @@ class DemoLoginResults(object):
 def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, results):
     # 1. check if this google identity is currently linked to other NIH usernames
     # note: the NIH username exclusion is case-insensitive so this will not return a false positive
-    # e.g. if this google identity is linked to 'NIHUSERNAME1' but just authenticated with 'nihusername1',
+    # e.g. if this user identity is linked to 'NIHUSERNAME1' but just authenticated with 'nihusername1',
     # it will still pass this test
-    nih_usernames_already_linked_to_this_google_identity = NIH_User.objects.filter(
+    nih_usernames_already_linked_to_this_user_identity = NIH_User.objects.filter(
         user_id=user_id, linked=True).exclude(NIH_username__iexact=NIH_username)
-    for nih_user in nih_usernames_already_linked_to_this_google_identity:
+    for nih_user in nih_usernames_already_linked_to_this_user_identity:
         if nih_user.NIH_username.lower() != NIH_username.lower():
+            existing_nih_user_name = nih_user.NIH_username
             logger.warn(
                 "User {} is already linked to the eRA commons identity {} and attempted authentication"
                 " with the eRA commons identity {}."
-                    .format(user_email, nih_user.NIH_username, NIH_username))
+                    .format(user_email, existing_nih_user_name, NIH_username))
             my_st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] {}".format(
                 "User {} is already linked to the eRA commons identity {} and attempted authentication"
                 " with the eRA commons identity {}."
-                    .format(user_email, nih_user.NIH_username, NIH_username)))
+                    .format(user_email, existing_nih_user_name, NIH_username)))
 
-            results.messages.append("User {} is already linked to the eRA commons identity {}. "
-                                    "Please unlink these before authenticating with the eRA commons "
-                                    "identity {}.".format(user_email, nih_user.NIH_username,
-                                                          NIH_username))
+            if settings.DCF_TEST:
+                user_message = "User {} is already linked to the eRA commons identity {}. " \
+                               "Please log out of the Data Commons now using the link below, then " \
+                               "click the link to disconnect from {} before trying to log in " \
+                               "using {}".format(user_email, existing_nih_user_name, existing_nih_user_name, NIH_username)
+            else:
+                user_message = "User {} is already linked to the eRA commons identity {}. " \
+                               "Please unlink these before authenticating with the eRA commons " \
+                               "identity {}.".format(user_email, existing_nih_user_name, NIH_username)
+            results.messages.append(user_message)
             return True
 
     # 2. check if there are other google identities that are still linked to this NIH_username
     # note: the NIH username match is case-insensitive so this will not return a false negative.
-    # e.g. if a different google identity is linked to 'NIHUSERNAME1' and this google identity just authenticated with 'nihusername1',
-    # this will fail the test and return to the /users/ url with a warning message
+    # e.g. if a different user identity is linked to 'NIHUSERNAME1' and this user identity just authenticated with 'nihusername1',
+    # this will fail the test
     preexisting_nih_users = NIH_User.objects.filter(
         NIH_username__iexact=NIH_username, linked=True).exclude(user_id=user_id)
 
@@ -875,10 +882,12 @@ def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, resu
                                            NIH_username,
                                            prelinked_user_emails + '.'
                                           ))
-
-        results.messages.append(
-            "You tried to link your email address to NIH account {}, but it is already linked to {}.".format(
-                NIH_username, prelinked_user_emails))
+        if settings.DCF_TEST:
+            user_message = "You tried to link your email address to NIH account {}, but it is already linked to {}. " \
+                           "Please log out of the Data Commons now using the link below, then try again."
+        else:
+            user_message = "You tried to link your email address to NIH account {}, but it is already linked to {}."
+        results.messages.append(user_message.format(NIH_username, prelinked_user_emails))
         return True
     return False
 
@@ -1333,91 +1342,107 @@ def deactivate_nih_add_to_open(user_id, user_email):
         logger.info(e)
 
 
-def get_nih_user_details(user_id):
+def get_nih_user_details(user_id, force_logout):
     user_details = {}
 
-    #
-    # Now with DCF, we can have a user logged in as an NIH user, but not be linked (which means DCF does not
-    # have an association between NIH ID and Google ID). So while we previously did a get on a linked user,
-    # now we need to filter. If one of the users is linked, that is who we use. Otherwise, we can resolve the
-    # issue by looking at the current DCF token attached to the user to see who they are associated with.
-    #
+    if settings.DCF_TEST:
 
-    dcf_tokens = DCFToken.objects.filter(user_id=user_id)
-    if len(dcf_tokens) == 0:
-        return user_details # i.e. empty dict
-    elif len(dcf_tokens) > 1:
-        logger.error("[ERROR] MULTIPLE DCF RECORDS FOR USER {}. ".format(str(user_id)))
-        return user_details  # i.e. empty dict
+        if force_logout:
+            user_details['force_DCF_logout'] = True
+            user_details['NIH_username'] = force_logout
+            return user_details
 
-    dcf_token = dcf_tokens.first()
-
-    curr_user = User.objects.get(id=user_id)
-    nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username__iexact=dcf_token.nih_username)
-
-    if len(nih_users) == 0:
-        user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
-        return user_details  # i.e. empty dict
-
-    elif len(nih_users) == 1:
-        nih_user = nih_users.first()
-
-    else:
         #
-        # Multiple NIH user rows for the current user for the same nih_username. We want the one that is linked.
-        # If more than one (is that possible??) take the one with the most recent usage. If nobody is linked,
-        # again take the one with the most recent usage. Some of these cases should not be possible (?) but
-        # trying to be bombproof here:
+        # Now with DCF, we can have a user logged in as an NIH user, but not be linked (which means DCF does not
+        # have an association between NIH ID and Google ID). So while we previously did a get on a linked user,
+        # now we need to filter. If one of the users is linked, that is who we use. Otherwise, we can resolve the
+        # issue by looking at the current DCF token attached to the user to see who they are associated with.
         #
-        nih_user = None
-        freshest_linked = None
-        freshest_linked_stamp = None
-        freshest_unlinked = None
-        freshest_unlinked_stamp = None
-        for user in nih_users:
-            if user.linked:
-                if (freshest_linked_stamp is None) or (freshest_linked_stamp < user.NIH_assertion_expiration):
-                    freshest_linked_stamp = user.NIH_assertion_expiration
-                    freshest_linked = user
-                if nih_user is None:
-                    nih_user = nih_users.first()
-                else:
-                    logger.error("[ERROR] Multiple linked nih users retrieved nih_user with user_id {}.".format(user_id))
-            else:
-                if (freshest_unlinked_stamp is None) or (freshest_unlinked_stamp < user.NIH_assertion_expiration):
-                    freshest_unlinked_stamp = user.NIH_assertion_expiration
-                    freshest_unlinked = user
 
-        if freshest_linked:
-            nih_user = freshest_linked
-        elif freshest_unlinked:
-            nih_user = freshest_unlinked
-        else:
-            logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
+        dcf_tokens = DCFToken.objects.filter(user_id=user_id)
+        if len(dcf_tokens) == 0:
+            return user_details # i.e. empty dict
+        elif len(dcf_tokens) > 1:
+            logger.error("[ERROR] MULTIPLE DCF RECORDS FOR USER {}. ".format(str(user_id)))
+            return user_details  # i.e. empty dict
+
+        dcf_token = dcf_tokens.first()
+
+        curr_user = User.objects.get(id=user_id)
+
+
+        nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username__iexact=dcf_token.nih_username)
+
+        if len(nih_users) == 0:
             user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
             return user_details  # i.e. empty dict
 
-    #
-    # With the user_details page, we now need to check with DCF about current status before we display information
-    # to the user, as our database view could be stale.
-    #
-    # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
-    # flag. This is the *minimun* we chould be doing, no matter what. Note that in DCF-based Brave New World, we no
-    # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
-    # need to give the user an accurate picture of the state when they hit this page.
-    #
+        elif len(nih_users) == 1:
+            nih_user = nih_users.first()
 
-    if nih_user.active:
-        expired_time = nih_user.NIH_assertion_expiration
-        # If we need to have the access expire in just a few minutes for testing, this is one way to fake it:
-        # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
-        # expired_time = expired_time + testing_expire_hack
-        now_time = pytz.utc.localize(datetime.datetime.utcnow())
-        print "times", expired_time, now_time
-        if now_time >= expired_time:
-            nih_user.active = False
-            nih_user.NIH_assertion_expiration = now_time
-            nih_user.save()
+        else:
+            #
+            # Multiple NIH user rows for the current user for the same nih_username. We want the one that is linked.
+            # If more than one (is that possible??) take the one with the most recent usage. If nobody is linked,
+            # again take the one with the most recent usage. Some of these cases should not be possible (?) but
+            # trying to be bombproof here:
+            #
+            nih_user = None
+            freshest_linked = None
+            freshest_linked_stamp = None
+            freshest_unlinked = None
+            freshest_unlinked_stamp = None
+            for user in nih_users:
+                if user.linked:
+                    if (freshest_linked_stamp is None) or (freshest_linked_stamp < user.NIH_assertion_expiration):
+                        freshest_linked_stamp = user.NIH_assertion_expiration
+                        freshest_linked = user
+                    if nih_user is None:
+                        nih_user = nih_users.first()
+                    else:
+                        logger.error("[ERROR] Multiple linked nih users retrieved nih_user with user_id {}.".format(user_id))
+                else:
+                    if (freshest_unlinked_stamp is None) or (freshest_unlinked_stamp < user.NIH_assertion_expiration):
+                        freshest_unlinked_stamp = user.NIH_assertion_expiration
+                        freshest_unlinked = user
+
+            if freshest_linked:
+                nih_user = freshest_linked
+            elif freshest_unlinked:
+                nih_user = freshest_unlinked
+            else:
+                logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
+                user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
+                return user_details  # i.e. empty dict
+
+        #
+        # With the user_details page, we now need to check with DCF about current status before we display information
+        # to the user, as our database view could be stale.
+        #
+        # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
+        # flag. This is the *minimun* we chould be doing, no matter what. Note that in DCF-based Brave New World, we no
+        # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
+        # need to give the user an accurate picture of the state when they hit this page.
+        #
+
+        if nih_user.active:
+            expired_time = nih_user.NIH_assertion_expiration
+            # If we need to have the access expire in just a few minutes for testing, this is one way to fake it:
+            # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
+            # expired_time = expired_time + testing_expire_hack
+            now_time = pytz.utc.localize(datetime.datetime.utcnow())
+            print "times", expired_time, now_time
+            if now_time >= expired_time:
+                nih_user.active = False
+                nih_user.NIH_assertion_expiration = now_time
+                nih_user.save()
+    else:
+        try:
+            nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
+        except (MultipleObjectsReturned, ObjectDoesNotExist), e:
+            if type(e) is MultipleObjectsReturned:
+                logger.warn("Error when retrieving noh_user with user_id {}. {}".format(str(user_id), str(e)))
+            return user_details
 
     user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
     user_details['NIH_username'] = nih_user.NIH_username
@@ -1426,11 +1451,14 @@ def get_nih_user_details(user_id):
     user_details['dbGaP_has_datasets'] = (len(user_auth_datasets) > 0)
     user_details['dbGaP_authorized'] = (len(user_auth_datasets) > 0) and nih_user.active
     logger.debug("[DEBUG] User {} has access to {} dataset(s) and is {}".format(nih_user.NIH_username, str(len(user_auth_datasets)), ('not active' if not nih_user.active else 'active')))
-    user_details['link_mismatch'] = (dcf_token.google_id is None) or (dcf_token.google_id != curr_user.email)
     user_details['NIH_active'] = nih_user.active
-    user_details['NIH_DCF_linked'] = nih_user.linked
-    user_details['refresh_key_ok'] = get_dcf_auth_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
     user_details['auth_datasets'] = [] if len(user_auth_datasets) <= 0 else AuthorizedDataset.objects.filter(id__in=user_auth_datasets.values_list('authorized_dataset',flat=True))
+
+    if settings.DCF_TEST:
+        user_details['link_mismatch'] = (dcf_token.google_id is None) or (dcf_token.google_id != curr_user.email)
+        user_details['NIH_DCF_linked'] = nih_user.linked
+        user_details['refresh_key_ok'] = get_dcf_auth_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
+        user_details['force_DCF_logout'] = False
 
     return user_details
 
