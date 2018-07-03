@@ -50,14 +50,17 @@ MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 
 class TokenFailure(Exception):
-    """Thrown if we have problems with our access/refresh tokens """
+    """Thrown if we don't have our access/refresh tokens (user has disconnected from DCF)"""
 
+class InternalTokenError(Exception):
+    """Thrown if we have internal DB consistency errors """
 
 class RefreshTokenExpired(Exception):
     """Thrown if our refresh token is no longer valid and user must log in """
 
-    def __init__(self, seconds):
+    def __init__(self, seconds, token):
         self.seconds = seconds
+        self.token = token
 
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
 
@@ -1091,7 +1094,7 @@ def unlink_account_in_db_for_dcf(user_id):
 
     # If nobody is linked, we are actually done. There is nothing to do.
     if num_linked == 0:
-        return None
+        return
     elif num_linked > 1:
         logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
 
@@ -1099,10 +1102,10 @@ def unlink_account_in_db_for_dcf(user_id):
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.active = False
         nih_account_to_unlink.save()
-        nih_account_to_unlink.delete_all_auth_datasets()
+        nih_account_to_unlink.delete_all_auth_datasets() # Drop the user's approved data sets!
         logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
-    return None
+    return
 
 
 def handle_user_db_entry(user_id, NIH_username, user_email, auth_response, num_auth_datasets,
@@ -1308,10 +1311,14 @@ def get_dcf_refresh_key_remaining_seconds(user_id):
     """
     We need to know how many seconds are left before the user needs to log back in to NIH to get
     a new refresh token, which will expire every 30 days.
+
+    :raises InternalTokenError:
     """
 
     try:
         dcf_token = get_stored_dcf_token(user_id)
+    except InternalTokenError as e:
+        raise e
     except TokenFailure:
         return -1  # ? No token? They expire immediately!
     except RefreshTokenExpired as e:
@@ -1331,6 +1338,7 @@ def get_stored_dcf_token(user_id):
     we need to be bulletproof on maybe not getting back a token.
 
     :raises TokenFailure:
+    :raises InternalTokenError:
     :raises RefreshTokenExpired:
     """
     dcf_tokens = DCFToken.objects.filter(user_id)
@@ -1338,16 +1346,40 @@ def get_stored_dcf_token(user_id):
     if num_tokens != 1:
         if num_tokens > 1:
             logger.error('[ERROR] Unexpected Server Error: Multiple tokens found for user {}'.format(user_id))
+            raise InternalTokenError()
         else:
             logger.info('[INFO] User {} tried to use a flushed token'.format(user_id))
-        raise TokenFailure()
+            raise TokenFailure()
 
     dcf_token = dcf_tokens.first()
     remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
     if remaining_seconds <= 60:
-        raise RefreshTokenExpired(remaining_seconds)
+        # Still make the token available to e.g. drop linkages from DB
+        raise RefreshTokenExpired(remaining_seconds, dcf_token)
 
     return dcf_token
+
+
+def force_dcf_token_expiration(user_id):
+    """
+    We have seen a case where DCF has rejected our valid refresh token when their server gets rolled. This should not
+    happen anymore. But if it does, we need to be able to force our token expirations ASAP so as to let the user login
+    again to get a new token.
+
+    :raises InternalTokenError:
+    """
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except InternalTokenError as e:
+        raise e
+    except (TokenFailure, RefreshTokenExpired):
+        # a no-op
+        return
+
+    dcf_token.refresh_expires_at = pytz.utc.localize(datetime.datetime.utcnow())
+    dcf_token.save()
+
+    return
 
 
 def get_nih_user_details(user_id, force_logout):
@@ -1378,6 +1410,8 @@ def get_nih_user_details(user_id, force_logout):
         try:
             dcf_token = get_stored_dcf_token(user_id)
         except TokenFailure:
+            return user_details  # i.e. empty dict
+        except InternalTokenError:
             return user_details  # i.e. empty dict
         except RefreshTokenExpired:
             user_details['refresh_required'] = True
@@ -1426,6 +1460,7 @@ def get_nih_user_details(user_id, force_logout):
                 nih_user = freshest_unlinked
             else:
                 logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
+                # FIXME: Second condition can no longer happen:
                 user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
                 return user_details  # i.e. empty dict
 
@@ -1471,8 +1506,12 @@ def get_nih_user_details(user_id, force_logout):
     user_details['auth_datasets'] = [] if len(user_auth_datasets) <= 0 else AuthorizedDataset.objects.filter(id__in=user_auth_datasets.values_list('authorized_dataset',flat=True))
 
     if settings.DCF_TEST:
+        # FIXME: Second condition can no longer happen:
         user_details['link_mismatch'] = (dcf_token.google_id is None) or (dcf_token.google_id != curr_user.email)
-        user_details['refresh_key_ok'] = get_dcf_refresh_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
+        try:
+            user_details['refresh_key_ok'] = get_dcf_refresh_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
+        except InternalTokenError:
+            return {}
         user_details['force_DCF_logout'] = False
 
     return user_details
