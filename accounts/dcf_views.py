@@ -452,6 +452,8 @@ def dcf_link_callback(request):
     """
 
     dcf_err_msg = "DCF reported an error {} logging in. Please contact the ISB-CGC administrator."
+    internal_err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator."
+    comm_err_msg = "There was a communications problem contacting Data Commons Framework."
 
     #
     # If there was an error, return that: Also, we now need to equip all callbacks to report
@@ -493,9 +495,20 @@ def dcf_link_callback(request):
     # so we need to keep deleting the linkage at DCF!
     #
 
+    err_msg = None
     try:
         the_user_token_string = get_user_data_token_string(request.user.id) # a string.
-    except (TokenFailure, InternalTokenError, DCFCommFailure, RefreshTokenExpired):
+    except TokenFailure:
+        err_msg = internal_err_msg.format("0060")
+    except InternalTokenError:
+        err_msg = internal_err_msg.format("0061")
+    except RefreshTokenExpired:
+        err_msg = internal_err_msg.format("0062")
+    except DCFCommFailure:
+        err_msg = comm_err_msg
+
+    if err_msg:
+        messages.error(request, err_msg)
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     the_user_token_dict = json_loads(the_user_token_string)
@@ -522,10 +535,22 @@ def dcf_link_callback(request):
     # No match? Not acceptable. Send user back to details page. The empty google ID in our table will
     # mean the page shows an option to try again. We need to
     #
+
     if google_link != req_user.email:
+        err_msg = None
         try:
             unlink_at_dcf(request.user.id, True)  # True means saved token is now updated with unlinked state
-        except (TokenFailure, InternalTokenError, DCFCommFailure, RefreshTokenExpired):
+        except TokenFailure:
+            err_msg = internal_err_msg.format("0064")
+        except InternalTokenError:
+            err_msg = internal_err_msg.format("0065")
+        except RefreshTokenExpired:
+            err_msg = internal_err_msg.format("0066")
+        except DCFCommFailure:
+            err_msg = comm_err_msg
+
+        if err_msg:
+            messages.error(request, err_msg)
             return redirect(reverse('user_detail', args=[request.user.id]))
 
         message = "You must use your ISB-CGC login email ({}) to link with the DCF instead of {}".format(
@@ -542,8 +567,11 @@ def dcf_link_callback(request):
         st_logger = StackDriverLogger.build_from_django_settings()
         # Don't hit DCF again, we just did it (thus False):
         warning = _finish_the_link(request.user.id, google_link, use_expiration_time, st_logger, False)
-    except (TokenFailure, RefreshTokenExpired):
-        messages.warning(request, "say something witty here...")
+    except TokenFailure:
+        messages.error(request, "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0067"))
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    except RefreshTokenExpired:
+        messages.error(request, "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0068"))
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     if warning:
@@ -713,12 +741,18 @@ def dcf_disconnect_user(request):
     # they would have to login in order to disconnect!
     #
 
+    err_msg = None
     try:
         dcf_token = get_stored_dcf_token(request.user.id)
-    except (TokenFailure, InternalTokenError):
-        return redirect(reverse('user_detail', args=[request.user.id]))
+    except TokenFailure:
+        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0069")
+    except InternalTokenError:
+        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0070")
     except RefreshTokenExpired:
-        messages.warning(request, "You will need to first login to the Data Commons again to disconnect your Google ID")
+        err_msg = "You will need to first login to the Data Commons again to disconnect your Google ID"
+
+    if err_msg:
+        messages.error(request, err_msg)
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
@@ -726,10 +760,20 @@ def dcf_disconnect_user(request):
     # is no link when we try to do it, we ignore that fact:
     #
 
+    err_msg = None
     try:
         unlink_at_dcf(request.user.id, False) # Don't refresh, we are about to drop the record...
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure):
-        messages.warning(request, "Problems encountered unlinking Google ID at Data Commons. Please contact ISB-CGC Administrator")
+    except TokenFailure:
+        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0071")
+    except InternalTokenError:
+        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0072")
+    except RefreshTokenExpired:
+        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0073")
+    except DCFCommFailure:
+        err_msg = "There was a communications problem contacting Data Commons Framework."
+
+    if err_msg:
+        messages.warning(request, err_msg)
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
