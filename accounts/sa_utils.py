@@ -1302,67 +1302,6 @@ def deactivate_nih_add_to_open(user_id, user_email):
             logger.info(e)
 
 
-def get_dcf_refresh_key_remaining_seconds(user_id):
-    """
-    We need to know how many seconds are left before the user needs to log back in to NIH to get
-    a new refresh token, which will expire every 30 days.
-
-    :raises InternalTokenError:
-    """
-
-    try:
-        dcf_token = get_stored_dcf_token(user_id)
-    except InternalTokenError as e:
-        raise e
-    except TokenFailure:
-        return -1  # ? No token? They expire immediately!
-    except RefreshTokenExpired as e:
-        return e.seconds
-
-    remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
-    logger.info('[INFO] user {} has {} seconds remaining on refresh token'.
-                format(dcf_token.nih_username, remaining_seconds))
-
-    return remaining_seconds
-
-
-def _resolve_multiple_nih_users(nih_users, user_id):
-    """
-    Multiple NIH user rows for the current user for the same nih_username. We want the one that is linked.
-    If more than one (is that possible??) take the one with the most recent usage. If nobody is linked,
-    again take the one with the most recent usage. Some of these cases should not be possible (?) but
-    trying to be bombproof here
-    """
-    nih_user = None
-    freshest_linked = None
-    freshest_linked_stamp = None
-    freshest_unlinked = None
-    freshest_unlinked_stamp = None
-    for user in nih_users:
-        if user.linked:
-            if (freshest_linked_stamp is None) or (freshest_linked_stamp < user.NIH_assertion_expiration):
-                freshest_linked_stamp = user.NIH_assertion_expiration
-                freshest_linked = user
-            if nih_user is None:
-                nih_user = nih_users.first()
-            else:
-                logger.error("[ERROR] Multiple linked nih users retrieved nih_user with user_id {}.".format(user_id))
-        else:
-            if (freshest_unlinked_stamp is None) or (freshest_unlinked_stamp < user.NIH_assertion_expiration):
-                freshest_unlinked_stamp = user.NIH_assertion_expiration
-                freshest_unlinked = user
-
-    if freshest_linked:
-        nih_user = freshest_linked
-    elif freshest_unlinked:
-        nih_user = freshest_unlinked
-    else:
-        logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
-        nih_user = None
-
-    return nih_user
-
-
 class RefreshCode:
     NO_TOKEN = 1
     TOKEN_EXPIRED = 2

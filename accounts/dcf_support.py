@@ -466,6 +466,7 @@ def _access_token_storage(token_dict, cgc_uid):
     refresh token to get a new access key.
 
     :raises TokenFailure:
+    :raises InternalTokenError:
     :raises RefreshTokenExpired:
     """
 
@@ -487,7 +488,7 @@ def _access_token_storage(token_dict, cgc_uid):
 
     try:
         dcf_token = get_stored_dcf_token(cgc_uid)
-    except (TokenFailure, RefreshTokenExpired) as e:
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
         logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
         raise e
 
@@ -574,6 +575,7 @@ def dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False):
         logger.exception(e)
         raise TokenFailure()
     except InternalTokenError as e:
+        # bubbles up from token_storage_for_user call
         logger.warning("Internal Token Exception")
         logger.exception(e)
         raise e
@@ -793,9 +795,7 @@ def compare_google_ids(dcf_version, cgc_version, user_email):
     """
     When we get new tokens from DCF, we want to sanity check if the Google IDs are in agreement.
     """
-    print dcf_version
-    print cgc_version
-    print user_email
+
     if dcf_version != cgc_version:
         # Most likely possibility is that either DCF or us thinks the google ID is None and the other doesn't. Another
         # possibility is that DCF has another Google ID for the user that is not consistent with the
