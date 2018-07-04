@@ -31,20 +31,21 @@ from django.http import HttpResponseRedirect
 
 from google_helpers.stackdriver import StackDriverLogger
 
-from sa_utils import found_linking_problems, DemoLoginResults, handle_user_for_dataset,\
+from sa_utils import found_linking_problems, DemoLoginResults, \
                      handle_user_db_update_for_dcf_linking, \
-                     unlink_account_in_db_for_dcf, get_dcf_refresh_key_remaining_seconds, \
-                     get_stored_dcf_token, TokenFailure, RefreshTokenExpired, InternalTokenError, \
-                     force_dcf_token_expiration
+                     unlink_account_in_db_for_dcf, refresh_user_projects
 
-from models import DCFToken, AuthorizedDataset, NIH_User, UserAuthorizedDatasets
+from dcf_support import get_stored_dcf_token, \
+                        TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
+                        get_google_link_from_user_dict, get_projects_from_user_dict, \
+                        get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
+                        user_data_token_dict_massaged, \
+                        user_data_token_dict_to_user_dict, get_secrets, refresh_token_storage, \
+                        unlink_at_dcf, refresh_at_dcf, decode_token_chunk, calc_expiration_time
+
 from requests_oauthlib.oauth2_session import OAuth2Session
-from oauthlib.oauth2 import MissingTokenError
-from base64 import urlsafe_b64decode
 from jwt.contrib.algorithms.pycrypto import RSAAlgorithm
-from json import loads as json_loads, dumps as json_dumps
-from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
-from dataset_utils.dataset_config import DatasetGoogleGroupPair
+from json import loads as json_loads
 
 # Shut this up unless we need to do debug of HTTP request contents
 #import httplib as http_client
@@ -54,16 +55,10 @@ logger = logging.getLogger('main_logger')
 
 DCF_AUTH_URL = settings.DCF_AUTH_URL
 DCF_TOKEN_URL = settings.DCF_TOKEN_URL
-DCF_USER_URL = settings.DCF_USER_URL
 DCF_REVOKE_URL = settings.DCF_REVOKE_URL
 DCF_GOOGLE_URL = settings.DCF_GOOGLE_URL
 DCF_LOGOUT_URL = settings.DCF_LOGOUT_URL
-DCF_URL_URL = settings.DCF_URL_URL
-DCF_TOKEN_REFRESH_WINDOW_SECONDS = settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
 
-
-class DCFCommFailure(Exception):
-    """Thrown if we have problems communicating with DCF """
 
 @login_required
 def oauth2_login(request):
@@ -82,7 +77,7 @@ def oauth2_login(request):
         if settings.IS_DEV and full_callback.startswith('http://localhost'):
             os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
-        client_id, _ = _get_secrets()
+        client_id, _ = get_secrets()
 
         logger.info("[INFO] OAuth1 b")
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
@@ -178,7 +173,7 @@ def oauth2_callback(request):
             messages.error(request, internal_err_msg.format("001"))
             return redirect(reverse('user_detail', args=[request.user.id]))
 
-        client_id, client_secret = _get_secrets()
+        client_id, client_secret = get_secrets()
         logger.info("[INFO] OAuthCB c")
         # You MUST provide the callback *here* to get it into the fetch request
         dcf = OAuth2Session(client_id, state=saved_state, redirect_uri=full_callback)
@@ -232,7 +227,7 @@ def oauth2_callback(request):
         # key provided by their endpoint using the pyjwt package to do the work.
         #
 
-        jwt_header_json, jwt_header_dict = _decode_token_chunk(token_data['id_token'], 0)
+        jwt_header_json, jwt_header_dict = decode_token_chunk(token_data['id_token'], 0)
         kid = jwt_header_dict['kid']
 
         #
@@ -301,13 +296,13 @@ def oauth2_callback(request):
         # Suck the data out of the user token to plunk into the database
         #
 
-        user_data_token_str, user_data_token_dict = _user_data_token_dict_massaged(decoded_jwt_id)
+        user_data_token_str, user_data_token_dict = user_data_token_dict_massaged(decoded_jwt_id)
 
-        user_data_dict = _user_data_token_dict_to_user_dict(user_data_token_dict)
+        user_data_dict = user_data_token_dict_to_user_dict(user_data_token_dict)
 
-        nih_from_dcf = _get_nih_id_from_user_dict(user_data_dict)
+        nih_from_dcf = get_nih_id_from_user_dict(user_data_dict)
 
-        google_link = _get_google_link_from_user_dict(user_data_dict)
+        google_link = get_google_link_from_user_dict(user_data_dict)
         logger.info("[INFO] OAuthCB i")
 
         # We now have the NIH User ID back from DCF; we also might now know the Google ID they have linked to previously
@@ -355,7 +350,7 @@ def oauth2_callback(request):
         # make the entry in the NIH_User table, since we need to now either establish or refresh the DCF-Google ID link:
         #
 
-        _refresh_token_storage(token_data, decoded_jwt_id, user_data_token_str, nih_from_dcf, dcf_user_id, request.user.id, save_google_link)
+        refresh_token_storage(token_data, decoded_jwt_id, user_data_token_str, nih_from_dcf, dcf_user_id, request.user.id, save_google_link)
 
         #
         # If user already has a google ID link, we would PATCH the endpoint to update it for 24 more hours. If
@@ -381,7 +376,7 @@ def oauth2_callback(request):
             logger.info("[INFO] OAuthCB l")
             if google_link != req_user.email:
                 try:
-                    _unlink_at_dcf(request.user.id, True)  # True means after unlinking, we call DCF again to update our link state
+                    unlink_at_dcf(request.user.id, True)  # True means after unlinking, we call DCF again to update our link state
                     message = "You must use your ISB-CGC login email ({}) to link with the DCF instead of {}".format(
                         req_user.email, google_link)
                     messages.warning(request, message)
@@ -406,7 +401,7 @@ def oauth2_callback(request):
             logger.info("[INFO] OAuthCB m")
 
             try:
-                err_msg, returned_expiration_str, _ = _refresh_at_dcf(request.user.id)
+                err_msg, returned_expiration_str, _ = refresh_at_dcf(request.user.id)
             except TokenFailure:
                 err_msg = internal_err_msg.format("006")
             except InternalTokenError:
@@ -426,7 +421,7 @@ def oauth2_callback(request):
             #
 
             logger.info("[INFO] OAuthCB n")
-            use_expiration_time = _calc_expiration_time(returned_expiration_str)
+            use_expiration_time = calc_expiration_time(returned_expiration_str)
 
             logger.info("[INFO] OAuthCB o")
             # Don't hit DCF again, we just did it (thus False):
@@ -488,7 +483,7 @@ def dcf_link_callback(request):
     returned_expiration_str = request.GET.get('exp', None)
     returned_google_link = request.GET.get('linked_email', None)
 
-    use_expiration_time = _calc_expiration_time(returned_expiration_str)
+    use_expiration_time = calc_expiration_time(returned_expiration_str)
 
     #
     # We will NEVER accept a Google ID that does not match.  At this point, we need to wrestle
@@ -499,7 +494,7 @@ def dcf_link_callback(request):
     #
 
     try:
-        the_user_token_string = _get_user_data_token_string(request.user.id) # a string.
+        the_user_token_string = get_user_data_token_string(request.user.id) # a string.
     except (TokenFailure, InternalTokenError, DCFCommFailure, RefreshTokenExpired):
         return redirect(reverse('user_detail', args=[request.user.id]))
 
@@ -507,7 +502,7 @@ def dcf_link_callback(request):
     the_user_dict = the_user_token_dict['context']['user']
 
     # Just parses the google link out of the recently return token.
-    google_link = _get_google_link_from_user_dict(the_user_dict)
+    google_link = get_google_link_from_user_dict(the_user_dict)
 
     if returned_google_link:
         if google_link != returned_google_link:
@@ -529,7 +524,7 @@ def dcf_link_callback(request):
     #
     if google_link != req_user.email:
         try:
-            _unlink_at_dcf(request.user.id, True)  # True means saved token is now updated with unlinked state
+            unlink_at_dcf(request.user.id, True)  # True means saved token is now updated with unlinked state
         except (TokenFailure, InternalTokenError, DCFCommFailure, RefreshTokenExpired):
             return redirect(reverse('user_detail', args=[request.user.id]))
 
@@ -573,7 +568,7 @@ def dcf_link_extend(request):
     user_data_token_string = None
 
     try:
-        err_msg, returned_expiration_str, user_data_token_string = _refresh_at_dcf(request.user.id)
+        err_msg, returned_expiration_str, user_data_token_string = refresh_at_dcf(request.user.id)
     except TokenFailure:
         err_msg = "Your Data Commons Framework identity needs to be reestablished to complete this task."
     except RefreshTokenExpired:
@@ -587,8 +582,8 @@ def dcf_link_extend(request):
         messages.error(request, err_msg)
         return redirect(reverse('user_detail', args=[request.user.id]))
 
-    use_expiration_time = _calc_expiration_time(returned_expiration_str)
-    user_data_dict = _user_data_token_to_user_dict(user_data_token_string)
+    use_expiration_time = calc_expiration_time(returned_expiration_str)
+    user_data_dict = user_data_token_to_user_dict(user_data_token_string)
 
     # log the reports using Cloud logging API
     st_logger = StackDriverLogger.build_from_django_settings()
@@ -598,30 +593,6 @@ def dcf_link_extend(request):
         messages.warning(request, warning)
 
     return redirect(reverse('user_detail', args=[request.user.id]))
-
-
-def _calc_expiration_time(returned_expiration_str):
-
-    returned_expiration_time = None
-    if returned_expiration_str:
-        exp_secs = float(returned_expiration_str)
-        returned_expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(exp_secs))
-
-    login_expiration_seconds = settings.DCF_LOGIN_EXPIRATION_SECONDS
-    calc_expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
-        seconds=login_expiration_seconds))
-    if returned_expiration_time:
-        diff = returned_expiration_time - calc_expiration_time
-        secs = abs((diff.days * (3600 * 24)) + diff.seconds)
-        if secs > 30:
-            logger.error("WARNING: DCF RETURNED TIME SKEW OF {} SECONDS".format(secs))
-        else:
-            logger.info("DCF expiration skew was {} seconds".format(secs))
-            calc_expiration_time = returned_expiration_time
-    else:
-        logger.error("No expiration time provided by DCF")
-
-    return calc_expiration_time
 
 
 def _finish_the_link(user_id, user_email, expiration_time, st_logger, refresh_first):
@@ -642,7 +613,7 @@ def _finish_the_link(user_id, user_email, expiration_time, st_logger, refresh_fi
 
     if refresh_first:
         try:
-            the_user_token = _get_user_data_token_string(user_id) # the_user is a string.
+            the_user_token = get_user_data_token_string(user_id) # the_user is a string.
         except (TokenFailure, InternalTokenError, DCFCommFailure, RefreshTokenExpired) as e:
             raise e
 
@@ -666,350 +637,16 @@ def _finish_the_link(user_id, user_email, expiration_time, st_logger, refresh_fi
         the_user_token = dcf_token.user_token
     dcf_token.save()
 
-    the_user_dict = _user_data_token_to_user_dict(the_user_token)
+    the_user_dict = user_data_token_to_user_dict(the_user_token)
     nih_user, warning = handle_user_db_update_for_dcf_linking(user_id, the_user_dict,
                                                               nih_assertion_expiration, st_logger)
 
-    dict_o_projects = _get_projects_from_user_dict(the_user_dict)
-    authorized_datasets = []
-    for project, perm_list in dict_o_projects.iteritems():
-        adqs = AuthorizedDataset.objects.filter(whitelist_id=project)
-        if len(adqs) == 1:
-            authorized_datasets.append(DatasetGoogleGroupPair(project, adqs.first().acl_google_group))
+    dict_o_projects = get_projects_from_user_dict(the_user_dict)
+    project_keys = set(dict_o_projects.keys())
 
-    das = DatasetAccessSupportFactory.from_webapp_django_settings()
-    all_datasets = das.get_all_datasets_and_google_groups()
-
-    for dataset in all_datasets:
-        handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, False, None, None, st_logger)
+    refresh_user_projects(nih_user, user_email, project_keys, st_logger)
 
     return warning
-
-
-def _user_data_token_dict_massaged(the_user_token_dict):
-    """
-    Takes the user data token dictionary (as returned by DCF) and returns massaged user-only string AND dict
-
-    """
-    the_user_dict = the_user_token_dict['context']['user']
-    the_massaged_dict = _massage_user_data_for_dev(the_user_dict)
-    the_user_token_dict['context']['user'] = the_massaged_dict
-    return json_dumps(the_user_token_dict), the_user_token_dict
-
-
-def _user_data_token_massaged(user_data_token_string):
-    """
-    Takes the user data token string and returns user-only string AND dict
-
-    """
-    the_user_token_dict = json_loads(user_data_token_string)
-    the_user_dict = the_user_token_dict['context']['user']
-    the_massaged_dict = _massage_user_data_for_dev(the_user_dict)
-    the_user_token_dict['context']['user'] = the_massaged_dict
-    return json_dumps(the_user_token_dict), the_user_token_dict
-
-
-def _get_projects_from_user_dict(the_user_dict):
-    """
-    The dict schema and keys vary depending on whether is comes from token or user data endpoint. Hide this fact!
-
-    """
-    return the_user_dict['projects']
-
-
-def _set_projects_for_user_dict(the_user_dict, projects):
-    """
-    The dict schema and keys vary depending on whether is comes from token or user data endpoint. Hide this fact!
-
-    """
-    the_user_dict['projects'] = projects
-    return
-
-
-def _get_nih_id_from_user_dict(the_user_dict):
-    """
-    The dict schema and keys vary depending on whether is comes from token or user data endpoint. Hide this fact!
-
-    """
-    return the_user_dict['name']
-
-def _set_nih_id_for_user_dict(the_user_dict, nih_id):
-    """
-    The dict schema and keys vary depending on whether is comes from token or user data endpoint. Hide this fact!
-
-    """
-    the_user_dict['name'] = nih_id
-    return
-
-
-def _get_google_link_from_user_dict(the_user_dict):
-    """
-    The dict schema and keys vary depending on whether is comes from token or user data endpoint. Hide this fact!
-
-    """
-    gotta_google_link = the_user_dict.has_key('google') and \
-                        the_user_dict['google'].has_key('linked_google_account')
-    google_link = the_user_dict['google']['linked_google_account'] if gotta_google_link else None
-    return google_link
-
-
-def _user_data_token_to_user_dict(user_data_token_string):
-    """
-    Takes the user data token string (as returned by DCF and stored in database) and returns user-only dict
-
-    """
-    the_user_token_dict = json_loads(user_data_token_string)
-    the_user_dict = the_user_token_dict['context']['user']
-    return the_user_dict
-
-
-def _user_data_token_dict_to_user_dict(the_user_token_dict):
-    """
-    Takes the user data token dict and returns user-only dict
-
-    """
-    the_user_dict = the_user_token_dict['context']['user']
-    return the_user_dict
-
-
-def _get_user_data_token_string(user_id):
-    """
-    Get up-to-date user data from DCF, massage as needed.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises DCFCommFailure:
-    :raises RefreshTokenExpired:
-    """
-    # The user endpoint is spotty at the moment (6/5/18) so we drag it out of the token instead
-
-    the_user_id_token, _ = _user_data_from_token(user_id, False)
-
-    massaged_string, _ = _user_data_token_massaged(the_user_id_token)
-
-    return massaged_string
-
-
-def _user_data_from_token(user_id, stash_it):
-    """
-    Seems that we should be able to get full user info from the user endpoint, but it turns out that
-    the information in the token refresh is more complete.
-
-    PLUS, user can set stash_it to True.  DCF suggests we refresh the access token after e.g. unlinking.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises DCFCommFailure:
-    :raises RefreshTokenExpired:
-    """
-
-    #
-    # OAuth2Session handles token refreshes under the covers. Here we want to do it explicitly.
-    #
-
-    try:
-        dcf_token = get_stored_dcf_token(user_id)
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
-        raise e
-
-    client_id, client_secret = _get_secrets()
-
-    data = {
-        'grant_type': 'refresh_token',
-        'refresh_token': dcf_token.refresh_token,
-        'client_id': client_id
-    }
-
-    auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
-    client_id = None
-    client_secret = None
-    try:
-        resp = requests.request('POST', DCF_TOKEN_URL, data=data, auth=auth)
-    except Exception as e:
-        logger.error("[ERROR] Token acquisition Exception")
-        logger.exception(e)
-        raise DCFCommFailure()
-
-    if resp.status_code != 200:
-        logger.error("[ERROR] Token acquisition problem: {} : {}".format(resp.status_code, resp.text))
-        raise DCFCommFailure()
-
-    token_dict = json_loads(resp.text)
-    id_token_decoded, id_token_dict = _decode_token(token_dict['id_token'])
-
-    if stash_it:
-        try:
-            _access_token_storage(token_dict, user_id)
-        except (TokenFailure, RefreshTokenExpired) as e:
-            logger.error("[ERROR] _user_data_from_token aborted: {}".format(str(e)))
-            raise e
-
-    return id_token_decoded, id_token_dict
-
-
-def _massage_user_data_for_dev(the_user):
-    """
-    Note that when working against their QA server, user names
-    and projects are junk. So we repair them here for our development needs.
-    """
-
-    dcf_secrets = _read_dict(settings.DCF_CLIENT_SECRETS)
-    if not dcf_secrets.has_key('DEV_1_EMAIL'):
-        return the_user
-
-    nih_from_dcf = _get_nih_id_from_user_dict(the_user)
-    if nih_from_dcf == dcf_secrets['DEV_1_EMAIL']:
-        nih_from_dcf = dcf_secrets['DEV_1_NIH']
-        _set_nih_id_for_user_dict(the_user, nih_from_dcf)
-
-    dict_o_projects = _get_projects_from_user_dict(the_user)
-    new_dict_o_projects = {}
-    for project, perm_list in dict_o_projects.iteritems():
-        # DCF QA returns bogus project info. Do this mapping as a workaround:
-        if project == dcf_secrets['DEV_1_PROJ']:
-            project = dcf_secrets['DEV_1_MAPPED_PROJ']
-        elif project == dcf_secrets['DEV_2_PROJ']:
-            project = dcf_secrets['DEV_2_MAPPED_PROJ']
-        new_dict_o_projects[project] = perm_list
-    _set_projects_for_user_dict(the_user, new_dict_o_projects)
-
-    return the_user
-
-
-def _unlink_at_dcf(user_id, do_refresh):
-    """
-    There are only three places where we call DCF to do a Google unlink: 1) If they login via NIH and we get
-    a token for the user that tells us they already are linked to a Google ID that does not match their ISB-CGC
-    login ID. 2) We send them back to DCF to do the Google ID linking step and the callback informs us that they
-    have logged in with the wrong (not ISB-CGC) Google ID, and 3) the user has chosen to fully disconnect, and
-    dropping the Google ID is one step in the teardown flow. We NEVER enter a Google ID into the DCFToken
-    table if it does not match their ISB-CCG ID.
-
-    Can raise TokenFailure, DCFCommFailure, RefreshTokenExpired
-
-    WARNING: DO NOT CALL this routine unless we have positive evidence returned from DCF that the user is
-    linked. It is an error to tell DCF to unlink if the user is not actually linked. That said, we will
-    log the discrepancy but not issue any error to the user.
-
-    :raise TokenFailure:
-    :raise InternalTokenError:
-    :raise DCFCommFailure:
-    :raise RefreshTokenExpired:
-
-    """
-
-    success = False
-    throw_later = None
-
-    #
-    # Call DCF to drop the linkage. Note that this will immediately remove them from controlled access.
-    #
-
-    try:
-        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='delete')  # can raise TokenFailure, DCFCommFailure
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-        throw_later = e # hold off so we can try a refresh first...
-    except Exception as e:
-        logger.error("[ERROR] Attempt to contact DCF for Google ID unlink failed (user {})".format(user_id))
-        raise e
-
-    if resp:
-        if resp.status_code == 404:
-            # We are trying to unlink, and DCF thinks there is no link. *Silent* failure!
-            logger.error("[ERROR] No linked Google account found for user {}".format(user_id))
-            success = True
-        elif resp.status_code == 400:
-            delete_response = json_loads(resp.text)
-            error = delete_response['error']
-            message = delete_response['error_description']
-            logger.error("[ERROR] Error returned in unlinking: {} : {}".format(error, message))
-        elif resp.status_code == 200:
-            success = True
-        else:
-            logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
-
-    #
-    # Per discussions with DCF, need to ask for a new token from DCF after doing the unlinking
-    # since they care about the token info. Even if we had a failure, let's try to refresh:
-    #
-
-    if do_refresh:
-        try:
-            _user_data_from_token(user_id, True)
-        except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-            throw_later = throw_later if throw_later else e
-
-    if throw_later:
-        raise throw_later
-    elif not success:
-        raise DCFCommFailure()
-
-    return
-
-
-def _refresh_at_dcf(user_id):
-    """
-    Handle the PATCH call, to extend a user's presence on controlled access for 24 hours. Note that we might
-    reasonably raise a TokenFailure if the user disconnects from DCF in one screen before extending in another.
-    This could also manifest as a 404 response from DCF
-
-    Can raise TokenFailure, DCFCommFailure, RefreshTokenExpired
-
-    WARNING: DO NOT CALL this routine unless we have positive evidence returned from DCF that the user is
-    linked. It is an error to tell DCF to patch if the user is not actually linked, and this will be an error.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises DCFCommFailure:
-    :raises RefreshTokenExpired:
-
-    """
-
-    success = False
-    throw_later = None
-    err_msg = None
-    returned_expiration_str = None
-    massaged_string = None
-
-    #
-    # Call DCF to drop the linkage. Note that this will immediately remove them from controlled access.
-    #
-
-    try:
-        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='patch')
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-        throw_later = e
-    except Exception as e:
-        logger.error("[ERROR] Attempt to contact DCF for Google ID patch failed (user {})".format(user_id))
-        raise e
-
-    if resp:
-        if resp.status_code == 404:
-            err_msg = "User's GoogleID was no longer linked at Data Commons"
-        elif resp.status_code == 200:
-            success = True
-        else:
-            logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
-
-        returned_expiration_str = json_loads(resp.text)['exp']
-
-    #
-    # Per discussions with DCF, need to ask for a new token from DCF after changing google linking
-    # status. Always try to do this. Return the result too, since caller might be interested.
-    #
-
-    try:
-        the_user_id_token, _ = _user_data_from_token(user_id, True)
-        massaged_string, _ = _user_data_token_massaged(the_user_id_token)
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-        throw_later = throw_later if throw_later else e
-
-    if throw_later:
-        raise throw_later
-    elif not success:
-        raise DCFCommFailure()
-
-    return err_msg, returned_expiration_str, massaged_string
 
 
 def _unlink_internally(user_id):
@@ -1060,124 +697,6 @@ def _unlink_internally(user_id):
     return
 
 
-def _refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from_dcf, dcf_uid, cgc_uid, google_id):
-    """
-    This is called when the user logs into DCF for the first time, whenever they need to get a new 30-day refresh
-    token from DCF by logging in, or if they explicitly disconnect their NIH identity and need to reauthenticate
-    to DCF again. It creates or refreshes the token in the database.
-    """
-
-    #
-    # We need to extract out the expiration time buried in the refresh token. When the refresh token
-    # expires (30 days) the user has to reauthenticate with DCF:
-    #
-
-    refresh_token = token_dict['refresh_token']
-    refresh_tokens_b64 = refresh_token.split('.')
-    i64 = refresh_tokens_b64[1]
-    padded = i64 + '=' * (-len(i64) % 4)  # Pad with =; Weird Python % with -length
-    refresh_token_decoded = urlsafe_b64decode(padded.encode("ascii"))
-    refresh_token_dict = json_loads(refresh_token_decoded)
-
-    # A refresh key:
-    # {
-    # "azp": "Client ID",
-    # "jti": "hex string with dashes",
-    # "aud": ["openid", "user", "data", "Client ID"],
-    # "exp": 1529262310,
-    # "iss": "https://The DCF server/user",
-    # "iat": 1526670310,
-    # "pur": "refresh",
-    # "sub": "The users's DCF ID"
-    # }
-
-    refresh_expire_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(refresh_token_dict['exp']))
-
-    # This refers to the *access key* expiration (~20 minutes)
-    if token_dict.has_key('expires_at'):
-        expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
-    else:
-        expiration_time = pytz.utc.localize(
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
-        logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
-
-    logger.info('[INFO] Refresh token storage. New token expires at {}'.format(str(expiration_time)))
-
-    # FIXME! Make sure that the NIH name is going to be unique before we shove it into the table. Don't
-    # depend on the DB table constraint.
-
-    # Note that (nih_username_lower, user_id) is enforced unique in the table:
-    DCFToken.objects.update_or_create(user_id=cgc_uid,
-                                      defaults={
-                                          'dcf_user': dcf_uid,
-                                          'nih_username': nih_username_from_dcf,
-                                          'nih_username_lower': nih_username_from_dcf.lower(),
-                                          'access_token': token_dict['access_token'],
-                                          'refresh_token': token_dict['refresh_token'],
-                                          'user_token': user_token,
-                                          'decoded_jwt': json_dumps(decoded_jwt),
-                                          'expires_at': expiration_time,
-                                          'refresh_expires_at': refresh_expire_time,
-                                          'google_id': google_id # May be none on create...
-                                      })
-
-
-def _access_token_storage(token_dict, cgc_uid):
-    """
-    This call just replaces the access key and user token part of the DCF record. Used when we use the
-    refresh token to get a new access key.
-
-    :raises TokenFailure:
-    :raises RefreshTokenExpired:
-    """
-
-    # This refers to the *access key* expiration (~20 minutes)
-    if token_dict.has_key('expires_at'):
-        expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
-    else:
-        expiration_time = pytz.utc.localize(
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
-        logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
-
-    logger.info('[INFO] Access token storage. New token expires at {}'.format(str(expiration_time)))
-
-    #
-    # Right now (5/30/18) we only get full user info back during the token refresh call. So decode
-    # it and stash it as well:
-    #
-    id_token_decoded, _ = _decode_token(token_dict['id_token'])
-
-    try:
-        dcf_token = get_stored_dcf_token(cgc_uid)
-    except (TokenFailure, RefreshTokenExpired) as e:
-        logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
-        raise e
-
-    dcf_token.access_token = token_dict['access_token']
-    dcf_token.user_token = id_token_decoded
-    dcf_token.expires_at = expiration_time
-    dcf_token.save()
-
-
-def _decode_token_chunk(token, index):
-    """
-    Decode a given chunk of the token and return it as a JSON string and as a dict
-    """
-    tokens_b64 = token.split('.')
-    i64 = tokens_b64[index]
-    padded = i64 + '=' * (-len(i64) % 4)  # Pad with =; Weird Python % with -length
-    token_decoded = urlsafe_b64decode(padded.encode("ascii"))
-    token_dict = json_loads(token_decoded)
-    return token_decoded, token_dict
-
-
-def _decode_token(token):
-    """
-    Decode the token and return it as a JSON string and as a dict
-    """
-    return _decode_token_chunk(token, 1)
-
-
 @login_required
 def dcf_disconnect_user(request):
     """
@@ -1208,9 +727,9 @@ def dcf_disconnect_user(request):
     #
 
     try:
-        _unlink_at_dcf(request.user.id, False) # Don't refresh, we are about to drop the record...
+        unlink_at_dcf(request.user.id, False) # Don't refresh, we are about to drop the record...
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure):
-        messages.warning(request, "Unexpected response from DCF {}".format(resp.status_code))
+        messages.warning(request, "Problems encountered unlinking Google ID at Data Commons. Please contact ISB-CGC Administrator")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
@@ -1222,7 +741,7 @@ def dcf_disconnect_user(request):
     # framework. Not seeing that inside the OAuthSession framework, so we roll our own by hand:
     #
 
-    client_id, client_secret  = _get_secrets()
+    client_id, client_secret = get_secrets()
     data = {
         'token': dcf_token.refresh_token
     }
@@ -1236,7 +755,8 @@ def dcf_disconnect_user(request):
     logger.info("[INFO] DDU C")
 
     if resp.status_code != 200 and resp.status_code != 204:
-        messages.warning(request, 'Revocation problem: {} : {}'.format(resp.status_code, resp.text))
+        logger.error(request, '[ERROR] Token revocation problem: {} : {}'.format(resp.status_code, resp.text))
+        messages.warning(request, "Problems encountered revoking access token at Data Commons. Please contact ISB-CGC Administrator")
 
     #
     # Now we do the internal unlinking, which includes detach the user in our NIH tables, and detach the user from data permissions.
@@ -1244,8 +764,11 @@ def dcf_disconnect_user(request):
 
     try:
         _unlink_internally(request.user.id)
-    except (TokenFailure, InternalTokenError, Exception):
-        messages.warning(request, "Internal problems unlinking".format(resp.status_code))
+    except TokenFailure:
+        # Token problem? Don't care; it is about to be blown away
+        pass
+    except (InternalTokenError, Exception):
+        messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please contact ISB-CGC Administrator")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
@@ -1259,11 +782,13 @@ def dcf_disconnect_user(request):
     except TokenFailure:
         dcf_token = None
     except InternalTokenError:
+        messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please contact ISB-CGC Administrator")
         return redirect(reverse('user_detail', args=[request.user.id]))
     except RefreshTokenExpired as e:
         dcf_token = e.token
 
-    dcf_token.delete()
+    if dcf_token:
+        dcf_token.delete()
 
     #
     # Finally, we need to send the user to logout from the DCF, which is needed to clear the
@@ -1275,254 +800,6 @@ def dcf_disconnect_user(request):
     callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
 
     return HttpResponseRedirect(callback)
-
-
-def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False):
-    """
-    All the stuff around a DCF call that handles token management and refreshes.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises DCFCommFailure:
-    :raises RefreshTokenExpired:
-    """
-
-    dcf_token = get_stored_dcf_token(user_id) # Can raise a TokenFailure or RefreshTokenExpired
-
-    expires_in = (dcf_token.expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
-    logger.info("[INFO] Token Expiration : {} seconds".format(expires_in))
-
-    token_dict = {
-        'access_token' : dcf_token.access_token,
-        'refresh_token' : dcf_token.refresh_token,
-        'token_type' : 'Bearer',
-        'expires_in' : -100 if force_token else expires_in
-    }
-
-    def token_storage_for_user(my_token_dict):
-        _access_token_storage(my_token_dict, user_id)
-
-    client_id, client_secret  = _get_secrets()
-
-    extra_dict = {
-        'client_id' : client_id,
-        'client_secret': client_secret
-    }
-
-    dcf = OAuth2Session(client_id, token=token_dict, auto_refresh_url=DCF_TOKEN_URL,
-                        auto_refresh_kwargs=extra_dict, token_updater=token_storage_for_user)
-    extra_dict = None
-
-    # Hoo boy! You *MUST* provide the client_id and client_secret in the call itself to insure an OAuth2Session token
-    # refresh call uses HTTPBasicAuth!
-
-    # We have seen an exception here (BAD REQUEST) if refresh token has e.g. been revoked and not dropped out of DB.
-    # Also have seen this when requesting an unlink:
-    # reply: 'HTTP/1.1 401 UNAUTHORIZED\r\n' after staging server is rolled??
-    # "/home/vagrant/www/lib/oauthlib/oauth2/rfc6749/parameters.py"
-    # MissingTokenError: (missing_token) Missing access token parameter.
-
-    try:
-        resp = dcf.request(mode, full_url, client_id=client_id,
-                           client_secret=client_secret, data=post_body)
-    except (TokenFailure, RefreshTokenExpired) as e:
-        # bubbles up from token_storage_for_user call
-        logger.error("[ERROR] _dcf_call {} aborted: {}".format(full_url, str(e)))
-        raise e
-    except MissingTokenError as e:
-        force_dcf_token_expiration(user_id)
-        logger.warning("[INFO] MissingTokenError seen")
-        logger.exception(e)
-        raise TokenFailure()
-    except InternalTokenError as e:
-        logger.warning("Internal Token Exception")
-        logger.exception(e)
-        raise e
-    except Exception as e:
-        force_dcf_token_expiration(user_id)
-        logger.warning("DCF Exception")
-        logger.exception(e)
-        raise DCFCommFailure()
-
-    return resp
-
-
-def _get_secrets():
-    """
-    Keep hidden info hidden as much as possible
-    """
-    dcf_secrets = _read_dict(settings.DCF_CLIENT_SECRETS)
-    client_id = dcf_secrets['DCF_CLIENT_ID']
-    client_secret = dcf_secrets['DCF_CLIENT_SECRET']
-    return client_id, client_secret
-
-
-def _read_dict(my_file_name):
-    """
-    Keep hidden info hidden as much as possible
-    """
-    retval = {}
-    with open(my_file_name, 'r') as f:
-        for line in f:
-            if '=' not in line:
-                continue
-            split_line = line.split('=')
-            retval[split_line[0].strip()] = split_line[1].strip()
-    return retval
-
-
-class GoogleLinkState:
-    BOTH_NULL = 1
-    DCF_NULL_CGC_NON_NULL = 2
-    DCF_BAD_CGC_NULL = 3
-    DCF_GOOD_CGC_NULL = 4
-    MATCHING_BAD = 5
-    MATCHING_OK = 6
-    NON_MATCHING_DCF_BAD = 7
-    NON_MATCHING_CGC_BAD = 8
-    NON_MATCHING_ALL_BAD = 9
-
-def _compare_google_ids(dcf_version, cgc_version, user_email):
-    """
-    When we get new tokens from DCF, we want to sanity check if the Google IDs are in agreement.
-    """
-
-    if dcf_version != cgc_version:
-        # Most likely possibility is that either DCF or us thinks the google ID is None and the other doesn't. Another
-        # possibility is that DCF has another Google ID for the user that is not consistent with the
-        # one we *want* them to be using. That case *should* have been caught when they first tried to link.
-        #
-        # If link IDs do not match, we need match ours to DCF, and flag the problem
-        if dcf_version is None:
-            google_match_state = GoogleLinkState.DCF_NULL_CGC_NON_NULL
-        elif cgc_version is None:
-            if dcf_version == user_email:
-                google_match_state = GoogleLinkState.DCF_GOOD_CGC_NULL
-            else:
-                google_match_state = GoogleLinkState.DCF_BAD_CGC_NULL
-        elif dcf_version == user_email:
-            google_match_state = GoogleLinkState.NON_MATCHING_CGC_BAD # Cannot happen
-        elif cgc_version == user_email:
-            google_match_state = GoogleLinkState.NON_MATCHING_DCF_BAD
-        else:
-            google_match_state = GoogleLinkState.NON_MATCHING_ALL_BAD # Cannot happen
-    # Next three cases handle matching GoogleIDs:
-    elif dcf_version is None:
-        google_match_state = GoogleLinkState.BOTH_NULL
-    elif dcf_version == user_email:
-        google_match_state = GoogleLinkState.MATCHING_OK
-    elif dcf_version != user_email:
-        google_match_state = GoogleLinkState.MATCHING_BAD # Cannot happen
-
-    return google_match_state
-
-
-def _refresh_from_dcf(user_id):
-    """
-    Whenever the user hits the user details page, we need to check how the DCF views the world (linkage, expirations,
-    datasets), and update accordingly.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises DCFCommFailure:
-    :raises RefreshTokenExpired:
-    """
-
-    user_email = User.objects.get(id=user_id).email
-
-    #
-    # Haul the user data token string down from DCF:
-    #
-
-    try:
-        the_user_token = _get_user_data_token_string(user_id) # the_user_token is a string.
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-        raise e
-
-    #
-    # Things that could be different: Google ID linkage, expiration time, approved datasets.
-    # Right now, we are not provided with expiration time, so we cannot check that. While NIH linkage
-    # could change in theory, that is fixed via DCF for the life of a refresh token. User could only change
-    # that by logging out/disconnecting from DCF and going back in again, which would give us a new refresh
-    # token.
-    #
-
-    the_user_dict = _user_data_token_to_user_dict(the_user_token)
-    dcf_google_link = _get_google_link_from_user_dict(the_user_dict)
-    nih_id = _get_nih_id_from_user_dict(the_user_dict)
-
-    #
-    # Compare to our versions:
-    #
-
-    try:
-        dcf_token = get_stored_dcf_token(user_id)
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
-        raise e
-
-    if nih_id.lower() != dcf_token.nih_username_lower:
-        logger.error("ERROR: UNEXPECTED NIH_USER_ID MISMATCH {} VERSUS {}".format(nih_id.lower(),
-                                                                                  dcf_token.nih_username_lower))
-    #
-    # More worrisome is a possible mismatch between
-    #
-
-    google_match_state = _compare_google_ids(dcf_google_link.lower(), dcf_token.google_id, user_email)
-
-    null_us = False
-    attach_us = False
-    detach_dcf = False
-    all_done = False
-    if google_match_state == GoogleLinkState.DCF_NULL_CGC_NON_NULL:
-        null_us = True
-    elif google_match_state == GoogleLinkState.DCF_GOOD_CGC_NULL:
-        attach_us = True
-    elif google_match_state == GoogleLinkState.DCF_BAD_CGC_NULL:
-        detach_dcf = True
-    elif google_match_state == GoogleLinkState.NON_MATCHING_CGC_BAD: # Cannot happen
-        raise Exception()
-    elif google_match_state == GoogleLinkState.NON_MATCHING_DCF_BAD:
-        detach_dcf = True
-    elif google_match_state == GoogleLinkState.NON_MATCHING_ALL_BAD: # Cannot happen
-        raise Exception()
-    elif google_match_state == GoogleLinkState.BOTH_NULL:
-        pass
-    elif google_match_state == GoogleLinkState.MATCHING_OK:
-        pass
-    elif google_match_state == GoogleLinkState.MATCHING_BAD: # Cannot happen
-        raise Exception()
-
-    if null_us:
-        try:
-            _unlink_internally(user_id)
-        except (TokenFailure, InternalTokenError, Exception) as e:
-            raise e
-    elif attach_us:
-        try:
-            warning = _finish_the_link(user_id, user_email, use_expiration_time, st_logger, False)
-        except (TokenFailure, InternalTokenError, Exception) as e:
-            raise e
-        all_done = True
-    elif detach_dcf:
-        "Tell the user there is a problem"
-
-
-    #
-    # This is exercised when the NIH ID of the user, returned in the ID token is different than the one we
-    # have in our token database. Don't think this is even possible, since user would need to log in as the
-    # new NIH ID first...
-    #
-
-    #
-    # If everything was consistent, if DCF tells the user is linked to an NIH ID, we would have that ID as one and
-    # only one linked record in our DB.
-    #
-
-    if not all_done:
-        st_logger = StackDriverLogger.build_from_django_settings()
-        _, warning = handle_user_db_update_for_dcf_linking(request.user.id, user_data_dict, use_expiration_time, st_logger)
-
-
 
 
 # @login_required
