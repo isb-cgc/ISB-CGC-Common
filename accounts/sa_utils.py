@@ -38,7 +38,15 @@ from django.conf import settings
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.iam_service import get_iam_resource
 from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
+from dataset_utils.dataset_config import DatasetGoogleGroupPair
 from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_name
+
+from dcf_support import get_stored_dcf_token, \
+                        TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
+                        GoogleLinkState, \
+                        get_google_link_from_user_dict, get_projects_from_user_dict, \
+                        get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
+                        compare_google_ids
 
 logger = logging.getLogger('main_logger')
 
@@ -47,6 +55,7 @@ SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
+
 
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
 
@@ -1005,21 +1014,6 @@ def demo_process_success(auth, user_id, saml_response):
         return retval
 
 
-def get_dcf_auth_key_remaining_seconds(user_id):
-    """
-    We need to know how many seconds are left before the user needs to log back in to NIH to get
-    a new refresh token, which will expire every 30 days.
-    """
-
-    dcf_token = DCFToken.objects.get(user_id=user_id)
-
-    remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
-    logger.info('[INFO] user {} has {} seconds remaining on refresh token'.
-                format(dcf_token.nih_username, remaining_seconds))
-
-    return remaining_seconds
-
-
 def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion_expiration, st_logger):
     """
     When user logs into DCF using iTrust and links via DCF, we create an NIH record for them and link them to to their data.
@@ -1052,7 +1046,7 @@ def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion
             str(nih_user.NIH_username)))
         st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
                                        "[STATUS] NIH_User.objects updated nih_user for linking: {}".format(
-            str(nih_user.NIH_username)))
+                                           str(nih_user.NIH_username)))
         st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
                                        "[STATUS] NIH_User {} associated with email {}".format(
                                            str(nih_user.NIH_username), our_user.email))
@@ -1095,7 +1089,7 @@ def unlink_account_in_db_for_dcf(user_id):
 
     # If nobody is linked, we are actually done. There is nothing to do.
     if num_linked == 0:
-        return None
+        return
     elif num_linked > 1:
         logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
 
@@ -1103,10 +1097,10 @@ def unlink_account_in_db_for_dcf(user_id):
         nih_account_to_unlink.linked = False
         nih_account_to_unlink.active = False
         nih_account_to_unlink.save()
-        nih_account_to_unlink.delete_all_auth_datasets()
+        nih_account_to_unlink.delete_all_auth_datasets() # Drop the user's approved data sets!
         logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
 
-    return None
+    return
 
 
 def handle_user_db_entry(user_id, NIH_username, user_email, auth_response, num_auth_datasets,
@@ -1276,39 +1270,6 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                 #                                "[STATUS] User {} added to {}.".format(user_email,
                 #                                                                       dataset.google_group_name))
 
-        # Add task in queue to deactivate NIH_User entry after NIH_assertion_expiration has passed.
-        # try:
-        #     full_topic_name = get_full_topic_name(PUBSUB_TOPIC_ERA_LOGIN)
-        #     logger.info("Full topic name: {}".format(full_topic_name))
-        #     client = get_pubsub_service()
-        #     params = {
-        #         'event_type': 'era_login',
-        #         'user_id': user_id,
-        #         'deployment': CRON_MODULE
-        #     }
-        #     message = json_dumps(params)
-        #
-        #     body = {
-        #         'messages': [
-        #             {
-        #                 'data': base64.b64encode(message.encode('utf-8'))
-        #             }
-        #         ]
-        #     }
-        #     client.projects().topics().publish(topic=full_topic_name, body=body).execute()
-        #     st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-        #                                    "[STATUS] Notification sent to PubSub topic: {}".format(full_topic_name))
-        #
-        # except Exception as e:
-        #     logger.error("[ERROR] Failed to publish to PubSub topic")
-        #     logger.exception(e)
-        #     st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-        #                                    "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
-        #
-        # retval.messages.append(warn_message)
-        # return retval
-
-
 def deactivate_nih_add_to_open(user_id, user_email):
     # 5/14/18 NO! active flag has nothing to do with user logout, but instead is set to zero when user expires off of ACL group
     # after 24 hours:
@@ -1329,91 +1290,241 @@ def deactivate_nih_add_to_open(user_id, user_email):
     #     else:
     #         logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user_email))
 
-    directory_service, http_auth = get_directory_resource()
+    if not settings.DCF_TEST:
+        directory_service, http_auth = get_directory_resource()
+        # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
+        try:
+            body = {"email": user_email, "role": "MEMBER"}
+            directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
+            logger.info("[STATUS] Attempting to insert user {} into group {}. "
+                        .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
+        except HttpError as e:
+            logger.info(e)
 
 
-    # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
+def get_dcf_refresh_key_remaining_seconds(user_id):
+    """
+    We need to know how many seconds are left before the user needs to log back in to NIH to get
+    a new refresh token, which will expire every 30 days.
+
+    :raises InternalTokenError:
+    """
+
     try:
-        body = {"email": user_email, "role": "MEMBER"}
-        directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-        logger.info("[STATUS] Attempting to insert user {} into group {}. "
-                    .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
-    except HttpError as e:
-        logger.info(e)
+        dcf_token = get_stored_dcf_token(user_id)
+    except InternalTokenError as e:
+        raise e
+    except TokenFailure:
+        return -1  # ? No token? They expire immediately!
+    except RefreshTokenExpired as e:
+        return e.seconds
+
+    remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
+    logger.info('[INFO] user {} has {} seconds remaining on refresh token'.
+                format(dcf_token.nih_username, remaining_seconds))
+
+    return remaining_seconds
+
+
+def _resolve_multiple_nih_users(nih_users, user_id):
+    """
+    Multiple NIH user rows for the current user for the same nih_username. We want the one that is linked.
+    If more than one (is that possible??) take the one with the most recent usage. If nobody is linked,
+    again take the one with the most recent usage. Some of these cases should not be possible (?) but
+    trying to be bombproof here
+    """
+    nih_user = None
+    freshest_linked = None
+    freshest_linked_stamp = None
+    freshest_unlinked = None
+    freshest_unlinked_stamp = None
+    for user in nih_users:
+        if user.linked:
+            if (freshest_linked_stamp is None) or (freshest_linked_stamp < user.NIH_assertion_expiration):
+                freshest_linked_stamp = user.NIH_assertion_expiration
+                freshest_linked = user
+            if nih_user is None:
+                nih_user = nih_users.first()
+            else:
+                logger.error("[ERROR] Multiple linked nih users retrieved nih_user with user_id {}.".format(user_id))
+        else:
+            if (freshest_unlinked_stamp is None) or (freshest_unlinked_stamp < user.NIH_assertion_expiration):
+                freshest_unlinked_stamp = user.NIH_assertion_expiration
+                freshest_unlinked = user
+
+    if freshest_linked:
+        nih_user = freshest_linked
+    elif freshest_unlinked:
+        nih_user = freshest_unlinked
+    else:
+        logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
+        nih_user = None
+
+    return nih_user
+
+
+class RefreshCode:
+    NO_TOKEN = 1
+    TOKEN_EXPIRED = 2
+    INTERNAL_ERROR = 3
+    DCF_COMMUNICATIONS_ERROR = 4
+    NIH_ID_MISMATCH = 5
+    NO_GOOGLE_LINK = 6
+    GOOGLE_LINK_MISMATCH = 7
+    UNEXPECTED_UNLINKED_NIH_USER = 8
+    PROJECT_SET_UPDATED = 9
+    ALL_MATCHES = 10
+
+
+def _refresh_from_dcf(user_id, nih_user):
+    """
+    Whenever the user hits the user details page, we need to check how the DCF views the world (linkage, expirations,
+    datasets). If something is weird, we report it. If not, we make sure the allowed datasets are in sync.
+    """
+
+    #
+    # First off, do we even have a token for the user? If we do, has it expired? If either case exists, there is
+    # nothing we can do. If we are good, haul the data down:
+    #
+
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+        the_user_token = get_user_data_token_string(user_id)  # the_user_token is a string.
+    except TokenFailure:
+        return RefreshCode.NO_TOKEN
+    except RefreshTokenExpired:
+        return RefreshCode.TOKEN_EXPIRED
+    except InternalTokenError:
+        return RefreshCode.INTERNAL_ERROR
+    except DCFCommFailure:
+        raise RefreshCode.DCF_COMMUNICATIONS_ERROR
+
+    #
+    # Things that could be different: Google ID linkage, expiration time, approved datasets.
+    # Right now, we are not provided with expiration time, so we cannot check that. While NIH linkage
+    # could change in theory, that is fixed via DCF for the life of a refresh token. User could only change
+    # that by logging out/disconnecting from DCF and going back in again, which would give us a new refresh
+    # token.
+    #
+
+    the_user_dict = user_data_token_to_user_dict(the_user_token)
+    dcf_google_link = get_google_link_from_user_dict(the_user_dict)
+    dcf_google_link = dcf_google_link.lower() if dcf_google_link else dcf_google_link
+    nih_id = get_nih_id_from_user_dict(the_user_dict)
+    dict_o_projects = get_projects_from_user_dict(the_user_dict)
+    dcf_projects = set(dict_o_projects.keys())
+
+    if nih_id.lower() != dcf_token.nih_username_lower:
+        logger.error("ERROR: UNEXPECTED NIH_USER_ID MISMATCH {} VERSUS {}".format(nih_id.lower(),
+                                                                                  dcf_token.nih_username_lower))
+        return RefreshCode.NIH_ID_MISMATCH
+
+    #
+    # Much more possible is a mismatch in Google link state, though this should not be common:
+    #
+
+    user_email = User.objects.get(id=user_id).email
+    google_match_state =  compare_google_ids(dcf_google_link, dcf_token.google_id, user_email)
+
+    if google_match_state == GoogleLinkState.BOTH_NULL:
+        return RefreshCode.NO_GOOGLE_LINK
+    elif google_match_state != GoogleLinkState.MATCHING_OK:
+        logger.error("ERROR: GOOGLE ID STATE MISMATCH FOR USER {}: {}".format(user_id, google_match_state))
+        return RefreshCode.GOOGLE_LINK_MISMATCH
+
+    if not nih_user:
+        return RefreshCode.UNEXPECTED_UNLINKED_NIH_USER
+
+    our_user_projects = projects_for_user(user_id)
+    if our_user_projects != dcf_projects:
+        st_logger = StackDriverLogger.build_from_django_settings()
+        refresh_user_projects(nih_user, user_email, dcf_projects, st_logger)
+        return RefreshCode.PROJECT_SET_UPDATED
+
+    return RefreshCode.ALL_MATCHES
 
 
 def get_nih_user_details(user_id, force_logout):
+    """
+    :param user_id:
+    :param force_logout:
+    :return:
+    """
     user_details = {}
 
     if settings.DCF_TEST:
 
+        #
+        # If we have detected that the user has logged into DCF with a different NIH username than what we think,
+        # nothing else matters. We tell them to log out.
+        #
+
         if force_logout:
+            user_details['error_state'] = None
+            user_details['dcf_comm_error'] = False
             user_details['force_DCF_logout'] = True
             user_details['NIH_username'] = force_logout
             return user_details
 
         #
+        # Otherwise, ask the DCF for current user info,
+        # FIXME: Check in with DCF for info, throw DCFCommError if we have problems
+        # FIXME: If refresh token is expired, we cannot show any info until they log back in!
+
+        user_details['force_DCF_logout'] = False
+        user_details['refresh_required'] = False
+        user_details['refresh_key_ok'] = True
+        user_details['error_state'] = None
+        user_details['dcf_comm_error'] = False
+        user_details['link_mismatch'] = False
+        user_details['data_sets_updated'] = False
+
+        nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
+
+        nih_user = nih_users.first() if len(nih_users) == 1 else None
+
+        match_state = _refresh_from_dcf(user_id, nih_user)
+
+        if match_state == RefreshCode.NO_TOKEN:
+            user_details['NIH_username'] = None
+            return user_details
+        elif match_state == RefreshCode.TOKEN_EXPIRED:
+            user_details['refresh_required'] = True
+            return user_details
+        elif match_state == RefreshCode.INTERNAL_ERROR:
+            user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
+            return user_details
+        elif match_state == RefreshCode.DCF_COMMUNICATIONS_ERROR:
+            user_details['dcf_comm_error'] = True
+            return user_details
+        elif match_state == RefreshCode.NO_GOOGLE_LINK:
+            user_details['refresh_key_ok'] = False
+            return user_details
+        elif match_state == RefreshCode.GOOGLE_LINK_MISMATCH:
+            # If they have a bad Google ID linked at DCF, we force them to login again, which eventually
+            # tells them they need to switch it.
+            user_details['link_mismatch'] = True
+        elif match_state == RefreshCode.UNEXPECTED_UNLINKED_NIH_USER:
+            # Should not happen. Force a complete logout
+            user_details['NIH_username'] = None
+            return user_details
+        elif match_state == RefreshCode.PROJECT_SET_UPDATED:
+            user_details['data_sets_updated'] = True
+        elif match_state == RefreshCode.ALL_MATCHES:
+            pass
+        else:
+            user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
+            return user_details
+
+        #
         # Now with DCF, we can have a user logged in as an NIH user, but not be linked (which means DCF does not
-        # have an association between NIH ID and Google ID). So while we previously did a get on a linked user,
-        # now we need to filter. If one of the users is linked, that is who we use. Otherwise, we can resolve the
-        # issue by looking at the current DCF token attached to the user to see who they are associated with.
+        # have an association between NIH ID and Google ID). But if the user has not made that link at DCF,
+        # we treat them as unlinked. We are still only interested in fully linked NIH users!
         #
 
-        dcf_tokens = DCFToken.objects.filter(user_id=user_id)
-        if len(dcf_tokens) == 0:
-            return user_details # i.e. empty dict
-        elif len(dcf_tokens) > 1:
-            logger.error("[ERROR] MULTIPLE DCF RECORDS FOR USER {}. ".format(str(user_id)))
-            return user_details  # i.e. empty dict
-
-        dcf_token = dcf_tokens.first()
-
-        curr_user = User.objects.get(id=user_id)
-
-
-        nih_users = NIH_User.objects.filter(user_id=user_id, NIH_username__iexact=dcf_token.nih_username)
-
-        if len(nih_users) == 0:
-            user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
-            return user_details  # i.e. empty dict
-
-        elif len(nih_users) == 1:
-            nih_user = nih_users.first()
-
-        else:
-            #
-            # Multiple NIH user rows for the current user for the same nih_username. We want the one that is linked.
-            # If more than one (is that possible??) take the one with the most recent usage. If nobody is linked,
-            # again take the one with the most recent usage. Some of these cases should not be possible (?) but
-            # trying to be bombproof here:
-            #
-            nih_user = None
-            freshest_linked = None
-            freshest_linked_stamp = None
-            freshest_unlinked = None
-            freshest_unlinked_stamp = None
-            for user in nih_users:
-                if user.linked:
-                    if (freshest_linked_stamp is None) or (freshest_linked_stamp < user.NIH_assertion_expiration):
-                        freshest_linked_stamp = user.NIH_assertion_expiration
-                        freshest_linked = user
-                    if nih_user is None:
-                        nih_user = nih_users.first()
-                    else:
-                        logger.error("[ERROR] Multiple linked nih users retrieved nih_user with user_id {}.".format(user_id))
-                else:
-                    if (freshest_unlinked_stamp is None) or (freshest_unlinked_stamp < user.NIH_assertion_expiration):
-                        freshest_unlinked_stamp = user.NIH_assertion_expiration
-                        freshest_unlinked = user
-
-            if freshest_linked:
-                nih_user = freshest_linked
-            elif freshest_unlinked:
-                nih_user = freshest_unlinked
-            else:
-                logger.error("[ERROR] Unexpected lack of nih_user for {}.".format(user_id))
-                user_details['link_mismatch'] = (dcf_token.google_id is not None) and (dcf_token.google_id != curr_user.email)
-                return user_details  # i.e. empty dict
+        if not nih_user: # Extracted above
+            user_details['NIH_username'] = None
+            return user_details
 
         #
         # With the user_details page, we now need to check with DCF about current status before we display information
@@ -1431,17 +1542,20 @@ def get_nih_user_details(user_id, force_logout):
             # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
             # expired_time = expired_time + testing_expire_hack
             now_time = pytz.utc.localize(datetime.datetime.utcnow())
-            print "times", expired_time, now_time
             if now_time >= expired_time:
+                logger.info("[INFO] Expired user hit user info page and was deactivated {}.".format(expired_time, now_time))
                 nih_user.active = False
                 nih_user.NIH_assertion_expiration = now_time
                 nih_user.save()
-    else:
+
+    else: # Old non-DCF code:
         try:
             nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
-        except (MultipleObjectsReturned, ObjectDoesNotExist), e:
-            if type(e) is MultipleObjectsReturned:
-                logger.warn("Error when retrieving noh_user with user_id {}. {}".format(str(user_id), str(e)))
+        except MultipleObjectsReturned as e:
+            logger.warn("Multiple objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
+            return user_details
+        except ObjectDoesNotExist as e:
+            logger.warn("No objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
             return user_details
 
     user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
@@ -1454,13 +1568,28 @@ def get_nih_user_details(user_id, force_logout):
     user_details['NIH_active'] = nih_user.active
     user_details['auth_datasets'] = [] if len(user_auth_datasets) <= 0 else AuthorizedDataset.objects.filter(id__in=user_auth_datasets.values_list('authorized_dataset',flat=True))
 
-    if settings.DCF_TEST:
-        user_details['link_mismatch'] = (dcf_token.google_id is None) or (dcf_token.google_id != curr_user.email)
-        user_details['NIH_DCF_linked'] = nih_user.linked
-        user_details['refresh_key_ok'] = get_dcf_auth_key_remaining_seconds(user_id) > settings.DCF_TOKEN_REFRESH_WINDOW_SECONDS
-        user_details['force_DCF_logout'] = False
-
     return user_details
+
+
+def projects_for_user(user_id):
+
+    retval = set()
+    try:
+        nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
+    except MultipleObjectsReturned as e:
+        logger.warn("Multiple objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
+        return retval
+    except ObjectDoesNotExist as e:
+        logger.warn("No objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
+        return retval
+
+    user_auth_datasets = AuthorizedDataset.objects.filter(
+        id__in=UserAuthorizedDatasets.objects.filter(nih_user=nih_user).values_list('authorized_dataset', flat=True))
+
+    for dataset in user_auth_datasets:
+        retval.add(dataset.whitelist_id)
+
+    return retval
 
 
 def verify_user_is_in_gcp(user_id, gcp_id):
@@ -1493,3 +1622,24 @@ def verify_user_is_in_gcp(user_id, gcp_id):
         user_in_gcp = False
 
     return user_in_gcp
+
+
+def refresh_user_projects(nih_user, user_email, project_keys, st_logger):
+    """
+    Bring our database in line with the projects that DCF tells us they are good for.
+    """
+
+    authorized_datasets = []
+    for project in project_keys:
+        adqs = AuthorizedDataset.objects.filter(whitelist_id=project)
+        if len(adqs) == 1:
+            authorized_datasets.append(DatasetGoogleGroupPair(project, adqs.first().acl_google_group))
+
+    das = DatasetAccessSupportFactory.from_webapp_django_settings()
+    all_datasets = das.get_all_datasets_and_google_groups()
+
+    for dataset in all_datasets:
+        handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, False, None, None, st_logger)
+
+    return
+
