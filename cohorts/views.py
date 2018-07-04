@@ -1602,15 +1602,14 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
-
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
         return redirect('/user_landing')
 
     try:
         metadata_data_attr_builds = {
-            'HG19': fetch_build_data_attr('HG19'),
-            'HG38': fetch_build_data_attr('HG38')
+            'HG19': fetch_build_data_attr('HG19', panel_type),
+            'HG38': fetch_build_data_attr('HG38', panel_type)
         }
 
         build = request.GET.get('build', 'HG19')
@@ -1623,7 +1622,6 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
 
         if panel_type:
             items = cohort_files(request, cohort_id, build=build, access=has_access, type=panel_type)
-
             for attr in items['metadata_data_counts']:
                 for val in items['metadata_data_counts'][attr]:
                     metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
@@ -2067,9 +2065,8 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     filter_counts = None
     file_list = []
     total_file_count = 0
-    case_barcode = request.GET.get('case_barcode', '')
-    #case_barcode_condition = '' if not case_barcode else "AND cs.case_barcode ='" + case_barcode + "'"
-    case_barcode_condition = '' if not case_barcode else "AND cs.case_barcode like '%" + case_barcode + "%'"
+    case_barcode = request.GET.get('case_barcode', '').lower()
+    case_barcode_condition = '' if not case_barcode else "AND LOWER(cs.case_barcode) like '%" + case_barcode + "%'"
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
@@ -2077,7 +2074,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
         if type == 'dicom':
 
             filter_counts = {}
-
             limit_clause = ""
             offset_clause = ""
 
@@ -2086,6 +2082,12 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
             data_project = settings.BIGQUERY_DATA_PROJECT_NAME
 
+            filter_conditions = ''
+            if len(inc_filters):
+                built_clause = build_where_clause(inc_filters, for_files=True)
+                filter_conditions = 'AND ' + 'bc.'+built_clause['query_str']
+                filter_conditions = filter_conditions.replace("%s", "'{}'").format(*built_clause['value_tuple'])
+
             file_list_query_base = """
                 SELECT cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
                 FROM  [{cohort_project}:{cohort_dataset}.{cohort_table}] cs
@@ -2093,12 +2095,12 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 ON cs.case_barcode = ds.PatientID
                 JOIN [{data_project}:{tcga_bioclin_dataset}.{tcga_clin_table}] bc
                 ON bc.case_barcode=cs.case_barcode
-                WHERE cs.cohort_id = {cohort} {case_barcode_condition}
+                WHERE cs.cohort_id = {cohort} {filter_conditions} {case_barcode_condition}
                 GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name                
             """.format(cohort_dataset=bq_cohort_dataset,
                 cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
                 data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
-                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id, case_barcode_condition=case_barcode_condition)
+                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id, filter_conditions=filter_conditions, case_barcode_condition=case_barcode_condition)
 
             file_list_query = """
                 {select_clause}
@@ -2127,26 +2129,31 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             }
 
             if limit > 0:
-                #limit_clause = ' LIMIT %s' % str(limit)
                 limit_clause = ' LIMIT {}'.format(str(limit))
                 # Offset is only valid when there is a limit
                 if offset > 0:
-                    #offset_clause = ' OFFSET %s' % str(offset)
                     offset_clause = ' OFFSET {}'.format(str(offset))
 
-            order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
 
+
+            order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
+            counts = {}
             if do_filter_count:
                 # Query the count
                 start = time.time()
                 results = BigQuerySupport.execute_query_and_fetch_results(file_count_query.format(select_clause=file_list_query_base))
+                print("*****query")
+                print(file_count_query.format(select_clause=file_list_query_base))
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
                 for entry in results:
                     total_file_count = int(entry['f'][0]['v'])
-
+                cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+                counts = count_public_data_type(request.user, file_list_query_base,
+                                            inc_filters, cohort_programs, (type is not None and type != 'all'),
+                                            build, type)
             # Query the file list only if there was anything to find
-            if (total_file_count and do_filter_count) or not do_filter_count:
+            if total_file_count >0 and do_filter_count or not do_filter_count:
                 start = time.time()
                 results = BigQuerySupport.execute_query_and_fetch_results(
                     file_list_query.format(
@@ -2155,9 +2162,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                     )
                 )
                 stop = time.time()
-
                 logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + (stop - start).__str__())
-
                 if len(results) > 0:
                     for entry in results:
                         file_list.append({
@@ -2168,7 +2173,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                             'project_short_name': entry['f'][4]['v'],
                             'program': "TCGA"
                         })
-
+            filter_counts = counts
         else:
             select_clause_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
@@ -2213,7 +2218,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
             cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-            #params = ()
             select_clause = ''
             count_select_clause = ''
             first_program = True
@@ -2229,7 +2233,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                     built_clause = build_where_clause(inc_filters, for_files=True)
                     filter_conditions = 'AND ' + built_clause['query_str']
                     filter_conditions = filter_conditions.replace("%s", "'{}'").format(*built_clause['value_tuple'])
-
                 union_template = (" UNION " if not first_program else "") + "(" + select_clause_base + ")"
                 select_clause += union_template.format(
                     cohort_id=cohort_id,
@@ -2250,21 +2253,15 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             if not first_program:
 
                 if limit > 0:
-                    #limit_clause = ' LIMIT %s' % str(limit)
                     limit_clause = ' LIMIT {}'.format(str(limit))
                     # Offset is only valid when there is a limit
                     if offset > 0:
-                        #offset_clause = ' OFFSET %s' % str(offset)
                         offset_clause = ' OFFSET {}'.format(str(offset))
                 order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
 
                 start = time.time()
                 query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
                             offset_clause=offset_clause)
-                #final_query = query % params
-                #cursor.execute(query, params)
-                #print(final_query)
-                #print(params)
                 cursor.execute(query)
                 stop = time.time()
                 logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
