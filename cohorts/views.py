@@ -2097,10 +2097,24 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 ON bc.case_barcode=cs.case_barcode
                 WHERE cs.cohort_id = {cohort} {filter_conditions} {case_barcode_condition}
                 GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name                
-            """.format(cohort_dataset=bq_cohort_dataset,
-                cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
-                data_project=data_project, dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
-                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id, filter_conditions=filter_conditions, case_barcode_condition=case_barcode_condition)
+            """
+            file_list_query_formatted = file_list_query_base.format(cohort_dataset=bq_cohort_dataset,
+                                   cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
+                                   data_project=data_project, dcf_data_table="TCGA_radiology_images",
+                                   tcga_img_dataset="metadata",
+                                   tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id,
+                                   filter_conditions=filter_conditions, case_barcode_condition=case_barcode_condition)
+
+            file_list_query_filter_count_formatted = file_list_query_base.format(cohort_dataset=bq_cohort_dataset,
+                                                                    cohort_project=bq_cohort_project_id,
+                                                                    cohort_table=bq_cohort_table,
+                                                                    data_project=data_project,
+                                                                    dcf_data_table="TCGA_radiology_images",
+                                                                    tcga_img_dataset="metadata",
+                                                                    tcga_bioclin_dataset="TCGA_bioclin_v0",
+                                                                    tcga_clin_table="Clinical", cohort=cohort_id,
+                                                                    filter_conditions="",
+                                                                    case_barcode_condition=case_barcode_condition)
 
             file_list_query = """
                 {select_clause}
@@ -2141,15 +2155,13 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             if do_filter_count:
                 # Query the count
                 start = time.time()
-                results = BigQuerySupport.execute_query_and_fetch_results(file_count_query.format(select_clause=file_list_query_base))
-                print("*****query")
-                print(file_count_query.format(select_clause=file_list_query_base))
+                results = BigQuerySupport.execute_query_and_fetch_results(file_count_query.format(select_clause=file_list_query_formatted))
                 stop = time.time()
                 logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
                 for entry in results:
                     total_file_count = int(entry['f'][0]['v'])
                 cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-                counts = count_public_data_type(request.user, file_list_query_base,
+                counts = count_public_data_type(request.user, file_list_query_filter_count_formatted,
                                             inc_filters, cohort_programs, (type is not None and type != 'all'),
                                             build, type)
             # Query the file list only if there was anything to find
@@ -2157,7 +2169,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 start = time.time()
                 results = BigQuerySupport.execute_query_and_fetch_results(
                     file_list_query.format(
-                        select_clause=file_list_query_base, order_clause=order_clause, limit_clause=limit_clause,
+                        select_clause=file_list_query_formatted, order_clause=order_clause, limit_clause=limit_clause,
                         offset_clause=offset_clause
                     )
                 )

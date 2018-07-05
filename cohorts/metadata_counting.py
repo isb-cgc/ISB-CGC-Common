@@ -178,7 +178,6 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
         WHERE TRUE {where_clause}
         GROUP BY {attr};
     """
-
     filter_clauses = {}
     try:
 
