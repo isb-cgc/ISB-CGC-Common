@@ -1663,7 +1663,8 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'sel_file_max': MAX_SEL_FILES,
                                             'img_thumbs_url': settings.IMG_THUMBS_URL,
                                             'has_user_data': bool(cohort_sample_list.count() > 0),
-                                            'build': build})
+                                            'build': build,
+                                            'programs_this_cohort': cohort.get_program_names()})
 
         logger.debug("[STATUS] Returning response from cohort_filelist, with exception")
 
@@ -1739,8 +1740,6 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
             del result['metadata_data_counts']
             result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
-
-        logger.debug("[STATUS] Returning response from cohort_filelist_ajax")
 
     except Exception as e:
         logger.error("[ERROR] While retrieving cohort file data for AJAX call:")
