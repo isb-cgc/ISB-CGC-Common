@@ -223,7 +223,7 @@ def get_sql_connection():
         if db and db.open: db.close()
 
 
-def fetch_build_data_attr(build, type='None'):
+def fetch_build_data_attr(build, type=None):
     db = None
     cursor = None
 
