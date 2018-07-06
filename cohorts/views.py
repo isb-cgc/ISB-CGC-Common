@@ -2049,8 +2049,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
 
     inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
 
-    logger.debug("inc_filters: {}".format(inc_filters))
-
     user = request.user
     user_email = user.email
     user_id = user.id
@@ -2202,7 +2200,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.case_barcode = md.case_barcode
-                 WHERE md.file_uploaded='true' {type_conditions} {filter_conditions} {case_barcode_condition}
+                 WHERE md.file_uploaded='true' {filter_conditions} {case_barcode_condition}
             """
 
             file_list_query = """
@@ -2224,11 +2222,13 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             }
 
             if type == 'igv':
-                type_conditions = "AND md.data_format='BAM'"
-                inc_filters['data_format'] = ['BAM']
+                if 'data_format' not in inc_filters:
+                    inc_filters['data_format'] = []
+                inc_filters['data_format'].append('BAM')
             elif type == 'camic':
-                type_conditions = "AND md.data_format='SVS'"
-                inc_filters['data_format'] = ['SVS']
+                if 'data_format' not in inc_filters:
+                    inc_filters['data_format'] = []
+                inc_filters['data_format'].append('SVS')
 
             db = get_sql_connection()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -2237,7 +2237,6 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             select_clause = ''
             count_select_clause = ''
             first_program = True
-            count_params = ()
             filelist_params = ()
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
@@ -2257,14 +2256,12 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 select_clause += union_template.format(
                     cohort_id=cohort_id,
                     metadata_table=program_data_table,
-                    type_conditions=type_conditions,
                     filter_conditions=filter_conditions,
                     case_barcode_condition=case_barcode_condition)
                 if do_filter_count:
                     count_select_clause += union_template.format(
                         cohort_id=cohort_id,
                         metadata_table=program_data_table,
-                        type_conditions=type_conditions,
                         filter_conditions='',
                         case_barcode_condition=case_barcode_condition)
                 first_program = False
