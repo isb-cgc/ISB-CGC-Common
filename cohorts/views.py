@@ -2064,8 +2064,11 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
     filter_counts = None
     file_list = []
     total_file_count = 0
-    case_barcode = request.GET.get('case_barcode', '').lower()
-    case_barcode_condition = '' if not case_barcode else "AND LOWER(cs.case_barcode) like '%" + case_barcode + "%'"
+    case_barcode = request.GET.get('case_barcode', None)
+    case_barcode_condition = ''
+    if case_barcode:
+        case_barcode_condition = "AND LOWER(cs.case_barcode) like %s"
+        case_barcode = "%{}%".format(case_barcode)
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
@@ -2197,7 +2200,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.case_barcode = md.case_barcode
-                 WHERE md.file_uploaded='true' {type_conditions} {filter_conditions} {case_barcode_condition}
+                 WHERE md.file_uploaded='true' {filter_conditions} {case_barcode_condition}
             """
 
             file_list_query = """
@@ -2219,11 +2222,13 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             }
 
             if type == 'igv':
-                type_conditions = "AND md.data_format='BAM'"
-                inc_filters['data_format'] = ['BAM']
+                if 'data_format' not in inc_filters:
+                    inc_filters['data_format'] = []
+                inc_filters['data_format'].append('BAM')
             elif type == 'camic':
-                type_conditions = "AND md.data_format='SVS'"
-                inc_filters['data_format'] = ['SVS']
+                if 'data_format' not in inc_filters:
+                    inc_filters['data_format'] = []
+                inc_filters['data_format'].append('SVS')
 
             db = get_sql_connection()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -2232,6 +2237,7 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
             select_clause = ''
             count_select_clause = ''
             first_program = True
+            filelist_params = ()
             for program in cohort_programs:
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
                 if len(program_data_tables) <= 0:
@@ -2243,19 +2249,19 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 if len(inc_filters):
                     built_clause = build_where_clause(inc_filters, for_files=True)
                     filter_conditions = 'AND ' + built_clause['query_str']
-                    filter_conditions = filter_conditions.replace("%s", "'{}'").format(*built_clause['value_tuple'])
+                    filelist_params += built_clause['value_tuple']
+                if case_barcode:
+                    filelist_params += (case_barcode, )
                 union_template = (" UNION " if not first_program else "") + "(" + select_clause_base + ")"
                 select_clause += union_template.format(
                     cohort_id=cohort_id,
                     metadata_table=program_data_table,
-                    type_conditions=type_conditions,
                     filter_conditions=filter_conditions,
                     case_barcode_condition=case_barcode_condition)
                 if do_filter_count:
                     count_select_clause += union_template.format(
                         cohort_id=cohort_id,
                         metadata_table=program_data_table,
-                        type_conditions=type_conditions,
                         filter_conditions='',
                         case_barcode_condition=case_barcode_condition)
                 first_program = False
@@ -2273,13 +2279,20 @@ def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='co
                 start = time.time()
                 query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
                             offset_clause=offset_clause)
-                cursor.execute(query)
+                if len(filelist_params) > 0:
+                    logger.debug("query for filelist: {}".format(query))
+                    logger.debug("params: {}".format(str(filelist_params)))
+                    cursor.execute(query, filelist_params)
+                else:
+                    cursor.execute(query)
                 stop = time.time()
                 logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
 
                 counts = {}
                 if do_filter_count:
                     start = time.time()
+                    if case_barcode:
+                        inc_filters['case_barcode'] = [case_barcode]
                     counts = count_public_data_type(request.user, count_select_clause,
                                                 inc_filters, cohort_programs, (type is not None and type != 'all'), build)
                     stop = time.time()
