@@ -166,7 +166,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19'):
+def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19', type='None'):
     db = None
     cursor = None
 
@@ -175,18 +175,16 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
     QUERY_BASE = """
         SELECT {attr}, COUNT(*) AS count
         FROM ({data_query_clause}) AS qc
-        WHERE 1 {where_clause}
+        WHERE TRUE {where_clause}
         GROUP BY {attr};
     """
-
     filter_clauses = {}
-
     try:
 
         db = get_sql_connection()
         cursor = db.cursor()
 
-        metadata_data_attr = fetch_build_data_attr(build)
+        metadata_data_attr = fetch_build_data_attr(build, type)
 
         # Make our where clauses
         for filter in inc_filters:
@@ -199,7 +197,7 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
             subfilter[filter] = inc_filters[filter]
 
             built_clause = build_where_clause(subfilter, for_files=True)
-            filter_clauses[filter]['where_clause'] = built_clause['query_str']
+            filter_clauses[filter]['where_clause'] = built_clause['query_str'].replace("%s", "'{}'")
             filter_clauses[filter]['parameters'] = built_clause['value_tuple']
 
         for attr in metadata_data_attr:
@@ -207,14 +205,22 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
             where_clause = ""
             filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
             if len(filter_clause):
+                filter_clause = filter_clause.format(*[y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format')])
                 where_clause = "AND ( {} )".format(filter_clause)
-            paramter_tuple = tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format'))
             query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr)
-            cursor.execute(query, paramter_tuple)
-            for row in cursor.fetchall():
-                val = "None" if not row[0] else row[0]
-                counts[attr][val] = row[1]
-
+            if type == 'dicom':
+                results = BigQuerySupport.execute_query_and_fetch_results(query)
+            else:
+                cursor.execute(query)
+                results = cursor.fetchall()
+            for row in results:
+                if type == 'dicom':
+                    val = row['f'][0]['v']
+                    cnt = int(row['f'][1]['v'])
+                else:
+                    val = "None" if not row[0] else row[0]
+                    cnt = row[1]
+                counts[attr][val] = cnt
         return counts
 
     except Exception as e:
