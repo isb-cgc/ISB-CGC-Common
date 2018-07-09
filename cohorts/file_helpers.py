@@ -159,15 +159,12 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             if do_filter_count:
                 # Query the count
                 start = time.time()
-                logger.debug("Query: {}".format(file_count_query.format(select_clause=file_list_query_formatted)))
-                if built_clause:
-                    logger.debug("Params: {}".format(built_clause['parameters']))
                 results = BigQuerySupport.execute_query_and_fetch_results(
                     file_count_query.format(select_clause=file_list_query_formatted),
                     built_clause['parameters'] if built_clause else None
                 )
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + str(stop - start))
                 for entry in results:
                     total_file_count = int(entry['f'][0]['v'])
                 cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
@@ -181,10 +178,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                     file_list_query.format(
                         select_clause=file_list_query_formatted, order_clause=order_clause, limit_clause=limit_clause,
                         offset_clause=offset_clause
-                    )
+                    ),
+                    built_clause['parameters'] if built_clause else None
                 )
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + (stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + str(stop - start))
                 if len(results) > 0:
                     for entry in results:
                         file_list.append({
@@ -288,13 +286,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
                             offset_clause=offset_clause)
                 if len(filelist_params) > 0:
-                    logger.debug("query for filelist: {}".format(query))
-                    logger.debug("params: {}".format(str(filelist_params)))
                     cursor.execute(query, filelist_params)
                 else:
                     cursor.execute(query)
                 stop = time.time()
-                logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
+                logger.info("[STATUS] Time to get filelist: {}s".format(str(stop - start)))
 
                 counts = {}
                 if do_filter_count:
