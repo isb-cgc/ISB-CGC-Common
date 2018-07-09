@@ -186,6 +186,15 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
 
         metadata_data_attr = fetch_build_data_attr(build, type)
 
+        case_barcode = None
+
+        # Pull out the case barcode filter, if there is one
+        if 'case_barcode' in inc_filters:
+            case_barcode = inc_filters['case_barcode']
+            del inc_filters['case_barcode']
+
+        case_barcode_condition = '' if not case_barcode else "AND LOWER(cs.case_barcode) like %s"
+
         # Make our where clauses
         for filter in inc_filters:
             for prog in program_list:
@@ -197,21 +206,26 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
             subfilter[filter] = inc_filters[filter]
 
             built_clause = build_where_clause(subfilter, for_files=True)
-            filter_clauses[filter]['where_clause'] = built_clause['query_str'].replace("%s", "'{}'")
+            filter_clauses[filter]['where_clause'] = built_clause['query_str']
             filter_clauses[filter]['parameters'] = built_clause['value_tuple']
 
         for attr in metadata_data_attr:
+            paramter_tuple = ()
             counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
             where_clause = ""
+            if case_barcode:
+                paramter_tuple += (case_barcode, )
             filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
             if len(filter_clause):
-                filter_clause = filter_clause.format(*[y for x in filter_clauses for y in filter_clauses[x]['parameters'] if x != attr or (filter_format and attr == 'data_format')])
                 where_clause = "AND ( {} )".format(filter_clause)
-            query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr)
+            paramter_tuple += tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
+                                   x != attr or (filter_format and attr == 'data_format'))
+
+            query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr, case_barcode_condition=case_barcode_condition)
             if type == 'dicom':
                 results = BigQuerySupport.execute_query_and_fetch_results(query)
             else:
-                cursor.execute(query)
+                cursor.execute(query, paramter_tuple)
                 results = cursor.fetchall()
             for row in results:
                 if type == 'dicom':
