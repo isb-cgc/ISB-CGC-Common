@@ -1,6 +1,6 @@
 """
 
-Copyright 2017, Institute for Systems Biology
+Copyright 2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -160,7 +160,8 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         return user_data_counts
 
     except (Exception) as e:
-        logger.error(traceback.format_exc())
+        logger.error("[ERROR] While counting user metadata:")
+        logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
@@ -169,8 +170,9 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19', type=None):
     db = None
     cursor = None
-
     counts = {}
+    filter_clauses = {}
+    built_clause = None
 
     QUERY_BASE = """
         SELECT {attr}, COUNT(*) AS count
@@ -178,7 +180,7 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
         WHERE TRUE {where_clause}
         GROUP BY {attr};
     """
-    filter_clauses = {}
+
     try:
 
         db = get_sql_connection()
@@ -196,37 +198,61 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
         case_barcode_condition = '' if not case_barcode else "AND LOWER(cs.case_barcode) like %s"
 
         # Make our where clauses
-        for filter in inc_filters:
-            for prog in program_list:
-                if not validate_filter_key(filter, prog.id, build):
-                    raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
-            filter_clauses[filter] = {'where_clause': None, 'parameters': None}
+        if type != 'dicom':
+            for filter in inc_filters:
+                for prog in program_list:
+                    if not validate_filter_key(filter, prog.id, build):
+                        raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
+                filter_clauses[filter] = {'where_clause': None, 'parameters': None}
 
-            subfilter = {}
-            subfilter[filter] = inc_filters[filter]
+                subfilter = {}
+                subfilter[filter] = inc_filters[filter]
 
-            built_clause = build_where_clause(subfilter, for_files=True)
-            filter_clauses[filter]['where_clause'] = built_clause['query_str']
-            filter_clauses[filter]['parameters'] = built_clause['value_tuple']
+                built_clause = None
+                build_where_clause(subfilter, for_files=True)
+                filter_clauses[filter]['where_clause'] = built_clause['query_str']
+                filter_clauses[filter]['parameters'] = built_clause['value_tuple']
+        else:
+            if len(inc_filters):
+                built_clause = BigQuerySupport.build_bq_filter_and_params(inc_filters, with_count_toggle=True)
 
         for attr in metadata_data_attr:
-            paramter_tuple = ()
             counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
-            where_clause = ""
-            if case_barcode:
-                paramter_tuple += (case_barcode, )
-            filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
-            if len(filter_clause):
-                where_clause = "AND ( {} )".format(filter_clause)
-            paramter_tuple += tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
-                                   x != attr or (filter_format and attr == 'data_format'))
 
-            query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr, case_barcode_condition=case_barcode_condition)
             if type == 'dicom':
-                results = BigQuerySupport.execute_query_and_fetch_results(query)
+                where_clause = ''
+                parameters = None
+                count_params = None
+                if built_clause:
+                    where_clause = "AND ( {} )".format(built_clause['filter_string'])
+                    parameters = built_clause['parameters']
+                    count_params = built_clause['count_params']
+
+                query = """
+                    #standardSQL
+                    {query}
+                """.format(query=QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr))
+
+                if count_params and attr in count_params:
+                    count_params[attr]['parameterValue']['value'] = 'not_filtering'
+                results = BigQuerySupport.execute_query_and_fetch_results(query, parameters)
+                if count_params and attr in count_params:
+                    count_params[attr]['parameterValue']['value'] = 'filtering'
             else:
+                paramter_tuple = ()
+                where_clause = ""
+                if case_barcode:
+                    paramter_tuple += (case_barcode, )
+                filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
+                if len(filter_clause):
+                    where_clause = "AND ( {} )".format(filter_clause)
+                paramter_tuple += tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
+                                       x != attr or (filter_format and attr == 'data_format'))
+
+                query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr, case_barcode_condition=case_barcode_condition)
                 cursor.execute(query, paramter_tuple)
                 results = cursor.fetchall()
+
             for row in results:
                 if type == 'dicom':
                     val = row['f'][0]['v']
@@ -486,7 +512,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             results = BigQuerySupport.execute_query_and_fetch_results(query, params)
             stop = time.time()
 
-            logger.debug('[BENCHMARKING] Time to query BQ for mutation data: '+(stop - start).__str__())
+            logger.debug('[BENCHMARKING] Time to query BQ for mutation data: '+str(stop - start))
 
             if len(results) > 0:
                 for barcode in results:
@@ -590,7 +616,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         stop = time.time()
 
-        logger.debug('[BENCHMARKING] Time to create temporary filter/cohort tables in count_metadata: '+(stop - start).__str__())
+        logger.debug('[BENCHMARKING] Time to create temporary filter/cohort tables in count_metadata: '+str(stop - start))
 
         count_query_set = []
 
@@ -782,7 +808,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 item[type] = item[type][:-2]
 
         stop = time.time()
-        logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+(stop - start).__str__())
+        logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+str(stop - start))
 
         # query sample and case counts
         count_query = 'SELECT COUNT(DISTINCT %s) FROM %s'
@@ -906,7 +932,7 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None,
                     filters[key]['values'].append(value)
 
         except Exception as e:
-            logger.error(traceback.format_exc())
+            logger.exception(e)
             raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
     start = time.time()
@@ -977,7 +1003,6 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
     except Exception, e:
         logger.error('[ERROR] Exception when counting user metadata: ')
         logger.exception(e)
-        logger.error(traceback.format_exc())
 
 
 def validate_and_count_barcodes(barcodes, user_id):

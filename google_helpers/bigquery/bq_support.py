@@ -292,6 +292,8 @@ class BigQuerySupport(BigQueryABC):
 
         job_id = query_job['jobReference']['jobId']
 
+        query_results = None
+
         # Cost Estimates don't actually run as fully-fledged jobs, and won't be inserted as such,
         # so we just get back the estimate immediately
         if cost_est:
@@ -323,11 +325,6 @@ class BigQuerySupport(BigQueryABC):
         else:
             logger.error("[ERROR] Query took longer than the allowed time to execute--" +
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
-
-        logger.debug("[STATUS] Logging statements for test debug:")
-        logger.debug("State: {}".format(str(job_is_done['status']['state']) if job_is_done and 'status' in job_is_done and 'state' in job_is_done['status'] else 'N/A'))
-        logger.debug("Exeucting project: {}".format(self.executing_project))
-        logger.debug("jobId: {}".format(job_is_done['jobReference']['jobId']))
 
         if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
                 job_is_done['statistics']['query']:
@@ -406,7 +403,7 @@ class BigQuerySupport(BigQueryABC):
     # TODO: add support for BETWEEN
     # TODO: add support for <>=
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None):
         result = {
             'filter_string': '',
             'parameters': []
@@ -433,7 +430,7 @@ class BigQuerySupport(BigQueryABC):
             type = attr.split(':')[-1]
             invert = bool(attr.split(':')[3] == 'NOT')
             param_name = 'gene{}{}'.format(str(mut_filtr_count), '_{}'.format(param_suffix) if param_suffix else '')
-            filter_string = 'Hugo_Symbol = @{} AND '.format(param_name)
+            filter_string = '{}Hugo_Symbol = @{} AND '.format('' if not field_prefix else field_prefix, param_name)
 
             gene_query_param = {
                 'name': param_name,
@@ -456,13 +453,13 @@ class BigQuerySupport(BigQueryABC):
             }
 
             if type == 'category' and values[0] == 'any':
-                filter_string += 'Variant_Classification IS NOT NULL'
+                filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix,)
                 var_query_param = None
             else:
                 if type == 'category':
                     values = MOLECULAR_CATEGORIES[values[0]]['attrs']
                 var_param_name = "var_class{}{}".format(str(mut_filtr_count), '_{}'.format(param_suffix) if param_suffix else '')
-                filter_string += 'Variant_Classification {}IN UNNEST(@{})'.format('NOT ' if invert else '', var_param_name)
+                filter_string += '{}Variant_Classification {}IN UNNEST(@{})'.format('' if not field_prefix else field_prefix, 'NOT ' if invert else '', var_param_name)
                 var_query_param['name'] = var_param_name
                 var_query_param['parameterType']['type'] = 'ARRAY'
                 var_query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
@@ -473,6 +470,8 @@ class BigQuerySupport(BigQueryABC):
             var_query_param and result['parameters'].append(var_query_param)
 
             mut_filtr_count += 1
+
+        logger.debug("other filters: {}".format(str(other_filters)))
 
         for attr, values in other_filters.items():
             filter_string = ''
@@ -488,7 +487,7 @@ class BigQuerySupport(BigQueryABC):
             }
             if 'None' in values:
                 values.remove('None')
-                filter_string = "{} IS NULL".format(attr)
+                filter_string = "{}{} IS NULL".format('' if not field_prefix else field_prefix, attr)
 
             if len(values) > 0:
                 if len(filter_string):
@@ -498,15 +497,15 @@ class BigQuerySupport(BigQueryABC):
                     query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING' and '%' in values[0]:
-                        filter_string += "{} LIKE @{}".format(attr, param_name)
+                        filter_string += "{}{} LIKE @{}".format('' if not field_prefix else field_prefix, attr, param_name)
                     else:
-                        filter_string += "{} = @{}".format(attr, param_name)
+                        filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr, param_name)
                 else:
                     # Array param
                     query_param['parameterType']['type'] = "ARRAY"
                     query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
                     query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')}
-                    filter_string += "{} IN UNNEST(@{})".format(attr, param_name)
+                    filter_string += "{}{} IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
                 filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
