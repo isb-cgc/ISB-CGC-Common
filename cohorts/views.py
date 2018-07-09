@@ -46,6 +46,7 @@ from workbooks.models import Workbook, Worksheet, Worksheet_plot
 from accounts.models import GoogleProject
 from metadata_helpers import *
 from metadata_counting import *
+from file_helpers import *
 from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from accounts.sa_utils import auth_dataset_whitelists_for_user
@@ -1602,6 +1603,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
         return redirect('/user_landing')
@@ -1621,7 +1623,12 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
         items = None
 
         if panel_type:
-            items = cohort_files(request, cohort_id, build=build, access=has_access, type=panel_type)
+            inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
+                request.POST.get('filters', '{}'))
+            if request.GET.get('case_barcode', None):
+                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')),]
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
+
             for attr in items['metadata_data_counts']:
                 for val in items['metadata_data_counts'][attr]:
                     metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
@@ -1715,12 +1722,15 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
             sort_order = int(request.GET.get('sort_order'))
             params['sort_order'] = sort_order
 
-
         build = request.GET.get('build','HG19')
 
         has_access = auth_dataset_whitelists_for_user(request.user.id)
 
-        result = cohort_files(request=request, cohort_id=cohort_id, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
+        inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
+            request.POST.get('filters', '{}'))
+        if request.GET.get('case_barcode', None):
+            inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')), ]
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our total file count will reflect that
         if do_filter_count:
@@ -1816,7 +1826,12 @@ def streaming_csv_view(request, cohort_id=0):
         if not re.compile(r'[Hh][Gg](19|38)').search(build):
             raise Exception("Invalid build supplied")
 
-        items = cohort_files(request=request, cohort_id=cohort_id, limit=limit, build=build)
+        inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
+            request.POST.get('filters', '{}'))
+        if request.GET.get('case_barcode', None):
+            inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')), ]
+        items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit, build=build)
+
         if 'file_list' in items:
             file_list = items['file_list']
         else:
@@ -2042,343 +2057,6 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
         }
 
     return render(request, template, template_values)
-
-
-@login_required
-def cohort_files(request, cohort_id, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG38', access=None, type=None, do_filter_count=True):
-
-    inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(request.POST.get('filters', '{}'))
-
-    user = request.user
-    user_email = user.email
-    user_id = user.id
-
-    resp = None
-    db = None
-    cursor = None
-    query_limit = limit
-    type_conditions = ""
-    limit_clause = ""
-    offset_clause = ""
-
-    filter_counts = None
-    file_list = []
-    total_file_count = 0
-    case_barcode = request.GET.get('case_barcode', None)
-    case_barcode_condition = ''
-    if case_barcode:
-        case_barcode_condition = "AND LOWER(cs.case_barcode) like %s"
-        case_barcode = "%{}%".format(case_barcode)
-    try:
-        # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
-        Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
-
-        if type == 'dicom':
-
-            filter_counts = {}
-            limit_clause = ""
-            offset_clause = ""
-
-            bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-            bq_cohort_dataset = settings.COHORT_DATASET_ID
-            bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
-            data_project = settings.BIGQUERY_DATA_PROJECT_NAME
-
-            filter_conditions = ''
-            if len(inc_filters):
-                built_clause = build_where_clause(inc_filters, for_files=True)
-                filter_conditions = 'AND ' + 'bc.'+built_clause['query_str']
-                filter_conditions = filter_conditions.replace("%s", "'{}'").format(*built_clause['value_tuple'])
-
-            file_list_query_base = """
-                SELECT cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
-                FROM  [{cohort_project}:{cohort_dataset}.{cohort_table}] cs
-                JOIN [{data_project}:{tcga_img_dataset}.{dcf_data_table}] ds
-                ON cs.case_barcode = ds.PatientID
-                JOIN [{data_project}:{tcga_bioclin_dataset}.{tcga_clin_table}] bc
-                ON bc.case_barcode=cs.case_barcode
-                WHERE cs.cohort_id = {cohort} {filter_conditions} {case_barcode_condition}
-                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name                
-            """
-            file_list_query_formatted = file_list_query_base.format(cohort_dataset=bq_cohort_dataset,
-                                   cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table,
-                                   data_project=data_project, dcf_data_table="TCGA_radiology_images",
-                                   tcga_img_dataset="metadata",
-                                   tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id,
-                                   filter_conditions=filter_conditions, case_barcode_condition=case_barcode_condition)
-
-            file_list_query_filter_count_formatted = file_list_query_base.format(cohort_dataset=bq_cohort_dataset,
-                                                                    cohort_project=bq_cohort_project_id,
-                                                                    cohort_table=bq_cohort_table,
-                                                                    data_project=data_project,
-                                                                    dcf_data_table="TCGA_radiology_images",
-                                                                    tcga_img_dataset="metadata",
-                                                                    tcga_bioclin_dataset="TCGA_bioclin_v0",
-                                                                    tcga_clin_table="Clinical", cohort=cohort_id,
-                                                                    filter_conditions="",
-                                                                    case_barcode_condition=case_barcode_condition)
-
-            file_list_query = """
-                {select_clause}
-                {order_clause}
-                {limit_clause}
-                {offset_clause}
-            """
-
-            file_count_query = """
-                SELECT COUNT(*)
-                FROM (
-                  {select_clause}
-                )
-            """
-
-            # col_map: used in the sql ORDER BY clause
-            # key: html column attribute 'columnId'
-            # value: db table column name
-            col_map = {
-                'col-program': 'bc.project_short_name',
-                'col-barcode': 'cs.case_barcode',
-                'col-diseasecode': 'bc.disease_code',
-                'col-projectname': 'bc.project_short_name',
-                'col-studydesc': 'ds.StudyDescription',
-                'col-studyuid': 'ds.StudyInstanceUID'
-            }
-
-            if limit > 0:
-                limit_clause = ' LIMIT {}'.format(str(limit))
-                # Offset is only valid when there is a limit
-                if offset > 0:
-                    offset_clause = ' OFFSET {}'.format(str(offset))
-
-
-
-            order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
-            counts = {}
-            if do_filter_count:
-                # Query the count
-                start = time.time()
-                results = BigQuerySupport.execute_query_and_fetch_results(file_count_query.format(select_clause=file_list_query_formatted))
-                stop = time.time()
-                logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + (stop - start).__str__())
-                for entry in results:
-                    total_file_count = int(entry['f'][0]['v'])
-                cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-                counts = count_public_data_type(request.user, file_list_query_filter_count_formatted,
-                                            inc_filters, cohort_programs, (type is not None and type != 'all'),
-                                            build, type)
-            # Query the file list only if there was anything to find
-            if total_file_count >0 and do_filter_count or not do_filter_count:
-                start = time.time()
-                results = BigQuerySupport.execute_query_and_fetch_results(
-                    file_list_query.format(
-                        select_clause=file_list_query_formatted, order_clause=order_clause, limit_clause=limit_clause,
-                        offset_clause=offset_clause
-                    )
-                )
-                stop = time.time()
-                logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + (stop - start).__str__())
-                if len(results) > 0:
-                    for entry in results:
-                        file_list.append({
-                            'case': entry['f'][0]['v'],
-                            'study_uid': entry['f'][1]['v'],
-                            'study_desc': entry['f'][2]['v'] or 'N/A',
-                            'disease_code': entry['f'][3]['v'],
-                            'project_short_name': entry['f'][4]['v'],
-                            'program': "TCGA"
-                        })
-            filter_counts = counts
-        else:
-            select_clause_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
-                  md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
-                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
-                 FROM {metadata_table} md
-                 JOIN (
-                     SELECT DISTINCT case_barcode
-                     FROM cohorts_samples
-                     WHERE cohort_id = {cohort_id}
-                 ) cs
-                 ON cs.case_barcode = md.case_barcode
-                 WHERE md.file_uploaded='true' {filter_conditions} {case_barcode_condition}
-            """
-
-            file_list_query = """
-                {select_clause}
-                {order_clause}
-                {limit_clause}
-                {offset_clause}                
-            """
-            col_map = {
-                'col-program': 'project_short_name',
-                'col-barcode': 'case_barcode',
-                'col-filename': 'file_name',
-                'col-diseasecode': 'disease_code',
-                'col-exp-strategy': 'experimental_strategy',
-                'col-platform': 'platform',
-                'col-datacat': 'data_category',
-                'col-datatype': 'data_type',
-                'col-dataformat': 'data_format'
-            }
-
-            if type == 'igv':
-                if 'data_format' not in inc_filters:
-                    inc_filters['data_format'] = []
-                inc_filters['data_format'].append('BAM')
-            elif type == 'camic':
-                if 'data_format' not in inc_filters:
-                    inc_filters['data_format'] = []
-                inc_filters['data_format'].append('SVS')
-
-            db = get_sql_connection()
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-
-            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-            select_clause = ''
-            count_select_clause = ''
-            first_program = True
-            filelist_params = ()
-            for program in cohort_programs:
-                program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
-                if len(program_data_tables) <= 0:
-                    logger.debug("[STATUS] No metadata_data table for {}, build {}--skipping.".format(program.name,build))
-                    # This program has no metadata_data table for this build, or at all--skip
-                    continue
-                program_data_table = program_data_tables[0].data_table
-                filter_conditions = ''
-                if len(inc_filters):
-                    built_clause = build_where_clause(inc_filters, for_files=True)
-                    filter_conditions = 'AND ' + built_clause['query_str']
-                    filelist_params += built_clause['value_tuple']
-                if case_barcode:
-                    filelist_params += (case_barcode, )
-                union_template = (" UNION " if not first_program else "") + "(" + select_clause_base + ")"
-                select_clause += union_template.format(
-                    cohort_id=cohort_id,
-                    metadata_table=program_data_table,
-                    filter_conditions=filter_conditions,
-                    case_barcode_condition=case_barcode_condition)
-                if do_filter_count:
-                    count_select_clause += union_template.format(
-                        cohort_id=cohort_id,
-                        metadata_table=program_data_table,
-                        filter_conditions='',
-                        case_barcode_condition=case_barcode_condition)
-                first_program = False
-
-            # if first_program is still true, we found no programs with data tables for this build
-            if not first_program:
-
-                if limit > 0:
-                    limit_clause = ' LIMIT {}'.format(str(limit))
-                    # Offset is only valid when there is a limit
-                    if offset > 0:
-                        offset_clause = ' OFFSET {}'.format(str(offset))
-                order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
-
-                start = time.time()
-                query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
-                            offset_clause=offset_clause)
-                if len(filelist_params) > 0:
-                    logger.debug("query for filelist: {}".format(query))
-                    logger.debug("params: {}".format(str(filelist_params)))
-                    cursor.execute(query, filelist_params)
-                else:
-                    cursor.execute(query)
-                stop = time.time()
-                logger.info("[STATUS] Time to get file-list: {}s".format(str(stop - start)))
-
-                counts = {}
-                if do_filter_count:
-                    start = time.time()
-                    if case_barcode:
-                        inc_filters['case_barcode'] = [case_barcode]
-                    counts = count_public_data_type(request.user, count_select_clause,
-                                                inc_filters, cohort_programs, (type is not None and type != 'all'), build)
-                    stop = time.time()
-                    logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
-
-                if cursor.rowcount > 0:
-                    for item in cursor.fetchall():
-                        whitelist_found = False
-                        # If this is a controlled-access entry, check for the user's access to it
-                        if item['access'] == 'controlled' and access:
-                            whitelists = item['acl'].split(',')
-                            for whitelist in whitelists:
-                                if whitelist in access:
-                                    whitelist_found = True
-
-                        file_list.append({
-                            'sample': item['sample_barcode'],
-                            'case': item['case_barcode'],
-                            'disease_code': item['disease_code'],
-                            'build': build.lower(),
-                            'cloudstorage_location': item['file_name_key'] or 'N/A',
-                            'index_name': item['index_file_name'] or 'N/A',
-                            'access': (item['access'] or 'N/A'),
-                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
-                            'filename': item['file_name'] or 'N/A',
-                            'exp_strat': item['experimental_strategy'] or 'N/A',
-                            'platform': item['platform'] or 'N/A',
-                            'datacat': item['data_category'] or 'N/A',
-                            'datatype': (item['data_type'] or 'N/A'),
-                            'dataformat': (item['data_format'] or 'N/A'),
-                            'program': item['project_short_name'].split("-")[0],
-                            'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
-                            'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
-                            'project_short_name': (item['project_short_name'] or 'N/A'),
-                            'cohort_id': cohort_id
-                        })
-                filter_counts = counts
-                files_counted = False
-                # Add to the file total
-                if do_filter_count:
-                    for attr in filter_counts:
-                        if files_counted:
-                            continue
-                        for val in filter_counts[attr]:
-                            if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                                total_file_count += int(filter_counts[attr][val])
-                        files_counted = True
-            else:
-                filter_counts = {}
-        resp = {
-            'total_file_count': total_file_count,
-            'page': page,
-            'file_list': file_list,
-            'build': build,
-            'metadata_data_counts': filter_counts
-        }
-
-    except (IndexError, TypeError) as e:
-        logger.error("Error obtaining list of samples in cohort file list")
-        logger.exception(e)
-        resp = {'error': 'Error obtaining list of samples in cohort file list'}
-
-    except ObjectDoesNotExist as e:
-        logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
-        logger.exception(e)
-        resp = {'error': "User {} does not have permission to view cohort {}, and so cannot export it or its file manifest.".format(user_email, str(cohort_id))}
-
-    except MultipleObjectsReturned as e:
-        logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
-        logger.exception(e)
-        perms = Cohort_Perms.objects.filter(cohort_id=cohort_id, user_id=user_id).values_list('cohort_id','user_id')
-        logger.error("[ERROR] Permissions found: {}".format(str(perms)))
-        resp = {'error': "There was an error while retrieving cohort {}'s permissions--please contact the administrator.".format(str(cohort_id))}
-
-    except Exception as e:
-        logger.error("[ERROR] Exception obtaining file list and platform counts:")
-        logger.exception(e)
-        resp = {'error': 'Error getting counts'}
-
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-    logger.debug("[STATUS] Returning response from cohort_files")
-
-    return resp
 
 
 # Master method for exporting data types to BQ, GCS, etc.

@@ -1,6 +1,6 @@
 """
 
-Copyright 2017, Institute for Systems Biology
+Copyright 2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -212,21 +212,37 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
         for attr in metadata_data_attr:
             paramter_tuple = ()
             counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
-            where_clause = ""
-            if case_barcode:
-                paramter_tuple += (case_barcode, )
-            filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
-            if len(filter_clause):
-                where_clause = "AND ( {} )".format(filter_clause)
-            paramter_tuple += tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
-                                   x != attr or (filter_format and attr == 'data_format'))
-
-            query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr, case_barcode_condition=case_barcode_condition)
             if type == 'dicom':
-                results = BigQuerySupport.execute_query_and_fetch_results(query)
+                query = """
+                    #standardSQL
+                    {query}
+                """.format(query=query)
+
+                where_clause = ''
+                parameters = None
+                if len(inc_filters):
+                    built_clause = BigQuerySupport.build_bq_filter_and_params(inc_filters)
+                    where_clause = "AND ( {} )".format(built_clause['filter_string'])
+                    parameters = built_clause['parameters']
+
+                query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause)
+
+                results = BigQuerySupport.execute_query_and_fetch_results(query, parameters)
             else:
+                where_clause = ""
+                if case_barcode:
+                    paramter_tuple += (case_barcode, )
+                filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
+                if len(filter_clause):
+                    where_clause = "AND ( {} )".format(filter_clause)
+                paramter_tuple += tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
+                                       x != attr or (filter_format and attr == 'data_format'))
+
+                query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr, case_barcode_condition=case_barcode_condition)
                 cursor.execute(query, paramter_tuple)
                 results = cursor.fetchall()
+
+
             for row in results:
                 if type == 'dicom':
                     val = row['f'][0]['v']
