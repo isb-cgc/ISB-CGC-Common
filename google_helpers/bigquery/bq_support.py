@@ -497,7 +497,10 @@ class BigQuerySupport(BigQueryABC):
                     # Scalar param
                     query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     query_param['parameterValue']['value'] = values[0]
-                    filter_string += "{} = @{}".format(attr, param_name)
+                    if query_param['parameterType']['type'] == 'STRING' and '%' in values[0]:
+                        filter_string += "{} LIKE @{}".format(attr, param_name)
+                    else:
+                        filter_string += "{} = @{}".format(attr, param_name)
                 else:
                     # Array param
                     query_param['parameterType']['type'] = "ARRAY"

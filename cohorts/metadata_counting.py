@@ -166,7 +166,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if db and db.open: db.close()
 
 
-def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19', type='None'):
+def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19', type=None):
     db = None
     cursor = None
 
@@ -210,21 +210,30 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
             filter_clauses[filter]['parameters'] = built_clause['value_tuple']
 
         for attr in metadata_data_attr:
+            paramter_tuple = ()
             counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
             where_clause = ""
+            if case_barcode:
+                paramter_tuple += (case_barcode, )
             filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
             if len(filter_clause):
                 where_clause = "AND ( {} )".format(filter_clause)
-            paramter_tuple = tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
+            paramter_tuple += tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
                                    x != attr or (filter_format and attr == 'data_format'))
-            if case_barcode:
-                paramter_tuple += (case_barcode, )
+
             query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr, case_barcode_condition=case_barcode_condition)
-            cursor.execute(query, paramter_tuple)
-            results = cursor.fetchall()
+            if type == 'dicom':
+                results = BigQuerySupport.execute_query_and_fetch_results(query)
+            else:
+                cursor.execute(query, paramter_tuple)
+                results = cursor.fetchall()
             for row in results:
-                val = "None" if not row[0] else row[0]
-                cnt = row[1]
+                if type == 'dicom':
+                    val = row['f'][0]['v']
+                    cnt = int(row['f'][1]['v'])
+                else:
+                    val = "None" if not row[0] else row[0]
+                    cnt = row[1]
                 counts[attr][val] = cnt
         return counts
 
