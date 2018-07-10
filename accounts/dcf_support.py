@@ -356,6 +356,7 @@ def refresh_at_dcf(user_id):
     err_msg = None
     returned_expiration_str = None
     massaged_string = None
+    resp = None
 
     #
     # Call DCF to drop the linkage. Note that this will immediately remove them from controlled access.
@@ -527,7 +528,7 @@ def dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False):
     :raises RefreshTokenExpired:
     """
 
-    dcf_token = get_stored_dcf_token(user_id) # Can raise a TokenFailure or RefreshTokenExpired
+    dcf_token = get_stored_dcf_token(user_id)
 
     expires_in = (dcf_token.expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
     logger.info("[INFO] Token Expiration : {} seconds".format(expires_in))
@@ -617,6 +618,7 @@ def _access_token_storage(token_dict, cgc_uid):
     refresh token to get a new access key.
 
     :raises TokenFailure:
+    :raises InternalTokenError:
     :raises RefreshTokenExpired:
     """
 
@@ -638,7 +640,7 @@ def _access_token_storage(token_dict, cgc_uid):
 
     try:
         dcf_token = get_stored_dcf_token(cgc_uid)
-    except (TokenFailure, RefreshTokenExpired) as e:
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
         logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
         raise e
 
