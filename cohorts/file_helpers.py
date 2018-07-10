@@ -47,15 +47,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
     user_email = user.email
     user_id = user.id
 
-    resp = None
+    #resp = None
     db = None
     cursor = None
-    query_limit = limit
-    type_conditions = ""
+    #query_limit = limit
     limit_clause = ""
     offset_clause = ""
 
-    filter_counts = None
+    #filter_counts = None
     file_list = []
     total_file_count = 0
 
@@ -68,10 +67,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         if 'case_barcode' in inc_filters:
             case_barcode = inc_filters['case_barcode']
             del inc_filters['case_barcode']
-
         if case_barcode:
-            case_barcode_condition = "AND LOWER(cs.case_barcode) LIKE %s"
-            case_barcode = "%{}%".format(case_barcode)
+            case_barcode_condition = "AND LOWER(cs.case_barcode) LIKE LOWER(%s)"
+            case_barcode = ''.join(case_barcode)
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
@@ -79,7 +77,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
         if type == 'dicom':
 
-            filter_counts = {}
             limit_clause = ""
             offset_clause = ""
 
@@ -269,7 +266,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         cohort_id=cohort_id,
                         metadata_table=program_data_table,
                         filter_conditions='',
-                        case_barcode_condition=case_barcode_condition)
+                        case_barcode_condition='')
                 first_program = False
 
             # if first_program is still true, we found no programs with data tables for this build
