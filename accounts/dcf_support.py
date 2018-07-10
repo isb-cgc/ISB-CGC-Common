@@ -356,6 +356,7 @@ def refresh_at_dcf(user_id):
     err_msg = None
     returned_expiration_str = None
     massaged_string = None
+    resp = None
 
     #
     # Call DCF to drop the linkage. Note that this will immediately remove them from controlled access.
