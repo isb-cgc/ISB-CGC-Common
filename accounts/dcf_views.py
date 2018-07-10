@@ -599,11 +599,15 @@ def dcf_link_extend(request):
         err_msg, returned_expiration_str, user_data_token_string = refresh_at_dcf(request.user.id)
     except TokenFailure:
         err_msg = "Your Data Commons Framework identity needs to be reestablished to complete this task."
+    except InternalTokenError:
+        err_msg = "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("0081")
     except RefreshTokenExpired:
         err_msg = "Your login to the Data Commons Framework has expired. You will need to log in again."
     except DCFCommFailure:
         err_msg = comm_err_msg
-    except Exception:
+    except Exception as e:
+        logger.error("[ERROR]: Unexpected Exception {}".format(str(e)))
+        logger.exception(e)
         err_msg = "Unexpected problem."
 
     if err_msg:
