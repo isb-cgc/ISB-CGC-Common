@@ -46,37 +46,18 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
     user_email = user.email
     user_id = user.id
-
-    #resp = None
     db = None
     cursor = None
-    #query_limit = limit
     limit_clause = ""
     offset_clause = ""
-
-    #filter_counts = None
     file_list = []
     total_file_count = 0
-
-    case_barcode = None
-    case_barcode_condition = ''
-
-    # DICOM uses BQ, and that WHERE clause builder can handle the LIKE clause,
-    # but the MySQL WHERE clause builder can't
-    if not type == 'dicom':
-        if 'case_barcode' in inc_filters:
-            case_barcode = inc_filters['case_barcode']
-            del inc_filters['case_barcode']
-        if case_barcode:
-            case_barcode_condition = "AND LOWER(cs.case_barcode) LIKE LOWER(%s)"
-            case_barcode = ''.join(case_barcode)
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
         if type == 'dicom':
-
             limit_clause = ""
             offset_clause = ""
 
@@ -192,6 +173,13 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         })
             filter_counts = counts
         else:
+            case_barcode = None
+            case_barcode_condition = ''
+            if 'case_barcode' in inc_filters:
+                case_barcode = ''.join(inc_filters['case_barcode'])
+                del inc_filters['case_barcode']
+                case_barcode_condition = " AND LOWER(cs.case_barcode) LIKE LOWER(%s)"
+
             select_clause_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
                   md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
@@ -271,7 +259,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             # if first_program is still true, we found no programs with data tables for this build
             if not first_program:
-
                 if limit > 0:
                     limit_clause = ' LIMIT {}'.format(str(limit))
                     # Offset is only valid when there is a limit
