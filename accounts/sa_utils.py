@@ -855,9 +855,9 @@ def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, resu
 
             if settings.DCF_TEST:
                 user_message = "User {} is already linked to the eRA commons identity {}. " \
-                               "Please log out of the Data Commons now using the link below, then " \
-                               "click the link to disconnect from {} before trying to log in " \
-                               "using {}".format(user_email, existing_nih_user_name, existing_nih_user_name, NIH_username)
+                               "You must now use the link below to first log out of the Data Commons. " \
+                               "Then, please have {} unlink from {} before trying this again." \
+                               .format(user_email, existing_nih_user_name, user_email, existing_nih_user_name)
             else:
                 user_message = "User {} is already linked to the eRA commons identity {}. " \
                                "Please unlink these before authenticating with the eRA commons " \
@@ -1417,6 +1417,7 @@ def get_nih_user_details(user_id, force_logout):
         user_details['dcf_comm_error'] = False
         user_details['link_mismatch'] = False
         user_details['data_sets_updated'] = False
+        user_details['legacy_linkage'] = False
 
         nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
 
@@ -1425,7 +1426,11 @@ def get_nih_user_details(user_id, force_logout):
         match_state = _refresh_from_dcf(user_id, nih_user)
 
         if match_state == RefreshCode.NO_TOKEN:
-            user_details['NIH_username'] = None
+            if nih_user:
+                user_details['legacy_linkage'] = True
+                user_details['NIH_username'] = nih_user.NIH_username
+            else:
+                user_details['NIH_username'] = None
             return user_details
         elif match_state == RefreshCode.TOKEN_EXPIRED:
             user_details['refresh_required'] = True
