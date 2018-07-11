@@ -497,7 +497,7 @@ class BigQuerySupport(BigQueryABC):
                     query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING' and '%' in values[0]:
-                        filter_string += "{}{} LIKE @{}".format('' if not field_prefix else field_prefix, attr, param_name)
+                        filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
                     else:
                         filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr, param_name)
                 else:
