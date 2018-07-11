@@ -1417,6 +1417,7 @@ def get_nih_user_details(user_id, force_logout):
         user_details['dcf_comm_error'] = False
         user_details['link_mismatch'] = False
         user_details['data_sets_updated'] = False
+        user_details['legacy_linkage'] = False
 
         nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
 
@@ -1425,7 +1426,11 @@ def get_nih_user_details(user_id, force_logout):
         match_state = _refresh_from_dcf(user_id, nih_user)
 
         if match_state == RefreshCode.NO_TOKEN:
-            user_details['NIH_username'] = None
+            if nih_user:
+                user_details['legacy_linkage'] = True
+                user_details['NIH_username'] = nih_user.NIH_username
+            else:
+                user_details['NIH_username'] = None
             return user_details
         elif match_state == RefreshCode.TOKEN_EXPIRED:
             user_details['refresh_required'] = True
