@@ -855,9 +855,9 @@ def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, resu
 
             if settings.DCF_TEST:
                 user_message = "User {} is already linked to the eRA commons identity {}. " \
-                               "Please log out of the Data Commons now using the link below, then " \
-                               "click the link to disconnect from {} before trying to log in " \
-                               "using {}".format(user_email, existing_nih_user_name, existing_nih_user_name, NIH_username)
+                               "You must now use the link below to first log out of the Data Commons. " \
+                               "Then, please have {} unlink from {} before trying this again." \
+                               .format(user_email, existing_nih_user_name, user_email, existing_nih_user_name)
             else:
                 user_message = "User {} is already linked to the eRA commons identity {}. " \
                                "Please unlink these before authenticating with the eRA commons " \
