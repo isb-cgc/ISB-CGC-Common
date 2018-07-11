@@ -224,14 +224,17 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
             counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
             if type == 'dicom':
                 where_clause = ''
-                parameters = []
+                parameters = None
                 count_params = None
                 if case_barcode:
                     where_clause += case_barcode_condition
-                    parameters.extend(case_barcode_param)
+                    parameters = case_barcode_param
                 if built_clause:
                     where_clause += " AND ( {} )".format(built_clause['filter_string'])
-                    parameters.extend(built_clause['parameters'])
+                    if parameters:
+                        parameters.extend(built_clause['parameters'])
+                    else:
+                        parameters = built_clause['parameters']
                     count_params = built_clause['count_params']
                 query = """
                     #standardSQL
