@@ -66,7 +66,6 @@ def oauth2_login(request):
     First step of OAuth2 login to DCF. Just build the URL that we send back to the browser in the refresh request
     """
     try:
-        logger.info("[INFO] OAuth1 a")
 
         full_callback = request.build_absolute_uri(reverse('dcf_callback'))
 
@@ -79,15 +78,14 @@ def oauth2_login(request):
 
         client_id, _ = get_secrets()
 
-        logger.info("[INFO] OAuth1 b")
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
         # to do data queries. Starting to recognize a pattern here...
         oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'data'])
         authorization_url, state = oauth.authorization_url(DCF_AUTH_URL)
-        logger.info("[INFO] OAuth1 c")
+
         # stash the state string in the session!
         request.session['dcfOAuth2State'] = state
-        logger.info("[INFO] OAuth1 d")
+
         return HttpResponseRedirect(authorization_url)
 
     finally:
@@ -123,11 +121,10 @@ def oauth2_callback(request):
     """
 
     comm_err_msg = "There was a communications problem contacting Data Commons Framework."
-    internal_err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator."
-    dcf_err_msg = "DCF reported an error {} logging in. Please contact the ISB-CGC administrator."
+    internal_err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org."
+    dcf_err_msg = "DCF reported an error {} logging in. Please report this to feedback@isb-cgc.org."
 
     try:
-        logger.info("[INFO] OAuthCB a")
         full_callback = request.build_absolute_uri(reverse('dcf_callback'))
 
         # For future reference, this also worked, using underlying requests library:
@@ -162,7 +159,6 @@ def oauth2_callback(request):
         # development:
         #
 
-        logger.info("[INFO] OAuthCB b")
         if settings.IS_DEV and full_callback.startswith('http://localhost'):
             os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'
 
@@ -170,14 +166,18 @@ def oauth2_callback(request):
             saved_state = request.session['dcfOAuth2State']
         else:
             logger.error("[ERROR] Missing dcfOAuth2State during callback")
-            messages.error(request, internal_err_msg.format("001"))
+            #
+            # If the user hung out on the DCF login site for a long time, and finally got back to us, they would
+            # hit the login screen and then end up back here. The session would have expired, and so there would be
+            # no saved state available. So we should not send back a scary and cryptic "Internal Error", but a
+            # message that login could not be completed and they should try again.
+            #
+            messages.error(request, "Login could not be completed, possibly due to session expiration. Please try again.")
             return redirect(reverse('user_detail', args=[request.user.id]))
 
         client_id, client_secret = get_secrets()
-        logger.info("[INFO] OAuthCB c")
         # You MUST provide the callback *here* to get it into the fetch request
         dcf = OAuth2Session(client_id, state=saved_state, redirect_uri=full_callback)
-        logger.info("[INFO] OAuthCB c1")
         auth_response = request.build_absolute_uri(request.get_full_path())
 
         # You MUST provide the client_id *here* (again!) in order to get this to do basic auth! DCF will not authorize
@@ -198,7 +198,6 @@ def oauth2_callback(request):
         finally:
             client_secret = None # clear this in case we are in Debug mode to keep this out of the browser
 
-        logger.info("[INFO] OAuthCB d")
         if token_data['token_type'] != 'Bearer':
             logger.error("[ERROR] Token type returned was not 'Bearer'")
             messages.error(request, internal_err_msg.format("002"))
@@ -214,7 +213,7 @@ def oauth2_callback(request):
 
         my_jwt = jwt.PyJWT()
         my_jwt.register_algorithm('RS256', RSAAlgorithm(RSAAlgorithm.SHA256))
-        logger.info("[INFO] OAuthCB e")
+
         #
         # DCF's key endpoint provides a list of keys they use. Right now, only one, but to future-proof, we want
         # to choose the right one from the list. But that means we need to parse the first element of the JWT tuple
@@ -233,7 +232,7 @@ def oauth2_callback(request):
         #
         # Get the key list from the endpoint and choose which one was used in the JWT:
         #
-        logger.info("[INFO] OAuthCB f")
+
         try:
             resp = dcf.get(settings.DCF_KEY_URL)
         except Exception as e:
@@ -257,7 +256,7 @@ def oauth2_callback(request):
         #
         # Decode the JWT!
         #
-        logger.info("[INFO] OAuthCB g")
+
         try:
             alg_list = ['RS256']
             decoded_jwt_id = my_jwt.decode(token_data['id_token'], key=use_key, algorithms=alg_list,
@@ -289,7 +288,6 @@ def oauth2_callback(request):
         #         u'pur': u'id', (The "purpose" of the token. This is an ID. Refresh tokens say "refresh")
         #         u'sub': u'integer user key'}
 
-        logger.info("[INFO] OAuthCB h")
         dcf_user_id = decoded_jwt_id['sub']
 
         #
@@ -303,7 +301,6 @@ def oauth2_callback(request):
         nih_from_dcf = get_nih_id_from_user_dict(user_data_dict)
 
         google_link = get_google_link_from_user_dict(user_data_dict)
-        logger.info("[INFO] OAuthCB i")
 
         # We now have the NIH User ID back from DCF; we also might now know the Google ID they have linked to previously
         # (it comes back in the user_id). Note that this routine is going to get called every 30 days or so when we
@@ -327,8 +324,6 @@ def oauth2_callback(request):
             # stash the requirement to only show a logout link in the session!
             request.session['dcfForcedLogout'] = nih_from_dcf
             return redirect(reverse('user_detail', args=[request.user.id]))
-
-        logger.info("[INFO] OAuthCB j")
 
         #
         # We now are almost ready to stash the token. One field in the table is the Google ID. First time
@@ -359,7 +354,6 @@ def oauth2_callback(request):
         # flow diverges. For the GET, we wrap things up in the callback. For the PATCH, we wrap things up immediately:
         #
 
-        logger.info("[INFO] OAuthCB k")
         if google_link:
 
             #
@@ -373,7 +367,6 @@ def oauth2_callback(request):
             #
 
             req_user = User.objects.get(id=request.user.id)
-            logger.info("[INFO] OAuthCB l")
             if google_link != req_user.email:
                 try:
                     unlink_at_dcf(request.user.id, True)  # True means after unlinking, we call DCF again to update our link state
@@ -398,8 +391,6 @@ def oauth2_callback(request):
             # The link matches. So we use PATCH. Any problems encountered and we return error message to user:
             #
 
-            logger.info("[INFO] OAuthCB m")
-
             try:
                 err_msg, returned_expiration_str, _ = refresh_at_dcf(request.user.id)
             except TokenFailure:
@@ -420,10 +411,8 @@ def oauth2_callback(request):
             # to finish the link
             #
 
-            logger.info("[INFO] OAuthCB n")
             use_expiration_time = calc_expiration_time(returned_expiration_str)
 
-            logger.info("[INFO] OAuthCB o")
             # Don't hit DCF again, we just did it (thus False):
             warning = _finish_the_link(request.user.id, req_user.email, use_expiration_time, st_logger, False)
             messages.warning(request, warning)
@@ -435,7 +424,7 @@ def oauth2_callback(request):
         # User has not yet been linked, so start the redirect flow with the user and DCF that will result
         # in us getting the callback below to finish the process:
         #
-        logger.info("[INFO] OAuthCB p")
+
         link_callback = request.build_absolute_uri(reverse('dcf_link_callback'))
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
@@ -451,8 +440,8 @@ def dcf_link_callback(request):
     conditions.
     """
 
-    dcf_err_msg = "DCF reported an error {} logging in. Please contact the ISB-CGC administrator."
-    internal_err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator."
+    dcf_err_msg = "DCF reported an error {} logging in. Please report this to feedback@isb-cgc.org."
+    internal_err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org."
     comm_err_msg = "There was a communications problem contacting Data Commons Framework."
 
     #
@@ -568,10 +557,10 @@ def dcf_link_callback(request):
         # Don't hit DCF again, we just did it (thus False):
         warning = _finish_the_link(request.user.id, google_link, use_expiration_time, st_logger, False)
     except TokenFailure:
-        messages.error(request, "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0067"))
+        messages.error(request, "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0067"))
         return redirect(reverse('user_detail', args=[request.user.id]))
     except RefreshTokenExpired:
-        messages.error(request, "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0068"))
+        messages.error(request, "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0068"))
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     if warning:
@@ -585,7 +574,7 @@ def dcf_link_extend(request):
     Put a user's GoogleID in the ACL groups for 24 (more) hours:
     """
 
-    comm_err_msg = "There was a communications problem contacting Data Commons Framework."
+    comm_err_msg = "There was a communications problem contacting the Data Commons Framework."
 
     #
     # If user has disconnected their ID in another window before clicking this link, they would easily get a
@@ -660,7 +649,7 @@ def _finish_the_link(user_id, user_email, expiration_time, st_logger, refresh_fi
 
     if dcf_token.google_id is not None and dcf_token.google_id != user_email:
         return 'Unexpected internal error detected during linking: email/ID mismatch. ' \
-               'Please report this to the ISB-CGC administrator'
+               'Please report this to feedback@isb-cgc.org'
 
     dcf_token.google_id = user_email
     if refresh_first:
@@ -749,9 +738,9 @@ def dcf_disconnect_user(request):
     try:
         dcf_token = get_stored_dcf_token(request.user.id)
     except TokenFailure:
-        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0069")
+        err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0069")
     except InternalTokenError:
-        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0070")
+        err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0070")
     except RefreshTokenExpired:
         err_msg = "You will need to first login to the Data Commons again to disconnect your Google ID"
 
@@ -768,11 +757,11 @@ def dcf_disconnect_user(request):
     try:
         unlink_at_dcf(request.user.id, False) # Don't refresh, we are about to drop the record...
     except TokenFailure:
-        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0071")
+        err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0071")
     except InternalTokenError:
-        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0072")
+        err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0072")
     except RefreshTokenExpired:
-        err_msg = "There was an internal error {} logging in. Please contact the ISB-CGC administrator.".format("0073")
+        err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0073")
     except DCFCommFailure:
         err_msg = "There was a communications problem contacting Data Commons Framework."
 
@@ -793,18 +782,15 @@ def dcf_disconnect_user(request):
     data = {
         'token': dcf_token.refresh_token
     }
-    logger.info("[INFO] DDU B")
 
     auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
     resp = requests.request('POST', DCF_REVOKE_URL, data=data, auth=auth)
     client_id = None
     client_secret = None
 
-    logger.info("[INFO] DDU C")
-
     if resp.status_code != 200 and resp.status_code != 204:
         logger.error(request, '[ERROR] Token revocation problem: {} : {}'.format(resp.status_code, resp.text))
-        messages.warning(request, "Problems encountered revoking access token at Data Commons. Please contact ISB-CGC Administrator")
+        messages.warning(request, "Problems encountered revoking access token at Data Commons. Please report this to feedback@isb-cgc.org")
 
     #
     # Now we do the internal unlinking, which includes detach the user in our NIH tables, and detach the user from data permissions.
@@ -816,7 +802,7 @@ def dcf_disconnect_user(request):
         # Token problem? Don't care; it is about to be blown away
         pass
     except (InternalTokenError, Exception):
-        messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please contact ISB-CGC Administrator")
+        messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please report this to feedback@isb-cgc.org")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
@@ -830,7 +816,7 @@ def dcf_disconnect_user(request):
     except TokenFailure:
         dcf_token = None
     except InternalTokenError:
-        messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please contact ISB-CGC Administrator")
+        messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please report this to feedback@isb-cgc.org")
         return redirect(reverse('user_detail', args=[request.user.id]))
     except RefreshTokenExpired as e:
         dcf_token = e.token
@@ -844,7 +830,6 @@ def dcf_disconnect_user(request):
     #
 
     logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
-    logger.info("[INFO] DDU D")
     callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
 
     return HttpResponseRedirect(callback)
