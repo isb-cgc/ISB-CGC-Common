@@ -2171,9 +2171,13 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
         union_queries = []
         inc_filters = json.loads(request.POST.get('filters', '{}'))
+        if inc_filters.get('case_barcode'):
+            case_barcode = inc_filters.get('case_barcode')
+            inc_filters['case_barcode'] = ["%{}%".format(case_barcode),]
+
         filter_params = None
         if len(inc_filters):
-            filter_and_params = BigQuerySupport.build_bq_filter_and_params(inc_filters)
+            filter_and_params = BigQuerySupport.build_bq_filter_and_params(inc_filters, field_prefix='md.' if export_type == 'file_manifest' else None)
             filter_params = filter_and_params['parameters']
             filter_conditions = "AND {}".format(filter_and_params['filter_string'])
 
@@ -2233,9 +2237,6 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         tz=settings.TIME_ZONE
                     )
                 )
-
-            query_string = ""
-
             if len(union_queries) > 1:
                 query_string = ") UNION ALL (".join(union_queries)
                 query_string = '(' + query_string + ')'
@@ -2297,8 +2298,6 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         biospec_clause=biospec_clause
                     )
                 )
-
-            query_string = ""
 
             if len(union_queries) > 1:
                 query_string = ") UNION ALL (".join(union_queries)
