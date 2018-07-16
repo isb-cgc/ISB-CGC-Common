@@ -551,22 +551,58 @@ def dcf_link_callback(request):
     use_expiration_time = calc_expiration_time(returned_expiration_str)
 
     if returned_google_link:
+        #
+        # OK, two (realistic) possible cases here if (google_link != returned_google_link). Note that having
+        # returned_google_link be None is not realistic unless there is a fundamental DCF bug.
+        # Generally, we do not care what the returned_google_link is, since we basically use this as an event
+        # to go refresh our token and get the latest info. ALTHOUGH at the moment (7/16/18), we have no other way
+        # to get the link expiration time.
+        #
+        # Case 1 is where google_link and returned_google_link are both not None, and are different. THIS SHOULD NOT
+        # (IN GENERAL) BE VERY LIKELY. Because DCF forbids overwriting an existing link with a new link value. BUT we have
+        # dueling browser login test that show it happening, possibly because DCF is only rejecting second link attempts
+        # early in the flow, but is not checking for/requiring an existing NULL value while writing to their DB. So
+        # if that was caught, we would not expect not-None-but-unequal. (Note that it *would be* possible if there was
+        # a significant delay receiving/processing this linking callback, and another actor had successfully
+        # unlinked/relinked during that delay).
+        #
+        # Case 2 is where the returned link has a value, but when we check, the freshest token from DCF says they
+        # are unlinked. This could happen if there was a race and an unlinking request to DCF got processed before
+        # this link callback got processed.
+        #
+        # Regardless, we need to use the user info just obtained from get_user_data_token_string() as definitive
+        # in deciding what to do here.
+        #
+
         if google_link != returned_google_link:
             logger.error("[ERROR]: DCF RETURNED CONFLICTING GOOGLE LINK {} VERSUS {}".format(returned_google_link,
                                                                                              google_link))
+            if google_link is not None:
+                #
+                # Report the difference, but do not do anything. User details page should process any discrepancies:
+                #
+                messages.error(request, "Data Commons reports that you have already linked with " \
+                                        "Google ID {}. ".format(google_link))
+                return redirect(reverse('user_detail', args=[request.user.id]))
+
         else:
             logger.info("DCF provided google link was consistent")
     else:
+        #
+        # If the DCF callback does not provide a Google ID, we will log it, but not bug the user. We will just drag
+        # the data out of the token:
+        #
         logger.error("No google link provided by DCF")
 
     if google_link is None:
-        messages.error(request, dcf_err_msg.format("D003"))
+        #
+        # If we are now seeing that we are NOT linked anymore, we tell the user, and bag it.
+        messages.error(request, "Data Commons reports that you have just unlinked your Google ID.")
         return redirect(reverse('user_detail', args=[request.user.id]))
-
 
     #
     # No match? Not acceptable. Send user back to details page. The empty google ID in our table will
-    # mean the page shows an option to try again. We need to
+    # mean the page shows an option to try again.
     #
 
     if google_link != req_user.email:
