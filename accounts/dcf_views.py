@@ -606,6 +606,7 @@ def dcf_link_callback(request):
     #
 
     if google_link != req_user.email:
+        logger.info("Now calling DCF to disconnect {} Google ID; we needed {} ".format(google_link, req_user.email))
         err_msg = None
         try:
             unlink_at_dcf(request.user.id, True)  # True means saved token is now updated with unlinked state
@@ -622,6 +623,7 @@ def dcf_link_callback(request):
             messages.error(request, err_msg)
             return redirect(reverse('user_detail', args=[request.user.id]))
 
+        logger.info("DCF has returned following disconnect request: {} should be dropped for {} ".format(google_link, req_user.email))
         message = "You must use your ISB-CGC login email ({}) to link with the DCF instead of {}".format(
             req_user.email, google_link)
         messages.warning(request, message)
