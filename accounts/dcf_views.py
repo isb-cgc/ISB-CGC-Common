@@ -80,7 +80,7 @@ def oauth2_login(request):
 
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
         # to do data queries. Starting to recognize a pattern here...
-        oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'data'])
+        oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user'])
         authorization_url, state = oauth.authorization_url(DCF_AUTH_URL)
 
         # stash the state string in the session!
@@ -260,7 +260,7 @@ def oauth2_callback(request):
         try:
             alg_list = ['RS256']
             decoded_jwt_id = my_jwt.decode(token_data['id_token'], key=use_key, algorithms=alg_list,
-                                           audience=['openid', 'user', 'data', client_id])
+                                           audience=['openid', 'user', client_id])
         except Exception as e:
             logger.error("[ERROR] Decoding JWT failure")
             logger.exception(e)
@@ -449,7 +449,7 @@ def dcf_link_callback(request):
     # any random error that is reported back to us.
     #
     error = request.GET.get('error', None)
-    defer_error_return = False;
+    defer_error_return = False
     if error:
         error_description = request.GET.get('error_description', "")
         if error == 'g_acnt_link_error':
@@ -460,7 +460,7 @@ def dcf_link_callback(request):
             # If we get the message, we should tell the user what email they are registered with! For that, we will
             # need to get the token, which we do below in the regular flow. So defer the return in this case...
             message = 'Issue with the linkage between user and their Google account'
-            if error_description == "User already has a linked Google account":
+            if error_description == "User already has a linked Google account.":
                 defer_error_return = True
         elif error == 'g_acnt_auth_failure':
             message = "Issue with Oauth2 flow to AuthN user's Google account"
