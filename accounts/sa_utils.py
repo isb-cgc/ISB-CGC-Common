@@ -1383,11 +1383,17 @@ def _refresh_from_dcf(user_id, nih_user):
     return RefreshCode.ALL_MATCHES
 
 
+def have_linked_user(user_id):
+    """
+    Answers if the user is linked
+    """
+    nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
+    return len(nih_users) == 1
+
+
 def get_nih_user_details(user_id, force_logout):
     """
-    :param user_id:
-    :param force_logout:
-    :return:
+    When used with DCF, this compares DCF state with our state and acts accordingly.
     """
     user_details = {}
 
