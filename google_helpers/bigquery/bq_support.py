@@ -20,6 +20,7 @@ import logging
 import re
 from time import sleep
 from uuid import uuid4
+import copy
 from django.conf import settings
 from google_helpers.bigquery.service import get_bigquery_service
 from abstract import BigQueryABC
@@ -281,7 +282,6 @@ class BigQuerySupport(BigQueryABC):
             projectId=self.executing_project,
             body=job_desc).execute(num_retries=5)
 
-
     # Runs a basic, optionally parameterized query
     # If self.project_id, self.dataset_id, and self.table_id are set they
     # will be used as the destination table for the query
@@ -400,8 +400,13 @@ class BigQuerySupport(BigQueryABC):
     # Breaks out '<ATTR> IS NULL'
     # 2+ values are converted to IN (<value>,...)
     # Filters must already be pre-bucketed or formatted
-    # TODO: add support for BETWEEN
-    # TODO: add support for <>=
+    # Use of LIKE is detected based on single-length value array and use of % in the value string
+    # Support special 'mutation' filter category
+    # Support for Greater/Less than (or equal to) via [gl]t[e]{0,1} in attr name,
+    #     eg. {"age_at_diagnosis_gte": [50,]}
+    # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
+    #
+    # TODO: add support for DATES
     @staticmethod
     def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None):
         result = {
@@ -425,6 +430,8 @@ class BigQuerySupport(BigQueryABC):
                 other_filters[attr] = filters[attr]
 
         mut_filtr_count = 1
+
+        # 'Mutation' filters, special category for MUT: type filters
         for attr, values in mutation_filters.items():
             gene = attr.split(':')[2]
             type = attr.split(':')[-1]
@@ -473,17 +480,14 @@ class BigQuerySupport(BigQueryABC):
 
         logger.debug("other filters: {}".format(str(other_filters)))
 
+        # Standard query filters
         for attr, values in other_filters.items():
             filter_string = ''
             param_name = attr + '{}'.format('_{}'.format(param_suffix) if param_suffix else '')
             query_param = {
                 'name': param_name,
-                'parameterType': {
-
-                },
-                'parameterValue': {
-
-                }
+                'parameterType': {},
+                'parameterValue': {}
             }
             if 'None' in values:
                 values.remove('None')
@@ -496,10 +500,42 @@ class BigQuerySupport(BigQueryABC):
                     # Scalar param
                     query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     query_param['parameterValue']['value'] = values[0]
-                    if query_param['parameterType']['type'] == 'STRING' and '%' in values[0]:
-                        filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
-                    else:
-                        filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr, param_name)
+                    if query_param['parameterType']['type'] == 'STRING':
+                        if '%' in values[0]:
+                            filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
+                        else:
+                            filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
+                                                                 param_name)
+                    elif query_param['parameterType']['type'] == 'INT64':
+                        if attr.endsWith('_gt') or attr.endsWith('_gte'):
+                            filter_string += "{}{} >{} @{}".format(
+                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '=' if attr.endsWith('_gte') else '',
+                                param_name
+                            )
+                        elif attr.endsWith('_lt') or attr.endsWith('_lte'):
+                            filter_string += "{}{} <{} @{}".format(
+                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '=' if attr.endsWith('_lte') else '',
+                                param_name
+                            )
+                elif len(values) == 2 and attr.endsWith('_btw'):
+                    query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
+                    param_name_1 = param_name + '_btw_1'
+                    param_name_2 = param_name + '_btw_2'
+                    filter_string += "{}{} BETWEEN @{} AND @{}".format(
+                        '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                        param_name_1,
+                        param_name_2
+                    )
+                    query_param_1 = query_param
+                    query_param_2 = copy.deepcopy(query_param)
+                    query_param = [query_param_1, query_param_2, ]
+                    query_param_1['name'] = query_param_1
+                    query_param_1['parameterValue']['value'] = values[0]
+                    query_param_2['name'] = query_param_2
+                    query_param_2['parameterValue']['value'] = values[1]
+
                 else:
                     # Array param
                     query_param['parameterType']['type'] = "ARRAY"
@@ -521,7 +557,11 @@ class BigQuerySupport(BigQueryABC):
                 result['parameters'].append(result['count_params'][param_name])
 
             filter_set.append('({})'.format(filter_string))
-            result['parameters'].append(query_param)
+
+            if type(query_param) is list:
+                result['parameters'].extend(query_param)
+            else:
+                result['parameters'].append(query_param)
 
         result['filter_string'] = " {} ".format(comb_with).join(filter_set)
 
