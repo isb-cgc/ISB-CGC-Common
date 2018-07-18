@@ -430,7 +430,7 @@ class BigQuerySupport(BigQueryABC):
                 other_filters[attr] = filters[attr]
 
         mut_filtr_count = 1
-
+        type = None
         # 'Mutation' filters, special category for MUT: type filters
         for attr, values in mutation_filters.items():
             gene = attr.split(':')[2]
@@ -558,7 +558,7 @@ class BigQuerySupport(BigQueryABC):
 
             filter_set.append('({})'.format(filter_string))
 
-            if type(query_param) is list:
+            if type != None and type(query_param) is list:
                 result['parameters'].extend(query_param)
             else:
                 result['parameters'].append(query_param)
