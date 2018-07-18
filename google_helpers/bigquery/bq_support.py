@@ -430,11 +430,10 @@ class BigQuerySupport(BigQueryABC):
                 other_filters[attr] = filters[attr]
 
         mut_filtr_count = 1
-        type = None
         # 'Mutation' filters, special category for MUT: type filters
         for attr, values in mutation_filters.items():
             gene = attr.split(':')[2]
-            type = attr.split(':')[-1]
+            filter_type = attr.split(':')[-1]
             invert = bool(attr.split(':')[3] == 'NOT')
             param_name = 'gene{}{}'.format(str(mut_filtr_count), '_{}'.format(param_suffix) if param_suffix else '')
             filter_string = '{}Hugo_Symbol = @{} AND '.format('' if not field_prefix else field_prefix, param_name)
@@ -459,11 +458,11 @@ class BigQuerySupport(BigQueryABC):
                 }
             }
 
-            if type == 'category' and values[0] == 'any':
+            if filter_type == 'category' and values[0] == 'any':
                 filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix,)
                 var_query_param = None
             else:
-                if type == 'category':
+                if filter_type == 'category':
                     values = MOLECULAR_CATEGORIES[values[0]]['attrs']
                 var_param_name = "var_class{}{}".format(str(mut_filtr_count), '_{}'.format(param_suffix) if param_suffix else '')
                 filter_string += '{}Variant_Classification {}IN UNNEST(@{})'.format('' if not field_prefix else field_prefix, 'NOT ' if invert else '', var_param_name)
@@ -477,8 +476,6 @@ class BigQuerySupport(BigQueryABC):
             var_query_param and result['parameters'].append(var_query_param)
 
             mut_filtr_count += 1
-
-        logger.debug("other filters: {}".format(str(other_filters)))
 
         # Standard query filters
         for attr, values in other_filters.items():
@@ -558,7 +555,7 @@ class BigQuerySupport(BigQueryABC):
 
             filter_set.append('({})'.format(filter_string))
 
-            if type != None and type(query_param) is list:
+            if type(query_param) is list:
                 result['parameters'].extend(query_param)
             else:
                 result['parameters'].append(query_param)
