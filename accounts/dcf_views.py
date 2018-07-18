@@ -519,8 +519,9 @@ def dcf_link_callback(request):
 
     if defer_error_return:
         if google_link is None:
-            # DCF is confused. We have seen this case.
-            err_msg = "Data Commons experienced an internal error. Please use another browser to Associate with eRA Commons Account."
+            # DCF is confused (stale cookie) OR user tried to connect with a non-CGC Google ID in a login race condition
+            # with this login, and we unlinked them before this got processed. The user is currently unlinked.
+            err_msg = "Data Commons did not accept linking request. Please use a single browser for linking/unlinking requests."
             messages.error(request, err_msg)
         else:
             # User had two browsers open and tried to login on both. If the user ID in the token matches
@@ -597,7 +598,9 @@ def dcf_link_callback(request):
     if google_link is None:
         #
         # If we are now seeing that we are NOT linked anymore, we tell the user, and bag it.
-        messages.error(request, "Data Commons reports that you have just unlinked your Google ID.")
+        #
+        messages.error(request, "Data Commons reports that you do not yet have a valid linked Google ID. "
+                                "Please use a single brower for linking/unlinking requests.")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
