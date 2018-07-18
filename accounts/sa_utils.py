@@ -1173,13 +1173,15 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
     logger.debug("[STATUS] UserAuthorizedDatasets for {}: {}".format(nih_user.NIH_username, str(uad)))
 
     need_to_add = False
+    user_on_acl = False
     if handle_acls:
         try:
             result = directory_client.members().get(groupKey=dataset.google_group_name,
                                                     memberKey=user_email).execute(http=http_auth)
 
+            user_on_acl = len(result) > 0
             # If we found them in the ACL but they're not currently authorized for it, remove them from it and the table
-            if len(result) and not dataset_in_auth_set:
+            if user_on_acl and not dataset_in_auth_set:
                 directory_client.members().delete(groupKey=dataset.google_group_name,
                                                   memberKey=user_email).execute(http=http_auth)
                 logger.warn(
@@ -1215,7 +1217,7 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
     # Sometimes an account is in the Google Group but not the database - add them if they should
     # have access.
     # May 2018: Not handling ACL groups anymore, we skip this step (added handle_acls condition)
-    elif not len(uad) and handle_acls and len(result) and dataset_in_auth_set:
+    elif not len(uad) and handle_acls and user_on_acl and dataset_in_auth_set:
         logger.info(
             "User {} was was found in group {} but not the database--adding them.".format(
                 user_email, dataset.google_group_name
