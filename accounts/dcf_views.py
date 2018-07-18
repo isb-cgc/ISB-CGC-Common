@@ -33,7 +33,7 @@ from google_helpers.stackdriver import StackDriverLogger
 
 from sa_utils import found_linking_problems, DemoLoginResults, \
                      handle_user_db_update_for_dcf_linking, \
-                     unlink_account_in_db_for_dcf, refresh_user_projects
+                     unlink_account_in_db_for_dcf, refresh_user_projects, have_linked_user
 
 from dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
@@ -80,7 +80,7 @@ def oauth2_login(request):
 
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
         # to do data queries. Starting to recognize a pattern here...
-        oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'data'])
+        oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user'])
         authorization_url, state = oauth.authorization_url(DCF_AUTH_URL)
 
         # stash the state string in the session!
@@ -260,7 +260,7 @@ def oauth2_callback(request):
         try:
             alg_list = ['RS256']
             decoded_jwt_id = my_jwt.decode(token_data['id_token'], key=use_key, algorithms=alg_list,
-                                           audience=['openid', 'user', 'data', client_id])
+                                           audience=['openid', 'user', client_id])
         except Exception as e:
             logger.error("[ERROR] Decoding JWT failure")
             logger.exception(e)
@@ -449,10 +449,19 @@ def dcf_link_callback(request):
     # any random error that is reported back to us.
     #
     error = request.GET.get('error', None)
+    defer_error_return = False
     if error:
         error_description = request.GET.get('error_description', "")
         if error == 'g_acnt_link_error':
+            # OK, it turns out that it is not so hard to get the error from DCF that "User already has a
+            # linked Google account". If a user has gotten themselves to DCF's sign-in via Google page in *two
+            # separate browsers*, then logged in on one, and then the other, the second browser will trigger that
+            # message.
+            # If we get the message, we should tell the user what email they are registered with! For that, we will
+            # need to get the token, which we do below in the regular flow. So defer the return in this case...
             message = 'Issue with the linkage between user and their Google account'
+            if error_description == "User already has a linked Google account.":
+                defer_error_return = True
         elif error == 'g_acnt_auth_failure':
             message = "Issue with Oauth2 flow to AuthN user's Google account"
         elif error == 'g_acnt_access_error':
@@ -462,19 +471,9 @@ def dcf_link_callback(request):
 
         logger.error("[ERROR]: DCF reports an error ({}, {}, {}) trying to link Google ID".format(error, message, error_description))
 
-        messages.error(request, dcf_err_msg.format("D002"))
-        return redirect(reverse('user_detail', args=[request.user.id]))
-
-    #
-    # The callback provides us with both the link expiration and the user ID that was linked. BUT THIS IS
-    # COMING FROM THE USER, IS NOT SIGNED, AND SO CANNOT BE TRUSTED! Pull them out and verify them. If things
-    # are not too crazy, we accept the value we are sent:
-    #
-
-    returned_expiration_str = request.GET.get('exp', None)
-    returned_google_link = request.GET.get('linked_email', None)
-
-    use_expiration_time = calc_expiration_time(returned_expiration_str)
+        if not defer_error_return:
+            messages.error(request, dcf_err_msg.format("D002"))
+            return redirect(reverse('user_detail', args=[request.user.id]))
 
     #
     # We will NEVER accept a Google ID that does not match.  At this point, we need to wrestle
@@ -503,29 +502,114 @@ def dcf_link_callback(request):
     the_user_token_dict = json_loads(the_user_token_string)
     the_user_dict = the_user_token_dict['context']['user']
 
-    # Just parses the google link out of the recently return token.
+    # Just parses the google link out of the recently return token:
+
     google_link = get_google_link_from_user_dict(the_user_dict)
 
+    # need this in a couple of places, so do it now:
+
+    req_user = User.objects.get(id=request.user.id)
+
+    #
+    # OK, we just got back what the DCF thinks the user's google linking state is. If they reported above that
+    # the user is already linked, use that info to fully inform the user about what is going on. If they report
+    # that there is *no link*, but we got back an error, then we need to let the user know this. This case arose in
+    # testing, based on DCF making a decision based on stale cookie data in a second browser.
+    #
+
+    if defer_error_return:
+        if google_link is None:
+            # DCF is confused (stale cookie) OR user tried to connect with a non-CGC Google ID in a login race condition
+            # with this login, and we unlinked them before this got processed. The user is currently unlinked.
+            err_msg = "Data Commons did not accept linking request. Please use a single browser for linking/unlinking requests."
+            messages.error(request, err_msg)
+        else:
+            # User had two browsers open and tried to login on both. If the user ID in the token matches
+            # what we think it should be, just post this fact for user to see.
+            if have_linked_user(request.user.id) and google_link == req_user.email:
+                warn_msg = "Data Commons reported that you were already linked with Google ID {}."
+                messages.warning(request, warn_msg)
+
+            else:
+                # DCF says we are linked already, but we do not have a linked user, or the email we have is
+                # not matching what DCF thinks it is. This is so messed up that we should tell the user there
+                # was a problem, and let the user_details page try to figure out what to tell the user about
+                # the inconsistent state.
+                err_msg = "Data Commons did not accept linking request."
+                messages.error(request, err_msg)
+
+        return redirect(reverse('user_detail', args=[request.user.id]))
+
+    #
+    # The callback provides us with both the link expiration and the user ID that was linked. BUT THIS IS
+    # COMING FROM THE USER, IS NOT SIGNED, AND SO CANNOT BE TRUSTED! Pull them out and verify them. If things
+    # are not too crazy, we accept the value we are sent:
+    #
+
+    returned_expiration_str = request.GET.get('exp', None)
+    returned_google_link = request.GET.get('linked_email', None)
+
+    use_expiration_time = calc_expiration_time(returned_expiration_str)
+
     if returned_google_link:
+        #
+        # OK, two (realistic) possible cases here if (google_link != returned_google_link). Note that having
+        # returned_google_link be None is not realistic unless there is a fundamental DCF bug.
+        # Generally, we do not care what the returned_google_link is, since we basically use this as an event
+        # to go refresh our token and get the latest info. ALTHOUGH at the moment (7/16/18), we have no other way
+        # to get the link expiration time.
+        #
+        # Case 1 is where google_link and returned_google_link are both not None, and are different. THIS SHOULD NOT
+        # (IN GENERAL) BE VERY LIKELY. Because DCF forbids overwriting an existing link with a new link value. BUT we have
+        # dueling browser login test that show it happening, possibly because DCF is only rejecting second link attempts
+        # early in the flow, but is not checking for/requiring an existing NULL value while writing to their DB. So
+        # if that was caught, we would not expect not-None-but-unequal. (Note that it *would be* possible if there was
+        # a significant delay receiving/processing this linking callback, and another actor had successfully
+        # unlinked/relinked during that delay).
+        #
+        # Case 2 is where the returned link has a value, but when we check, the freshest token from DCF says they
+        # are unlinked. This could happen if there was a race and an unlinking request to DCF got processed before
+        # this link callback got processed.
+        #
+        # Regardless, we need to use the user info just obtained from get_user_data_token_string() as definitive
+        # in deciding what to do here.
+        #
+
         if google_link != returned_google_link:
             logger.error("[ERROR]: DCF RETURNED CONFLICTING GOOGLE LINK {} VERSUS {}".format(returned_google_link,
                                                                                              google_link))
+            if google_link is not None:
+                #
+                # Report the difference, but do not do anything. User details page should process any discrepancies:
+                #
+                messages.error(request, "Data Commons reports that you have already linked with " \
+                                        "Google ID {}. ".format(google_link))
+                return redirect(reverse('user_detail', args=[request.user.id]))
+
         else:
             logger.info("DCF provided google link was consistent")
     else:
+        #
+        # If the DCF callback does not provide a Google ID, we will log it, but not bug the user. We will just drag
+        # the data out of the token:
+        #
         logger.error("No google link provided by DCF")
 
     if google_link is None:
-        messages.error(request, dcf_err_msg.format("D003"))
+        #
+        # If we are now seeing that we are NOT linked anymore, we tell the user, and bag it.
+        #
+        messages.error(request, "Data Commons reports that you do not yet have a valid linked Google ID. "
+                                "Please use a single brower for linking/unlinking requests.")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
-    req_user = User.objects.get(id=request.user.id)
     #
     # No match? Not acceptable. Send user back to details page. The empty google ID in our table will
-    # mean the page shows an option to try again. We need to
+    # mean the page shows an option to try again.
     #
 
     if google_link != req_user.email:
+        logger.info("Now calling DCF to disconnect {} Google ID; we needed {} ".format(google_link, req_user.email))
         err_msg = None
         try:
             unlink_at_dcf(request.user.id, True)  # True means saved token is now updated with unlinked state
@@ -542,6 +626,7 @@ def dcf_link_callback(request):
             messages.error(request, err_msg)
             return redirect(reverse('user_detail', args=[request.user.id]))
 
+        logger.info("DCF has returned following disconnect request: {} should be dropped for {} ".format(google_link, req_user.email))
         message = "You must use your ISB-CGC login email ({}) to link with the DCF instead of {}".format(
             req_user.email, google_link)
         messages.warning(request, message)
@@ -583,15 +668,17 @@ def dcf_link_extend(request):
 
     returned_expiration_str = None
     user_data_token_string = None
+    err_msg = None
+    warn_msg = None
 
     try:
         err_msg, returned_expiration_str, user_data_token_string = refresh_at_dcf(request.user.id)
     except TokenFailure:
-        err_msg = "Your Data Commons Framework identity needs to be reestablished to complete this task."
+        warn_msg = "Your Data Commons Framework identity needs to be reestablished to complete this task."
     except InternalTokenError:
         err_msg = "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("0081")
     except RefreshTokenExpired:
-        err_msg = "Your login to the Data Commons Framework has expired. You will need to log in again."
+        warn_msg = "Your login to the Data Commons Framework has expired. You will need to log in again."
     except DCFCommFailure:
         err_msg = comm_err_msg
     except Exception as e:
@@ -601,6 +688,9 @@ def dcf_link_extend(request):
 
     if err_msg:
         messages.error(request, err_msg)
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    elif warn_msg:
+        messages.warning(request, warn_msg)
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     use_expiration_time = calc_expiration_time(returned_expiration_str)
@@ -738,9 +828,10 @@ def dcf_disconnect_user(request):
     try:
         dcf_token = get_stored_dcf_token(request.user.id)
     except TokenFailure:
-        err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0069")
+        # No token? We are done!
+        return redirect(reverse('user_detail', args=[request.user.id]))
     except InternalTokenError:
-        err_msg = "There was an internal error {} logging in. Please report this to feedback@isb-cgc.org.".format("0070")
+        err_msg = "There was an internal error {} unlinking. Please report this to feedback@isb-cgc.org.".format("0070")
     except RefreshTokenExpired:
         err_msg = "You will need to first login to the Data Commons again to disconnect your Google ID"
 
