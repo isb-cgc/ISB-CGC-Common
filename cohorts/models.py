@@ -68,6 +68,11 @@ class Cohort(models.Model):
         projects = self.samples_set.values_list('project_id', flat=True).distinct()
         return Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct()
 
+    def get_program_names(self):
+        projects = self.samples_set.values_list('project_id', flat=True).distinct()
+        names = Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct().values_list('name',flat=True)
+        return [str(x) for x in names]
+
     def only_user_data(self):
         return bool(Program.objects.filter(id__in=self.get_programs(), is_public=True).count() <= 0)
 
