@@ -1196,8 +1196,9 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                     )
                 )
         except HttpError:
-            # if the user_email doesn't exist in the google group an HttpError will be thrown...
-            need_to_add = True
+            # if the user_email doesn't exist in the google group an HttpError will be thrown... It means nothing
+            # should happen...
+            pass
     else:
         need_to_add = (len(uad) == 0) and dataset_in_auth_set
 
