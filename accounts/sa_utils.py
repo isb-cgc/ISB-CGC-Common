@@ -1338,7 +1338,7 @@ def _refresh_from_dcf(user_id, nih_user):
     except InternalTokenError:
         return RefreshCode.INTERNAL_ERROR
     except DCFCommFailure:
-        raise RefreshCode.DCF_COMMUNICATIONS_ERROR
+        return RefreshCode.DCF_COMMUNICATIONS_ERROR
 
     #
     # Things that could be different: Google ID linkage, expiration time, approved datasets.
@@ -1410,17 +1410,15 @@ def get_nih_user_details(user_id, force_logout):
             user_details['error_state'] = None
             user_details['dcf_comm_error'] = False
             user_details['force_DCF_logout'] = True
-            user_details['NIH_username'] = force_logout
             return user_details
 
         #
         # Otherwise, ask the DCF for current user info,
-        # FIXME: Check in with DCF for info, throw DCFCommError if we have problems
-        # FIXME: If refresh token is expired, we cannot show any info until they log back in!
+        #
 
         user_details['force_DCF_logout'] = False
         user_details['refresh_required'] = False
-        user_details['refresh_key_ok'] = True
+        user_details['no_google_link'] = False
         user_details['error_state'] = None
         user_details['dcf_comm_error'] = False
         user_details['link_mismatch'] = False
@@ -1450,7 +1448,7 @@ def get_nih_user_details(user_id, force_logout):
             user_details['dcf_comm_error'] = True
             return user_details
         elif match_state == RefreshCode.NO_GOOGLE_LINK:
-            user_details['refresh_key_ok'] = False
+            user_details['no_google_link'] = True
             return user_details
         elif match_state == RefreshCode.GOOGLE_LINK_MISMATCH:
             # If they have a bad Google ID linked at DCF, we force them to login again, which eventually
