@@ -1172,7 +1172,6 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
 
     logger.debug("[STATUS] UserAuthorizedDatasets for {}: {}".format(nih_user.NIH_username, str(uad)))
 
-    need_to_add = False
     user_on_acl = False
     if handle_acls:
         try:
@@ -1180,7 +1179,9 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                                                     memberKey=user_email).execute(http=http_auth)
 
             user_on_acl = len(result) > 0
-            # If we found them in the ACL but they're not currently authorized for it, remove them from it and the table
+            # If we found them in the ACL but they're not currently authorized for it, remove them from it. Note
+            # race condition: If they were just dropped by somebody else, the following call raises an error, which
+            # also gets caught below.
             if user_on_acl and not dataset_in_auth_set:
                 directory_client.members().delete(groupKey=dataset.google_group_name,
                                                   memberKey=user_email).execute(http=http_auth)
@@ -1196,10 +1197,9 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                     )
                 )
         except HttpError:
-            # if the user_email doesn't exist in the google group an HttpError will be thrown...
-            need_to_add = True
-    else:
-        need_to_add = (len(uad) == 0) and dataset_in_auth_set
+            # if the user_email doesn't exist in the google group an HttpError will be thrown... It means nothing
+            # should happen...
+            pass
 
     #
     # Either remove them from the table, or add them to the table.
@@ -1215,20 +1215,49 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
         uad.delete()
 
     # Sometimes an account is in the Google Group but not the database - add them if they should
-    # have access.
-    # May 2018: Not handling ACL groups anymore, we skip this step (added handle_acls condition)
-    elif not len(uad) and handle_acls and user_on_acl and dataset_in_auth_set:
-        logger.info(
-            "User {} was was found in group {} but not the database--adding them.".format(
-                user_email, dataset.google_group_name
-            )
-        )
-        st_logger.write_text_log_entry(
-            LOG_NAME_ERA_LOGIN_VIEW,
-            "[WARN] User {} was was found in group {} but not the database--adding them.".format(
-                user_email, dataset.google_group_name
-            )
-        )
+    # have access. July 2018: No, that is a bad idea. Privilege must only flow in one direction.
+    # Database must be considered definitive.
+    # May 2018: If not handling ACL groups anymore, we skip this step (added handle_acls condition)
+    # elif not len(uad) and handle_acls and user_on_acl and dataset_in_auth_set:
+    #     logger.info(
+    #         "User {} was was found in group {} but not the database--adding them.".format(
+    #             user_email, dataset.google_group_name
+    #         )
+    #     )
+    #     st_logger.write_text_log_entry(
+    #         LOG_NAME_ERA_LOGIN_VIEW,
+    #         "[WARN] User {} was was found in group {} but not the database--adding them.".format(
+    #             user_email, dataset.google_group_name
+    #         )
+    #     )
+    #     uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
+    #                                                                    authorized_dataset=ad)
+    #     if not created:
+    #         logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
+    #                                                                                           ad.whitelist_id))
+    #     else:
+    #         logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
+
+    if handle_acls:
+        # Check for their need to be in the ACL, and add them
+        if dataset_in_auth_set and not user_on_acl:
+            body = {
+                "email": user_email,
+                "role": "MEMBER"
+            }
+
+            result = directory_client.members().insert(
+                groupKey=dataset.google_group_name,
+                body=body
+            ).execute(http=http_auth)
+
+            logger.info(result)
+            logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                           "[STATUS] User {} added to {}.".format(user_email,
+                                                                              dataset.google_group_name))
+    # Add them to the database as well
+    if (len(uad) == 0) and dataset_in_auth_set:
         uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
                                                                        authorized_dataset=ad)
         if not created:
@@ -1237,40 +1266,11 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
         else:
             logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
 
-    if need_to_add:
-        if handle_acls:
-            # Check for their need to be in the ACL, and add them
-            if dataset_in_auth_set:
-                body = {
-                    "email": user_email,
-                    "role": "MEMBER"
-                }
-
-                result = directory_client.members().insert(
-                    groupKey=dataset.google_group_name,
-                    body=body
-                ).execute(http=http_auth)
-
-                logger.info(result)
-                logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-                st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                               "[STATUS] User {} added to {}.".format(user_email,
-                                                                                  dataset.google_group_name))
-        # Add them to the database as well
-        if not len(uad):
-            uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
-                                                                           authorized_dataset=ad)
-            if not created:
-                logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
-                                                                                                  ad.whitelist_id))
-            else:
-                logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
-
-                # logger.info(result)
-                # logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-                # st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                #                                "[STATUS] User {} added to {}.".format(user_email,
-                #                                                                       dataset.google_group_name))
+            # logger.info(result)
+            # logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+            # st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+            #                                "[STATUS] User {} added to {}.".format(user_email,
+            #                                                                       dataset.google_group_name))
 
 def deactivate_nih_add_to_open(user_id, user_email):
     # 5/14/18 NO! active flag has nothing to do with user logout, but instead is set to zero when user expires off of ACL group
