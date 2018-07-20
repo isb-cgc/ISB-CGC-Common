@@ -43,7 +43,7 @@ from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_nam
 
 from dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
-                        GoogleLinkState, \
+                        GoogleLinkState, get_auth_elapsed_time, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
                         compare_google_ids
@@ -1403,7 +1403,7 @@ def get_nih_user_details(user_id, force_logout):
 
         #
         # If we have detected that the user has logged into DCF with a different NIH username than what we think,
-        # nothing else matters. We tell them to log out.
+        # nothing else matters. We tell them to log out. Same if they have a bad Google ID.
         #
 
         if force_logout:
@@ -1431,6 +1431,18 @@ def get_nih_user_details(user_id, force_logout):
 
         match_state = _refresh_from_dcf(user_id, nih_user)
 
+        # It is not essential, but helps the user if we can suggest they log out
+        # before trying to fix problems (we provide them with a logout link no
+        # matter what).
+
+        try:
+            since_login_est = get_auth_elapsed_time(user_id)
+        except InternalTokenError:
+            user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
+            return user_details
+
+        live_cookie_probable = since_login_est < (60 * 10)
+
         if match_state == RefreshCode.NO_TOKEN:
             if nih_user:
                 user_details['legacy_linkage'] = True
@@ -1448,15 +1460,24 @@ def get_nih_user_details(user_id, force_logout):
             user_details['dcf_comm_error'] = True
             return user_details
         elif match_state == RefreshCode.NO_GOOGLE_LINK:
-            user_details['no_google_link'] = True
+            # If they have no Google link, and they have recently tried to link, just get them
+            # to log out. Otherwise, get them to log in again to fix it:
+            if live_cookie_probable:
+                user_details['force_DCF_logout'] = True
+            else:
+                user_details['no_google_link'] = True
             return user_details
         elif match_state == RefreshCode.GOOGLE_LINK_MISMATCH:
-            # If they have a bad Google ID linked at DCF, we force them to login again, which eventually
-            # tells them they need to switch it.
-            user_details['link_mismatch'] = True
+            # If they have a mismatched Google link, and they have recently tried to link, just get them
+            # to log out. Otherwise, get them to log in again to fix it:
+            if live_cookie_probable:
+                user_details['force_DCF_logout'] = True
+            else:
+                user_details['link_mismatch'] = True
+            return user_details
         elif match_state == RefreshCode.UNEXPECTED_UNLINKED_NIH_USER:
             # Should not happen. Force a complete logout
-            user_details['NIH_username'] = None
+            user_details['force_DCF_logout'] = True
             return user_details
         elif match_state == RefreshCode.PROJECT_SET_UPDATED:
             user_details['data_sets_updated'] = True
