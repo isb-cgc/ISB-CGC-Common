@@ -81,6 +81,29 @@ def get_stored_dcf_token(user_id):
 
     return dcf_token
 
+
+def drop_dcf_token(user_id):
+    """
+    If we are forcing a logout from DCF, it is because we need to get the user to start with a clean slate. Dropping
+    their DCF token is part of that.
+
+    :raises InternalTokenError:
+    """
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except TokenFailure:
+        dcf_token = None
+    except InternalTokenError as e:
+        raise e
+    except RefreshTokenExpired as e:
+        dcf_token = e.token
+
+    if dcf_token:
+        dcf_token.delete()
+
+    return None
+
+
 def get_auth_elapsed_time(user_id):
     """
     There is benefit in knowing when the user did their NIH login at DCF, allowing us to e.g. estimate

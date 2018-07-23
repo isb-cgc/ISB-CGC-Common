@@ -39,7 +39,7 @@ from dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
-                        user_data_token_dict_massaged, \
+                        user_data_token_dict_massaged, drop_dcf_token, \
                         user_data_token_dict_to_user_dict, get_secrets, refresh_token_storage, \
                         unlink_at_dcf, refresh_at_dcf, decode_token_chunk, calc_expiration_time
 
@@ -101,14 +101,21 @@ def oauth2_login(request):
 
 @login_required
 def dcf_simple_logout(request):
-    '''
-    If the user is trying to login with an NIH idea already in use by somebody else, or if they are already linked
+    """
+    If the user is trying to login with an NIH ID already in use by somebody else, or if they are already linked
     with a different NIH ID, we immediately reject the response from DCF and tell the user they need to logout to
     try again. This involves simply sending them back to DCF; the user's DCF session cookies do the rest to let
     DCF know who they are. Note we also clear the session key we are using to record the error. This is now also used
     if we have Google Link ID inconsistencies, since DCF session cookies currently need to be cleared.
-    '''
+    """
+
     request.session.pop('dcfForcedLogout', None)
+    try:
+        drop_dcf_token(request.user.id)
+    except InternalTokenError:
+        messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please report this to feedback@isb-cgc.org")
+        return redirect(reverse('user_detail', args=[request.user.id]))
+
     logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
     callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
     return HttpResponseRedirect(callback)
@@ -914,17 +921,10 @@ def dcf_disconnect_user(request):
     #
 
     try:
-        dcf_token = get_stored_dcf_token(request.user.id)
-    except TokenFailure:
-        dcf_token = None
+        drop_dcf_token(request.user.id)
     except InternalTokenError:
         messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please report this to feedback@isb-cgc.org")
         return redirect(reverse('user_detail', args=[request.user.id]))
-    except RefreshTokenExpired as e:
-        dcf_token = e.token
-
-    if dcf_token:
-        dcf_token.delete()
 
     #
     # Finally, we need to send the user to logout from the DCF, which is needed to clear the
