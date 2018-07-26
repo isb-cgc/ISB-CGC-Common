@@ -82,6 +82,53 @@ def get_stored_dcf_token(user_id):
     return dcf_token
 
 
+def drop_dcf_token(user_id):
+    """
+    If we are forcing a logout from DCF, it is because we need to get the user to start with a clean slate. Dropping
+    their DCF token is part of that.
+
+    :raises InternalTokenError:
+    """
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except TokenFailure:
+        dcf_token = None
+    except InternalTokenError as e:
+        raise e
+    except RefreshTokenExpired as e:
+        dcf_token = e.token
+
+    if dcf_token:
+        dcf_token.delete()
+
+    return None
+
+
+def get_auth_elapsed_time(user_id):
+    """
+    There is benefit in knowing when the user did their NIH login at DCF, allowing us to e.g. estimate
+    if they have recently tried to do the linking step. This is pretty hackish, but should work.
+
+    :raises InternalTokenError:
+    """
+    remaining_seconds = None
+    dcf_token = None
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except TokenFailure:  # No token, user has logged out.
+        return 2592000  # sorta like infinity
+    except RefreshTokenExpired as e:
+        remaining_seconds = e.seconds
+    except InternalTokenError as e:
+        raise e
+
+    if not remaining_seconds:
+        remaining_seconds = (dcf_token.refresh_expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
+    # DCF tokens last 30 days = 2592000 seconds. Use this to calculate when we first got it:
+    elapsed_seconds = 2592000 - remaining_seconds
+    return elapsed_seconds
+
+
 def get_access_expiration(user_id):
     nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
     num_users = len(nih_users)
@@ -693,8 +740,8 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
 
     logger.info('[INFO] Refresh token storage. New token expires at {}'.format(str(expiration_time)))
 
-    # FIXME! Make sure that the NIH name is going to be unique before we shove it into the table. Don't
-    # depend on the DB table constraint.
+    # We previously made sure that the NIH name is going to be unique before we shove it into the table, calling
+    # found_linking_problems(). Don't depend on the DB table constraint.
 
     # Note that (nih_username_lower, user_id) is enforced unique in the table:
     DCFToken.objects.update_or_create(user_id=cgc_uid,
