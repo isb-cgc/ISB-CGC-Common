@@ -272,8 +272,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 if len(filelist_params) > 0:
                     cursor.execute(query, filelist_params)
                 else:
-                    print("###query")
-                    print(query)
                     cursor.execute(query)
                 stop = time.time()
                 logger.info("[STATUS] Time to get filelist: {}s".format(str(stop - start)))
