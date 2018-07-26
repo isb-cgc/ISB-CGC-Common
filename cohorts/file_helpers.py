@@ -181,8 +181,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 case_barcode_condition = " AND LOWER(cs.case_barcode) LIKE LOWER(%s)"
 
             select_clause_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
-                  md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
+                 SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name_key,
+                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
                  FROM {metadata_table} md
                  JOIN (
@@ -302,10 +302,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                             'disease_code': item['disease_code'],
                             'build': build.lower(),
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
-                            'index_name': item['index_file_name'] or 'N/A',
+                            'index_name': item['index_file_name_key'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
                             'user_access': str(item['access'] != 'controlled' or whitelist_found),
-                            'filename': item['file_name'] or 'N/A',
+                            'filename': item['file_name_key'].split('/')[-1] or 'N/A',
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
                             'datacat': item['data_category'] or 'N/A',
