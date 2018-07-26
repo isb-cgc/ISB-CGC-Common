@@ -43,7 +43,7 @@ from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_nam
 
 from dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
-                        GoogleLinkState, \
+                        GoogleLinkState, get_auth_elapsed_time, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
                         compare_google_ids
@@ -1173,7 +1173,6 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
 
     logger.debug("[STATUS] UserAuthorizedDatasets for {}: {}".format(nih_user.NIH_username, str(uad)))
 
-    need_to_add = False
     user_on_acl = False
     if handle_acls:
         try:
@@ -1181,7 +1180,9 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                                                     memberKey=user_email).execute(http=http_auth)
 
             user_on_acl = len(result) > 0
-            # If we found them in the ACL but they're not currently authorized for it, remove them from it and the table
+            # If we found them in the ACL but they're not currently authorized for it, remove them from it. Note
+            # race condition: If they were just dropped by somebody else, the following call raises an error, which
+            # also gets caught below.
             if user_on_acl and not dataset_in_auth_set:
                 directory_client.members().delete(groupKey=dataset.google_group_name,
                                                   memberKey=user_email).execute(http=http_auth)
@@ -1197,10 +1198,9 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
                     )
                 )
         except HttpError:
-            # if the user_email doesn't exist in the google group an HttpError will be thrown...
-            need_to_add = True
-    else:
-        need_to_add = (len(uad) == 0) and dataset_in_auth_set
+            # if the user_email doesn't exist in the google group an HttpError will be thrown... It means nothing
+            # should happen...
+            pass
 
     #
     # Either remove them from the table, or add them to the table.
@@ -1216,20 +1216,49 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
         uad.delete()
 
     # Sometimes an account is in the Google Group but not the database - add them if they should
-    # have access.
-    # May 2018: Not handling ACL groups anymore, we skip this step (added handle_acls condition)
-    elif not len(uad) and handle_acls and user_on_acl and dataset_in_auth_set:
-        logger.info(
-            "User {} was was found in group {} but not the database--adding them.".format(
-                user_email, dataset.google_group_name
-            )
-        )
-        st_logger.write_text_log_entry(
-            LOG_NAME_ERA_LOGIN_VIEW,
-            "[WARN] User {} was was found in group {} but not the database--adding them.".format(
-                user_email, dataset.google_group_name
-            )
-        )
+    # have access. July 2018: No, that is a bad idea. Privilege must only flow in one direction.
+    # Database must be considered definitive.
+    # May 2018: If not handling ACL groups anymore, we skip this step (added handle_acls condition)
+    # elif not len(uad) and handle_acls and user_on_acl and dataset_in_auth_set:
+    #     logger.info(
+    #         "User {} was was found in group {} but not the database--adding them.".format(
+    #             user_email, dataset.google_group_name
+    #         )
+    #     )
+    #     st_logger.write_text_log_entry(
+    #         LOG_NAME_ERA_LOGIN_VIEW,
+    #         "[WARN] User {} was was found in group {} but not the database--adding them.".format(
+    #             user_email, dataset.google_group_name
+    #         )
+    #     )
+    #     uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
+    #                                                                    authorized_dataset=ad)
+    #     if not created:
+    #         logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
+    #                                                                                           ad.whitelist_id))
+    #     else:
+    #         logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
+
+    if handle_acls:
+        # Check for their need to be in the ACL, and add them
+        if dataset_in_auth_set and not user_on_acl:
+            body = {
+                "email": user_email,
+                "role": "MEMBER"
+            }
+
+            result = directory_client.members().insert(
+                groupKey=dataset.google_group_name,
+                body=body
+            ).execute(http=http_auth)
+
+            logger.info(result)
+            logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+                                           "[STATUS] User {} added to {}.".format(user_email,
+                                                                              dataset.google_group_name))
+    # Add them to the database as well
+    if (len(uad) == 0) and dataset_in_auth_set:
         uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
                                                                        authorized_dataset=ad)
         if not created:
@@ -1238,40 +1267,11 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
         else:
             logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
 
-    if need_to_add:
-        if handle_acls:
-            # Check for their need to be in the ACL, and add them
-            if dataset_in_auth_set:
-                body = {
-                    "email": user_email,
-                    "role": "MEMBER"
-                }
-
-                result = directory_client.members().insert(
-                    groupKey=dataset.google_group_name,
-                    body=body
-                ).execute(http=http_auth)
-
-                logger.info(result)
-                logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-                st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                               "[STATUS] User {} added to {}.".format(user_email,
-                                                                                  dataset.google_group_name))
-        # Add them to the database as well
-        if not len(uad):
-            uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
-                                                                           authorized_dataset=ad)
-            if not created:
-                logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
-                                                                                                  ad.whitelist_id))
-            else:
-                logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
-
-                # logger.info(result)
-                # logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-                # st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                #                                "[STATUS] User {} added to {}.".format(user_email,
-                #                                                                       dataset.google_group_name))
+            # logger.info(result)
+            # logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
+            # st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
+            #                                "[STATUS] User {} added to {}.".format(user_email,
+            #                                                                       dataset.google_group_name))
 
 def deactivate_nih_add_to_open(user_id, user_email):
     # 5/14/18 NO! active flag has nothing to do with user logout, but instead is set to zero when user expires off of ACL group
@@ -1339,7 +1339,7 @@ def _refresh_from_dcf(user_id, nih_user):
     except InternalTokenError:
         return RefreshCode.INTERNAL_ERROR
     except DCFCommFailure:
-        raise RefreshCode.DCF_COMMUNICATIONS_ERROR
+        return RefreshCode.DCF_COMMUNICATIONS_ERROR
 
     #
     # Things that could be different: Google ID linkage, expiration time, approved datasets.
@@ -1404,24 +1404,22 @@ def get_nih_user_details(user_id, force_logout):
 
         #
         # If we have detected that the user has logged into DCF with a different NIH username than what we think,
-        # nothing else matters. We tell them to log out.
+        # nothing else matters. We tell them to log out. Same if they have a bad Google ID.
         #
 
         if force_logout:
             user_details['error_state'] = None
             user_details['dcf_comm_error'] = False
             user_details['force_DCF_logout'] = True
-            user_details['NIH_username'] = force_logout
             return user_details
 
         #
         # Otherwise, ask the DCF for current user info,
-        # FIXME: Check in with DCF for info, throw DCFCommError if we have problems
-        # FIXME: If refresh token is expired, we cannot show any info until they log back in!
+        #
 
         user_details['force_DCF_logout'] = False
         user_details['refresh_required'] = False
-        user_details['refresh_key_ok'] = True
+        user_details['no_google_link'] = False
         user_details['error_state'] = None
         user_details['dcf_comm_error'] = False
         user_details['link_mismatch'] = False
@@ -1433,6 +1431,18 @@ def get_nih_user_details(user_id, force_logout):
         nih_user = nih_users.first() if len(nih_users) == 1 else None
 
         match_state = _refresh_from_dcf(user_id, nih_user)
+
+        # It is not essential, but helps the user if we can suggest they log out
+        # before trying to fix problems (we provide them with a logout link no
+        # matter what).
+
+        try:
+            since_login_est = get_auth_elapsed_time(user_id)
+        except InternalTokenError:
+            user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
+            return user_details
+
+        live_cookie_probable = since_login_est < (60 * 10)
 
         if match_state == RefreshCode.NO_TOKEN:
             if nih_user:
@@ -1451,15 +1461,24 @@ def get_nih_user_details(user_id, force_logout):
             user_details['dcf_comm_error'] = True
             return user_details
         elif match_state == RefreshCode.NO_GOOGLE_LINK:
-            user_details['refresh_key_ok'] = False
+            # If they have no Google link, and they have recently tried to link, just get them
+            # to log out. Otherwise, get them to log in again to fix it:
+            if live_cookie_probable:
+                user_details['force_DCF_logout'] = True
+            else:
+                user_details['no_google_link'] = True
             return user_details
         elif match_state == RefreshCode.GOOGLE_LINK_MISMATCH:
-            # If they have a bad Google ID linked at DCF, we force them to login again, which eventually
-            # tells them they need to switch it.
-            user_details['link_mismatch'] = True
+            # If they have a mismatched Google link, and they have recently tried to link, just get them
+            # to log out. Otherwise, get them to log in again to fix it:
+            if live_cookie_probable:
+                user_details['force_DCF_logout'] = True
+            else:
+                user_details['link_mismatch'] = True
+            return user_details
         elif match_state == RefreshCode.UNEXPECTED_UNLINKED_NIH_USER:
             # Should not happen. Force a complete logout
-            user_details['NIH_username'] = None
+            user_details['force_DCF_logout'] = True
             return user_details
         elif match_state == RefreshCode.PROJECT_SET_UPDATED:
             user_details['data_sets_updated'] = True
