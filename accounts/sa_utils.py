@@ -231,6 +231,7 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         if not member_sa.startswith(projectNumber+'-') and not project_id_re.search(member_sa) and \
                                 not (msa.is_managed_this_project(member_sa, projectNumber, gcp_id)) and \
                                 not sab.is_blacklisted(member_sa):
+                            logger.debug("[STATUS] {} is managed this project: {}".format(member_sa,str(msa.is_managed_this_project(member_sa, projectNumber, gcp_id))))
                             invalid_members['external_sa'].append(member_sa)
 
                         # If we haven't already invalidated this member SA for being from outside the project, check to see if anyone
