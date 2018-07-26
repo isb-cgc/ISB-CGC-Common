@@ -181,8 +181,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 case_barcode_condition = " AND LOWER(cs.case_barcode) LIKE LOWER(%s)"
 
             select_clause_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.disease_code, md.file_name, md.file_name_key,
-                  md.index_file_name, md.access, md.acl, md.platform, md.data_type, md.data_category,
+                 SELECT md.sample_barcode, md.case_barcode, md.disease_code, substring_index(md.file_name_key, '/', -1) as file_name, md.file_name_key,
+                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
                  FROM {metadata_table} md
                  JOIN (
@@ -191,7 +191,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                      WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.case_barcode = md.case_barcode
-                 WHERE md.file_uploaded='true' {filter_conditions} {case_barcode_condition}
+                 WHERE TRUE {filter_conditions} {case_barcode_condition}
             """
 
             file_list_query = """
@@ -272,6 +272,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 if len(filelist_params) > 0:
                     cursor.execute(query, filelist_params)
                 else:
+                    print("###query")
+                    print(query)
                     cursor.execute(query)
                 stop = time.time()
                 logger.info("[STATUS] Time to get filelist: {}s".format(str(stop - start)))
@@ -302,7 +304,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                             'disease_code': item['disease_code'],
                             'build': build.lower(),
                             'cloudstorage_location': item['file_name_key'] or 'N/A',
-                            'index_name': item['index_file_name'] or 'N/A',
+                            'index_name': item['index_file_name_key'] or 'N/A',
                             'access': (item['access'] or 'N/A'),
                             'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
