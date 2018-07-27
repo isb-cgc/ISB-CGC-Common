@@ -232,6 +232,8 @@ def fetch_build_data_attr(build, type=None):
 
     if type == 'dicom' :
         metadata_data_attrs = ['disease_code', ]
+    elif type == 'camic':
+        metadata_data_attrs = ['data_type', 'data_format', 'disease_code', ]
     else:
         metadata_data_attrs = ['data_type', 'data_category','experimental_strategy','data_format','platform', 'disease_code',]
     try:
