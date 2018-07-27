@@ -282,7 +282,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                     if case_barcode:
                         inc_filters['case_barcode'] = [case_barcode]
                     counts = count_public_data_type(user, count_select_clause,
-                                                inc_filters, cohort_programs, (type is not None and type != 'all'), build)
+                                        inc_filters, cohort_programs, (type is not None and type != 'all'), build, type)
                     stop = time.time()
                     logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
 
