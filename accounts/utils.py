@@ -137,7 +137,6 @@ class ManagedServiceAccounts(ServiceObjectBase):
 
     def __init__(self, managed_service_accounts):
         self.managed_service_accounts = set(managed_service_accounts)
-        logger.debug("[STATUS] Managed service accounts: {}".format(str(managed_service_accounts)))
 
     def is_managed(self, service_account):
         return '@{}'.format(service_account.split('@')[-1]) in self.managed_service_accounts
