@@ -31,7 +31,10 @@ logger = logging.getLogger('main_logger')
 
 DCF_TOKEN_URL = settings.DCF_TOKEN_URL
 DCF_GOOGLE_URL = settings.DCF_GOOGLE_URL
-
+DCF_GOOGLE_SA_REGISTER_URL = settings.DCF_GOOGLE_SA_REGISTER_URL
+DCF_GOOGLE_SA_VERIFY_URL = settings.DCF_GOOGLE_SA_VERIFY_URL
+DCF_GOOGLE_SA_MONITOR_URL = settings.DCF_GOOGLE_SA_MONITOR_URL
+DCF_GOOGLE_SA_URL = settings.DCF_GOOGLE_SA_URL
 
 class DCFCommFailure(Exception):
     """Thrown if we have problems communicating with DCF """
@@ -102,6 +105,75 @@ def drop_dcf_token(user_id):
         dcf_token.delete()
 
     return None
+
+
+def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
+    """
+    :raise TokenFailure:
+    :raise InternalTokenError:
+    :raise DCFCommFailure:
+    :raise RefreshTokenExpired:
+    """
+
+    sa_data = {
+        "service_account_email": service_account_id,
+        "google_project_id": gcp_id,
+        "project_access": datasets
+    }
+
+    #
+    # Call DCF to see if there would be problems with the service account registration.
+    #
+
+    try:
+        resp = _dcf_call(DCF_GOOGLE_SA_VERIFY_URL, user_id, mode='post', post_body=sa_data)
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
+        raise e
+    except Exception as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
+        raise e
+
+    messages = None
+
+    if resp:
+        logger.info("[INFO] DCF SA verification response code was {} with body: {} ".format(resp.status_code, resp.text))
+        response_dict = json_loads(resp.text)
+        if resp.status_code == 200:
+            success = response_dict['success']
+            if not success:
+                logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
+        elif resp.status_code == 400:
+            messages = []
+            error_info = response_dict['errors']
+            sa_error_info = error_info['service_account_email']
+            if sa_error_info['status'] == 200:
+                messages.append("Service account {}: no issues".format(service_account_id))
+            else:
+                messages.append("Service account {} error ({}): {}".format(service_account_id,
+                                                                           sa_error_info['error'],
+                                                                           sa_error_info['error_description']))
+            gcp_error_info = error_info['google_project_id']
+            if gcp_error_info['status'] == 200:
+                messages.append("Google cloud project {}: no issues".format(gcp_id))
+            else:
+                messages.append("Google cloud project {} error ({}): {}".format(gcp_id,
+                                                                                gcp_error_info['error'],
+                                                                                gcp_error_info['error_description']))
+            project_access_error_info = error_info['project_access']
+            messages.append("Requested projects:")
+            for project_name in project_access_error_info:
+                project = project_access_error_info[project_name]
+                if project['status'] == 200:
+                    messages.append("Dataset {}: no issues".format(project_name))
+                else:
+                    messages.append("Dataset {} error ({}): {}".format(project_name,
+                                                                       project['error'],
+                                                                       project['error_description']))
+        else:
+            logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
+
+    return messages
 
 
 def get_auth_elapsed_time(user_id):
@@ -410,7 +482,7 @@ def refresh_at_dcf(user_id):
     #
 
     try:
-        resp = dcf_call(DCF_GOOGLE_URL, user_id, mode='patch')
+        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='patch')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         throw_later = e
     except Exception as e:
@@ -565,7 +637,7 @@ def _decode_token(token):
     return decode_token_chunk(token, 1)
 
 
-def dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False):
+def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False):
     """
     All the stuff around a DCF call that handles token management and refreshes.
 
@@ -787,7 +859,7 @@ def unlink_at_dcf(user_id, do_refresh):
     #
 
     try:
-        resp = dcf_call(DCF_GOOGLE_URL, user_id, mode='delete')  # can raise TokenFailure, DCFCommFailure
+        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='delete')  # can raise TokenFailure, DCFCommFailure
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         throw_later = e # hold off so we can try a refresh first...
     except Exception as e:

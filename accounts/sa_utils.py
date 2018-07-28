@@ -41,7 +41,7 @@ from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFac
 from dataset_utils.dataset_config import DatasetGoogleGroupPair
 from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_name
 
-from dcf_support import get_stored_dcf_token, \
+from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         GoogleLinkState, get_auth_elapsed_time, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
@@ -50,6 +50,7 @@ from dcf_support import get_stored_dcf_token, \
 
 logger = logging.getLogger('main_logger')
 
+SA_VIA_DCF = settings.SA_VIA_DCF
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
@@ -57,7 +58,196 @@ GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 
+class SAModes:
+    REMOVE_ALL = 1
+    ADJUST = 2
+    EXTEND = 3
+    REGISTER = 4
+    CANNOT_OCCUR = 5
+
+
+def _derive_sa_mode(is_refresh, is_adjust, remove_all):
+    """
+    We have three different flag driving only four different modes. Try to make this more
+    comprehensible:
+    """
+    if is_adjust:
+        if is_refresh:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.CANNOT_OCCUR
+        else:
+            if remove_all:
+                return SAModes.REMOVE_ALL
+            else:
+                return SAModes.ADJUST
+    else:
+        if is_refresh:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.EXTEND
+        else:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.REGISTER
+
+
+def _load_black_and_white(st_logger, log_name, service_account):
+    """
+    Even with DCF handling registration, we would still maybe want to e.g. catch our SAs:
+    """
+
+    #
+    # Block verification of service accounts used by the application
+    # We should keep this around even with DCF, since we can catch these without even asking.
+    #
+    try:
+        sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
+        msa = ManagedServiceAccounts.from_json_file_path(MANAGED_SERVICE_ACCOUNTS_PATH)
+        gow = GoogleOrgWhitelist.from_json_file_path(GOOGLE_ORG_WHITELIST_PATH)
+    except Exception as e:
+        logger.error("[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
+        logger.exception(e)
+        trace_msg = traceback.format_exc()
+        st_logger.write_text_log_entry(log_name, "[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
+        st_logger.write_text_log_entry(log_name, trace_msg)
+        return None, None, None, {'message': 'An error occurred while validating the service account.'}
+
+    if sab.is_blacklisted(service_account):
+        st_logger.write_text_log_entry(log_name, "Cannot register {0}: Service account is blacklisted.".format(service_account))
+        return None, None, None, {'message': 'This service account cannot be registered.'}
+
+    return sab, msa, gow, None
+
+
+def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email):
+    # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already
+    # exists with the same datasets
+
+    sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=1)
+    if len(sa_qset) == 0:
+        if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.EXTEND:
+            return {
+                'message': 'Service account {} was not found so cannot be {}.'.format(escape(service_account), (
+                "adjusted" if (sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST) else "refreshed")),
+                'level': 'error'
+            }
+        # determine if this is a re-registratio, or a brand-new one
+        sa_qset = ServiceAccount.objects.get(service_account=service_account, active=0)
+        if len(sa_qset) > 0:
+            logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
+                                                                                                user_email))
+            st_logger.write_text_log_entry(log_name,
+                                           "[STATUS] Verification for SA {} being re-registered by user {}".format(
+                                           service_account, user_email))
+    else:
+        sa = sa_qset.first()
+        if sa_mode == SAModes.REGISTER:
+            return {
+                'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(escape(service_account)),
+                'level': 'error'
+            }
+
+        # if is_adjust or not is_refresh:
+        if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.REGISTER:
+            reg_change = False
+            # Check the private datasets to see if there's a registration change
+            saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
+
+            # If we're removing all datasets and there are 1 or more, this is automatically a registration change
+            if (sa_mode == SAModes.REMOVE_ALL) and saads.count():
+                reg_change = True
+            else:
+                if controlled_datasets.count() or saads.count():
+                    ads = controlled_datasets.values_list('whitelist_id', flat=True)
+                    # A private dataset missing from either list means this is a registration change
+                    for ad in ads:
+                        if ad not in saads:
+                            reg_change = True
+                    if not reg_change:
+                        for saad in saads:
+                            if saad not in ads:
+                                reg_change = True
+                else:
+                    reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
+            # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
+            if not reg_change:
+                return {
+                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(escape(service_account),('re-registered' if (sa_mode == SAModes.REGISTER) else 'adjusted')),
+                    'level': 'warning'
+                }
+    return None
+
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+    if SA_VIA_DCF:
+        _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+    else:
+        _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+
+
+def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+
+    sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
+
+    # Only verify for protected datasets
+    controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
+    controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
+    project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
+    projectNumber = None
+    sab = None
+    gow = None
+    sa = None
+    is_compute = False
+
+    # log the reports using Cloud logging API
+    st_logger = StackDriverLogger.build_from_django_settings()
+
+    log_name = SERVICE_ACCOUNT_LOG_NAME
+    resp = {
+        'message': '{0}: Begin verification of service account.'.format(service_account)
+    }
+    st_logger.write_struct_log_entry(log_name, resp)
+
+    #
+    # load the lists:
+    #
+
+    sab, msa, gow, msg = _load_black_and_white(st_logger, log_name, service_account)
+    if msg:
+        return msg
+
+    #
+    # Check SA sanity:
+    #
+
+    msg = _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email)
+    if msg:
+        return msg
+
+    #
+    # Ask DCF if we are cool:
+    #
+
+    try:
+        messages = verify_sa_at_dcf(user_email, gcp_id, service_account, datasets)
+        if messages:
+            return {
+              'message': '\n'.join(messages),
+              'level': 'error'
+            }
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.exception(e)
+        return {'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
+
+    return_obj = {'roles': 'FIXME!!',
+                  'all_user_datasets_verified': 'FIXME!!'}
+    return return_obj
+
+
+def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
 
     # Only verify for protected datasets
     controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
@@ -420,7 +610,7 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
         datasets = map(int, datasets)
 
     # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-    result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
+    result = _verify_service_account_isb(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
 
     err_msgs = []
 
