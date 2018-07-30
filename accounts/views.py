@@ -1,5 +1,5 @@
 """
-Copyright 2017, Institute for Systems Biology
+Copyright 2017-2018, Institute for Systems Biology
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,14 +33,14 @@ from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from googleapiclient.errors import HttpError
+from django.contrib.auth.models import User
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
                      do_nih_unlink, deactivate_nih_add_to_open
-
-import json
+from json import loads as json_loads
 
 logger = logging.getLogger('main_logger')
 
@@ -52,6 +52,7 @@ MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 @login_required
 def extended_logout_view(request):
+
     response = None
     try:
         # deactivate NIH_username entry if exists
@@ -475,6 +476,32 @@ def register_bucket(request, user_id, gcp_id):
         # Check bucketname not null
         if not bucket_name:
             messages.error(request, 'There was no bucket name provided.')
+            return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+        else:
+            try:
+                bucket = Bucket.objects.get(bucket_name=bucket_name)
+                if bucket.google_project.project_id != gcp.project_id:
+                    messages.error(
+                        request,
+                        "A bucket with the name {} has already been registered under a different project.".format(escape(bucket_name)) +
+                        " If you feel you've received this message in error, please contact the administrator."
+                    )
+                else:
+                    messages.error(
+                        request,
+                        "A bucket with the name {} has already been registered under project {}.".format(escape(bucket_name),gcp.project_id) +
+                        " Buckets can only be registered to a project once. If you feel you've received this message in error, please contact the administrator."
+                    )
+                return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+            except MultipleObjectsReturned:
+                messages.error(
+                    request,
+                    "More than one bucket with the name {} has already been registered.".format(escape(bucket_name)) +
+                    " Buckets can only be registered once."
+                )
+                return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+            except ObjectDoesNotExist:
+                pass
 
         # Check that bucket is in project
         try:
@@ -500,7 +527,7 @@ def register_bucket(request, user_id, gcp_id):
                 messages.error(request, 'Access to the bucket {0} in Google Cloud Project {1} was denied.'.format(
                     bucket_name, gcp.project_id))
             elif e.resp.get('content-type', '').startswith('application/json'):
-                err_val = json.loads(e.content).get('error')
+                err_val = json_loads(e.content).get('error')
                 if err_val:
                     e_message = err_val.get('message')
                 else:
@@ -545,8 +572,19 @@ def register_bqdataset(request, user_id, gcp_id):
         # Check bqdatasetname not null
         if not bqdataset_name:
             messages.error(request, 'There was no dataset name provided.')
+            return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
         else:
             bqdataset_name = bqdataset_name.strip()
+            try:
+                BqDataset.objects.get(dataset_name=bqdataset_name,google_project=gcp)
+                messages.error(request,"A dataset with the name {} has already been registered for project {}.".format(escape(bqdataset_name),gcp.project_id))
+                return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+            except MultipleObjectsReturned:
+                messages.error(request, "Multiple datasets with the name {} have already been registered for project {}.".format(
+                    escape(bqdataset_name),gcp.project_id))
+                return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
+            except ObjectDoesNotExist:
+                pass
 
         # Check that bqdataset is in project
         try:

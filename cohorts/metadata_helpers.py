@@ -223,18 +223,22 @@ def get_sql_connection():
         if db and db.open: db.close()
 
 
-def fetch_build_data_attr(build):
+def fetch_build_data_attr(build, type=None):
     db = None
     cursor = None
 
     # Our methods and templates use HG and not hg casing; try to be consistent
     build = build.upper()
 
-    # TODO: make this progrmmatic
-    metadata_data_attrs = ['data_type', 'data_category','experimental_strategy','data_format','platform', 'disease_code',]
-
+    if type == 'dicom' :
+        metadata_data_attrs = ['disease_code', ]
+    elif type == 'camic':
+        metadata_data_attrs = ['data_type', 'data_format', 'disease_code', ]
+    else:
+        metadata_data_attrs = ['data_type', 'data_category','experimental_strategy','data_format','platform', 'disease_code',]
     try:
-
+        if len(METADATA_DATA_ATTR[build]) != len(metadata_data_attrs):
+            METADATA_DATA_ATTR[build]={}
         if not len(METADATA_DATA_ATTR[build]):
             db = get_sql_connection()
             cursor = db.cursor()
