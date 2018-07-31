@@ -528,9 +528,9 @@ class BigQuerySupport(BigQueryABC):
                     query_param_1 = query_param
                     query_param_2 = copy.deepcopy(query_param)
                     query_param = [query_param_1, query_param_2, ]
-                    query_param_1['name'] = query_param_1
+                    query_param_1['name'] = param_name_1
                     query_param_1['parameterValue']['value'] = values[0]
-                    query_param_2['name'] = query_param_2
+                    query_param_2['name'] = param_name_2
                     query_param_2['parameterValue']['value'] = values[1]
 
                 else:
