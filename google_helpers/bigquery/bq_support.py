@@ -504,19 +504,19 @@ class BigQuerySupport(BigQueryABC):
                             filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
                                                                  param_name)
                     elif query_param['parameterType']['type'] == 'INT64':
-                        if attr.endsWith('_gt') or attr.endsWith('_gte'):
+                        if attr.endswith('_gt') or attr.endswith('_gte'):
                             filter_string += "{}{} >{} @{}".format(
                                 '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                                '=' if attr.endsWith('_gte') else '',
+                                '=' if attr.endswith('_gte') else '',
                                 param_name
                             )
-                        elif attr.endsWith('_lt') or attr.endsWith('_lte'):
+                        elif attr.endswith('_lt') or attr.endswith('_lte'):
                             filter_string += "{}{} <{} @{}".format(
                                 '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                                '=' if attr.endsWith('_lte') else '',
+                                '=' if attr.endswith('_lte') else '',
                                 param_name
                             )
-                elif len(values) == 2 and attr.endsWith('_btw'):
+                elif len(values) == 2 and attr.endswith('_btw'):
                     query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     param_name_1 = param_name + '_btw_1'
                     param_name_2 = param_name + '_btw_2'
