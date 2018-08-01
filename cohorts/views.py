@@ -2187,6 +2187,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         # Some files only have case barcodes, but some have sample barcodes. We have to make sure
         # to export any files linked to a case if any sample from that case is in the cohort, but
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
+
         if export_type == 'file_manifest':
             query_string_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
