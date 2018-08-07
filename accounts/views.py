@@ -39,7 +39,10 @@ from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
-                     do_nih_unlink, deactivate_nih_add_to_open
+                     do_nih_unlink, deactivate_nih_add_to_open, controlled_auth_datasets
+
+from dcf_support import service_account_info_from_dcf_for_project
+
 from json import loads as json_loads
 
 logger = logging.getLogger('main_logger')
@@ -49,6 +52,7 @@ SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
+SA_VIA_DCF = settings.SA_VIA_DCF
 
 @login_required
 def extended_logout_view(request):
@@ -315,6 +319,20 @@ def register_gcp(request, user_id):
 def gcp_detail(request, user_id, gcp_id):
     context = {}
     context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
+    if SA_VIA_DCF:
+        sa_info, _ = service_account_info_from_dcf_for_project(user_id, gcp_id)
+
+    #
+    # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
+    # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
+    #
+
+    # we need:
+    #
+    # service_account.get_auth_datasets
+    # dataset names, separated by ","
+    # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
+    # dataset ids, separated by ", "
 
     return render(request, 'GenespotRE/gcp_detail.html', context)
 
@@ -401,15 +419,21 @@ def register_sa(request, user_id):
         if request.GET.get('sa_id') or request.GET.get('gcp_id'):
             template = 'GenespotRE/register_sa.html'
             context = {
-                'authorized_datasets': AuthorizedDataset.objects.filter(public=False)
+                'authorized_datasets': controlled_auth_datasets()
             }
 
             if request.GET.get('sa_id'):
                 template = 'GenespotRE/adjust_sa.html'
-                sa_dict = service_account_dict(request.GET.get('sa_id'))
+                sa_dict, sa_msgs = service_account_dict(user_id, request.GET.get('sa_id'))
+                # FIXME!!! What to do next if there is an error message (Coming from DCF)??
+                if sa_msgs:
+                    for sa_msg in sa_msgs:
+                        messages.error(request, sa_msg)
+
                 context['gcp_id'] = sa_dict['gcp_id']
-                context['sa_datasets'] = sa_dict['sa_datasets']
+                context['sa_dataset_ids'] = sa_dict['sa_dataset_ids']
                 context['sa_id'] = sa_dict['sa_id']
+
             else:
                 gcp_id = escape(request.GET.get('gcp_id'))
                 crm_service = get_special_crm_resource()
@@ -453,6 +477,7 @@ def register_sa(request, user_id):
 
 @login_required
 def delete_sa(request, user_id, sa_id):
+    # FIXME: No longer have an SA_ID to work with
     try:
         if request.POST:
             unregister_sa_with_id(user_id, sa_id)

@@ -43,10 +43,10 @@ from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_nam
 
 from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
-                        GoogleLinkState, get_auth_elapsed_time, \
+                        GoogleLinkState, get_auth_elapsed_time, unregister_sa_via_dcf, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
-                        compare_google_ids
+                        compare_google_ids, service_account_info_from_dcf
 
 logger = logging.getLogger('main_logger')
 
@@ -135,7 +135,7 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
                 "adjusted" if (sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST) else "refreshed")),
                 'level': 'error'
             }
-        # determine if this is a re-registratio, or a brand-new one
+        # determine if this is a re-registration, or a brand-new one
         sa_qset = ServiceAccount.objects.get(service_account=service_account, active=0)
         if len(sa_qset) > 0:
             logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
@@ -181,6 +181,7 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
                 }
     return None
 
+
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
     if SA_VIA_DCF:
         _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
@@ -200,7 +201,6 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, i
     sab = None
     gow = None
     sa = None
-    is_compute = False
 
     # log the reports using Cloud logging API
     st_logger = StackDriverLogger.build_from_django_settings()
@@ -780,11 +780,27 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
         return ret_msg
 
+
 def unregister_sa_with_id(user_id, sa_id):
+    # FIXME DO NOT USE THIS FUNCTION
     unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
 
 
 def unregister_all_gcp_sa(user_id, gcp_id):
+    if SA_VIA_DCF:
+        # FIXME Throws exceptions:
+        success = None
+        msgs = None
+        #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
+        pass
+    else:
+        success = None
+        msgs = None
+        _unregister_all_gcp_sa_db(user_id, gcp_id)
+
+    return success, msgs
+
+def _unregister_all_gcp_sa_db(user_id, gcp_id):
     gcp = GoogleProject.objects.get(id=gcp_id, active=1)
 
     # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
@@ -794,6 +810,17 @@ def unregister_all_gcp_sa(user_id, gcp_id):
 
 
 def unregister_sa(user_id, sa_name):
+    if SA_VIA_DCF:
+        # FIXME Throws exceptions:
+        success, msgs = unregister_sa_via_dcf(user_id, sa_name)
+    else:
+        success = None
+        msgs = None
+        _unregister_sa_db(user_id, sa_name)
+    return success, msgs
+
+
+def _unregister_sa_db(user_id, sa_name):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     sa = ServiceAccount.objects.get(service_account=sa_name)
@@ -845,14 +872,51 @@ def unregister_sa(user_id, sa_name):
     sa.active = False
     sa.save()
 
-def service_account_dict(sa_id):
+
+def controlled_auth_datasets():
+    datasets = AuthorizedDataset.objects.filter(public=False)
+    return [{'whitelist_id': x.whitelist_id, 'name': x.name, 'duca': x.duca_id} for x in datasets]
+
+
+def service_account_dict(user_id, sa_id):
+    if SA_VIA_DCF:
+        # FIXME This is throwing DCF token exceptions!
+        return _service_account_dict_from_dcf(user_id, sa_id)
+    else:
+        return _service_account_dict_from_db(sa_id)
+
+
+def _service_account_dict_from_dcf(user_id, sa_id):
+
+    #
+    # DCF currently (8/2/18) requires us to provide the list of Google projects
+    # that we want service accounts for. If we are just given the SA ID, we need
+    # to query for all projects and then use those results to find the SA matching
+    # the ID (unless we go through funny business trying to parse the project out
+    # of the service account name:
+    #
+    user = User.objects.get(id=user_id)
+    gcp_list = GoogleProject.objects.filter(user=user, active=1)
+    proj_list = [x.project_id for x in gcp_list]
+
+    sa_dict, messages = service_account_info_from_dcf(user_id, proj_list)
+    return sa_dict[sa_id] if sa_id in sa_dict else None, messages
+
+
+def _service_account_dict_from_db(sa_id):
     service_account = ServiceAccount.objects.get(id=sa_id, active=1)
+    datasets = service_account.get_auth_datasets()
+    ds_ids = []
+    for dataset in datasets:
+        ds_ids.append(dataset.whitelist_id)
+
     retval = {
       'gcp_id': service_account.google_project.project_id,
-      'sa_datasets': service_account.get_auth_datasets(),
+      'sa_dataset_ids': ds_ids,
       'sa_id': service_account.service_account
     }
-    return retval
+    return retval, None
+
 
 def auth_dataset_whitelists_for_user(use_user_id):
     nih_user = NIH_User.objects.filter(user_id=use_user_id, active=True)
