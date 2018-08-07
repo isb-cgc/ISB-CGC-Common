@@ -2201,7 +2201,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                      GROUP BY case_barcode, sample_barcode
                  ) cs
                  ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
-                 WHERE md.file_uploaded {filter_conditions}
+                 WHERE TRUE {filter_conditions}
                  GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location,
                   md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
                   gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
