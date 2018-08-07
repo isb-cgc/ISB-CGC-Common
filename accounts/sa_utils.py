@@ -194,7 +194,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, i
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
     # Only verify for protected datasets
-    controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
+    controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
     controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
     project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
@@ -250,7 +250,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, i
 def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
 
     # Only verify for protected datasets
-    controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
+    controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
     controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
     project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
