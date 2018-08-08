@@ -606,8 +606,9 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
     if len(datasets) == 1 and datasets[0] == '':
         datasets = []
-    else:
-        datasets = map(int, datasets)
+    # datasets are now identified by their whitelist id:
+    #else:
+    #    datasets = map(int, datasets)
 
     # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
     result = _verify_service_account_isb(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
@@ -621,7 +622,7 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
                                              user_sa, user_email)})
 
         # Datasets verified, add service accounts to appropriate acl groups
-        protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
+        protected_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets)
 
         # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
         public_datasets = AuthorizedDataset.objects.filter(public=True)
