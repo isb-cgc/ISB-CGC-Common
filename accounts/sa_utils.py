@@ -252,6 +252,8 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
     # Only verify for protected datasets
     controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
     controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
+    logger.info("[INFO] Datasets: {} {} {}".format(str(datasets), len(controlled_datasets), controlled_dataset_names))
+
     project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
     sab = None
