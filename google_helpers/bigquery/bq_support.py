@@ -318,6 +318,7 @@ class BigQuerySupport(BigQueryABC):
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
                 logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done['status']['errors'])))
+                logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
                 query_results = self.fetch_job_results(query_job['jobReference'])
@@ -325,6 +326,7 @@ class BigQuerySupport(BigQueryABC):
         else:
             logger.error("[ERROR] Query took longer than the allowed time to execute--" +
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
+            logger.error("[ERROR] Timed out query: {}".format(query))
 
         if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
                 job_is_done['statistics']['query']:
