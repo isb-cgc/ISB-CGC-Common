@@ -363,6 +363,9 @@ class BigQuerySupport(BigQueryABC):
 
         return result
 
+    def fetch_job_resource(self, job_ref):
+        return self.bq_service.jobs().get(**job_ref).execute(num_retries=5)
+
     # Execute a query to be saved on a temp table (shorthand to instance method above), optionally parameterized
     # and fetch its results
     @classmethod
@@ -394,6 +397,12 @@ class BigQuerySupport(BigQueryABC):
     def get_job_results(cls, job_reference):
         bqs = cls(None, None, None)
         return bqs.fetch_job_results(job_reference)
+
+    # Given a BQ service and a job reference, fetch out the results
+    @classmethod
+    def get_job_resource(cls, job_id, project_id):
+        bqs = cls(None, None, None)
+        return bqs.fetch_job_resource({'jobId': job_id, 'projectId': project_id})
 
     # Builds a BQ API v2 QueryParameter set and WHERE clause string from a set of filters of the form:
     # {
