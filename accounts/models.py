@@ -84,7 +84,7 @@ class GoogleProject(models.Model):
 
 class Bucket(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
-    bucket_name = models.CharField(null=True,max_length=155)
+    bucket_name = models.CharField(null=True,max_length=155, unique=True)
     bucket_permissions = models.TextField(null=True)
 
     def __str__(self):
@@ -93,6 +93,9 @@ class Bucket(models.Model):
 class BqDataset(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     dataset_name = models.CharField(null=False, max_length=155)
+
+    class Meta:
+        unique_together = (("google_project", "dataset_name"),)
 
 
 class AuthorizedDataset(models.Model):
@@ -157,3 +160,20 @@ class ServiceAccountAuthorizedDatasets(models.Model):
     service_account = models.ForeignKey(ServiceAccount, null=False)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
     authorized_date = models.DateTimeField(auto_now=True)
+
+
+class DCFToken(models.Model):
+    user = models.OneToOneField(User, null=False)
+    nih_username = models.TextField(null=False)
+    nih_username_lower = models.CharField(max_length=128, null=False) # Must be limited to include in constraint
+    dcf_user = models.CharField(max_length=128, null=False)
+    access_token = models.TextField(null=False)
+    refresh_token = models.TextField(null=False)
+    user_token = models.TextField(null=False)
+    decoded_jwt = models.TextField(null=False)
+    expires_at = models.DateTimeField(null=False)
+    refresh_expires_at = models.DateTimeField(null=False)
+    google_id = models.TextField(null=True)
+
+    class Meta:
+        unique_together = (("user", "nih_username_lower"),)

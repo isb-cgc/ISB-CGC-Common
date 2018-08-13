@@ -144,6 +144,7 @@ class ManagedServiceAccounts(ServiceObjectBase):
     def is_managed_this_project(self, service_account, projectNumber, projectId):
         return '@{}'.format(service_account.split('@')[-1]) in self.managed_service_accounts \
                and (service_account.split('@')[0] == 'service-{}'.format(projectNumber) or \
+                    service_account.split('@')[0] == 'project-{}'.format(projectNumber) or \
                     service_account.split('@')[0] == projectNumber or service_account.split('@')[0] == projectId)
 
     @classmethod
