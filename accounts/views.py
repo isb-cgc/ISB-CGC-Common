@@ -319,12 +319,50 @@ def gcp_detail(request, user_id, gcp_id):
     context = {}
     context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
     if settings.SA_VIA_DCF:
-        sa_info, _ = service_account_info_from_dcf_for_project(user_id, gcp_id)
+        sa_info, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
+        if messages:
+            for message in messages:
+                messages.error(request, message)
+            return render(request, 'GenespotRE/gcp_detail.html', context)
+        context['sa_list'] = []
 
-    #
-    # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
-    # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
-    #
+    else:
+        context['sa_list'] = []
+
+        #google_project = models.ForeignKey(GoogleProject, null=False)
+        #service_account = models.CharField(max_length=1024, null=False)
+        #active = models.BooleanField(default=False, null=False)
+        #authorized_date = models.DateTimeField(auto_now=True)
+
+        for service_account in context['gcp'].active_service_accounts:
+            auth_datasets = service_account.get_auth_datasets()
+            sa_data = {}
+            context['sa_list'].append(sa_data)
+            sa_data['name'] = service_account.service_account
+            sa_data['is_expired'] = service_account.is_expired()
+            sa_data['authorized_date'] = service_account.authorized_date
+            sa_data['id'] = service_account.id
+            auth_names = []
+            auth_ids = []
+            sa_data['num_auth'] = len(auth_datasets)
+            for auth_data in auth_datasets:
+                auth_names.append(auth_data.name)
+                auth_ids.append(auth_data.id)
+            sa_data['auth_dataset_names'] = ', '.join(auth_names)
+            sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
+
+
+        # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
+        # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
+        #
+        #  for sa in sa_list:
+        #    ret_entry = {
+        #         'gcp_id': sa['google_project_id'],
+        #        'sa_dataset_ids': sa['project_access'],
+        #         'sa_id': sa['service_account_email'],
+        #         'sa_exp': sa['project_access_exp']
+        #     }
+        #      retval.append(ret_entry)
 
     # we need:
     #
