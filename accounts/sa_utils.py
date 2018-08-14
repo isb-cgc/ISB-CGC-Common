@@ -50,7 +50,6 @@ from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, \
 
 logger = logging.getLogger('main_logger')
 
-SA_VIA_DCF = settings.SA_VIA_DCF
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
@@ -183,7 +182,7 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
 
 
 def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
     else:
         return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
@@ -790,7 +789,7 @@ def unregister_sa_with_id(user_id, sa_id):
 
 
 def unregister_all_gcp_sa(user_id, gcp_id):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME Throws exceptions:
         success = None
         msgs = None
@@ -813,7 +812,7 @@ def _unregister_all_gcp_sa_db(user_id, gcp_id):
 
 
 def unregister_sa(user_id, sa_name):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME Throws exceptions:
         success, msgs = unregister_sa_via_dcf(user_id, sa_name)
     else:
@@ -882,7 +881,7 @@ def controlled_auth_datasets():
 
 
 def service_account_dict(user_id, sa_id):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME This is throwing DCF token exceptions!
         return _service_account_dict_from_dcf(user_id, sa_id)
     else:
