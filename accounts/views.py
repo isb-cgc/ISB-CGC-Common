@@ -52,7 +52,6 @@ SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
-SA_VIA_DCF = settings.SA_VIA_DCF
 
 @login_required
 def extended_logout_view(request):
@@ -319,7 +318,7 @@ def register_gcp(request, user_id):
 def gcp_detail(request, user_id, gcp_id):
     context = {}
     context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         sa_info, _ = service_account_info_from_dcf_for_project(user_id, gcp_id)
 
     #
