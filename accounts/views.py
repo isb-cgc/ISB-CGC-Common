@@ -346,7 +346,7 @@ def gcp_detail(request, user_id, gcp_id):
                     logger.info("[INFO] AD {}:".format(gcp_id, str(auth_data)))
                     protected_dataset = AuthorizedDataset.objects.get(whitelist_id=auth_data)
                     auth_names.append(protected_dataset.name)
-                    auth_ids.append(protected_dataset.id)
+                    auth_ids.append(str(protected_dataset.id))
                 sa_data['auth_dataset_names'] = ', '.join(auth_names)
                 sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
 
@@ -382,7 +382,7 @@ def gcp_detail(request, user_id, gcp_id):
                 logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
                 for auth_data in auth_datasets:
                     auth_names.append(auth_data.name)
-                    auth_ids.append(auth_data.id)
+                    auth_ids.append(str(auth_data.id))
                 sa_data['auth_dataset_names'] = ', '.join(auth_names)
                 sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
 
