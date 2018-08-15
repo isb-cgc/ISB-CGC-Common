@@ -316,67 +316,96 @@ def register_gcp(request, user_id):
 
 @login_required
 def gcp_detail(request, user_id, gcp_id):
-    logger.info("[INFO] gcp_detail {}:".format(gcp_id))
-    context = {}
-    context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
+    try:
+        logger.info("[INFO] gcp_detail {}:".format(gcp_id))
+        context = {}
+        context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
 
-    logger.info("[INFO] Listing SAs for GCP {} {}:".format(gcp_id, len(context['gcp'])))
-    if settings.SA_VIA_DCF:
-        sa_info, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
-        if messages:
-            for message in messages:
-                messages.error(request, message)
-            return render(request, 'GenespotRE/gcp_detail.html', context)
-        context['sa_list'] = []
+        logger.info("[INFO] Listing SAs for GCP {} {}:".format(gcp_id, len(context['gcp'])))
+        if settings.SA_VIA_DCF:
+            context['sa_list'] = []
+            sa_info, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
+            if messages:
+                for message in messages:
+                    messages.error(request, message)
+                return render(request, 'GenespotRE/gcp_detail.html', context)
 
-    else:
-        context['sa_list'] = []
+            for sa_dict in sa_info:
+                sa_data = {}
+                context['sa_list'].append(sa_data)
+                sa_data['name'] = sa_dict['sa_name']
+                now_time = pytz.utc.localize(datetime.datetime.utcnow())
+                exp_time = datetime.datetime.fromtimestamp(sa_data['sa_exp'])
+                sa_data['is_expired'] = exp_time < now_time
+                sa_data['authorized_date'] = exp_time + datetime.timedelta(days=-7)
+                auth_names = []
+                auth_ids = []
+                sa_data['num_auth'] = len(sa_data['sa_dataset_ids'])
+                logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(sa_data['sa_dataset_ids'])))
+                for auth_data in sa_data['sa_dataset_ids']:
+                    auth_names.append(auth_data)
+                    auth_ids.append(auth_data)
+                sa_data['auth_dataset_names'] = ', '.join(auth_names)
+                sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
 
-        #google_project = models.ForeignKey(GoogleProject, null=False)
-        #service_account = models.CharField(max_length=1024, null=False)
-        #active = models.BooleanField(default=False, null=False)
-        #authorized_date = models.DateTimeField(auto_now=True)
+            #  for sa in sa_list:
+            #    ret_entry = {
+            #         'gcp_id': sa['google_project_id'],
+            #        'sa_dataset_ids': sa['project_access'],
+            #         'sa_name': sa['service_account_email'],
+            #         'sa_exp': sa['project_access_exp']
+            #     }
+            #      retval.append(ret_entry)
 
-        active_sas = context['gcp'].active_service_accounts()
-        for service_account in active_sas:
-            logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
-            auth_datasets = service_account.get_auth_datasets()
-            sa_data = {}
-            context['sa_list'].append(sa_data)
-            sa_data['name'] = service_account.service_account
-            sa_data['is_expired'] = service_account.is_expired()
-            sa_data['authorized_date'] = service_account.authorized_date
-            sa_data['id'] = service_account.id
-            auth_names = []
-            auth_ids = []
-            sa_data['num_auth'] = len(auth_datasets)
-            logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
-            for auth_data in auth_datasets:
-                auth_names.append(auth_data.name)
-                auth_ids.append(auth_data.id)
-            sa_data['auth_dataset_names'] = ', '.join(auth_names)
-            sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
+        else:
+            context['sa_list'] = []
+
+            #google_project = models.ForeignKey(GoogleProject, null=False)
+            #service_account = models.CharField(max_length=1024, null=False)
+            #active = models.BooleanField(default=False, null=False)
+            #authorized_date = models.DateTimeField(auto_now=True)
+
+            active_sas = context['gcp'].active_service_accounts()
+            for service_account in active_sas:
+                logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
+                auth_datasets = service_account.get_auth_datasets()
+                sa_data = {}
+                context['sa_list'].append(sa_data)
+                sa_data['name'] = service_account.service_account
+                sa_data['is_expired'] = service_account.is_expired()
+                sa_data['authorized_date'] = service_account.authorized_date
+                auth_names = []
+                auth_ids = []
+                sa_data['num_auth'] = len(auth_datasets)
+                logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
+                for auth_data in auth_datasets:
+                    protected_dataset = AuthorizedDataset.objects.get(whitelist_id=auth_data)
+                    auth_names.append(protected_dataset.name)
+                    auth_ids.append(protected_dataset.id)
+                sa_data['auth_dataset_names'] = ', '.join(auth_names)
+                sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
 
 
-        # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
-        # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
+            # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
+            # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
+            #
+
+
+        # we need:
         #
-        #  for sa in sa_list:
-        #    ret_entry = {
-        #         'gcp_id': sa['google_project_id'],
-        #        'sa_dataset_ids': sa['project_access'],
-        #         'sa_id': sa['service_account_email'],
-        #         'sa_exp': sa['project_access_exp']
-        #     }
-        #      retval.append(ret_entry)
+        # service_account.get_auth_datasets
+        # dataset names, separated by ","
+        # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
+        # dataset ids, separated by ", "
+        logger.info("[INFO] Render!! {}:".format(gcp_id))
 
-    # we need:
-    #
-    # service_account.get_auth_datasets
-    # dataset names, separated by ","
-    # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
-    # dataset ids, separated by ", "
-    logger.info("[INFO] Render!! {}:".format(gcp_id))
+    except Exception as e:
+        logger.error("[ERROR] While detailing a GCP: ")
+        logger.exception(e)
+        messages.error(request,
+                       "Encountered an error while trying to detail this Google Cloud Project - please contact the administrator.")
+
+
     return render(request, 'GenespotRE/gcp_detail.html', context)
 
 
