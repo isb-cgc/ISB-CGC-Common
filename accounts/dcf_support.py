@@ -196,7 +196,7 @@ def service_account_info_from_dcf(user_id, proj_list):
             ret_entry = {
                 'gcp_id': sa['google_project_id'],
                 'sa_dataset_ids': sa['project_access'],
-                'sa_id': sa['service_account_email'],
+                'sa_name': sa['service_account_email'],
                 'sa_exp': sa['project_access_exp']
             }
             retval[sa['service_account_email']] = ret_entry

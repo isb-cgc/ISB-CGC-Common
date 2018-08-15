@@ -38,7 +38,7 @@ from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, \
-                     unregister_all_gcp_sa, unregister_sa_with_id, service_account_dict, \
+                     unregister_all_gcp_sa, unregister_sa, service_account_dict, \
                      do_nih_unlink, deactivate_nih_add_to_open, controlled_auth_datasets
 
 from dcf_support import service_account_info_from_dcf_for_project
@@ -453,13 +453,13 @@ def register_sa(request, user_id):
 
     try:
         # This is a Service Account dataset adjustment or an initial load of the service account registration page
-        if request.GET.get('sa_id') or request.GET.get('gcp_id'):
+        if request.GET.get('sa_name') or request.GET.get('gcp_id'):
             template = 'GenespotRE/register_sa.html'
             context = {
                 'authorized_datasets': controlled_auth_datasets()
             }
 
-            if request.GET.get('sa_id'):
+            if request.GET.get('sa_name'):
                 template = 'GenespotRE/adjust_sa.html'
                 sa_dict, sa_msgs = service_account_dict(user_id, request.GET.get('sa_id'))
                 # FIXME!!! What to do next if there is an error message (Coming from DCF)??
@@ -469,7 +469,7 @@ def register_sa(request, user_id):
 
                 context['gcp_id'] = sa_dict['gcp_id']
                 context['sa_dataset_ids'] = sa_dict['sa_dataset_ids']
-                context['sa_id'] = sa_dict['sa_id']
+                context['sa_name'] = sa_dict['sa_name']
 
             else:
                 gcp_id = escape(request.GET.get('gcp_id'))
@@ -513,13 +513,13 @@ def register_sa(request, user_id):
 
 
 @login_required
-def delete_sa(request, user_id, sa_id):
+def delete_sa(request, user_id, sa_name):
     # FIXME: No longer have an SA_ID to work with
     try:
         if request.POST:
-            unregister_sa_with_id(user_id, sa_id)
+            unregister_sa(user_id, sa_name)
     except Exception as e:
-        logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_id))
+        logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_name))
         logger.exception(e)
         messages.error(request, "Encountered an error while trying to remove this service account - please contact the administrator.")
 
