@@ -782,12 +782,6 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
         return ret_msg
 
-
-def unregister_sa_with_id(user_id, sa_id):
-    # FIXME DO NOT USE THIS FUNCTION
-    unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
-
-
 def unregister_all_gcp_sa(user_id, gcp_id):
     if settings.SA_VIA_DCF:
         # FIXME Throws exceptions:
@@ -888,7 +882,7 @@ def service_account_dict(user_id, sa_id):
         return _service_account_dict_from_db(sa_id)
 
 
-def _service_account_dict_from_dcf(user_id, sa_id):
+def _service_account_dict_from_dcf(user_id, sa_name):
 
     #
     # DCF currently (8/2/18) requires us to provide the list of Google projects
@@ -902,20 +896,24 @@ def _service_account_dict_from_dcf(user_id, sa_id):
     proj_list = [x.project_id for x in gcp_list]
 
     sa_dict, messages = service_account_info_from_dcf(user_id, proj_list)
-    return sa_dict[sa_id] if sa_id in sa_dict else None, messages
+    return sa_dict[sa_name] if sa_name in sa_dict else None, messages
 
 
-def _service_account_dict_from_db(sa_id):
-    service_account = ServiceAccount.objects.get(id=sa_id, active=1)
+def _service_account_dict_from_db(sa_name):
+    service_account = ServiceAccount.objects.get(service_account=sa_name, active=1)
     datasets = service_account.get_auth_datasets()
     ds_ids = []
     for dataset in datasets:
         ds_ids.append(dataset.whitelist_id)
 
+    expired_time = service_account.authorized_time + datetime.timedelta(days=7)
+
     retval = {
-      'gcp_id': service_account.google_project.project_id,
-      'sa_dataset_ids': ds_ids,
-      'sa_id': service_account.service_account
+        'gcp_id': service_account.google_project.project_id,
+        'sa_dataset_ids': ds_ids,
+        'sa_name': service_account.service_account,
+        'sa_exp': expired_time
+
     }
     return retval, None
 
