@@ -319,7 +319,6 @@ def gcp_detail(request, user_id, gcp_id):
     logger.info("[INFO] gcp_detail {}:".format(gcp_id))
     context = {}
     context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
-    context['sa_list'] = []
 
     logger.info("[INFO] Listing SAs for GCP {} {}:".format(gcp_id, len(context['gcp'])))
     if settings.SA_VIA_DCF:
@@ -338,7 +337,8 @@ def gcp_detail(request, user_id, gcp_id):
         #active = models.BooleanField(default=False, null=False)
         #authorized_date = models.DateTimeField(auto_now=True)
 
-        for service_account in context['gcp'].active_service_accounts:
+        active_sas = context['gcp'].active_service_accounts
+        for service_account in active_sas:
             logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
             auth_datasets = service_account.get_auth_datasets()
             sa_data = {}
