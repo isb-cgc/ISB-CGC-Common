@@ -321,7 +321,7 @@ def gcp_detail(request, user_id, gcp_id):
         context = {}
         context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
 
-        logger.info("[INFO] Listing SAs for GCP {} {}:".format(gcp_id, len(context['gcp'])))
+        logger.info("[INFO] Listing SAs for GCP {}:".format(gcp_id))
         if settings.SA_VIA_DCF:
             context['sa_list'] = []
             sa_info, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
