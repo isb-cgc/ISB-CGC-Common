@@ -337,7 +337,7 @@ def gcp_detail(request, user_id, gcp_id):
         #active = models.BooleanField(default=False, null=False)
         #authorized_date = models.DateTimeField(auto_now=True)
 
-        active_sas = context['gcp'].active_service_accounts
+        active_sas = context['gcp'].active_service_accounts()
         for service_account in active_sas:
             logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
             auth_datasets = service_account.get_auth_datasets()
