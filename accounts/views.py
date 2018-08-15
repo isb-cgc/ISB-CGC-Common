@@ -316,9 +316,13 @@ def register_gcp(request, user_id):
 
 @login_required
 def gcp_detail(request, user_id, gcp_id):
+    logger.info("[INFO] gcp_detail {}:".format(gcp_id))
     context = {}
     context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
-    logger.info("[INFO] Listing SAs for GCP {} {}:".format(gcp_id, len(context['gcp'])))
+    context['sa_list'] = []
+    return render(request, 'GenespotRE/gcp_detail.html', context)
+
+    """logger.info("[INFO] Listing SAs for GCP {} {}:".format(gcp_id, len(context['gcp'])))
     if settings.SA_VIA_DCF:
         sa_info, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
         if messages:
@@ -374,7 +378,7 @@ def gcp_detail(request, user_id, gcp_id):
     # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
     # dataset ids, separated by ", "
     logger.info("[INFO] Render!! {}:".format(gcp_id))
-    return render(request, 'GenespotRE/gcp_detail.html', context)
+    return render(request, 'GenespotRE/gcp_detail.html', context)"""
 
 
 @login_required
