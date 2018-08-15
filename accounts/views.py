@@ -318,6 +318,7 @@ def register_gcp(request, user_id):
 def gcp_detail(request, user_id, gcp_id):
     context = {}
     context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
+    logger.info("[INFO] Listing SAs for GCP {} {}:".format(gcp_id, len(context['gcp'])))
     if settings.SA_VIA_DCF:
         sa_info, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
         if messages:
@@ -335,6 +336,7 @@ def gcp_detail(request, user_id, gcp_id):
         #authorized_date = models.DateTimeField(auto_now=True)
 
         for service_account in context['gcp'].active_service_accounts:
+            logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
             auth_datasets = service_account.get_auth_datasets()
             sa_data = {}
             context['sa_list'].append(sa_data)
@@ -345,6 +347,7 @@ def gcp_detail(request, user_id, gcp_id):
             auth_names = []
             auth_ids = []
             sa_data['num_auth'] = len(auth_datasets)
+            logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
             for auth_data in auth_datasets:
                 auth_names.append(auth_data.name)
                 auth_ids.append(auth_data.id)
@@ -370,7 +373,7 @@ def gcp_detail(request, user_id, gcp_id):
     # dataset names, separated by ","
     # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
     # dataset ids, separated by ", "
-
+    logger.info("[INFO] Render!! {}:".format(gcp_id))
     return render(request, 'GenespotRE/gcp_detail.html', context)
 
 
