@@ -335,7 +335,7 @@ def gcp_detail(request, user_id, gcp_id):
                 context['sa_list'].append(sa_data)
                 sa_data['name'] = sa_dict['sa_name']
                 # for modal names:
-                sa_data['esc_name'] = sa_dict['sa_name'].replace('@', "_at_").replace('.', '_dot_').replace('-', '___')
+                sa_data['esc_name'] = sa_dict['sa_name'].replace('@', "-at-").replace('.', '-dot-')
                 now_time = pytz.utc.localize(datetime.datetime.utcnow())
                 exp_time = datetime.datetime.fromtimestamp(sa_data['sa_exp'])
                 sa_data['is_expired'] = exp_time < now_time
@@ -377,7 +377,7 @@ def gcp_detail(request, user_id, gcp_id):
                 context['sa_list'].append(sa_data)
                 sa_data['name'] = service_account.service_account
                 # for modal names:
-                sa_data['esc_name'] = service_account.service_account.replace('@', "_at_").replace('.', '_dot_').replace('-', '___')
+                sa_data['esc_name'] = service_account.service_account.replace('@', "-at-").replace('.', '-dot-')
                 sa_data['is_expired'] = service_account.is_expired()
                 sa_data['authorized_date'] = service_account.authorized_date
                 auth_names = []
