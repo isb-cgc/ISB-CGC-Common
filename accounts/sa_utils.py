@@ -50,7 +50,6 @@ from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, \
 
 logger = logging.getLogger('main_logger')
 
-SA_VIA_DCF = settings.SA_VIA_DCF
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
@@ -136,7 +135,7 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
                 'level': 'error'
             }
         # determine if this is a re-registration, or a brand-new one
-        sa_qset = ServiceAccount.objects.get(service_account=service_account, active=0)
+        sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
         if len(sa_qset) > 0:
             logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
                                                                                                 user_email))
@@ -182,14 +181,14 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
     return None
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
-    if SA_VIA_DCF:
-        _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
+    if settings.SA_VIA_DCF:
+        return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
     else:
-        _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+        return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
 
 
-def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
 
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
@@ -232,7 +231,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, i
     #
 
     try:
-        messages = verify_sa_at_dcf(user_email, gcp_id, service_account, datasets)
+        messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
         if messages:
             return {
               'message': '\n'.join(messages),
@@ -252,6 +251,8 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
     # Only verify for protected datasets
     controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
     controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
+    logger.info("[INFO] Datasets: {} {} {}".format(str(datasets), len(controlled_datasets), str(controlled_dataset_names)))
+
     project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
     sab = None
@@ -606,8 +607,9 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
     if len(datasets) == 1 and datasets[0] == '':
         datasets = []
-    else:
-        datasets = map(int, datasets)
+    # datasets are now identified by their whitelist id:
+    #else:
+    #    datasets = map(int, datasets)
 
     # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
     result = _verify_service_account_isb(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
@@ -621,7 +623,7 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
                                              user_sa, user_email)})
 
         # Datasets verified, add service accounts to appropriate acl groups
-        protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
+        protected_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets)
 
         # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
         public_datasets = AuthorizedDataset.objects.filter(public=True)
@@ -780,14 +782,8 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
         return ret_msg
 
-
-def unregister_sa_with_id(user_id, sa_id):
-    # FIXME DO NOT USE THIS FUNCTION
-    unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
-
-
 def unregister_all_gcp_sa(user_id, gcp_id):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME Throws exceptions:
         success = None
         msgs = None
@@ -810,7 +806,7 @@ def _unregister_all_gcp_sa_db(user_id, gcp_id):
 
 
 def unregister_sa(user_id, sa_name):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME Throws exceptions:
         success, msgs = unregister_sa_via_dcf(user_id, sa_name)
     else:
@@ -879,14 +875,14 @@ def controlled_auth_datasets():
 
 
 def service_account_dict(user_id, sa_id):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME This is throwing DCF token exceptions!
         return _service_account_dict_from_dcf(user_id, sa_id)
     else:
         return _service_account_dict_from_db(sa_id)
 
 
-def _service_account_dict_from_dcf(user_id, sa_id):
+def _service_account_dict_from_dcf(user_id, sa_name):
 
     #
     # DCF currently (8/2/18) requires us to provide the list of Google projects
@@ -900,20 +896,24 @@ def _service_account_dict_from_dcf(user_id, sa_id):
     proj_list = [x.project_id for x in gcp_list]
 
     sa_dict, messages = service_account_info_from_dcf(user_id, proj_list)
-    return sa_dict[sa_id] if sa_id in sa_dict else None, messages
+    return sa_dict[sa_name] if sa_name in sa_dict else None, messages
 
 
-def _service_account_dict_from_db(sa_id):
-    service_account = ServiceAccount.objects.get(id=sa_id, active=1)
+def _service_account_dict_from_db(sa_name):
+    service_account = ServiceAccount.objects.get(service_account=sa_name, active=1)
     datasets = service_account.get_auth_datasets()
     ds_ids = []
     for dataset in datasets:
         ds_ids.append(dataset.whitelist_id)
 
+    expired_time = service_account.authorized_date + datetime.timedelta(days=7)
+
     retval = {
-      'gcp_id': service_account.google_project.project_id,
-      'sa_dataset_ids': ds_ids,
-      'sa_id': service_account.service_account
+        'gcp_id': service_account.google_project.project_id,
+        'sa_dataset_ids': ds_ids,
+        'sa_name': service_account.service_account,
+        'sa_exp': expired_time
+
     }
     return retval, None
 

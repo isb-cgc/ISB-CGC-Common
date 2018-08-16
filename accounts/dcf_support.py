@@ -144,6 +144,7 @@ def service_account_info_from_dcf_for_project(user_id, proj):
 
     try:
         full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, proj)
+        logger.info("[INFO] Calling DCF URL {}".format(full_url))
         resp = _dcf_call(full_url, user_id, mode='get')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
@@ -153,19 +154,23 @@ def service_account_info_from_dcf_for_project(user_id, proj):
         raise e
 
     messages = None
-    response_dict = json_loads(resp.text)
     if resp.status_code == 200:
+        response_dict = json_loads(resp.text)
         sa_list = response_dict['service_accounts']
         for sa in sa_list:
             ret_entry = {
                 'gcp_id': sa['google_project_id'],
                 'sa_dataset_ids': sa['project_access'],
-                'sa_id': sa['service_account_email'],
+                'sa_name': sa['service_account_email'],
                 'sa_exp': sa['project_access_exp']
             }
             retval.append(ret_entry)
     elif resp.status_code == 403:
         messages = ["User is not a member of Google project {}".format(proj)]
+    elif resp.status_code == 401: # Have seen this when the google sa scope was not requested in key
+        messages = ["User does not have permissions for this operation on Google project {}".format(proj)]
+    elif resp.status_code == 400: # If they don't like the request, say it was empty:
+        logger.info("[INFO] DCF response of 400 for URL {}".format(full_url))
     else:
         messages = ["Unexpected response from Data Commons: {}".format(resp.status_code)]
 
@@ -196,7 +201,7 @@ def service_account_info_from_dcf(user_id, proj_list):
             ret_entry = {
                 'gcp_id': sa['google_project_id'],
                 'sa_dataset_ids': sa['project_access'],
-                'sa_id': sa['service_account_email'],
+                'sa_name': sa['service_account_email'],
                 'sa_exp': sa['project_access_exp']
             }
             retval[sa['service_account_email']] = ret_entry
