@@ -240,15 +240,18 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
 
-    messages = None
+    messages = []
 
     if resp:
         logger.info("[INFO] DCF SA verification response code was {} with body: {} ".format(resp.status_code, resp.text))
         response_dict = json_loads(resp.text)
         if resp.status_code == 200:
+            messages = []
             success = response_dict['success']
             if not success:
                 logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
+            else:
+                messages.append("Service account {}: was verified".format(service_account_id))
         elif resp.status_code == 400:
             messages = []
             error_info = response_dict['errors']
