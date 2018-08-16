@@ -167,6 +167,10 @@ def service_account_info_from_dcf_for_project(user_id, proj):
             retval.append(ret_entry)
     elif resp.status_code == 403:
         messages = ["User is not a member of Google project {}".format(proj)]
+    elif resp.status_code == 401: # Have seen this when the google sa scope was not requested in key
+        messages = ["User does not have permissions for this operation on Google project {}".format(proj)]
+    elif resp.status_code == 400: # If they don't like the request, say it was empty:
+        logger.info("[INFO] DCF response of 400 for URL {}".format(full_url))
     else:
         messages = ["Unexpected response from Data Commons: {}".format(resp.status_code)]
 
