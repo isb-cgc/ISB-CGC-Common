@@ -135,7 +135,7 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
                 'level': 'error'
             }
         # determine if this is a re-registration, or a brand-new one
-        sa_qset = ServiceAccount.objects.get(service_account=service_account, active=0)
+        sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
         if len(sa_qset) > 0:
             logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
                                                                                                 user_email))
