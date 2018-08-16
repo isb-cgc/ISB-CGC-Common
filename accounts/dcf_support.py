@@ -153,8 +153,8 @@ def service_account_info_from_dcf_for_project(user_id, proj):
         raise e
 
     messages = None
-    response_dict = json_loads(resp.text)
     if resp.status_code == 200:
+        response_dict = json_loads(resp.text)
         sa_list = response_dict['service_accounts']
         for sa in sa_list:
             ret_entry = {
