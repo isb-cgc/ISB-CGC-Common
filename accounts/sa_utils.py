@@ -181,14 +181,14 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
     return None
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
     if settings.SA_VIA_DCF:
-        return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+        return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
     else:
         return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
 
 
-def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
 
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
@@ -231,7 +231,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, i
     #
 
     try:
-        messages = verify_sa_at_dcf(user_email, gcp_id, service_account, datasets)
+        messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
         if messages:
             return {
               'message': '\n'.join(messages),
