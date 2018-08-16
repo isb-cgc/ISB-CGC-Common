@@ -182,10 +182,15 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
 
 
 def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
-    if settings.SA_VIA_DCF:
-        return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
-    else:
-        return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+    try:
+        if settings.SA_VIA_DCF:
+            return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+        else:
+            return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+    except Exception as e:
+        logger.error("[ERROR] Exception while verifying ServiceAccount")
+        logger.exception(e)
+        return {'message': 'An error occurred while validating the service account.'}
 
 
 def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
@@ -232,6 +237,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
 
     try:
         messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
+        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
         if messages:
             return {
               'message': '\n'.join(messages),
@@ -377,9 +383,9 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
              or msa.is_managed(service_account)):
         msg = "Service Account {} is ".format(escape(service_account),)
         if msa.is_managed(service_account):
-            msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
+            msg += "a Google System Managed Service Account, and so cannot be registered. Please register a user-managed Service Account."
         else:
-            msg += "not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
+            msg += "not from GCP {}, and so cannot be registered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
         return {
             'message': msg,
             'level': 'error'

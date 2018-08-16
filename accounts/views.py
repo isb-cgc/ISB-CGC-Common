@@ -548,9 +548,12 @@ def verify_sa(request, user_id):
             if remove_all:
                 datasets = []
 
+            logger.info("[INFO] Verifying Service Account {} for datasets {}".format(user_sa, str(datasets)))
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+            logger.info("[INFO] Verified Service Account {} for datasets {}".format(user_sa, str(datasets)))
 
             if 'message' in result.keys():
+                logger.info("[INFO] Gotta message")
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
                 # Users attempting to refresh a project they're not on go back to their GCP list (because this GCP was probably removed from it)
@@ -563,8 +566,10 @@ def verify_sa(request, user_id):
                     gcp.save()
             else:
                 if result['all_user_datasets_verified']:
+                    logger.info("[INFO] all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
                 else:
+                    logger.info("[INFO] not all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
