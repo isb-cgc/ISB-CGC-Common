@@ -324,9 +324,10 @@ def gcp_detail(request, user_id, gcp_id):
         logger.info("[INFO] Listing SAs for GCP {}:".format(gcp_id))
         if settings.SA_VIA_DCF:
             context['sa_list'] = []
-            sa_info, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
-            if messages:
-                for message in messages:
+            sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
+            if sa_messages:
+                for message in sa_messages:
+                    logger.error("[ERROR] {}:".format(message))
                     messages.error(request, message)
                 return render(request, 'GenespotRE/gcp_detail.html', context)
 
