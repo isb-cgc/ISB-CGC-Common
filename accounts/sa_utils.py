@@ -906,7 +906,7 @@ def _service_account_dict_from_db(sa_name):
     for dataset in datasets:
         ds_ids.append(dataset.whitelist_id)
 
-    expired_time = service_account.authorized_time + datetime.timedelta(days=7)
+    expired_time = service_account.authorized_date + datetime.timedelta(days=7)
 
     retval = {
         'gcp_id': service_account.google_project.project_id,
