@@ -213,7 +213,6 @@ def service_account_info_from_dcf(user_id, proj_list):
     return retval, messages
 
 
-
 def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
     """
     :raise TokenFailure:
