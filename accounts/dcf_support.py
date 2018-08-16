@@ -144,6 +144,7 @@ def service_account_info_from_dcf_for_project(user_id, proj):
 
     try:
         full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, proj)
+        logger.info("[INFO] Calling DCF URL {}".format(full_url))
         resp = _dcf_call(full_url, user_id, mode='get')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
