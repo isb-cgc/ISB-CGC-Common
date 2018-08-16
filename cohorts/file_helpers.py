@@ -291,7 +291,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         whitelist_found = False
                         # If this is a controlled-access entry, check for the user's access to it
                         if item['access'] == 'controlled' and access:
-                            whitelists = item['acl'].split(',')
+                            whitelists = item['acl'].split(';')
                             for whitelist in whitelists:
                                 if whitelist in access:
                                     whitelist_found = True
