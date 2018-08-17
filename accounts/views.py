@@ -637,7 +637,7 @@ def register_sa(request, user_id):
                 elif msg_tuple[1] == 'warning':
                     messages.warning(request, msg_tuple[0])
                 else:
-                    logger.error("[ERROR] Unimplemented message level: {}, {}".format(msg_tuple[1], msg_tuple[0]))
+                    logger.info("[INFO] {}".format(msg_tuple))
 
             return redirect('user_gcp_list', user_id=user_id)
         else:
