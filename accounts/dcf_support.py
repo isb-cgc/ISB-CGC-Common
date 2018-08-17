@@ -143,7 +143,7 @@ def service_account_info_from_dcf_for_project(user_id, proj):
     retval = []
 
     try:
-        full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, proj)
+        full_url = '{0}?google_project_ids={1}'.format(DCF_GOOGLE_SA_URL, proj)
         logger.info("[INFO] Calling DCF URL {}".format(full_url))
         resp = _dcf_call(full_url, user_id, mode='get')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
@@ -183,7 +183,7 @@ def service_account_info_from_dcf(user_id, proj_list):
     """
     try:
         proj_string = ','.join(proj_list)
-        full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, proj_string)
+        full_url = '{0}?google_project_ids={1}'.format(DCF_GOOGLE_SA_URL, proj_string)
         resp = _dcf_call(full_url, user_id, mode='get')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
@@ -305,6 +305,7 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
 
     try:
         resp = _dcf_call(DCF_GOOGLE_SA_REGISTER_URL, user_id, mode='post', post_body=sa_data)
+        logger.info("[INFO] Just called DCF at {}".format(DCF_GOOGLE_SA_REGISTER_URL))
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
         raise e
@@ -353,6 +354,8 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
                                                                        project['error_description']))
         else:
             logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
+    else:
+        logger.error("[ERROR] No response from DCF for registration")
 
     return messages
 
