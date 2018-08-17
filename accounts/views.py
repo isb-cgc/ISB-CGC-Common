@@ -629,7 +629,7 @@ def register_sa(request, user_id):
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
-            err_msgs = register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+            err_msgs = register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
 
             for msg_tuple in err_msgs:
                 if msg_tuple[1] == 'error':
