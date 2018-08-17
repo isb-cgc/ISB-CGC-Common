@@ -630,7 +630,8 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
     #    datasets = map(int, datasets)
 
     # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-    result = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
+    result = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+    logger.info("[INFO] FIXME ACTUALLY CHECK RESULTS")
 
     err_msgs = []
 
