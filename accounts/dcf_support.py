@@ -304,6 +304,7 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
     #
 
     try:
+        logger.info("[INFO] Calling DCF at {}".format(json_dumps(sa_data)))
         resp = _dcf_call(DCF_GOOGLE_SA_REGISTER_URL, user_id, mode='post', post_body=sa_data)
         logger.info("[INFO] Just called DCF at {}".format(DCF_GOOGLE_SA_REGISTER_URL))
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
