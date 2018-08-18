@@ -992,7 +992,7 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
     # value:
     #
 
-    dcf_expire_timestamp -= (28 * 86400) # FIXME REMOVE THIS HACK AFTER TESTING
+    #dcf_expire_timestamp -= (28 * 86400) # ONLY USE THIS HACK FOR TESTING
 
     refresh_expire_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(dcf_expire_timestamp))
 
