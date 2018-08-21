@@ -230,7 +230,7 @@ def fetch_build_data_attr(build, type=None):
     # Our methods and templates use HG and not hg casing; try to be consistent
     build = build.upper()
 
-    if type == 'dicom' :
+    if type == 'dicom' or type == 'pdf' :
         metadata_data_attrs = ['disease_code', ]
     elif type == 'camic':
         metadata_data_attrs = ['data_type', 'data_format', 'disease_code', ]
