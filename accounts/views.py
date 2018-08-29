@@ -111,6 +111,7 @@ def user_gcp_list(request, user_id):
                 user = User.objects.get(id=user_id)
                 gcp_list = GoogleProject.objects.filter(user=user, active=1)
                 social_account = SocialAccount.objects.get(user_id=user_id)
+                sa_dict = {}
 
                 user_details = {
                     'date_joined': user.date_joined,
@@ -121,8 +122,9 @@ def user_gcp_list(request, user_id):
                     'last_login': user.last_login,
                     'last_name': user.last_name
                 }
-
-                context = {'user': user, 'user_details': user_details, 'gcp_list': gcp_list}
+                for gcp in gcp_list:
+                    sa_dict[gcp.id] = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                context = {'user': user, 'user_details': user_details, 'gcp_list': gcp_list, 'sa_dict': sa_dict}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")

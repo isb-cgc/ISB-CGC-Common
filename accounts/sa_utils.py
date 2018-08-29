@@ -236,20 +236,18 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
     #
 
     try:
-        messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
+        success, messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
         logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
-        if messages:
-            return {
-              'message': '\n'.join(messages),
-              'level': 'error'
-            }
+       #if not success:
+        #    return {
+        #      'message': '\n'.join(messages),
+        #      'level': 'error'
+        #    }
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.exception(e)
         return {'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
 
-    return_obj = {'roles': 'FIXME!!',
-                  'all_user_datasets_verified': 'FIXME!!'}
-    return return_obj
+    return {'all_user_datasets_verified': True}
 
 
 def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
@@ -630,31 +628,27 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
     #    datasets = map(int, datasets)
 
     # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-    result = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+    messages = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
     logger.info("[INFO] FIXME ACTUALLY CHECK RESULTS")
 
-    err_msgs = []
+    ret_msg = []
 
     #
-    # Ask DCF if we are cool:
+    # Get the service account registered at DCF:
     #
 
     try:
-        messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+        success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
         logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
-        if messages:
-            return {
-                'message': '\n'.join(messages),
-                'level': 'error'
-            }
+        if not success:
+            ret_msg.append((
+                "The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format(
+                    "\n".join(messages)), "error"))
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.exception(e)
-        return {
-            'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
+        return {("FIXME There was an error while verifying this service account. Please contact the administrator.", "error")}
 
-    return_obj = {'roles': 'FIXME!!',
-                  'all_user_datasets_verified': 'FIXME!!'}
-    return return_obj
+    return ret_msg
 
 
 def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
@@ -847,12 +841,13 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
 
         return ret_msg
 
+
 def unregister_all_gcp_sa(user_id, gcp_id):
     if settings.SA_VIA_DCF:
         # FIXME Throws exceptions:
         success = None
         msgs = None
-        #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
+        success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
         pass
     else:
         success = None
@@ -860,6 +855,7 @@ def unregister_all_gcp_sa(user_id, gcp_id):
         _unregister_all_gcp_sa_db(user_id, gcp_id)
 
     return success, msgs
+
 
 def _unregister_all_gcp_sa_db(user_id, gcp_id):
     gcp = GoogleProject.objects.get(id=gcp_id, active=1)

@@ -213,6 +213,59 @@ def service_account_info_from_dcf(user_id, proj_list):
     return retval, messages
 
 
+def _parse_dcf_response(resp, gcp_id, service_account_id, datasets):
+    """
+    Handles the JSON response from DCF and creates messages to display to the user
+    """
+    messages = []
+    success = False
+
+    if resp is not None:
+        logger.info("[INFO] DCF SA verification response code was {} with body: {} ".format(resp.status_code, resp.text))
+        response_dict = json_loads(resp.text)
+        if resp.status_code == 200:
+            success = response_dict['success']
+            if not success:
+                logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
+        elif resp.status_code == 400:
+            success = False
+            error_info = response_dict['errors']
+            sa_error_info = error_info['service_account_email']
+            if sa_error_info['status'] == 200:
+                messages.append("Service account {}: no issues".format(service_account_id))
+            else:
+                messages.append("Service account {} error ({}): {}".format(service_account_id,
+                                                                           sa_error_info['error'],
+                                                                           sa_error_info['error_description']))
+            gcp_error_info = error_info['google_project_id']
+            if gcp_error_info['status'] == 200:
+                messages.append("Google cloud project {}: no issues".format(gcp_id))
+            else:
+                messages.append("Google cloud project {} error ({}): {}".format(gcp_id,
+                                                                                gcp_error_info['error'],
+                                                                                gcp_error_info['error_description']))
+            project_access_error_info = error_info['project_access']
+            if project_access_error_info['status'] == 200:
+                messages.append("All users approved for all projects")
+            else:
+                messages.append("For datasets {}: error ({}): {}".format(','.join(datasets),
+                                                                         project_access_error_info['error'],
+                                                                         project_access_error_info['error_description']))
+            messages.append("Requested projects:")
+            project_validity_info = project_access_error_info['project_validity']
+            for project_name in project_validity_info:
+                project = project_validity_info[project_name]
+                messages.append("Project {}: all users have access: {}".format(project_name, project["all_users_have_access"]))
+
+        else:
+            logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
+            messages.append("Unexpected response from Data Commons Framework")
+    else:
+        messages.append("No response from Data Commons Framework")
+
+    return success, messages
+
+
 def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
     """
     :raise TokenFailure:
@@ -232,7 +285,9 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
     #
 
     try:
-        resp = _dcf_call(DCF_GOOGLE_SA_VERIFY_URL, user_id, mode='post', post_body=sa_data)
+        # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
+        headers = {'Content-Type': 'application/json'}
+        resp = _dcf_call(DCF_GOOGLE_SA_VERIFY_URL, user_id, mode='post', post_body=json_dumps(sa_data), headers=headers)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
@@ -240,49 +295,7 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
 
-    messages = []
-
-    if resp:
-        logger.info("[INFO] DCF SA verification response code was {} with body: {} ".format(resp.status_code, resp.text))
-        response_dict = json_loads(resp.text)
-        if resp.status_code == 200:
-            messages = []
-            success = response_dict['success']
-            if not success:
-                logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
-            else:
-                messages.append("Service account {}: was verified".format(service_account_id))
-        elif resp.status_code == 400:
-            messages = []
-            error_info = response_dict['errors']
-            sa_error_info = error_info['service_account_email']
-            if sa_error_info['status'] == 200:
-                messages.append("Service account {}: no issues".format(service_account_id))
-            else:
-                messages.append("Service account {} error ({}): {}".format(service_account_id,
-                                                                           sa_error_info['error'],
-                                                                           sa_error_info['error_description']))
-            gcp_error_info = error_info['google_project_id']
-            if gcp_error_info['status'] == 200:
-                messages.append("Google cloud project {}: no issues".format(gcp_id))
-            else:
-                messages.append("Google cloud project {} error ({}): {}".format(gcp_id,
-                                                                                gcp_error_info['error'],
-                                                                                gcp_error_info['error_description']))
-            project_access_error_info = error_info['project_access']
-            messages.append("Requested projects:")
-            for project_name in project_access_error_info:
-                project = project_access_error_info[project_name]
-                if project['status'] == 200:
-                    messages.append("Dataset {}: no issues".format(project_name))
-                else:
-                    messages.append("Dataset {} error ({}): {}".format(project_name,
-                                                                       project['error'],
-                                                                       project['error_description']))
-        else:
-            logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
-
-    return messages
+    return _parse_dcf_response(resp, gcp_id, service_account_id, datasets)
 
 
 def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
@@ -300,13 +313,14 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
     }
 
     #
-    # Call DCF to see if there would be problems with the service account registration.
+    # Call DCF to register. There really should not be any problems, since we *just* did a reverification. But handle
+    # the failure case anyway!
     #
 
     try:
-        logger.info("[INFO] Calling DCF at {}".format(json_dumps(sa_data)))
-        resp = _dcf_call(DCF_GOOGLE_SA_REGISTER_URL, user_id, mode='post', post_body=sa_data)
-        logger.info("[INFO] Just called DCF at {}".format(DCF_GOOGLE_SA_REGISTER_URL))
+        # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
+        headers = {'Content-Type': 'application/json'}
+        resp = _dcf_call(DCF_GOOGLE_SA_REGISTER_URL, user_id, mode='post', post_body=json_dumps(sa_data), headers=headers)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
         raise e
@@ -314,51 +328,9 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
         logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
         raise e
 
-    messages = []
+    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets)
 
-    if resp:
-        logger.info("[INFO] DCF SA registration response code was {} with body: {} ".format(resp.status_code, resp.text))
-        response_dict = json_loads(resp.text)
-        if resp.status_code == 200:
-            messages = []
-            success = response_dict['success']
-            if not success:
-                logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
-            else:
-                messages.append("Service account {}: was verified".format(service_account_id))
-        elif resp.status_code == 400:
-            messages = []
-            error_info = response_dict['errors']
-            sa_error_info = error_info['service_account_email']
-            if sa_error_info['status'] == 200:
-                messages.append("Service account {}: no issues".format(service_account_id))
-            else:
-                messages.append("Service account {} error ({}): {}".format(service_account_id,
-                                                                           sa_error_info['error'],
-                                                                           sa_error_info['error_description']))
-            gcp_error_info = error_info['google_project_id']
-            if gcp_error_info['status'] == 200:
-                messages.append("Google cloud project {}: no issues".format(gcp_id))
-            else:
-                messages.append("Google cloud project {} error ({}): {}".format(gcp_id,
-                                                                                gcp_error_info['error'],
-                                                                                gcp_error_info['error_description']))
-            project_access_error_info = error_info['project_access']
-            messages.append("Requested projects:")
-            for project_name in project_access_error_info:
-                project = project_access_error_info[project_name]
-                if project['status'] == 200:
-                    messages.append("Dataset {}: no issues".format(project_name))
-                else:
-                    messages.append("Dataset {} error ({}): {}".format(project_name,
-                                                                       project['error'],
-                                                                       project['error_description']))
-        else:
-            logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
-    else:
-        logger.error("[ERROR] No response from DCF for registration")
-
-    return messages
+    return success, messages
 
 
 def get_auth_elapsed_time(user_id):
@@ -822,7 +794,7 @@ def _decode_token(token):
     return decode_token_chunk(token, 1)
 
 
-def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, params_dict=None):
+def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, params_dict=None, headers=None):
     """
     All the stuff around a DCF call that handles token management and refreshes.
 
@@ -869,7 +841,7 @@ def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, 
 
     try:
         resp = dcf.request(mode, full_url, client_id=client_id,
-                           client_secret=client_secret, data=post_body, params=params_dict)
+                           client_secret=client_secret, data=post_body, headers=headers, params=params_dict)
     except (TokenFailure, RefreshTokenExpired) as e:
         # bubbles up from token_storage_for_user call
         logger.error("[ERROR] _dcf_call {} aborted: {}".format(full_url, str(e)))
