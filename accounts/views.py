@@ -233,7 +233,6 @@ def _buid_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
                 # dataset names, separated by ","
                 # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
                 # dataset ids, separated by ", "
-        logger.info("[INFO] Render!! {}:".format(gcp_id))
 
     except Exception as e:
         logger.error("[ERROR] While detailing a GCP: ")
@@ -503,7 +502,6 @@ def gcp_detail(request, user_id, gcp_id):
         # dataset names, separated by ","
         # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
         # dataset ids, separated by ", "
-        logger.info("[INFO] Render!! {}:".format(gcp_id))
 
     except Exception as e:
         logger.error("[ERROR] While detailing a GCP: ")
