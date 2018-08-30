@@ -124,7 +124,10 @@ def user_gcp_list(request, user_id):
 
                 gcp_and_sa_tuples = []
                 for gcp in gcp_list:
-                    sa_dicts  = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                    sa_dicts, sa_err_msg = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                    if sa_err_msg is not None:
+                        template = '500.html'
+                        return render(request, template, context)
                     gcp_and_sa_tuples.append((gcp, sa_dicts))
                 context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples}
 
