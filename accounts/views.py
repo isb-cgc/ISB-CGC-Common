@@ -111,7 +111,6 @@ def user_gcp_list(request, user_id):
                 user = User.objects.get(id=user_id)
                 gcp_list = GoogleProject.objects.filter(user=user, active=1)
                 social_account = SocialAccount.objects.get(user_id=user_id)
-                sa_dict = {}
 
                 user_details = {
                     'date_joined': user.date_joined,
@@ -122,9 +121,15 @@ def user_gcp_list(request, user_id):
                     'last_login': user.last_login,
                     'last_name': user.last_name
                 }
+
+                gcp_and_sa_tuples = []
                 for gcp in gcp_list:
-                    sa_dict[gcp.id] = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
-                context = {'user': user, 'user_details': user_details, 'gcp_list': gcp_list, 'sa_dict': sa_dict}
+                    sa_dicts, sa_err_msg = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                    if sa_err_msg is not None:
+                        template = '500.html'
+                        return render(request, template, context)
+                    gcp_and_sa_tuples.append((gcp, sa_dicts))
+                context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
@@ -228,7 +233,6 @@ def _buid_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
                 # dataset names, separated by ","
                 # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
                 # dataset ids, separated by ", "
-        logger.info("[INFO] Render!! {}:".format(gcp_id))
 
     except Exception as e:
         logger.error("[ERROR] While detailing a GCP: ")
@@ -498,7 +502,6 @@ def gcp_detail(request, user_id, gcp_id):
         # dataset names, separated by ","
         # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
         # dataset ids, separated by ", "
-        logger.info("[INFO] Render!! {}:".format(gcp_id))
 
     except Exception as e:
         logger.error("[ERROR] While detailing a GCP: ")
