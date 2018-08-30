@@ -607,7 +607,7 @@ def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_
     except Exception as e:
         logger.error("[ERROR] Exception while registering ServiceAccount")
         logger.exception(e)
-        return {'message': 'An error occurred while registering the service account.'}
+        return {('An error occurred while registering the service account.', 'error')}
 
 
 def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
@@ -849,7 +849,7 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
 
 def unregister_all_gcp_sa(user_id, gcp_id):
     if settings.SA_VIA_DCF:
-        # FIXME Throws exceptions:
+        # FIXME Throws ex ceptions:
         success = None
         msgs = None
         #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
