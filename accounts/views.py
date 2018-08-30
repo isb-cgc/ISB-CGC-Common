@@ -122,7 +122,11 @@ def user_gcp_list(request, user_id):
                     'last_name': user.last_name
                 }
 
-                context = {'user': user, 'user_details': user_details, 'gcp_list': gcp_list}
+                gcp_and_sa_tuples = []
+                for gcp in gcp_list:
+                    sa_dicts  = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                    gcp_and_sa_tuples.append((gcp, sa_dicts))
+                context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
