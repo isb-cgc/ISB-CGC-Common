@@ -143,7 +143,8 @@ def service_account_info_from_dcf_for_project(user_id, proj):
     retval = []
 
     try:
-        full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, proj)
+        full_url = '{0}?google_project_ids={1}'.format(DCF_GOOGLE_SA_URL, proj)
+        logger.info("[INFO] Calling DCF URL {}".format(full_url))
         resp = _dcf_call(full_url, user_id, mode='get')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
@@ -153,19 +154,23 @@ def service_account_info_from_dcf_for_project(user_id, proj):
         raise e
 
     messages = None
-    response_dict = json_loads(resp.text)
     if resp.status_code == 200:
+        response_dict = json_loads(resp.text)
         sa_list = response_dict['service_accounts']
         for sa in sa_list:
             ret_entry = {
                 'gcp_id': sa['google_project_id'],
                 'sa_dataset_ids': sa['project_access'],
-                'sa_id': sa['service_account_email'],
+                'sa_name': sa['service_account_email'],
                 'sa_exp': sa['project_access_exp']
             }
             retval.append(ret_entry)
     elif resp.status_code == 403:
         messages = ["User is not a member of Google project {}".format(proj)]
+    elif resp.status_code == 401: # Have seen this when the google sa scope was not requested in key
+        messages = ["User does not have permissions for this operation on Google project {}".format(proj)]
+    elif resp.status_code == 400: # If they don't like the request, say it was empty:
+        logger.info("[INFO] DCF response of 400 for URL {}".format(full_url))
     else:
         messages = ["Unexpected response from Data Commons: {}".format(resp.status_code)]
 
@@ -178,7 +183,7 @@ def service_account_info_from_dcf(user_id, proj_list):
     """
     try:
         proj_string = ','.join(proj_list)
-        full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, proj_string)
+        full_url = '{0}?google_project_ids={1}'.format(DCF_GOOGLE_SA_URL, proj_string)
         resp = _dcf_call(full_url, user_id, mode='get')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
@@ -196,7 +201,7 @@ def service_account_info_from_dcf(user_id, proj_list):
             ret_entry = {
                 'gcp_id': sa['google_project_id'],
                 'sa_dataset_ids': sa['project_access'],
-                'sa_id': sa['service_account_email'],
+                'sa_name': sa['service_account_email'],
                 'sa_exp': sa['project_access_exp']
             }
             retval[sa['service_account_email']] = ret_entry
@@ -206,7 +211,6 @@ def service_account_info_from_dcf(user_id, proj_list):
         messages = ["Unexpected response from Data Commons: {}".format(resp.status_code)]
 
     return retval, messages
-
 
 
 def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
@@ -236,15 +240,18 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
 
-    messages = None
+    messages = []
 
     if resp:
         logger.info("[INFO] DCF SA verification response code was {} with body: {} ".format(resp.status_code, resp.text))
         response_dict = json_loads(resp.text)
         if resp.status_code == 200:
+            messages = []
             success = response_dict['success']
             if not success:
                 logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
+            else:
+                messages.append("Service account {}: was verified".format(service_account_id))
         elif resp.status_code == 400:
             messages = []
             error_info = response_dict['errors']
@@ -274,6 +281,82 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
                                                                        project['error_description']))
         else:
             logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
+
+    return messages
+
+
+def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
+    """
+    :raise TokenFailure:
+    :raise InternalTokenError:
+    :raise DCFCommFailure:
+    :raise RefreshTokenExpired:
+    """
+
+    sa_data = {
+        "service_account_email": service_account_id,
+        "google_project_id": gcp_id,
+        "project_access": datasets
+    }
+
+    #
+    # Call DCF to see if there would be problems with the service account registration.
+    #
+
+    try:
+        logger.info("[INFO] Calling DCF at {}".format(json_dumps(sa_data)))
+        resp = _dcf_call(DCF_GOOGLE_SA_REGISTER_URL, user_id, mode='post', post_body=sa_data)
+        logger.info("[INFO] Just called DCF at {}".format(DCF_GOOGLE_SA_REGISTER_URL))
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
+        raise e
+    except Exception as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
+        raise e
+
+    messages = []
+
+    if resp:
+        logger.info("[INFO] DCF SA registration response code was {} with body: {} ".format(resp.status_code, resp.text))
+        response_dict = json_loads(resp.text)
+        if resp.status_code == 200:
+            messages = []
+            success = response_dict['success']
+            if not success:
+                logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
+            else:
+                messages.append("Service account {}: was verified".format(service_account_id))
+        elif resp.status_code == 400:
+            messages = []
+            error_info = response_dict['errors']
+            sa_error_info = error_info['service_account_email']
+            if sa_error_info['status'] == 200:
+                messages.append("Service account {}: no issues".format(service_account_id))
+            else:
+                messages.append("Service account {} error ({}): {}".format(service_account_id,
+                                                                           sa_error_info['error'],
+                                                                           sa_error_info['error_description']))
+            gcp_error_info = error_info['google_project_id']
+            if gcp_error_info['status'] == 200:
+                messages.append("Google cloud project {}: no issues".format(gcp_id))
+            else:
+                messages.append("Google cloud project {} error ({}): {}".format(gcp_id,
+                                                                                gcp_error_info['error'],
+                                                                                gcp_error_info['error_description']))
+            project_access_error_info = error_info['project_access']
+            messages.append("Requested projects:")
+            for project_name in project_access_error_info:
+                project = project_access_error_info[project_name]
+                if project['status'] == 200:
+                    messages.append("Dataset {}: no issues".format(project_name))
+                else:
+                    messages.append("Dataset {} error ({}): {}".format(project_name,
+                                                                       project['error'],
+                                                                       project['error_description']))
+        else:
+            logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
+    else:
+        logger.error("[ERROR] No response from DCF for registration")
 
     return messages
 
@@ -909,7 +992,7 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
     # value:
     #
 
-    dcf_expire_timestamp -= (28 * 86400) # FIXME REMOVE THIS HACK AFTER TESTING
+    #dcf_expire_timestamp -= (28 * 86400) # ONLY USE THIS HACK FOR TESTING
 
     refresh_expire_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(dcf_expire_timestamp))
 

@@ -41,7 +41,7 @@ from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFac
 from dataset_utils.dataset_config import DatasetGoogleGroupPair
 from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_name
 
-from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, \
+from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf,  \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         GoogleLinkState, get_auth_elapsed_time, unregister_sa_via_dcf, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
@@ -50,7 +50,6 @@ from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, \
 
 logger = logging.getLogger('main_logger')
 
-SA_VIA_DCF = settings.SA_VIA_DCF
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
@@ -136,7 +135,7 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
                 'level': 'error'
             }
         # determine if this is a re-registration, or a brand-new one
-        sa_qset = ServiceAccount.objects.get(service_account=service_account, active=0)
+        sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
         if len(sa_qset) > 0:
             logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
                                                                                                 user_email))
@@ -182,14 +181,19 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
     return None
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
-    if SA_VIA_DCF:
-        return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
-    else:
-        return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
+    try:
+        if settings.SA_VIA_DCF:
+            return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+        else:
+            return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+    except Exception as e:
+        logger.error("[ERROR] Exception while verifying ServiceAccount")
+        logger.exception(e)
+        return {'message': 'An error occurred while validating the service account.'}
 
 
-def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
 
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
@@ -232,7 +236,8 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, i
     #
 
     try:
-        messages = verify_sa_at_dcf(user_email, gcp_id, service_account, datasets)
+        messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
+        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
         if messages:
             return {
               'message': '\n'.join(messages),
@@ -378,9 +383,9 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
              or msa.is_managed(service_account)):
         msg = "Service Account {} is ".format(escape(service_account),)
         if msa.is_managed(service_account):
-            msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
+            msg += "a Google System Managed Service Account, and so cannot be registered. Please register a user-managed Service Account."
         else:
-            msg += "not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
+            msg += "not from GCP {}, and so cannot be registered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
         return {
             'message': msg,
             'level': 'error'
@@ -593,7 +598,66 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
     return return_obj
 
 
-def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+    try:
+        if settings.SA_VIA_DCF:
+            return _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+        else:
+            return _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+    except Exception as e:
+        logger.error("[ERROR] Exception while registering ServiceAccount")
+        logger.exception(e)
+        return {('An error occurred while registering the service account.', 'error')}
+
+
+def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+
+    ret_msg = []
+
+    # log the reports using Cloud logging API
+    st_logger = StackDriverLogger.build_from_django_settings()
+
+    user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+
+    # If we've received a remove-all request, ignore any provided datasets
+    if remove_all:
+        datasets = ['']
+
+    if len(datasets) == 1 and datasets[0] == '':
+        datasets = []
+    # datasets are now identified by their whitelist id:
+    #else:
+    #    datasets = map(int, datasets)
+
+    # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
+    result = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+    logger.info("[INFO] FIXME ACTUALLY CHECK RESULTS")
+
+    err_msgs = []
+
+    #
+    # Ask DCF if we are cool:
+    #
+
+    try:
+        messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
+        if messages:
+            return {
+                'message': '\n'.join(messages),
+                'level': 'error'
+            }
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.exception(e)
+        return {
+            'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
+
+    return_obj = {'roles': 'FIXME!!',
+                  'all_user_datasets_verified': 'FIXME!!'}
+    return return_obj
+
+
+def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
 
     ret_msg = []
 
@@ -783,15 +847,9 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
         return ret_msg
 
-
-def unregister_sa_with_id(user_id, sa_id):
-    # FIXME DO NOT USE THIS FUNCTION
-    unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
-
-
 def unregister_all_gcp_sa(user_id, gcp_id):
-    if SA_VIA_DCF:
-        # FIXME Throws exceptions:
+    if settings.SA_VIA_DCF:
+        # FIXME Throws ex ceptions:
         success = None
         msgs = None
         #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
@@ -813,7 +871,7 @@ def _unregister_all_gcp_sa_db(user_id, gcp_id):
 
 
 def unregister_sa(user_id, sa_name):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME Throws exceptions:
         success, msgs = unregister_sa_via_dcf(user_id, sa_name)
     else:
@@ -882,14 +940,14 @@ def controlled_auth_datasets():
 
 
 def service_account_dict(user_id, sa_id):
-    if SA_VIA_DCF:
+    if settings.SA_VIA_DCF:
         # FIXME This is throwing DCF token exceptions!
         return _service_account_dict_from_dcf(user_id, sa_id)
     else:
         return _service_account_dict_from_db(sa_id)
 
 
-def _service_account_dict_from_dcf(user_id, sa_id):
+def _service_account_dict_from_dcf(user_id, sa_name):
 
     #
     # DCF currently (8/2/18) requires us to provide the list of Google projects
@@ -903,20 +961,24 @@ def _service_account_dict_from_dcf(user_id, sa_id):
     proj_list = [x.project_id for x in gcp_list]
 
     sa_dict, messages = service_account_info_from_dcf(user_id, proj_list)
-    return sa_dict[sa_id] if sa_id in sa_dict else None, messages
+    return sa_dict[sa_name] if sa_name in sa_dict else None, messages
 
 
-def _service_account_dict_from_db(sa_id):
-    service_account = ServiceAccount.objects.get(id=sa_id, active=1)
+def _service_account_dict_from_db(sa_name):
+    service_account = ServiceAccount.objects.get(service_account=sa_name, active=1)
     datasets = service_account.get_auth_datasets()
     ds_ids = []
     for dataset in datasets:
         ds_ids.append(dataset.whitelist_id)
 
+    expired_time = service_account.authorized_date + datetime.timedelta(days=7)
+
     retval = {
-      'gcp_id': service_account.google_project.project_id,
-      'sa_dataset_ids': ds_ids,
-      'sa_id': service_account.service_account
+        'gcp_id': service_account.google_project.project_id,
+        'sa_dataset_ids': ds_ids,
+        'sa_name': service_account.service_account,
+        'sa_exp': expired_time
+
     }
     return retval, None
 
