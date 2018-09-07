@@ -136,45 +136,34 @@ def unregister_sa_via_dcf(user_id, sa_id):
     return success, messages
 
 
+def get_current_datasets_for_service_account(user_id, proj, sa_name):
+    """
+    Get the current datasets for the Service Account
+    """
+    sa_dict, messages = service_account_info_from_dcf_for_project_and_sa(user_id, proj, sa_name)
+    sa_datasets = sa_dict[sa_name]['sa_dataset_ids'] if (sa_dict is not None) and (sa_name in sa_dict) else None
+
+    return sa_datasets if sa_datasets is not None else [], messages
+
+
+def service_account_info_from_dcf_for_project_and_sa(user_id, proj, sa_name):
+    """
+    If we have the project id *and* the SA name, get the data for that single service account
+    version returns a dictionary:
+    """
+    proj_list = [proj]
+    sa_dict, messages = service_account_info_from_dcf(user_id, proj_list)
+    return sa_dict[sa_name] if sa_name in sa_dict else None, messages
+
+
 def service_account_info_from_dcf_for_project(user_id, proj):
     """
-    Get all service accounts tied to a project
+    Get all service accounts tied to a project. This returns a list; the multi-project
+    version returns a dictionary:
     """
-    retval = []
-
-    try:
-        full_url = '{0}?google_project_ids={1}'.format(DCF_GOOGLE_SA_URL, proj)
-        logger.info("[INFO] Calling DCF URL {}".format(full_url))
-        resp = _dcf_call(full_url, user_id, mode='get')
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-        logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
-        raise e
-    except Exception as e:
-        logger.error("[ERROR] Attempt to contact DCF for SA information failed (user {})".format(user_id))
-        raise e
-
-    messages = None
-    if resp.status_code == 200:
-        response_dict = json_loads(resp.text)
-        sa_list = response_dict['service_accounts']
-        for sa in sa_list:
-            ret_entry = {
-                'gcp_id': sa['google_project_id'],
-                'sa_dataset_ids': sa['project_access'],
-                'sa_name': sa['service_account_email'],
-                'sa_exp': sa['project_access_exp']
-            }
-            retval.append(ret_entry)
-    elif resp.status_code == 403:
-        messages = ["User is not a member of Google project {}".format(proj)]
-    elif resp.status_code == 401: # Have seen this when the google sa scope was not requested in key
-        messages = ["User does not have permissions for this operation on Google project {}".format(proj)]
-    elif resp.status_code == 400: # If they don't like the request, say it was empty:
-        logger.info("[INFO] DCF response of 400 for URL {}".format(full_url))
-    else:
-        messages = ["Unexpected response from Data Commons: {}".format(resp.status_code)]
-
-    return retval, messages
+    proj_list = [proj]
+    retval, messages = service_account_info_from_dcf(user_id, proj_list)
+    return [retval[k] for k in retval], messages
 
 
 def service_account_info_from_dcf(user_id, proj_list):
@@ -182,8 +171,11 @@ def service_account_info_from_dcf(user_id, proj_list):
     Get all service accounts tied to the list of projects
     """
     try:
+        print('projList {}'.format(proj_list))
         proj_string = ','.join(proj_list)
+        print('projString {}'.format(proj_string))
         full_url = '{0}?google_project_ids={1}'.format(DCF_GOOGLE_SA_URL, proj_string)
+        print('Full URL {}'.format(full_url))
         resp = _dcf_call(full_url, user_id, mode='get')
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
@@ -207,6 +199,10 @@ def service_account_info_from_dcf(user_id, proj_list):
             retval[sa['service_account_email']] = ret_entry
     elif resp.status_code == 403:
         messages = ["User is not a member on one or more of these Google projects: {}".format(proj_string)]
+    elif resp.status_code == 401: # Have seen this when the google sa scope was not requested in key
+        messages = ["User does not have permissions for this operation on one or more of these Google projects:".format(proj_string)]
+    elif resp.status_code == 400: # If they don't like the request, say it was empty:
+        logger.info("[INFO] DCF response of 400 for URL {}".format(full_url))
     else:
         messages = ["Unexpected response from Data Commons: {}".format(resp.status_code)]
 
@@ -217,6 +213,7 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets):
     """
     Handles the JSON response from DCF and creates messages to display to the user
     """
+    # Messages are 4-tuples of (class, id, error, text)
     messages = []
     success = False
 
@@ -227,35 +224,57 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets):
             success = response_dict['success']
             if not success:
                 logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
+        elif resp.status_code == 204: # Patch issues a 204 and no content on success:
+            success = True
         elif resp.status_code == 400:
             success = False
             error_info = response_dict['errors']
+            # This is the evaluation of the REQUESTED service account:
             sa_error_info = error_info['service_account_email']
             if sa_error_info['status'] == 200:
-                messages.append("Service account {}: no issues".format(service_account_id))
+                messages.append({"res" : "Registered Service Account", "id" : service_account_id, "ok" : "OK", "err" : ""})
             else:
-                messages.append("Service account {} error ({}): {}".format(service_account_id,
-                                                                           sa_error_info['error'],
-                                                                           sa_error_info['error_description']))
+                messages.append({"res" : "Registered Service Account", "id" : service_account_id,
+                                 "ok" : sa_error_info['error'], "err" : sa_error_info['error_description']})
+
+            # This is the evaluation of the PROJECT:
             gcp_error_info = error_info['google_project_id']
             if gcp_error_info['status'] == 200:
-                messages.append("Google cloud project {}: no issues".format(gcp_id))
+                messages.append({"res" : "Google Cloud Project", "id" : gcp_id, "ok" : "OK", "err" :""})
             else:
-                messages.append("Google cloud project {} error ({}): {}".format(gcp_id,
-                                                                                gcp_error_info['error'],
-                                                                                gcp_error_info['error_description']))
-            project_access_error_info = error_info['project_access']
-            if project_access_error_info['status'] == 200:
-                messages.append("All users approved for all projects")
+                messages.append({"res" : "Google Cloud Project", "id" : gcp_id, "ok" : gcp_error_info['error'],
+                                 "err": gcp_error_info['error_description']})
+
+            # This is the evaluation of the ALL SERVICE ACCOUNTS IN THE PROJECT:
+            gcp_sa_validity_info = gcp_error_info['service_account_validity']
+            for sa_email in gcp_sa_validity_info:
+                sa_info = gcp_sa_validity_info[sa_email]
+                owned = sa_info["owned_by_project"]
+                internal = sa_info["no_external_access"]
+                valid = sa_info["valid_type"]
+                is_owned = "" if owned is None else "project owned: True" if owned else "project owned: False"
+                is_internal = "" if internal is None else "is internal: True" if internal else "is internal: False"
+                is_valid = "" if valid is None else "is valid: True" if valid else "is Valid: False"
+                combined = "{}; {}; {}".format(is_owned, is_internal, is_valid)
+                is_ok = "OK" if combined == "project owned: True; is internal: True; is valid: True" else "Error"
+                messages.append({"res" : "Project Service Account", "id" : sa_email, "ok" : is_ok, "err" : combined})
+
+            # This is the evaluation of the MEMBERS ON THE PROJECT:
+            member_error_info = gcp_error_info['membership_validity']
+            messages.append({"res" : "Google Cloud Project Members", "id" : gcp_id, "ok" : "", "err" : str(member_error_info)})
+
+            # This is the evaluation of the DATASETS THE SA IS TO ACCESS:
+            project_access_info = error_info['project_access']
+            if project_access_info['status'] == 200:
+                messages.append({"res" : "Requested Datasets", "id" : ','.join(datasets), "ok" : "OK", "err" : ""})
             else:
-                messages.append("For datasets {}: error ({}): {}".format(','.join(datasets),
-                                                                         project_access_error_info['error'],
-                                                                         project_access_error_info['error_description']))
-            messages.append("Requested projects:")
-            project_validity_info = project_access_error_info['project_validity']
+                messages.append({"res" : "Requested Datasets", "id" : ','.join(datasets), "ok" : project_access_info['error'],
+                                 "err": project_access_info['error_description']})
+
+            project_validity_info = project_access_info['project_validity']
             for project_name in project_validity_info:
                 project = project_validity_info[project_name]
-                messages.append("Project {}: all users have access: {}".format(project_name, project["all_users_have_access"]))
+                messages.append({"res" : "Dataset", "id" : project_name, "ok" : "?", "err" : str(project)})
 
         else:
             logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
@@ -332,6 +351,83 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
 
     return success, messages
 
+
+def extend_sa_at_dcf(user_id, gcp_id, service_account_id):
+    """
+    Extends the SA with the existing dataset permisisons
+
+    :raise TokenFailure:
+    :raise InternalTokenError:
+    :raise DCFCommFailure:
+    :raise RefreshTokenExpired:
+    """
+
+    #
+    # Call DCF to extend the service account login. Per the Swagger doc, this means to just issue the patch command
+    # with NO body.
+    #
+
+    try:
+        full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, service_account_id)
+        resp = _dcf_call(full_url, user_id, mode='patch')
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA extension failed (user {})".format(user_id))
+        raise e
+    except Exception as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA extension failed (user {})".format(user_id))
+        raise e
+
+    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, None)
+
+    return success, messages
+
+
+def remove_sa_datasets_at_dcf(user_id, gcp_id, service_account_id):
+    """
+    :raise TokenFailure:
+    :raise InternalTokenError:
+    :raise DCFCommFailure:
+    :raise RefreshTokenExpired:
+    """
+    #
+    # Call DCF to remove all controlled access for the service account. Per the Swagger doc, this means we issue
+    # a PATCH with an empty project access list
+    #
+
+    return adjust_sa_at_dcf(user_id, gcp_id, service_account_id, [])
+
+
+def adjust_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
+    """
+    :raise TokenFailure:
+    :raise InternalTokenError:
+    :raise DCFCommFailure:
+    :raise RefreshTokenExpired:
+    """
+
+    patch_doc = {
+        "project_access": datasets
+    }
+
+    #
+    # Per the Swagger doc, just providing a new list of what we want is enough to handle the problem:
+    #
+
+    try:
+        # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
+        headers = {'Content-Type': 'application/json'}
+        full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, service_account_id)
+        resp = _dcf_call(full_url, user_id, mode='patch', post_body=json_dumps(patch_doc), headers=headers)
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA dataset removal failed (user {})".format(user_id))
+        raise e
+    except Exception as e:
+        logger.error("[ERROR] Attempt to contact DCF for SA dataset removal failed (user {})".format(user_id))
+        raise e
+
+    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets)
+
+    return success, messages
 
 def get_auth_elapsed_time(user_id):
     """

@@ -41,12 +41,13 @@ from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFac
 from dataset_utils.dataset_config import DatasetGoogleGroupPair
 from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_name
 
-from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf,  \
+from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf, extend_sa_at_dcf, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         GoogleLinkState, get_auth_elapsed_time, unregister_sa_via_dcf, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
-                        compare_google_ids, service_account_info_from_dcf
+                        compare_google_ids, service_account_info_from_dcf, \
+                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf
 
 logger = logging.getLogger('main_logger')
 
@@ -232,22 +233,167 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
         return msg
 
     #
+    # We already have some useful info, such as whether everybody on the project is registered with us and
+    # linked to NIH. So check that first, and bag it if we are not up to snuff:
+    #
+
+    roles_and_registered = _get_project_users(gcp_id, service_account, user_email, st_logger, log_name)
+
+    if not roles_and_registered['all_users_registered']:
+        roles_and_registered['all_user_datasets_verified'] = False
+        return roles_and_registered
+
+    #
     # Ask DCF if we are cool:
     #
 
     try:
-        success, messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
-        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
-       #if not success:
-        #    return {
-        #      'message': '\n'.join(messages),
-        #      'level': 'error'
-        #    }
+        success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
+        if not success:
+            # We want to be more structured with any error messages we receive from DCF instead of a narrative
+            # error block at the top of the page.
+            roles_and_registered['all_user_datasets_verified'] = False
+            roles_and_registered['dcf_messages'] = dcf_messages
+            return roles_and_registered
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.exception(e)
-        return {'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
+        roles_and_registered['all_user_datasets_verified'] = False
+        roles_and_registered['message'] = "FIXME There was an error while verifying this service account. Please contact the administrator."
+        roles_and_registered['level'] = 'error'
+        return roles_and_registered
 
-    return {'all_user_datasets_verified': True}
+    roles_and_registered['all_user_datasets_verified'] = True
+    return roles_and_registered
+
+
+def _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp):
+    """
+    For registering a service account for a project, we need to insure the user is currently on the project. If they
+    are not, then we want to drop them form our DB table
+    """
+    try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1].lower()
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
+
+        # 2) Verify that the current user is on the GCP project:
+        if not user_email.lower() in roles:
+            log_msg = '[STATUS] During SA operations, user email {0} was not in the IAM policy of GCP {1}.'.format(user_email, gcp_id)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': log_msg
+            })
+            user_gcp.user.set(user_gcp.user.all().exclude(id=User.objects.get(email=user_email).id))
+            user_gcp.save()
+            return False, "You are not currently a member of the project."
+
+    except HttpError as e:
+        logger.error("[ERROR] While verifying user {} for project {}: ".format(user_email, gcp_id))
+        logger.exception(e)
+        return False, "There was an error accessing your project. Please verify that you have set the permissions correctly."
+    except Exception as e:
+        logger.error("[ERROR] While verifying user {} for project {}: ".format(user_email, gcp_id))
+        logger.exception(e)
+        return False, "There was an error while verifying your project. Please contact the administrator."
+
+    return True, None
+
+def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name):
+    """
+    While we can no longer show the user with a listing of what datasets each project user has access to (DCF will not
+    provide that), we can still enumerate who is on the project, if they are registered, and if they are linked to
+    NIH. That info is available to us.
+    """
+    try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1].lower()
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
+
+        # 2) Verify that the current user is on the GCP project:
+        if not user_email.lower() in roles:
+            log_msg = '[STATUS] While verifying SA {0}: User email {1} is not in the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {
+                'message': log_msg
+            })
+
+            return {
+                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of a project in order to {} its service accounts.'.format(user_email, gcp_id, "refresh" if is_refresh else "register"),
+                'redirect': True,
+                'user_not_found': True,
+                'all_users_registered': False
+            }
+
+        # 3) Verify all users are registered with with NIH:
+        all_users_registered = True
+
+        for email in roles:
+            member = roles[email]
+
+            # IF USER IS REGISTERED
+            if member['registered_user']:
+                user = User.objects.get(email=email)
+                nih_user = None
+                # FIND NIH_USER FOR USER
+                try:
+                    nih_user = NIH_User.objects.get(user_id=user.id, linked=True)
+                except ObjectDoesNotExist:
+                    nih_user = None
+                except MultipleObjectsReturned:
+                    st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True)))})
+                    raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True))))
+
+                member['nih_registered'] = bool(nih_user)
+
+                if not nih_user:
+                    all_users_registered = False
+
+            else:
+                member['nih_registered'] = False
+                all_users_registered = False
+
+    except HttpError as e:
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
+        logger.exception(e)
+        return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
+    except Exception as e:
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
+        logger.exception(e)
+        return {'message': "There was an error while verifying this service account. Please contact the administrator."}
+
+    return_obj = {'roles': roles,
+                  'all_users_registered': all_users_registered}
+    return return_obj
 
 
 def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
@@ -598,24 +744,28 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
 
 def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
     try:
+        # log the reports using Cloud logging API
+        st_logger = StackDriverLogger.build_from_django_settings()
+        user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+
         if settings.SA_VIA_DCF:
-            return _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+            return _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust,
+                                                 remove_all, st_logger, user_gcp)
         else:
-            return _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+            return _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust,
+                                                 remove_all, st_logger, user_gcp)
     except Exception as e:
         logger.error("[ERROR] Exception while registering ServiceAccount")
         logger.exception(e)
         return {('An error occurred while registering the service account.', 'error')}
 
 
-def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh,
+                                  is_adjust, remove_all, st_logger, user_gcp):
 
-    ret_msg = []
+    sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
-    # log the reports using Cloud logging API
-    st_logger = StackDriverLogger.build_from_django_settings()
 
-    user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
 
     # If we've received a remove-all request, ignore any provided datasets
     if remove_all:
@@ -623,42 +773,65 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
 
     if len(datasets) == 1 and datasets[0] == '':
         datasets = []
-    # datasets are now identified by their whitelist id:
-    #else:
-    #    datasets = map(int, datasets)
 
-    # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-    messages = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
-    logger.info("[INFO] FIXME ACTUALLY CHECK RESULTS")
+    #
+    # Previously, when the user tried to register an SA, we *reran* the verification step here just before
+    # doing the registration. But now DCF is doing that checking as they register, so that is superfluous.
+    #
+    # However, we can still check to see that the user is on the GCP, and if they are not, we can remove them
+    # from the project, and do not continue.
+    #
 
     ret_msg = []
 
-    #
-    # Get the service account registered at DCF:
-    #
+    success, message = _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp)
+
+    if not success:
+        # Note the previous ISB approach agressively dropped the datasets following a verification failure. But if we
+        # detect that the user doing this request is no longer on the project, it would appear unlikely that we could
+        # use this user's token to drop all the datasets for the project! Note also this was a vector for denial of
+        # service: if a user not on the project made the request, they could get the SA dropped on the project.
+        # Instead, if an SA is out of bounds, DCF monitoring will presumably do the job and kick off the SA.
+
+        ret_msg.append((message, "error"))
+        return ret_msg
 
     try:
-        success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+        if sa_mode == SAModes.CANNOT_OCCUR:
+            success = False
+            messages = ["This cannot happen"]
+        elif sa_mode == SAModes.REMOVE_ALL:
+            success, messages = remove_sa_datasets_at_dcf(user_id, gcp_id, user_sa)
+        elif sa_mode == SAModes.ADJUST:
+            success, messages = adjust_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+        elif sa_mode == SAModes.EXTEND:
+            success, messages = extend_sa_at_dcf(user_id, gcp_id, user_sa)
+        elif sa_mode == SAModes.REGISTER:
+            success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+
         logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
         if not success:
             ret_msg.append((
                 "The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format(
                     "\n".join(messages)), "error"))
+            #
+            # In a similar fashion to the above, if e.g. a failure to extend the SA at DCF was due to a verification
+            # failure, it is their responsiblity to detect that the project is out of bounds and respond appropriately.
+            # So we *do not* issue a call the remove all datasets!
+            #
+
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.exception(e)
-        return {("FIXME There was an error while verifying this service account. Please contact the administrator.", "error")}
+        return {
+        ("FIXME There was an error while modifying this service account. Please contact the administrator.", "error")}
 
     return ret_msg
 
 
-def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh,
+                                  is_adjust, remove_all, st_logger, user_gcp):
 
     ret_msg = []
-
-    # log the reports using Cloud logging API
-    st_logger = StackDriverLogger.build_from_django_settings()
-
-    user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
 
     # If we've received a remove-all request, ignore any provided datasets
     if remove_all:
@@ -844,10 +1017,10 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
 
 def unregister_all_gcp_sa(user_id, gcp_id):
     if settings.SA_VIA_DCF:
-        # FIXME Throws ex ceptions:
+        # FIXME Throws exceptions:
         success = None
         msgs = None
-        success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
+        #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
         pass
     else:
         success = None

@@ -124,6 +124,7 @@ def user_gcp_list(request, user_id):
 
                 gcp_and_sa_tuples = []
                 for gcp in gcp_list:
+                    print("ID {} project".format(gcp.id))
                     sa_dicts, sa_err_msg = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
                     if sa_err_msg is not None:
                         template = '500.html'
@@ -156,7 +157,7 @@ def _buid_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
 
     try:
         if settings.SA_VIA_DCF:
-            sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
+            sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_context.project_id)
             if sa_messages:
                 for message in sa_messages:
                     logger.error("[ERROR] {}:".format(message))
