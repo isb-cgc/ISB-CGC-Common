@@ -243,12 +243,17 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
         roles_and_registered['all_user_datasets_verified'] = False
         return roles_and_registered
 
+    phs_map = {}
+    controlled_datasets = AuthorizedDataset.objects.filter(public=False)
+    for dataset in controlled_datasets:
+        phs_map[dataset.whitelist_id] = dataset.name
+
     #
     # Ask DCF if we are cool:
     #
 
     try:
-        success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
+        success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets, phs_map)
         if not success:
             # We want to be more structured with any error messages we receive from DCF instead of a narrative
             # error block at the top of the page.
@@ -312,6 +317,7 @@ def _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp):
         return False, "There was an error while verifying your project. Please contact the administrator."
 
     return True, None
+
 
 def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name):
     """
@@ -761,10 +767,9 @@ def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_
 
 
 def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh,
-                                  is_adjust, remove_all, st_logger, user_gcp):
+                                  is_adjust, remove_all, st_logger, user_gcp, phs_map):
 
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
-
 
 
     # If we've received a remove-all request, ignore any provided datasets
@@ -796,18 +801,23 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
         ret_msg.append((message, "error"))
         return ret_msg
 
+    phs_map = {}
+    controlled_datasets = AuthorizedDataset.objects.filter(public=False)
+    for dataset in controlled_datasets:
+        phs_map[dataset.whitelist_id] = dataset.name
+
     try:
         if sa_mode == SAModes.CANNOT_OCCUR:
             success = False
             messages = ["This cannot happen"]
         elif sa_mode == SAModes.REMOVE_ALL:
-            success, messages = remove_sa_datasets_at_dcf(user_id, gcp_id, user_sa)
+            success, messages = remove_sa_datasets_at_dcf(user_id, gcp_id, user_sa, phs_map)
         elif sa_mode == SAModes.ADJUST:
-            success, messages = adjust_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+            success, messages = adjust_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
         elif sa_mode == SAModes.EXTEND:
-            success, messages = extend_sa_at_dcf(user_id, gcp_id, user_sa)
+            success, messages = extend_sa_at_dcf(user_id, gcp_id, user_sa, phs_map)
         elif sa_mode == SAModes.REGISTER:
-            success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+            success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
 
         logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
         if not success:

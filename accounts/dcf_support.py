@@ -209,13 +209,20 @@ def service_account_info_from_dcf(user_id, proj_list):
     return retval, messages
 
 
-def _parse_dcf_response(resp, gcp_id, service_account_id, datasets):
+def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map):
     """
     Handles the JSON response from DCF and creates messages to display to the user
     """
-    # Messages are 4-tuples of (class, id, error, text)
-    messages = []
+    # Messages are 3-tuples of (id, error, text)
+    messages = {}
+    messages['dcf_analysis_sas'] = []
+    messages['dcf_analysis_data'] = []
     success = False
+
+    named_datasets = []
+    for d_set in datasets:
+        named_datasets.append('{} ({})'.format(phs_map[d_set], d_set))
+
 
     if resp is not None:
         logger.info("[INFO] DCF SA verification response code was {} with body: {} ".format(resp.status_code, resp.text))
@@ -232,60 +239,181 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets):
             # This is the evaluation of the REQUESTED service account:
             sa_error_info = error_info['service_account_email']
             if sa_error_info['status'] == 200:
-                messages.append({"res" : "Registered Service Account", "id" : service_account_id, "ok" : "OK", "err" : ""})
+                messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" meets all requirements.'\
+                    .format(service_account_id)
             else:
-                messages.append({"res" : "Registered Service Account", "id" : service_account_id,
-                                 "ok" : sa_error_info['error'], "err" : sa_error_info['error_description']})
+                sa_error_validity = sa_error_info['service_account_validity']
+                print(sa_error_validity)
+                info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
+                print(info_for_sa)
+                is_ok, combined = _write_sa_summary(info_for_sa, True, gcp_id)
+                if is_ok:
+                    logger.error(
+                        "[ERROR] Inconsistent success response from DCF! Code: {} Eval: {}".format(sa_error_info['status'],
+                                                                                              is_ok))
+
+                messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" cannot be ' \
+                                                           'accepted because: "{}"'.format(service_account_id, combined)
 
             # This is the evaluation of the PROJECT:
             gcp_error_info = error_info['google_project_id']
             if gcp_error_info['status'] == 200:
-                messages.append({"res" : "Google Cloud Project", "id" : gcp_id, "ok" : "OK", "err" :""})
+                messages['dcf_analysis_project_summary'] = "Google Cloud Project {} meets all requirements".format(gcp_id)
             else:
-                messages.append({"res" : "Google Cloud Project", "id" : gcp_id, "ok" : gcp_error_info['error'],
-                                 "err": gcp_error_info['error_description']})
+                messages['dcf_analysis_project_summary'] = \
+                    'Google Cloud Project {} had the following issues preventing verification: "{}"'\
+                        .format(gcp_id, gcp_error_info['error_description'].strip())
 
             # This is the evaluation of the ALL SERVICE ACCOUNTS IN THE PROJECT:
             gcp_sa_validity_info = gcp_error_info['service_account_validity']
             for sa_email in gcp_sa_validity_info:
                 sa_info = gcp_sa_validity_info[sa_email]
-                owned = sa_info["owned_by_project"]
-                internal = sa_info["no_external_access"]
-                valid = sa_info["valid_type"]
-                is_owned = "" if owned is None else "project owned: True" if owned else "project owned: False"
-                is_internal = "" if internal is None else "is internal: True" if internal else "is internal: False"
-                is_valid = "" if valid is None else "is valid: True" if valid else "is Valid: False"
-                combined = "{}; {}; {}".format(is_owned, is_internal, is_valid)
-                is_ok = "OK" if combined == "project owned: True; is internal: True; is valid: True" else "Error"
-                messages.append({"res" : "Project Service Account", "id" : sa_email, "ok" : is_ok, "err" : combined})
+                is_ok, combined = _write_sa_summary(sa_info, False, gcp_id)
+                messages['dcf_analysis_sas'].append({"id" : sa_email, "ok" : is_ok, "err": combined})
 
             # This is the evaluation of the MEMBERS ON THE PROJECT:
             member_error_info = gcp_error_info['membership_validity']
-            messages.append({"res" : "Google Cloud Project Members", "id" : gcp_id, "ok" : "", "err" : str(member_error_info)})
+            is_ok, combined = _write_project_member_summary(member_error_info, gcp_id)
+            if is_ok:
+                member_msg = "All Google Cloud Project roles meet requirements. Roles are assigned to either \
+                service accounts or to users who have registered with the Data Commons Framework."
+            else:
+                member_msg = 'The Google Cloud Project membership has errors "{}"'.format(combined)
+            messages['dcf_analysis_project_members'] = member_msg
 
             # This is the evaluation of the DATASETS THE SA IS TO ACCESS:
             project_access_info = error_info['project_access']
             if project_access_info['status'] == 200:
-                messages.append({"res" : "Requested Datasets", "id" : ','.join(datasets), "ok" : "OK", "err" : ""})
+                messages['dcf_analysis_data_summary'] = "The requested dataset list [{}] was approved.".format(', '.join(named_datasets))
             else:
-                messages.append({"res" : "Requested Datasets", "id" : ','.join(datasets), "ok" : project_access_info['error'],
-                                 "err": project_access_info['error_description']})
+                messages['dcf_analysis_data_summary'] = \
+                    'The requested dataset list [{}] was not approved, because: "{}"'.\
+                        format(', '.join(named_datasets), project_access_info['error_description'].strip())
 
-            project_validity_info = project_access_info['project_validity']
-            for project_name in project_validity_info:
-                project = project_validity_info[project_name]
-                messages.append({"res" : "Dataset", "id" : project_name, "ok" : "?", "err" : str(project)})
+            dataset_validity_info = project_access_info['project_validity']
+            for dataset_name in dataset_validity_info:
+                dataset = dataset_validity_info[dataset_name]
+                is_ok, combined = _write_dataset_summary(dataset, dataset_name, phs_map)
+                full_name = '{} ({})'.format(phs_map[dataset_name], dataset_name)
+                messages['dcf_analysis_data'].append({"id": full_name, "ok": is_ok, "err" : combined})
 
         else:
             logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
+            raise Exception("Problem")
             messages.append("Unexpected response from Data Commons Framework")
     else:
+        raise Exception("Problem")
         messages.append("No response from Data Commons Framework")
 
     return success, messages
 
 
-def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
+def _write_sa_summary(sa_info, for_registered_sa, project_id):
+    """
+    We get back a dictionary of results from DCF for each service account. Take this dict and write a summary string to
+    show the user. Returns a tuple of (success, message). Note that the DCF evaluation appears to short-circuit, so
+    we need to not say anything about items that were not evaluated.
+    """
+
+    owned = sa_info["owned_by_project"]
+    not_owned = owned is not None and not owned
+    is_owned = owned is not None and owned
+    owned_message = "Service account belongs to another project" if not_owned else None
+
+    internal = sa_info["no_external_access"]
+    not_internal = internal is not None and not internal
+    is_internal = internal is not None and internal
+    internal_message = "Service account has assigned roles or generated keys" if not_internal else None
+
+    not_valid = False
+    is_valid = True
+    if for_registered_sa:
+        valid = sa_info["valid_type"]
+        not_valid = valid is not None and not valid
+        is_valid = valid is not None and valid
+        valid_message = "Service account must be either from project {} or " \
+                        "the Compute Engine Default account.".format(project_id) if not_internal else None
+
+    is_ok = is_owned and is_internal and is_valid
+    combination = []
+    combo_msg = ""
+    if not is_ok:
+        if not_owned:
+            combination.append(owned_message)
+        if not_internal:
+            combination.append(internal_message)
+        if not_valid:
+            combination.append(valid_message)
+        combo_msg = "; ".join(combination)
+        combo_msg += "."
+
+    return is_ok, combo_msg
+
+
+def _write_project_member_summary(member_info, project_id):
+    """
+    We get back a dictionary of results from DCF for project membership. Take this dict and write a summary string to
+    show the user. Returns a tuple of (success, message)
+    """
+
+    in_fence = member_info["members_exist_in_fence"]
+    not_in_fence = in_fence is not None and not in_fence
+    is_in_fence = in_fence is not None and in_fence
+    fence_message = "Not all project members have registered with the Data Commons Framework" if not_in_fence else None
+
+    valid_members = member_info["valid_member_types"]
+    not_valid_members = valid_members is not None and not valid_members
+    is_valid_members = valid_members is not None and valid_members
+    member_message = "Project {} has one or more Google groups as members".format(project_id) if not_valid_members else None
+
+    is_ok = is_in_fence and is_valid_members
+    combination = []
+    combo_msg = ""
+    if not is_ok:
+        if fence_message:
+            combination.append(fence_message)
+        if member_message:
+            combination.append(member_message)
+        combo_msg = "; ".join(combination)
+        combo_msg += "."
+
+    return is_ok, combo_msg
+
+
+def _write_dataset_summary(dataset_info, dataset_id, phs_map):
+    """
+    We get back a dictionary of results from DCF for project membership. Take this dict and write a summary string to
+    show the user. Returns a tuple of (success, message)
+    """
+
+    full_name = '{} ({})'.format(phs_map[dataset_id], dataset_id)
+
+
+    all_access = dataset_info["all_users_have_access"]
+    not_all_access = all_access is not None and not all_access
+    is_all_access = all_access is not None and all_access
+    access_message = 'Not all project members have access to dataset "{}"'.format(full_name) if not_all_access else None
+
+    set_exists = dataset_info["exists"]
+    not_set_exists = set_exists is not None and not set_exists
+    is_set_exists = set_exists is not None and set_exists
+    exists_message = 'Dataset "{}" does not exist'.format(full_name) if not_set_exists else None
+
+    is_ok = is_all_access and is_set_exists
+    combination = []
+    combo_msg = ""
+    if not is_ok:
+        if access_message:
+            combination.append(access_message)
+        if exists_message:
+            combination.append(exists_message)
+        combo_msg = "; ".join(combination)
+        combo_msg += "."
+
+    return is_ok, combo_msg
+
+
+def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
     """
     :raise TokenFailure:
     :raise InternalTokenError:
@@ -314,10 +442,10 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
 
-    return _parse_dcf_response(resp, gcp_id, service_account_id, datasets)
+    return _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map)
 
 
-def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
+def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
     """
     :raise TokenFailure:
     :raise InternalTokenError:
@@ -347,12 +475,12 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
         logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
         raise e
 
-    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets)
+    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map)
 
     return success, messages
 
 
-def extend_sa_at_dcf(user_id, gcp_id, service_account_id):
+def extend_sa_at_dcf(user_id, gcp_id, service_account_id, phs_map):
     """
     Extends the SA with the existing dataset permisisons
 
@@ -377,12 +505,12 @@ def extend_sa_at_dcf(user_id, gcp_id, service_account_id):
         logger.error("[ERROR] Attempt to contact DCF for SA extension failed (user {})".format(user_id))
         raise e
 
-    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, None)
+    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, None, phs_map)
 
     return success, messages
 
 
-def remove_sa_datasets_at_dcf(user_id, gcp_id, service_account_id):
+def remove_sa_datasets_at_dcf(user_id, gcp_id, service_account_id, phs_map):
     """
     :raise TokenFailure:
     :raise InternalTokenError:
@@ -394,10 +522,10 @@ def remove_sa_datasets_at_dcf(user_id, gcp_id, service_account_id):
     # a PATCH with an empty project access list
     #
 
-    return adjust_sa_at_dcf(user_id, gcp_id, service_account_id, [])
+    return adjust_sa_at_dcf(user_id, gcp_id, service_account_id, [], phs_map)
 
 
-def adjust_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
+def adjust_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
     """
     :raise TokenFailure:
     :raise InternalTokenError:
@@ -425,9 +553,10 @@ def adjust_sa_at_dcf(user_id, gcp_id, service_account_id, datasets):
         logger.error("[ERROR] Attempt to contact DCF for SA dataset removal failed (user {})".format(user_id))
         raise e
 
-    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets)
+    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map)
 
     return success, messages
+
 
 def get_auth_elapsed_time(user_id):
     """
