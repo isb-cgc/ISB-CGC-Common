@@ -245,21 +245,27 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map):
                 messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" meets all requirements.'\
                     .format(service_account_id)
             elif sa_error_info['status'] == 409:  # Patch issues a 204 and no content on success:
-                success = True
+                messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" is already registered.' \
+                    .format(service_account_id)
             else:
                 # When a 409 code was returned, we did not get the following key returned, so let's be cautious
                 sa_error_validity = sa_error_info['service_account_validity'] if 'service_account_validity' in sa_error_info else None
-                print(sa_error_validity)
-                info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
-                print(info_for_sa)
-                is_ok, combined = _write_sa_summary(info_for_sa, True, gcp_id)
-                if is_ok:
-                    logger.error(
-                        "[ERROR] Inconsistent success response from DCF! Code: {} Eval: {}".format(sa_error_info['status'],
-                                                                                              is_ok))
+                if sa_error_validity is not None:
+                    print(sa_error_validity)
+                    info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
+                    print(info_for_sa)
+                    is_ok, combined = _write_sa_summary(info_for_sa, True, gcp_id)
+                    if is_ok:
+                        logger.error(
+                            "[ERROR] Inconsistent success response from DCF! Code: {} Eval: {}".format(sa_error_info['status'],
+                                                                                                  is_ok))
 
+                    err_msg = combined
+                else:
+                    err_msg = sa_error_info["error_description"]
                 messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" cannot be ' \
-                                                           'accepted because: "{}"'.format(service_account_id, combined)
+                                                               'accepted because: "{}"'.format(service_account_id,
+                                                                                               err_msg)
 
             # This is the evaluation of the PROJECT:
             gcp_error_info = error_info['google_project_id']
