@@ -125,7 +125,7 @@ def user_gcp_list(request, user_id):
                 gcp_and_sa_tuples = []
                 for gcp in gcp_list:
                     print("ID {} project".format(gcp.id))
-                    sa_dicts, sa_err_msg = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                    sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
                     if sa_err_msg is not None:
                         template = '500.html'
                         return render(request, template, context)
@@ -150,7 +150,31 @@ def user_gcp_list(request, user_id):
     return render(request, template, context)
 
 
-def _buid_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
+def _sa_dict_to_data(retval, gcp_id, sa_dict):
+    sa_data = {}
+    retval.append(sa_data)
+    sa_data['name'] = sa_dict['sa_name']
+    # for modal names:
+    sa_data['esc_name'] = sa_dict['sa_name'].replace('@', "-at-").replace('.', '-dot-')
+    now_time = pytz.utc.localize(datetime.datetime.utcnow())
+    exp_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(sa_dict['sa_exp']))
+    sa_data['is_expired'] = exp_time < now_time
+    sa_data['authorized_date'] = exp_time + datetime.timedelta(days=-7)
+    auth_names = []
+    auth_ids = []
+    sa_data['num_auth'] = len(sa_dict['sa_dataset_ids'])
+    logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(sa_dict['sa_dataset_ids'])))
+    for auth_data in sa_dict['sa_dataset_ids']:
+        print("[INFO] AD {} {}:".format(gcp_id, str(auth_data)))
+        logger.info("[INFO] AD {} {}:".format(gcp_id, str(auth_data)))
+        protected_dataset = AuthorizedDataset.objects.get(whitelist_id=auth_data)
+        auth_names.append(protected_dataset.name)
+        auth_ids.append(str(protected_dataset.id))
+    sa_data['auth_dataset_names'] = ', '.join(auth_names)
+    sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
+
+
+def _build_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
 
     retval = []
     sa_messages = None
@@ -165,39 +189,11 @@ def _buid_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
                 return None, sa_messages
 
             for sa_dict in sa_info:
-                sa_data = {}
-                retval.append(sa_data)
-                sa_data['name'] = sa_dict['sa_name']
-                # for modal names:
-                sa_data['esc_name'] = sa_dict['sa_name'].replace('@', "-at-").replace('.', '-dot-')
-                now_time = pytz.utc.localize(datetime.datetime.utcnow())
-                exp_time = datetime.datetime.fromtimestamp(sa_data['sa_exp'])
-                sa_data['is_expired'] = exp_time < now_time
-                sa_data['authorized_date'] = exp_time + datetime.timedelta(days=-7)
-                auth_names = []
-                auth_ids = []
-                sa_data['num_auth'] = len(sa_data['sa_dataset_ids'])
-                logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(sa_data['sa_dataset_ids'])))
-                for auth_data in sa_data['sa_dataset_ids']:
-                    logger.info("[INFO] AD {}:".format(gcp_id, str(auth_data)))
-                    protected_dataset = AuthorizedDataset.objects.get(whitelist_id=auth_data)
-                    auth_names.append(protected_dataset.name)
-                    auth_ids.append(str(protected_dataset.id))
-                sa_data['auth_dataset_names'] = ', '.join(auth_names)
-                sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
-
-                #  for sa in sa_list:
-                #    ret_entry = {
-                #         'gcp_id': sa['google_project_id'],
-                #        'sa_dataset_ids': sa['project_access'],
-                #         'sa_name': sa['service_account_email'],
-                #         'sa_exp': sa['project_access_exp']
-                #     }
-                #      retval.append(ret_entry)
+                _sa_dict_to_data(retval, gcp_id, sa_dict)
 
         else:
 
-            # google_project = models.ForeignKey(GoogleProject, null=False)
+            #  google_project = models.ForeignKey(GoogleProject, null=False)
             # service_account = models.CharField(max_length=1024, null=False)
             # active = models.BooleanField(default=False, null=False)
             # authorized_date = models.DateTimeField(auto_now=True)
@@ -433,35 +429,7 @@ def gcp_detail(request, user_id, gcp_id):
                 return render(request, 'GenespotRE/gcp_detail.html', context)
 
             for sa_dict in sa_info:
-                sa_data = {}
-                context['sa_list'].append(sa_data)
-                sa_data['name'] = sa_dict['sa_name']
-                # for modal names:
-                sa_data['esc_name'] = sa_dict['sa_name'].replace('@', "-at-").replace('.', '-dot-')
-                now_time = pytz.utc.localize(datetime.datetime.utcnow())
-                exp_time = datetime.datetime.fromtimestamp(sa_data['sa_exp'])
-                sa_data['is_expired'] = exp_time < now_time
-                sa_data['authorized_date'] = exp_time + datetime.timedelta(days=-7)
-                auth_names = []
-                auth_ids = []
-                sa_data['num_auth'] = len(sa_data['sa_dataset_ids'])
-                logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(sa_data['sa_dataset_ids'])))
-                for auth_data in sa_data['sa_dataset_ids']:
-                    logger.info("[INFO] AD {}:".format(gcp_id, str(auth_data)))
-                    protected_dataset = AuthorizedDataset.objects.get(whitelist_id=auth_data)
-                    auth_names.append(protected_dataset.name)
-                    auth_ids.append(str(protected_dataset.id))
-                sa_data['auth_dataset_names'] = ', '.join(auth_names)
-                sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
-
-            #  for sa in sa_list:
-            #    ret_entry = {
-            #         'gcp_id': sa['google_project_id'],
-            #        'sa_dataset_ids': sa['project_access'],
-            #         'sa_name': sa['service_account_email'],
-            #         'sa_exp': sa['project_access_exp']
-            #     }
-            #      retval.append(ret_entry)
+                _sa_dict_to_data(context['sa_list'], gcp_id, sa_dict)
 
         else:
             context['sa_list'] = []

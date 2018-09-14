@@ -187,6 +187,7 @@ def service_account_info_from_dcf(user_id, proj_list):
     retval = {}
     messages = None
     response_dict = json_loads(resp.text)
+    print('response text {}'.format(resp.text))
     if resp.status_code == 200:
         sa_list = response_dict['service_accounts']
         for sa in sa_list:
@@ -219,6 +220,10 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map):
     messages['dcf_analysis_data'] = []
     success = False
 
+    # FIX ME!!
+    if datasets is None:
+        datasets =["phs000178", "phs000218"]
+
     named_datasets = []
     for d_set in datasets:
         named_datasets.append('{} ({})'.format(phs_map[d_set], d_set))
@@ -228,9 +233,7 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map):
         logger.info("[INFO] DCF SA verification response code was {} with body: {} ".format(resp.status_code, resp.text))
         response_dict = json_loads(resp.text)
         if resp.status_code == 200:
-            success = response_dict['success']
-            if not success:
-                logger.error("[ERROR] Inconsistent success response from DCF! Code: {} Text: {}".format(resp.status_code, success))
+            success = True
         elif resp.status_code == 204: # Patch issues a 204 and no content on success:
             success = True
         elif resp.status_code == 400:
@@ -241,8 +244,11 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map):
             if sa_error_info['status'] == 200:
                 messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" meets all requirements.'\
                     .format(service_account_id)
+            elif sa_error_info['status'] == 409:  # Patch issues a 204 and no content on success:
+                success = True
             else:
-                sa_error_validity = sa_error_info['service_account_validity']
+                # When a 409 code was returned, we did not get the following key returned, so let's be cautious
+                sa_error_validity = sa_error_info['service_account_validity'] if 'service_account_validity' in sa_error_info else None
                 print(sa_error_validity)
                 info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
                 print(info_for_sa)
@@ -309,6 +315,50 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map):
 
 
 def _write_sa_summary(sa_info, for_registered_sa, project_id):
+    """
+    We get back a dictionary of results from DCF for each service account. Take this dict and write a summary string to
+    show the user. Returns a tuple of (success, message). Note that the DCF evaluation appears to short-circuit, so
+    we need to not say anything about items that were not evaluated.
+    """
+
+    owned = sa_info["owned_by_project"]
+    not_owned = owned is not None and not owned
+    is_owned = owned is not None and owned
+    owned_message = "Service account belongs to another project" if not_owned else None
+
+    internal = sa_info["no_external_access"]
+    internal_tested = internal is not None
+    not_internal = internal_tested and not internal
+    is_internal = internal_tested and internal
+    internal_message = "Service account has assigned roles or generated keys" if not_internal else None
+
+    not_valid = False
+    is_valid = True
+    if for_registered_sa:
+        valid = sa_info["valid_type"]
+        not_valid = valid is not None and not valid
+        is_valid = valid is not None and valid
+        valid_message = "Service account must be either from project {} or " \
+                        "the Compute Engine Default account.".format(project_id) if not_valid else None
+
+    is_ok = is_owned and ((not internal_tested) or is_internal) and is_valid
+    combination = []
+    combo_msg = ""
+    if not is_ok:
+        if not_owned:
+            combination.append(owned_message)
+        if not_internal:
+            combination.append(internal_message)
+        if not_valid:
+            combination.append(valid_message)
+        if len(combination) > 0:
+            combo_msg = "; ".join(combination)
+            combo_msg += "."
+
+    return is_ok, combo_msg
+
+
+def _write_sa_summary_old(sa_info, for_registered_sa, project_id):
     """
     We get back a dictionary of results from DCF for each service account. Take this dict and write a summary string to
     show the user. Returns a tuple of (success, message). Note that the DCF evaluation appears to short-circuit, so
@@ -505,7 +555,11 @@ def extend_sa_at_dcf(user_id, gcp_id, service_account_id, phs_map):
         logger.error("[ERROR] Attempt to contact DCF for SA extension failed (user {})".format(user_id))
         raise e
 
-    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, None, phs_map)
+    # Successful patch returns a 204 (no content):
+    if resp.status_code == 204:
+        success, messages = True, {}
+    else:
+        success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, None, phs_map)
 
     return success, messages
 

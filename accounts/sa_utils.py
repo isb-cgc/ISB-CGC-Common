@@ -47,7 +47,7 @@ from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_d
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
                         compare_google_ids, service_account_info_from_dcf, \
-                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf
+                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf, service_account_info_from_dcf_for_project_and_sa
 
 logger = logging.getLogger('main_logger')
 
@@ -123,28 +123,41 @@ def _load_black_and_white(st_logger, log_name, service_account):
     return sab, msa, gow, None
 
 
-def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email):
+def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
+                             controlled_datasets, user_email, user_id, gcp_id):
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already
     # exists with the same datasets
 
-    sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=1)
-    if len(sa_qset) == 0:
+    sa_info, messages = service_account_info_from_dcf_for_project_and_sa(user_id, gcp_id, service_account)
+
+    #ret_entry = {
+    #    'gcp_id': sa['google_project_id'],
+    #    'sa_dataset_ids': sa['project_access'],
+    #    'sa_name': sa['service_account_email'],
+    #    'sa_exp': sa['project_access_exp']
+    #}
+
+    # Note the pre-DCF version checked if "active = 1", so we were looking at non-deleted service accounts.
+    # We previously stored info for all service accounts that had ever been registered, with an active flag = 1
+    # checked for this test.
+    if sa_info is None:
         if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.EXTEND:
             return {
                 'message': 'Service account {} was not found so cannot be {}.'.format(escape(service_account), (
                 "adjusted" if (sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST) else "refreshed")),
                 'level': 'error'
             }
-        # determine if this is a re-registration, or a brand-new one
-        sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
-        if len(sa_qset) > 0:
-            logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
-                                                                                                user_email))
-            st_logger.write_text_log_entry(log_name,
-                                           "[STATUS] Verification for SA {} being re-registered by user {}".format(
-                                           service_account, user_email))
-    else:
-        sa = sa_qset.first()
+        # We previously stored info for *all* service accounts that had ever been registered, with an active flag
+        # of 0 for "deleted" accounts. If we detected a reregisration, all we seem to have done is write
+        # a log message (and pull that set out of the DB)
+        # sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
+        # if len(sa_qset) > 0:
+        #    logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
+        #                                                                                        user_email))
+        #    st_logger.write_text_log_entry(log_name,
+        #                                   "[STATUS] Verification for SA {} being re-registered by user {}".format(
+        #                                   service_account, user_email))
+    else: # this SA is known to DCF:
         if sa_mode == SAModes.REGISTER:
             return {
                 'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(escape(service_account)),
@@ -154,25 +167,33 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
         # if is_adjust or not is_refresh:
         if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.REGISTER:
             reg_change = False
+            #
+            # Used to be we checked the ServiceAccountAuthorizedDatasets to see what data sets we were on. Now that info
+            # comes back in the DCF response
+            #
+
+            have_datasets = len(sa_info['sa_dataset_ids']) > 0
+
             # Check the private datasets to see if there's a registration change
-            saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
+            # saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
 
             # If we're removing all datasets and there are 1 or more, this is automatically a registration change
-            if (sa_mode == SAModes.REMOVE_ALL) and saads.count():
+            if (sa_mode == SAModes.REMOVE_ALL) and have_datasets:
                 reg_change = True
             else:
-                if controlled_datasets.count() or saads.count():
+                if controlled_datasets.count() or have_datasets:
                     ads = controlled_datasets.values_list('whitelist_id', flat=True)
                     # A private dataset missing from either list means this is a registration change
                     for ad in ads:
-                        if ad not in saads:
+                        if ad not in sa_info['sa_dataset_ids']:
                             reg_change = True
                     if not reg_change:
-                        for saad in saads:
+                        for saad in sa_info['sa_dataset_ids']:
                             if saad not in ads:
                                 reg_change = True
-                else:
-                    reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
+                #else:
+                    # This says we have a reg change if we are currently not authorized for a public dataset. Registering for a public dataset goes away with the move to DCF.
+                    #reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
             # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
             if not reg_change:
                 return {
@@ -228,7 +249,8 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
     # Check SA sanity:
     #
 
-    msg = _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email)
+    msg = _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
+                                   controlled_datasets, user_email, user_id, gcp_id)
     if msg:
         return msg
 
@@ -268,6 +290,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
         return roles_and_registered
 
     roles_and_registered['all_user_datasets_verified'] = True
+    roles_and_registered['dcf_messages'] = dcf_messages
     return roles_and_registered
 
 
@@ -767,7 +790,7 @@ def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_
 
 
 def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh,
-                                  is_adjust, remove_all, st_logger, user_gcp, phs_map):
+                                  is_adjust, remove_all, st_logger, user_gcp):
 
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
