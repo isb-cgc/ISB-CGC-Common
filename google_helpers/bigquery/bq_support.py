@@ -318,6 +318,7 @@ class BigQuerySupport(BigQueryABC):
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
                 logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done['status']['errors'])))
+                logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
                 query_results = self.fetch_job_results(query_job['jobReference'])
@@ -325,6 +326,7 @@ class BigQuerySupport(BigQueryABC):
         else:
             logger.error("[ERROR] Query took longer than the allowed time to execute--" +
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
+            logger.error("[ERROR] Timed out query: {}".format(query))
 
         if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
                 job_is_done['statistics']['query']:
@@ -361,6 +363,9 @@ class BigQuerySupport(BigQueryABC):
 
         return result
 
+    def fetch_job_resource(self, job_ref):
+        return self.bq_service.jobs().get(**job_ref).execute(num_retries=5)
+
     # Execute a query to be saved on a temp table (shorthand to instance method above), optionally parameterized
     # and fetch its results
     @classmethod
@@ -392,6 +397,12 @@ class BigQuerySupport(BigQueryABC):
     def get_job_results(cls, job_reference):
         bqs = cls(None, None, None)
         return bqs.fetch_job_results(job_reference)
+
+    # Given a BQ service and a job reference, fetch out the results
+    @classmethod
+    def get_job_resource(cls, job_id, project_id):
+        bqs = cls(None, None, None)
+        return bqs.fetch_job_resource({'jobId': job_id, 'projectId': project_id})
 
     # Builds a BQ API v2 QueryParameter set and WHERE clause string from a set of filters of the form:
     # {

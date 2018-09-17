@@ -1849,9 +1849,11 @@ def streaming_csv_view(request, cohort_id=0):
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
-            rows += (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "Access Type"],)
+            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "Access Type"],)
             for file in file_list:
-                rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['dataformat'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
+                rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
+                          file['datatype'], file['dataformat'], file['cloudstorage_location'],
+                          file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
@@ -2185,6 +2187,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         # Some files only have case barcodes, but some have sample barcodes. We have to make sure
         # to export any files linked to a case if any sample from that case is in the cohort, but
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
+
         if export_type == 'file_manifest':
             query_string_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
