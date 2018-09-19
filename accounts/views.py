@@ -41,7 +41,8 @@ from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa, service_account_dict, \
                      do_nih_unlink, deactivate_nih_add_to_open, controlled_auth_datasets
 
-from dcf_support import service_account_info_from_dcf_for_project
+from dcf_support import service_account_info_from_dcf_for_project, TokenFailure, \
+                        InternalTokenError, RefreshTokenExpired, DCFCommFailure
 
 from json import loads as json_loads
 
@@ -124,7 +125,6 @@ def user_gcp_list(request, user_id):
 
                 gcp_and_sa_tuples = []
                 for gcp in gcp_list:
-                    print("ID {} project".format(gcp.id))
                     sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
                     if sa_err_msg is not None:
                         template = '500.html'
@@ -490,13 +490,23 @@ def user_gcp_delete(request, user_id, gcp_id):
             user = User.objects.get(id=user_id)
             logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
             gcp = GoogleProject.objects.get(id=gcp_id, active=1)
-            unregister_all_gcp_sa(user_id, gcp_id)
+            success, msg = unregister_all_gcp_sa(user_id, gcp_id)
             gcp.user.clear()
             gcp.active=False
             gcp.save()
+
+    except TokenFailure:
+        messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    except InternalTokenError:
+        messages.error(request, "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931"))
+    except RefreshTokenExpired:
+        messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    except DCFCommFailure:
+        messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
     except Exception as e:
-        logger.error("[ERROR] While deleting a GCP: ")
-        logger.exception(e)
+        logger.error("[ERROR]: Unexpected Exception {}".format(str(e)))
         messages.error(request, "Encountered an error while trying to delete this Google Cloud Project - please contact the administrator.")
 
     return redirect('user_gcp_list', user_id=request.user.id)
@@ -551,6 +561,19 @@ def verify_sa(request, user_id):
         else:
             result = {'message': 'There was no Google Cloud Project provided.'}
             status = '404'
+
+    except TokenFailure:
+        result = {'message': "Your Data Commons Framework identity needs to be reestablished to complete this task."}
+        status = '403'
+    except InternalTokenError:
+        result = {'message': "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1932")}
+        status = '500'
+    except RefreshTokenExpired:
+        result = {'message': "Your login to the Data Commons Framework has expired. You will need to log in again."}
+        status = '403'
+    except DCFCommFailure:
+        result = {'message': "There was a communications problem contacting the Data Commons Framework."}
+        status = '503'
     except Exception as e:
         logger.error("[ERROR] While verifying Service Accounts: ")
         logger.exception(e)
@@ -576,9 +599,13 @@ def register_sa(request, user_id):
                 template = 'GenespotRE/adjust_sa.html'
                 sa_dict, sa_msgs = service_account_dict(user_id, request.GET.get('sa_name'))
                 # FIXME!!! What to do next if there is an error message (Coming from DCF)??
+                # This is distinct from exceptions, handled below.
+                # this is stuff like user is not allowed to ask about the service account.
+                # Usual answer is to pop to user_gcp_list page:
                 if sa_msgs:
                     for sa_msg in sa_msgs:
                         messages.error(request, sa_msg)
+                    return redirect('user_gcp_list', user_id=user_id)
 
                 context['gcp_id'] = sa_dict['gcp_id']
                 context['sa_dataset_ids'] = sa_dict['sa_dataset_ids']
@@ -618,21 +645,46 @@ def register_sa(request, user_id):
             messages.error(request, 'There was no Google Cloud Project provided.', 'warning')
             return redirect('user_gcp_list', user_id=user_id)
 
+    except TokenFailure:
+        messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
+        return redirect(reverse('user_detail', args=[user_id]))
+    except InternalTokenError:
+        messages.error(request, "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1939"))
+    except RefreshTokenExpired:
+        messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
+        return redirect(reverse('user_detail', args=[user_id]))
+    except DCFCommFailure:
+        messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
     except Exception as e:
-        logger.error("[ERROR] While registering a Service Account: ")
-        logger.exception(e)
+        logger.error("[ERROR]: Unexpected Exception registering a Service Account {}".format(str(e)))
         messages.error(request, "Unable to register this Service Account - please contact the administrator.")
-        return redirect('user_gcp_list', user_id=user_id)
+
+    return redirect('user_gcp_list', user_id=user_id)
 
 
 @login_required
 def delete_sa(request, user_id, sa_name):
-    # FIXME: No longer have an SA_ID to work with
     try:
         if request.POST:
-            unregister_sa(user_id, sa_name)
+            success, msgs = unregister_sa(user_id, sa_name)
+
+        if msgs is not None:
+            for msg in msgs:
+                messages.error(request, msg)
+        return redirect('user_gcp_list', user_id=user_id)
+
+    except TokenFailure:
+        messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
+        return redirect(reverse('user_detail', args=[user_id]))
+    except InternalTokenError:
+        messages.error(request, "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931"))
+    except RefreshTokenExpired:
+        messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
+        return redirect(reverse('user_detail', args=[user_id]))
+    except DCFCommFailure:
+        messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
     except Exception as e:
-        logger.error("[ERROR] While trying to unregister Service Account {}: ".format(sa_name))
+        logger.error("[ERROR]: Unexpected Exception unregister a Service Account {}".format(str(e)))
         logger.exception(e)
         messages.error(request, "Encountered an error while trying to remove this service account - please contact the administrator.")
 

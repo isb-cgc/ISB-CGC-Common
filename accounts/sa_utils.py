@@ -47,7 +47,8 @@ from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_d
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
                         compare_google_ids, service_account_info_from_dcf, \
-                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf, service_account_info_from_dcf_for_project_and_sa
+                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf, service_account_info_from_dcf_for_project_and_sa, \
+                        service_account_info_from_dcf_for_project
 
 logger = logging.getLogger('main_logger')
 
@@ -204,19 +205,28 @@ def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
 
 
 def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     try:
         if settings.SA_VIA_DCF:
             return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
         else:
             return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
-    except Exception as e:
-        logger.error("[ERROR] Exception while verifying ServiceAccount")
-        logger.exception(e)
-        return {'message': 'An error occurred while validating the service account.'}
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        raise e
 
 
 def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
-
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
     # Only verify for protected datasets
@@ -271,11 +281,13 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
         phs_map[dataset.whitelist_id] = dataset.name
 
     #
-    # Ask DCF if we are cool:
+    # Ask DCF if we are cool. If we are just doing an adjustment, we need to let DCF know that we are doing
+    # a _dry_run for a PATCH condition.
     #
 
     try:
-        success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets, phs_map)
+        sa_in_use = (sa_mode == SAModes.ADJUST)
+        success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets, phs_map, sa_in_use)
         if not success:
             # We want to be more structured with any error messages we receive from DCF instead of a narrative
             # error block at the top of the page.
@@ -284,10 +296,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
             return roles_and_registered
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.exception(e)
-        roles_and_registered['all_user_datasets_verified'] = False
-        roles_and_registered['message'] = "FIXME There was an error while verifying this service account. Please contact the administrator."
-        roles_and_registered['level'] = 'error'
-        return roles_and_registered
+        raise e
 
     roles_and_registered['all_user_datasets_verified'] = True
     roles_and_registered['dcf_messages'] = dcf_messages
@@ -772,6 +781,15 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
 
 
 def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+    """
+    Register a service account
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+
     try:
         # log the reports using Cloud logging API
         st_logger = StackDriverLogger.build_from_django_settings()
@@ -783,17 +801,26 @@ def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_
         else:
             return _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust,
                                                  remove_all, st_logger, user_gcp)
+
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        raise e
     except Exception as e:
         logger.error("[ERROR] Exception while registering ServiceAccount")
         logger.exception(e)
-        return {('An error occurred while registering the service account.', 'error')}
-
+        raise e
 
 def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh,
                                   is_adjust, remove_all, st_logger, user_gcp):
+    """
+    Register a service account using DCF
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
 
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
-
 
     # If we've received a remove-all request, ignore any provided datasets
     if remove_all:
@@ -842,9 +869,21 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
         elif sa_mode == SAModes.REGISTER:
             success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
 
-        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
+        logger.info("[INFO] messages from DCF {}".format(str(messages)))
+
+        #
+        # For these operations, we do not expect any errors, as we have previously run e.g. verification steps
+        # to catch errors. But we still could have race conditions arise, and need to handle those:
+        #
         if not success:
-            ret_msg.append((
+            if messages['dcf_problems'] is not None and len(messages['dcf_problems']) > 0:
+                #dcf_parsing_problems...., show an error
+                #FIX ME #FIX ME
+                pass
+            elif messages['unexpected']:
+                #race_condition_problems...
+
+                ret_msg.append((
                 "The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format(
                     "\n".join(messages)), "error"))
             #
@@ -854,9 +893,9 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
             #
 
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.error("[ERROR] Exception while registering ServiceAccount")
         logger.exception(e)
-        return {
-        ("FIXME There was an error while modifying this service account. Please contact the administrator.", "error")}
+        raise e
 
     return ret_msg
 
@@ -1049,18 +1088,26 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
 
 
 def unregister_all_gcp_sa(user_id, gcp_id):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+    success = True
     if settings.SA_VIA_DCF:
-        # FIXME Throws exceptions:
-        success = None
-        msgs = None
-        #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
-        pass
+        msgs = []
+        all_sa_for_proj = service_account_info_from_dcf_for_project(user_id, gcp_id)
+        for sa in all_sa_for_proj:
+            one_success, one_msgs = unregister_sa_via_dcf(user_id, sa['sa_name'])
+            success = success and one_success
+            if one_msgs is not None:
+                msgs.append(one_msgs)
     else:
-        success = None
         msgs = None
         _unregister_all_gcp_sa_db(user_id, gcp_id)
 
-    return success, msgs
+    return success, (msgs if (msgs is not None and len(msgs) > 0) else None)
 
 
 def _unregister_all_gcp_sa_db(user_id, gcp_id):
@@ -1073,11 +1120,17 @@ def _unregister_all_gcp_sa_db(user_id, gcp_id):
 
 
 def unregister_sa(user_id, sa_name):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+
     if settings.SA_VIA_DCF:
-        # FIXME Throws exceptions:
         success, msgs = unregister_sa_via_dcf(user_id, sa_name)
     else:
-        success = None
+        success = True
         msgs = None
         _unregister_sa_db(user_id, sa_name)
     return success, msgs
@@ -1142,15 +1195,25 @@ def controlled_auth_datasets():
 
 
 def service_account_dict(user_id, sa_id):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     if settings.SA_VIA_DCF:
-        # FIXME This is throwing DCF token exceptions!
         return _service_account_dict_from_dcf(user_id, sa_id)
     else:
         return _service_account_dict_from_db(sa_id)
 
 
 def _service_account_dict_from_dcf(user_id, sa_name):
-
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     #
     # DCF currently (8/2/18) requires us to provide the list of Google projects
     # that we want service accounts for. If we are just given the SA ID, we need
@@ -2023,9 +2086,11 @@ def get_nih_user_details(user_id, force_logout):
         # to the user, as our database view could be stale.
         #
         # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
-        # flag. This is the *minimun* we chould be doing, no matter what. Note that in DCF-based Brave New World, we no
+        # flag. This is the *minimun* we should be doing, no matter what. Note that in DCF-based Brave New World, we no
         # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
-        # need to give the user an accurate picture of the state when they hit this page.
+        # need to give the user an accurate picture of the state when they hit this page. NO!! ACTUALLY (9/18/18),
+        # the active flag is still used by the File Browser page to determine if a user is allowed to click on a file.
+        # We are using the cron sweeper to remove the active status.
         #
 
         if nih_user.active:
