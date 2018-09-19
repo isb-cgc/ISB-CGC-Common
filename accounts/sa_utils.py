@@ -983,15 +983,27 @@ def _service_account_dict_from_db(sa_name):
     return retval, None
 
 
-def auth_dataset_whitelists_for_user(use_user_id):
-    nih_user = NIH_User.objects.filter(user_id=use_user_id, active=True)
+def auth_dataset_whitelists_for_user(user_id):
+    nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
+    num_users = len(nih_users)
+    if num_users != 1:
+        if num_users > 1:
+            logger.warn("Multiple objects when retrieving nih_user with user_id {}.".format(str(user_id)))
+        else:
+            logger.warn("No objects when retrieving nih_user with user_id {}.".format(str(user_id)))
+        return None
+    nih_user = nih_users.first()
+    expired_time = nih_user.NIH_assertion_expiration
+    now_time = pytz.utc.localize(datetime.datetime.utcnow())
+    if now_time >= expired_time:
+        return None
+
     has_access = None
-    if len(nih_user) > 0:
-        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-        for dataset in user_auth_sets:
-            if not has_access:
-                has_access = []
-            has_access.append(dataset.authorized_dataset.whitelist_id)
+    user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+    for dataset in user_auth_sets:
+        if not has_access:
+            has_access = []
+        has_access.append(dataset.authorized_dataset.whitelist_id)
 
     return has_access
 
