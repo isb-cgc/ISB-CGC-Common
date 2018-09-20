@@ -35,6 +35,7 @@ COHORT_TABLES = {
     'staging': 'staging_cohorts'
 }
 
+
 class BigQueryCohortSupport(BigQuerySupport):
 
     def __init__(self, project_id, dataset_id, table_id):

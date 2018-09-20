@@ -41,12 +41,12 @@ from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFac
 from dataset_utils.dataset_config import DatasetGoogleGroupPair
 from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_name
 
-from dcf_support import get_stored_dcf_token, \
+from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf,  \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
-                        GoogleLinkState, get_auth_elapsed_time, \
+                        GoogleLinkState, get_auth_elapsed_time, unregister_sa_via_dcf, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
-                        compare_google_ids
+                        compare_google_ids, service_account_info_from_dcf
 
 logger = logging.getLogger('main_logger')
 
@@ -57,11 +57,208 @@ GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+class SAModes:
+    REMOVE_ALL = 1
+    ADJUST = 2
+    EXTEND = 3
+    REGISTER = 4
+    CANNOT_OCCUR = 5
+
+
+def _derive_sa_mode(is_refresh, is_adjust, remove_all):
+    """
+    We have three different flag driving only four different modes. Try to make this more
+    comprehensible:
+    """
+    if is_adjust:
+        if is_refresh:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.CANNOT_OCCUR
+        else:
+            if remove_all:
+                return SAModes.REMOVE_ALL
+            else:
+                return SAModes.ADJUST
+    else:
+        if is_refresh:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.EXTEND
+        else:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.REGISTER
+
+
+def _load_black_and_white(st_logger, log_name, service_account):
+    """
+    Even with DCF handling registration, we would still maybe want to e.g. catch our SAs:
+    """
+
+    #
+    # Block verification of service accounts used by the application
+    # We should keep this around even with DCF, since we can catch these without even asking.
+    #
+    try:
+        sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
+        msa = ManagedServiceAccounts.from_json_file_path(MANAGED_SERVICE_ACCOUNTS_PATH)
+        gow = GoogleOrgWhitelist.from_json_file_path(GOOGLE_ORG_WHITELIST_PATH)
+    except Exception as e:
+        logger.error("[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
+        logger.exception(e)
+        trace_msg = traceback.format_exc()
+        st_logger.write_text_log_entry(log_name, "[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
+        st_logger.write_text_log_entry(log_name, trace_msg)
+        return None, None, None, {'message': 'An error occurred while validating the service account.'}
+
+    if sab.is_blacklisted(service_account):
+        st_logger.write_text_log_entry(log_name, "Cannot register {0}: Service account is blacklisted.".format(service_account))
+        return None, None, None, {'message': 'This service account cannot be registered.'}
+
+    return sab, msa, gow, None
+
+
+def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email):
+    # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already
+    # exists with the same datasets
+
+    sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=1)
+    if len(sa_qset) == 0:
+        if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.EXTEND:
+            return {
+                'message': 'Service account {} was not found so cannot be {}.'.format(escape(service_account), (
+                "adjusted" if (sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST) else "refreshed")),
+                'level': 'error'
+            }
+        # determine if this is a re-registration, or a brand-new one
+        sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
+        if len(sa_qset) > 0:
+            logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
+                                                                                                user_email))
+            st_logger.write_text_log_entry(log_name,
+                                           "[STATUS] Verification for SA {} being re-registered by user {}".format(
+                                           service_account, user_email))
+    else:
+        sa = sa_qset.first()
+        if sa_mode == SAModes.REGISTER:
+            return {
+                'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(escape(service_account)),
+                'level': 'error'
+            }
+
+        # if is_adjust or not is_refresh:
+        if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.REGISTER:
+            reg_change = False
+            # Check the private datasets to see if there's a registration change
+            saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
+
+            # If we're removing all datasets and there are 1 or more, this is automatically a registration change
+            if (sa_mode == SAModes.REMOVE_ALL) and saads.count():
+                reg_change = True
+            else:
+                if controlled_datasets.count() or saads.count():
+                    ads = controlled_datasets.values_list('whitelist_id', flat=True)
+                    # A private dataset missing from either list means this is a registration change
+                    for ad in ads:
+                        if ad not in saads:
+                            reg_change = True
+                    if not reg_change:
+                        for saad in saads:
+                            if saad not in ads:
+                                reg_change = True
+                else:
+                    reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
+            # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
+            if not reg_change:
+                return {
+                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(escape(service_account),('re-registered' if (sa_mode == SAModes.REGISTER) else 'adjusted')),
+                    'level': 'warning'
+                }
+    return None
+
+
+def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
+    try:
+        if settings.SA_VIA_DCF:
+            return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+        else:
+            return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
+    except Exception as e:
+        logger.error("[ERROR] Exception while verifying ServiceAccount")
+        logger.exception(e)
+        return {'message': 'An error occurred while validating the service account.'}
+
+
+def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
+
+    sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
     # Only verify for protected datasets
-    controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
+    controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
     controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
+    project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
+    projectNumber = None
+    sab = None
+    gow = None
+    sa = None
+
+    # log the reports using Cloud logging API
+    st_logger = StackDriverLogger.build_from_django_settings()
+
+    log_name = SERVICE_ACCOUNT_LOG_NAME
+    resp = {
+        'message': '{0}: Begin verification of service account.'.format(service_account)
+    }
+    st_logger.write_struct_log_entry(log_name, resp)
+
+    #
+    # load the lists:
+    #
+
+    sab, msa, gow, msg = _load_black_and_white(st_logger, log_name, service_account)
+    if msg:
+        return msg
+
+    #
+    # Check SA sanity:
+    #
+
+    msg = _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email)
+    if msg:
+        return msg
+
+    #
+    # Ask DCF if we are cool:
+    #
+
+    try:
+        messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
+        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
+        if messages:
+            return {
+              'message': '\n'.join(messages),
+              'level': 'error'
+            }
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.exception(e)
+        return {'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
+
+    return_obj = {'roles': 'FIXME!!',
+                  'all_user_datasets_verified': 'FIXME!!'}
+    return return_obj
+
+
+def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+
+    # Only verify for protected datasets
+    controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
+    controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
+    logger.info("[INFO] Datasets: {} {} {}".format(str(datasets), len(controlled_datasets), str(controlled_dataset_names)))
+
     project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
     projectNumber = None
     sab = None
@@ -186,9 +383,9 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
              or msa.is_managed(service_account)):
         msg = "Service Account {} is ".format(escape(service_account),)
         if msa.is_managed(service_account):
-            msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
+            msg += "a Google System Managed Service Account, and so cannot be registered. Please register a user-managed Service Account."
         else:
-            msg += "not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
+            msg += "not from GCP {}, and so cannot be registered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
         return {
             'message': msg,
             'level': 'error'
@@ -401,7 +598,19 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     return return_obj
 
 
-def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+    try:
+        if settings.SA_VIA_DCF:
+            return _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+        else:
+            return _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+    except Exception as e:
+        logger.error("[ERROR] Exception while registering ServiceAccount")
+        logger.exception(e)
+        return {('An error occurred while registering the service account.', 'error')}
+
+
+def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
 
     ret_msg = []
 
@@ -416,11 +625,59 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
     if len(datasets) == 1 and datasets[0] == '':
         datasets = []
-    else:
-        datasets = map(int, datasets)
+    # datasets are now identified by their whitelist id:
+    #else:
+    #    datasets = map(int, datasets)
 
     # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-    result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
+    result = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+    logger.info("[INFO] FIXME ACTUALLY CHECK RESULTS")
+
+    err_msgs = []
+
+    #
+    # Ask DCF if we are cool:
+    #
+
+    try:
+        messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
+        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
+        if messages:
+            return {
+                'message': '\n'.join(messages),
+                'level': 'error'
+            }
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.exception(e)
+        return {
+            'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
+
+    return_obj = {'roles': 'FIXME!!',
+                  'all_user_datasets_verified': 'FIXME!!'}
+    return return_obj
+
+
+def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+
+    ret_msg = []
+
+    # log the reports using Cloud logging API
+    st_logger = StackDriverLogger.build_from_django_settings()
+
+    user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+
+    # If we've received a remove-all request, ignore any provided datasets
+    if remove_all:
+        datasets = ['']
+
+    if len(datasets) == 1 and datasets[0] == '':
+        datasets = []
+    # datasets are now identified by their whitelist id:
+    #else:
+    #    datasets = map(int, datasets)
+
+    # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
+    result = _verify_service_account_isb(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
 
     err_msgs = []
 
@@ -431,7 +688,7 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
                                              user_sa, user_email)})
 
         # Datasets verified, add service accounts to appropriate acl groups
-        protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
+        protected_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets)
 
         # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
         public_datasets = AuthorizedDataset.objects.filter(public=True)
@@ -590,11 +847,21 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
         return ret_msg
 
-def unregister_sa_with_id(user_id, sa_id):
-    unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
-
-
 def unregister_all_gcp_sa(user_id, gcp_id):
+    if settings.SA_VIA_DCF:
+        # FIXME Throws ex ceptions:
+        success = None
+        msgs = None
+        #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
+        pass
+    else:
+        success = None
+        msgs = None
+        _unregister_all_gcp_sa_db(user_id, gcp_id)
+
+    return success, msgs
+
+def _unregister_all_gcp_sa_db(user_id, gcp_id):
     gcp = GoogleProject.objects.get(id=gcp_id, active=1)
 
     # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
@@ -604,6 +871,17 @@ def unregister_all_gcp_sa(user_id, gcp_id):
 
 
 def unregister_sa(user_id, sa_name):
+    if settings.SA_VIA_DCF:
+        # FIXME Throws exceptions:
+        success, msgs = unregister_sa_via_dcf(user_id, sa_name)
+    else:
+        success = None
+        msgs = None
+        _unregister_sa_db(user_id, sa_name)
+    return success, msgs
+
+
+def _unregister_sa_db(user_id, sa_name):
     st_logger = StackDriverLogger.build_from_django_settings()
 
     sa = ServiceAccount.objects.get(service_account=sa_name)
@@ -655,24 +933,77 @@ def unregister_sa(user_id, sa_name):
     sa.active = False
     sa.save()
 
-def service_account_dict(sa_id):
-    service_account = ServiceAccount.objects.get(id=sa_id, active=1)
-    retval = {
-      'gcp_id': service_account.google_project.project_id,
-      'sa_datasets': service_account.get_auth_datasets(),
-      'sa_id': service_account.service_account
-    }
-    return retval
 
-def auth_dataset_whitelists_for_user(use_user_id):
-    nih_user = NIH_User.objects.filter(user_id=use_user_id, active=True)
+def controlled_auth_datasets():
+    datasets = AuthorizedDataset.objects.filter(public=False)
+    return [{'whitelist_id': x.whitelist_id, 'name': x.name, 'duca': x.duca_id} for x in datasets]
+
+
+def service_account_dict(user_id, sa_id):
+    if settings.SA_VIA_DCF:
+        # FIXME This is throwing DCF token exceptions!
+        return _service_account_dict_from_dcf(user_id, sa_id)
+    else:
+        return _service_account_dict_from_db(sa_id)
+
+
+def _service_account_dict_from_dcf(user_id, sa_name):
+
+    #
+    # DCF currently (8/2/18) requires us to provide the list of Google projects
+    # that we want service accounts for. If we are just given the SA ID, we need
+    # to query for all projects and then use those results to find the SA matching
+    # the ID (unless we go through funny business trying to parse the project out
+    # of the service account name:
+    #
+    user = User.objects.get(id=user_id)
+    gcp_list = GoogleProject.objects.filter(user=user, active=1)
+    proj_list = [x.project_id for x in gcp_list]
+
+    sa_dict, messages = service_account_info_from_dcf(user_id, proj_list)
+    return sa_dict[sa_name] if sa_name in sa_dict else None, messages
+
+
+def _service_account_dict_from_db(sa_name):
+    service_account = ServiceAccount.objects.get(service_account=sa_name, active=1)
+    datasets = service_account.get_auth_datasets()
+    ds_ids = []
+    for dataset in datasets:
+        ds_ids.append(dataset.whitelist_id)
+
+    expired_time = service_account.authorized_date + datetime.timedelta(days=7)
+
+    retval = {
+        'gcp_id': service_account.google_project.project_id,
+        'sa_dataset_ids': ds_ids,
+        'sa_name': service_account.service_account,
+        'sa_exp': expired_time
+
+    }
+    return retval, None
+
+
+def auth_dataset_whitelists_for_user(user_id):
+    nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
+    num_users = len(nih_users)
+    if num_users != 1:
+        if num_users > 1:
+            logger.warn("Multiple objects when retrieving nih_user with user_id {}.".format(str(user_id)))
+        else:
+            logger.warn("No objects when retrieving nih_user with user_id {}.".format(str(user_id)))
+        return None
+    nih_user = nih_users.first()
+    expired_time = nih_user.NIH_assertion_expiration
+    now_time = pytz.utc.localize(datetime.datetime.utcnow())
+    if now_time >= expired_time:
+        return None
+
     has_access = None
-    if len(nih_user) > 0:
-        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-        for dataset in user_auth_sets:
-            if not has_access:
-                has_access = []
-            has_access.append(dataset.authorized_dataset.whitelist_id)
+    user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+    for dataset in user_auth_sets:
+        if not has_access:
+            has_access = []
+        has_access.append(dataset.authorized_dataset.whitelist_id)
 
     return has_access
 
