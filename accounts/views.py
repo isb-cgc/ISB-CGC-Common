@@ -122,7 +122,14 @@ def user_gcp_list(request, user_id):
                     'last_name': user.last_name
                 }
 
-                context = {'user': user, 'user_details': user_details, 'gcp_list': gcp_list}
+                gcp_and_sa_tuples = []
+                for gcp in gcp_list:
+                    sa_dicts, sa_err_msg = _buid_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                    if sa_err_msg is not None:
+                        template = '500.html'
+                        return render(request, template, context)
+                    gcp_and_sa_tuples.append((gcp, sa_dicts))
+                context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
@@ -226,7 +233,6 @@ def _buid_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
                 # dataset names, separated by ","
                 # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
                 # dataset ids, separated by ", "
-        logger.info("[INFO] Render!! {}:".format(gcp_id))
 
     except Exception as e:
         logger.error("[ERROR] While detailing a GCP: ")
@@ -496,7 +502,6 @@ def gcp_detail(request, user_id, gcp_id):
         # dataset names, separated by ","
         # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
         # dataset ids, separated by ", "
-        logger.info("[INFO] Render!! {}:".format(gcp_id))
 
     except Exception as e:
         logger.error("[ERROR] While detailing a GCP: ")
@@ -548,9 +553,12 @@ def verify_sa(request, user_id):
             if remove_all:
                 datasets = []
 
+            logger.info("[INFO] Verifying Service Account {} for datasets {}".format(user_sa, str(datasets)))
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+            logger.info("[INFO] Verified Service Account {} for datasets {}".format(user_sa, str(datasets)))
 
             if 'message' in result.keys():
+                logger.info("[INFO] Gotta message")
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
                 # Users attempting to refresh a project they're not on go back to their GCP list (because this GCP was probably removed from it)
@@ -563,8 +571,10 @@ def verify_sa(request, user_id):
                     gcp.save()
             else:
                 if result['all_user_datasets_verified']:
+                    logger.info("[INFO] all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
                 else:
+                    logger.info("[INFO] not all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
@@ -624,7 +634,7 @@ def register_sa(request, user_id):
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
-            err_msgs = register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+            err_msgs = register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
 
             for msg_tuple in err_msgs:
                 if msg_tuple[1] == 'error':
@@ -632,7 +642,7 @@ def register_sa(request, user_id):
                 elif msg_tuple[1] == 'warning':
                     messages.warning(request, msg_tuple[0])
                 else:
-                    logger.error("[ERROR] Unimplemented message level: {}, {}".format(msg_tuple[1], msg_tuple[0]))
+                    logger.info("[INFO] {}".format(msg_tuple))
 
             return redirect('user_gcp_list', user_id=user_id)
         else:

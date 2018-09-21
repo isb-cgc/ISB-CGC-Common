@@ -785,8 +785,8 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
 
             # If it's looking for None values
             elif value == 'None':
-                query_str += ' %s is null' % key
-                big_query_str += ' %s is null' % key
+                query_str += ' (%s is null or %s = "")' % (key, key)
+                big_query_str += ' (%s is null or %s = "")' % (key, key)
 
             # For the general case
             else:
