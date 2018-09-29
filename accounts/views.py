@@ -67,12 +67,12 @@ def extended_logout_view(request):
     except ObjectDoesNotExist as e:
         logger.error("[ERROR] User with ID of {} not found!".format(str(request.user.id)))
         logger.exception(e)
-        messages.error(request, "There was an error while attempting to log out - please contact the administrator.")
+        messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('landing_page'))
     except Exception as e:
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to log out - please contact the administrator.")
+        messages.error(request,"There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
     return response
 
@@ -89,7 +89,7 @@ def unlink_accounts(request):
     except Exception as e:
         logger.error("[ERROR] While unlinking accounts:")
         logger.exception(e)
-        messages.error(request, 'There was an error when attempting to unlink your NIH user account - please contact the administrator.')
+        messages.error(request, 'There was an error when attempting to unlink your NIH user account - please contact feedback@isb-cgc.org.')
 
     # redirect to user detail page
     return redirect(reverse('user_detail', args=[user_id]))
@@ -135,18 +135,28 @@ def user_gcp_list(request, user_id):
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
                 logger.exception(e)
-                messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
+                messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact feedback@isb-cgc.org.")
 
         else:
             messages.error(request,"You are not allowed to view that user's Google Cloud Project list.")
             logger.warn("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
             template = '403.html'
+
+    except TokenFailure:
+        messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    except InternalTokenError:
+        messages.error(request, "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931"))
+    except RefreshTokenExpired:
+        messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    except DCFCommFailure:
+        messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
     except Exception as e:
         logger.error("[ERROR] While trying to view the GCP list:")
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to list your Google Cloud Projects - please contact the administrator.")
+        messages.error(request,"There was an error while attempting to list your Google Cloud Projects. Please contact feedback@isb-cgc.org.")
         template = '500.html'
-
     return render(request, template, context)
 
 
@@ -159,7 +169,7 @@ def _sa_dict_to_data(retval, gcp_id, sa_dict):
     now_time = pytz.utc.localize(datetime.datetime.utcnow())
     exp_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(sa_dict['sa_exp']))
     sa_data['is_expired'] = exp_time < now_time
-    sa_data['authorized_date'] = exp_time + datetime.timedelta(days=-7)
+    sa_data['expiration_date'] = 'N/A' if sa_data['is_expired'] else exp_time
     auth_names = []
     auth_ids = []
     sa_data['num_auth'] = len(sa_dict['sa_dataset_ids'])
@@ -175,66 +185,53 @@ def _sa_dict_to_data(retval, gcp_id, sa_dict):
 
 
 def _build_sa_list_for_gcp(request, user_id, gcp_id, gcp_context):
+    """
+    Build the list od service accounts for the gcp
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
 
     retval = []
     sa_messages = None
 
-    try:
-        if settings.SA_VIA_DCF:
-            sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_context.project_id)
-            if sa_messages:
-                for message in sa_messages:
-                    logger.error("[ERROR] {}:".format(message))
-                    messages.error(request, message)
-                return None, sa_messages
+    if settings.SA_VIA_DCF:
+        sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_context.project_id)
+        if sa_messages:
+            for message in sa_messages:
+                logger.error("[ERROR] {}:".format(message))
+                messages.error(request, message)
+            return None, sa_messages
 
-            for sa_dict in sa_info:
-                _sa_dict_to_data(retval, gcp_id, sa_dict)
+        for sa_dict in sa_info:
+            _sa_dict_to_data(retval, gcp_id, sa_dict)
 
-        else:
+    else:
+        active_sas = gcp_context.active_service_accounts()
+        for service_account in active_sas:
+            logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
+            auth_datasets = service_account.get_auth_datasets()
+            sa_data = {}
+            retval.append(sa_data)
+            sa_data['name'] = service_account.service_account
+            # for modal names:
+            sa_data['esc_name'] = service_account.service_account.replace('@', "-at-").replace('.', '-dot-')
+            sa_data['is_expired'] = service_account.is_expired()
+            sa_data['authorized_date'] = service_account.authorized_date
+            auth_names = []
+            auth_ids = []
+            sa_data['num_auth'] = len(auth_datasets)
+            logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
+            for auth_data in auth_datasets:
+                auth_names.append(auth_data.name)
+                auth_ids.append(str(auth_data.id))
+            sa_data['auth_dataset_names'] = ', '.join(auth_names)
+            sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
 
-            #  google_project = models.ForeignKey(GoogleProject, null=False)
-            # service_account = models.CharField(max_length=1024, null=False)
-            # active = models.BooleanField(default=False, null=False)
-            # authorized_date = models.DateTimeField(auto_now=True)
-
-            active_sas = gcp_context.active_service_accounts()
-            for service_account in active_sas:
-                logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
-                auth_datasets = service_account.get_auth_datasets()
-                sa_data = {}
-                retval.append(sa_data)
-                sa_data['name'] = service_account.service_account
-                # for modal names:
-                sa_data['esc_name'] = service_account.service_account.replace('@', "-at-").replace('.', '-dot-')
-                sa_data['is_expired'] = service_account.is_expired()
-                sa_data['authorized_date'] = service_account.authorized_date
-                auth_names = []
-                auth_ids = []
-                sa_data['num_auth'] = len(auth_datasets)
-                logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
-                for auth_data in auth_datasets:
-                    auth_names.append(auth_data.name)
-                    auth_ids.append(str(auth_data.id))
-                sa_data['auth_dataset_names'] = ', '.join(auth_names)
-                sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
-
-                # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
-                # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
-                #
-
-
-                # we need:
-                #
-                # service_account.get_auth_datasets
-                # dataset names, separated by ","
-                # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
-                # dataset ids, separated by ", "
-
-    except Exception as e:
-        logger.error("[ERROR] While detailing a GCP: ")
-        logger.exception(e)
-        sa_messages = ["There was an error while attempting to list Service Accouts."]
+            # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
+            # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
 
     return retval, sa_messages
 
@@ -405,7 +402,7 @@ def register_gcp(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While {} a Google Cloud Project:".format("refreshing" if is_refresh else "registering"))
         logger.exception(e)
-        messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact the administrator.")
+        messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact feedback@isb-cgc.org.")
 
     return redirect(reverse(redirect_view, kwargs=args))
 
@@ -476,7 +473,7 @@ def gcp_detail(request, user_id, gcp_id):
         logger.error("[ERROR] While detailing a GCP: ")
         logger.exception(e)
         messages.error(request,
-                       "Encountered an error while trying to detail this Google Cloud Project - please contact the administrator.")
+                       "Encountered an error while trying to detail this Google Cloud Project - please contact feedback@isb-cgc.org.")
 
 
     return render(request, 'GenespotRE/gcp_detail.html', context)
@@ -507,7 +504,7 @@ def user_gcp_delete(request, user_id, gcp_id):
         messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
     except Exception as e:
         logger.error("[ERROR]: Unexpected Exception {}".format(str(e)))
-        messages.error(request, "Encountered an error while trying to delete this Google Cloud Project - please contact the administrator.")
+        messages.error(request, "Encountered an error while trying to delete this Google Cloud Project - please contact feedback@isb-cgc.org.")
 
     return redirect('user_gcp_list', user_id=request.user.id)
 
@@ -526,7 +523,7 @@ def verify_sa(request, user_id):
             datasets = request.POST.getlist('datasets')
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
-            remove_all = bool(request.POST.get('select-datasets') == 'remove')
+            remove_all = bool(request.POST.get('adjust-datasets') == 'remove')
 
             # If we have received a 'remove all' request, there's nothing to verify, so set the datasets to empty
             if remove_all:
@@ -536,6 +533,9 @@ def verify_sa(request, user_id):
             result = verify_service_account(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
             logger.info("[INFO] Verified Service Account {} for datasets {}".format(user_sa, str(datasets)))
 
+            #
+            # Early failures are identified with a "message" key:
+            #
             if 'message' in result.keys():
                 logger.info("[INFO] Gotta message")
                 status = '400'
@@ -549,12 +549,21 @@ def verify_sa(request, user_id):
                     gcp.user.set(gcp.user.all().exclude(id=user.id))
                     gcp.save()
             else:
+                #
+                # Otherwise, we get back this key:
+                #
                 if result['all_user_datasets_verified']:
                     logger.info("[INFO] all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
                 else:
+                    print(str(result))
                     logger.info("[INFO] not all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
+                    if result['dcf_messages']['dcf_problems']:
+                        result = {'message': result['dcf_messages']['dcf_problems']}
+                        status = '503'
+                        return JsonResponse(result, status=status)
+                print(str(result))
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
                 status = '200'
@@ -577,7 +586,7 @@ def verify_sa(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While verifying Service Accounts: ")
         logger.exception(e)
-        result = {'message': 'There was an error while trying to verify this service account. Please contact an administrator.'}
+        result = {'message': 'There was an error while trying to verify this service account. Please contact feedback@isb-cgc.org.'}
         status = '500'
 
     return JsonResponse(result, status=status)
@@ -626,7 +635,10 @@ def register_sa(request, user_id):
             user_email = request.user.email
             gcp_id = request.POST.get('gcp_id')
             user_sa = request.POST.get('user_sa')
-            datasets = request.POST.get('datasets').split(',')
+            # Used to be we were handed back datasets even if we were removing everything. Client side code depended
+            # on verification being run to get this done, but we no longer do verification of a full removal.
+            dataset_str = request.POST.get('datasets')
+            datasets = dataset_str.split(',') if dataset_str else []
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
@@ -657,7 +669,7 @@ def register_sa(request, user_id):
         messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
     except Exception as e:
         logger.error("[ERROR]: Unexpected Exception registering a Service Account {}".format(str(e)))
-        messages.error(request, "Unable to register this Service Account - please contact the administrator.")
+        messages.error(request, "Unable to register this Service Account - please contact feedback@isb-cgc.org.")
 
     return redirect('user_gcp_list', user_id=user_id)
 
@@ -686,7 +698,7 @@ def delete_sa(request, user_id, sa_name):
     except Exception as e:
         logger.error("[ERROR]: Unexpected Exception unregister a Service Account {}".format(str(e)))
         logger.exception(e)
-        messages.error(request, "Encountered an error while trying to remove this service account - please contact the administrator.")
+        messages.error(request, "Encountered an error while trying to remove this service account - please contact feedback@isb-cgc.org.")
 
     return redirect('user_gcp_list', user_id=user_id)
 
@@ -711,13 +723,13 @@ def register_bucket(request, user_id, gcp_id):
                     messages.error(
                         request,
                         "A bucket with the name {} has already been registered under a different project.".format(escape(bucket_name)) +
-                        " If you feel you've received this message in error, please contact the administrator."
+                        " If you feel you've received this message in error, please contact feedback@isb-cgc.org."
                     )
                 else:
                     messages.error(
                         request,
                         "A bucket with the name {} has already been registered under project {}.".format(escape(bucket_name),gcp.project_id) +
-                        " Buckets can only be registered to a project once. If you feel you've received this message in error, please contact the administrator."
+                        " Buckets can only be registered to a project once. If you feel you've received this message in error, please contact feedback@isb-cgc.org."
                     )
                 return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
             except MultipleObjectsReturned:
@@ -917,7 +929,7 @@ def get_user_buckets(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While retrieving user {}'s registered GCS buckets:".format(str(user_id)))
         logger.exception(e)
-        result = {'message': "There was an error while retrieving your GCS buckets--please contact the administrator.".format(str(request.user.id)), 'status': 'error'}
+        result = {'message': "There was an error while retrieving your GCS buckets--please contact feedback@isb-cgc.org.".format(str(request.user.id)), 'status': 'error'}
         status='500'
 
     return JsonResponse(result, status=status)
@@ -988,7 +1000,7 @@ def get_user_datasets(request,user_id):
     except Exception as e:
         logger.error("[ERROR] While retrieving user {}'s registered BQ datasets and tables:".format(str(user_id)))
         logger.exception(e)
-        result = {'message': "There was an error while retrieving your datasets and BQ tables. Please contact the administrator.".format(str(request.user.id)), 'status': 'error'}
+        result = {'message': "There was an error while retrieving your datasets and BQ tables. Please contact feedback@isb-cgc.org.".format(str(request.user.id)), 'status': 'error'}
         status='500'
 
     return JsonResponse(result, status=status)

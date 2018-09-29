@@ -72,6 +72,7 @@ def _derive_sa_mode(is_refresh, is_adjust, remove_all):
     We have three different flag driving only four different modes. Try to make this more
     comprehensible:
     """
+    print("IR {} IA {} RA {}".format(is_refresh, is_adjust, remove_all))
     if is_adjust:
         if is_refresh:
             if remove_all:
@@ -126,8 +127,15 @@ def _load_black_and_white(st_logger, log_name, service_account):
 
 def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
                              controlled_datasets, user_email, user_id, gcp_id):
+    """
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already
     # exists with the same datasets
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
 
     sa_info, messages = service_account_info_from_dcf_for_project_and_sa(user_id, gcp_id, service_account)
 
@@ -166,13 +174,14 @@ def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
             }
 
         # if is_adjust or not is_refresh:
+        print('samode is {}'.format(sa_mode))
         if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.REGISTER:
             reg_change = False
             #
             # Used to be we checked the ServiceAccountAuthorizedDatasets to see what data sets we were on. Now that info
             # comes back in the DCF response
             #
-
+            print(str(sa_info))
             have_datasets = len(sa_info['sa_dataset_ids']) > 0
 
             # Check the private datasets to see if there's a registration change
@@ -181,6 +190,7 @@ def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
             # If we're removing all datasets and there are 1 or more, this is automatically a registration change
             if (sa_mode == SAModes.REMOVE_ALL) and have_datasets:
                 reg_change = True
+                print("we got datasets that are gonna go")
             else:
                 if controlled_datasets.count() or have_datasets:
                     ads = controlled_datasets.values_list('whitelist_id', flat=True)
@@ -228,6 +238,19 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
     :raises RefreshTokenExpired:
     """
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
+
+    #
+    # Previously, the "removal of all datasets" meant that all project users had to be approved for "Open Datasets".
+    # We don't have open datasets anymore. So verification for SAModes.REMOVE_ALL is a no-brainer:
+    #
+
+    if sa_mode == SAModes.REMOVE_ALL:
+        roles_and_registered = {}
+        roles_and_registered['all_user_datasets_verified'] = True
+        roles_and_registered['dcf_messages'] = {}
+        roles_and_registered['dcf_messages']['dcf_analysis_reg_sas_summary'] = 'All controlled access datasets can be removed.'
+
+        return roles_and_registered
 
     # Only verify for protected datasets
     controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
@@ -288,6 +311,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
     try:
         sa_in_use = (sa_mode == SAModes.ADJUST)
         success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets, phs_map, sa_in_use)
+        print('verify_sa_at_dcf {}'.format(success))
         if not success:
             # We want to be more structured with any error messages we receive from DCF instead of a narrative
             # error block at the top of the page.
@@ -346,7 +370,7 @@ def _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp):
     except Exception as e:
         logger.error("[ERROR] While verifying user {} for project {}: ".format(user_email, gcp_id))
         logger.exception(e)
-        return False, "There was an error while verifying your project. Please contact the administrator."
+        return False, "There was an error while verifying your project. Please contact feedback@isb-cgc.org."
 
     return True, None
 
@@ -427,7 +451,7 @@ def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name)
     except Exception as e:
         logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
-        return {'message': "There was an error while verifying this service account. Please contact the administrator."}
+        return {'message': "There was an error while verifying this service account. Please contact feedback@isb-cgc.org."}
 
     return_obj = {'roles': roles,
                   'all_users_registered': all_users_registered}
@@ -773,7 +797,7 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
     except Exception as e:
         logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
-        return {'message': "There was an error while verifying this service account. Please contact the administrator."}
+        return {'message': "There was an error while verifying this service account. Please contact feedback@isb-cgc.org."}
 
     return_obj = {'roles': roles,
                   'all_user_datasets_verified': all_user_datasets_verified}
@@ -876,15 +900,8 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
         # to catch errors. But we still could have race conditions arise, and need to handle those:
         #
         if not success:
-            if messages['dcf_problems'] is not None and len(messages['dcf_problems']) > 0:
-                #dcf_parsing_problems...., show an error
-                #FIX ME #FIX ME
-                pass
-            elif messages['unexpected']:
-                #race_condition_problems...
-
-                ret_msg.append((
-                "The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format(
+            if messages is not None and len(messages) > 0:
+                ret_msg.append(("The following errors were encountered while registering this Service Account:\n{}\n".format(
                     "\n".join(messages)), "error"))
             #
             # In a similar fashion to the above, if e.g. a failure to extend the SA at DCF was due to a verification
@@ -1022,7 +1039,7 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
                     saad.delete()
 
         if len(err_msgs):
-            ret_msg.append(("The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format(
+            ret_msg.append(("The following errors were encountered while registering this Service Account: {}\nPlease contact feedback@isb-cgc.org.".format(
                     "\n".join(err_msgs)), "error"))
 
         return ret_msg
@@ -1313,7 +1330,7 @@ def _process_actions(unlink_accounts_result):
         except Exception as e:
             logger.error("[ERROR] When trying to remove from the Google Group:")
             logger.exception(e)
-            return "Encountered an error when trying to unlink this account--please contact the administrator."
+            return "Encountered an error when trying to unlink this account--please contact feedback@isb-cgc.org."
 
     return None
 
@@ -1328,7 +1345,7 @@ def unlink_accounts_and_get_acl_tasks(user_id):
     except Exception as e:
         logger.error("[ERROR] When trying to get the unlink actions:")
         logger.exception(e)
-        return None, "Encountered an error when trying to unlink this account--please contact the administrator."
+        return None, "Encountered an error when trying to unlink this account--please contact feedback@isb-cgc.org."
     return unlink_accounts_result, None
 
 

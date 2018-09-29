@@ -207,9 +207,9 @@ def service_account_info_from_dcf(user_id, proj_list):
 
     retval = {}
     messages = None
-    response_dict = json_loads(resp.text)
-    print('response text {}'.format(resp.text))
     if resp.status_code == 200:
+        response_dict = json_loads(resp.text)
+        print('response text {}'.format(resp.text))
         sa_list = response_dict['service_accounts']
         for sa in sa_list:
             ret_entry = {
@@ -231,7 +231,7 @@ def service_account_info_from_dcf(user_id, proj_list):
     return retval, messages
 
 
-def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_in_use):
+def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_in_use):
     """
     Handles the JSON response from DCF and creates messages to display to the user
     """
@@ -246,100 +246,193 @@ def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_
         for d_set in datasets:
             named_datasets.append('{} ({})'.format(phs_map[d_set], d_set))
 
+    # The _dry_run code always issues a body, even if the status is 200. Parse it all out for both cases:
+
     if resp is not None:
         logger.info("[INFO] DCF SA verification response code was {}".format(resp.status_code))
+        logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
+        success = (resp.status_code == 200)
+        print("from parser success: {}".format(success))
+
+        if resp.status_code != 200 and resp.status_code != 400:
+            logger.error("[ERROR] DCF SA verification UNEXPECTED response code was {}".format(resp.status_code))
+            messages['dcf_problems'].append(
+                "Unexpected response from Data Commons Framework. Please contact feedback@isb-cgc.org.")
+            return success, messages
+
+        response_dict = json_loads(resp.text)
+        error_info = response_dict['errors']
+
+        # This is the evaluation of the DATASETS THE SA IS TO ACCESS.
+
+        project_access_info = error_info['project_access']
+        if project_access_info['status'] == 200:
+            messages['dcf_analysis_data_summary'] = "The requested dataset list [{}] was approved.".format(
+                ', '.join(named_datasets))
+        else:
+            messages['dcf_analysis_data_summary'] = \
+                'The requested dataset list [{}] was not approved, because: "{}"'. \
+                    format(', '.join(named_datasets), project_access_info['error_description'].strip())
+
+        dataset_validity_info = project_access_info['project_validity']
+        for dataset_name in dataset_validity_info:
+            dataset = dataset_validity_info[dataset_name]
+            is_ok, combined = _write_dataset_summary(dataset, dataset_name, phs_map)
+            full_name = '{} ({})'.format(phs_map[dataset_name], dataset_name)
+            messages['dcf_analysis_data'].append({"id": full_name, "ok": is_ok, "err": combined})
+
+        # This is the evaluation of the REQUESTED service account. We do this even for a refresh verification case, since
+        # a "refresh" can refer to the reuse of a previously expired service account, and it may have gone out of
+        # compliance in the interim:
+
+        sa_error_info = error_info['service_account_email']
+        if sa_error_info['status'] == 200:
+            messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" meets all requirements.'\
+                .format(service_account_id)
+        elif sa_error_info['status'] == 409:
+            if (sa_in_use is not None) and sa_in_use:
+                logger.error(
+                    "[ERROR] Unexpected DCF Code: {} for PATCH verification".format(sa_error_info['status']))
+                messages['dcf_problems'].append(
+                    "Unexpected verification response from Data Commons Framework. Please contact feedback@isb-cgc.org.")
+            else:
+                messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" is already registered.'\
+                    .format(service_account_id)
+        else:
+            # Have seen the following key not returned (though in a 409 case...), but let's be cautious
+            sa_error_validity = sa_error_info['service_account_validity'] if 'service_account_validity' in sa_error_info else None
+            if sa_error_validity is not None:
+                info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
+                is_ok, combined = _write_sa_summary(info_for_sa, True, gcp_id)
+                if is_ok:
+                    logger.error(
+                        "[ERROR] Inconsistent success response from DCF! Code: {} Eval: {}".format(sa_error_info['status'],
+                                                                                              is_ok))
+
+                err_msg = combined
+            else:
+                err_msg = sa_error_info["error_description"]
+            messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" cannot be ' \
+                                                           'accepted because: "{}"'.format(service_account_id,
+                                                                                           err_msg)
+
+        # This is the evaluation of the PROJECT:
+        gcp_error_info = error_info['google_project_id']
+        if gcp_error_info['status'] == 200:
+            messages['dcf_analysis_project_summary'] = "Google Cloud Project {} meets all requirements".format(gcp_id)
+        else:
+            messages['dcf_analysis_project_summary'] = \
+                'Google Cloud Project {} had the following issues preventing verification: "{}"'\
+                    .format(gcp_id, gcp_error_info['error_description'].strip())
+
+        # This is the evaluation of the ALL SERVICE ACCOUNTS IN THE PROJECT:
+        gcp_sa_validity_info = gcp_error_info['service_account_validity']
+        for sa_email in gcp_sa_validity_info:
+            sa_info = gcp_sa_validity_info[sa_email]
+            is_ok, combined = _write_sa_summary(sa_info, False, gcp_id)
+            messages['dcf_analysis_sas'].append({"id" : sa_email, "ok" : is_ok, "err": combined})
+
+        # This is the evaluation of the MEMBERS ON THE PROJECT:
+        member_error_info = gcp_error_info['membership_validity']
+        is_ok, combined = _write_project_member_summary(member_error_info, gcp_id)
+        if is_ok:
+            member_msg = "All Google Cloud Project roles meet requirements. Roles are assigned to either \
+            service accounts or to users who have registered with the Data Commons Framework."
+        else:
+            member_msg = 'The Google Cloud Project membership has errors "{}"'.format(combined)
+        messages['dcf_analysis_project_members'] = member_msg
+
+    else:
+        messages['dcf_problems'].append("Empty response from Data Commons Framework. Please contact feedback@isb-cgc.org.")
+
+    return success, messages
+
+
+def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_in_use):
+    """
+    Service account operations should not fail, as we verify beforehand that everything is okay before
+    proceeding. But DCF does return an extensive data structure if there is a problem (in fact, the same
+    that is used during the verification process). And it *is* possible for race conditions to occur (e.g.
+    user permissions for a dataset are revoked, somebody else on the project registers an SA betweent the
+    time we have verified and the time we register. So, if we get back an unexpected response, we need to
+    handle it. But don't go to extensive lengths to create a pretty presentation. Just create some simple
+    error messages.
+    """
+    messages = []
+    success = False
+
+    named_datasets = []
+    if datasets is not None:
+        for d_set in datasets:
+            named_datasets.append('{} ({})'.format(phs_map[d_set], d_set))
+
+    if resp is not None:
+        logger.info("[INFO] DCF SA action response code was {}".format(resp.status_code))
         if resp.status_code == 200:
-            logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
+            logger.info("[INFO] DCF SA action response body: {} ".format(resp.text))
             success = True
         elif resp.status_code == 204: # Patch issues a 204 and *no content* on success:
             success = True
         elif resp.status_code == 400:
             logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
             response_dict = json_loads(resp.text)
-            success = False
             error_info = response_dict['errors']
 
-            # This is the evaluation of the DATASETS THE SA IS TO ACCESS. We want to evaluate this info even if
-            # we are getting back an overall 400 for verification of an adjustment, where DCF is returning a 400
-            # because the SA is already in use:
-
             project_access_info = error_info['project_access']
-            if project_access_info['status'] == 200:
-                success =  sa_in_use is not None and sa_in_use
-                messages['dcf_analysis_data_summary'] = "The requested dataset list [{}] was approved.".format(
-                    ', '.join(named_datasets))
-            else:
-                messages['dcf_analysis_data_summary'] = \
-                    'The requested dataset list [{}] was not approved, because: "{}"'. \
-                        format(', '.join(named_datasets), project_access_info['error_description'].strip())
+            if project_access_info['status'] != 200:
+                msg = 'The requested dataset list [{}] was not approved, because: "{}"'. \
+                    format(', '.join(named_datasets), project_access_info['error_description'].strip())
+                messages.append(msg)
 
-            dataset_validity_info = project_access_info['project_validity']
-            for dataset_name in dataset_validity_info:
-                dataset = dataset_validity_info[dataset_name]
-                is_ok, combined = _write_dataset_summary(dataset, dataset_name, phs_map)
-                full_name = '{} ({})'.format(phs_map[dataset_name], dataset_name)
-                messages['dcf_analysis_data'].append({"id": full_name, "ok": is_ok, "err": combined})
+
 
             if sa_in_use is None or not sa_in_use:
                 # This is the evaluation of the REQUESTED service account:
                 sa_error_info = error_info['service_account_email']
-                if sa_error_info['status'] == 200:
-                    messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" meets all requirements.'\
-                        .format(service_account_id)
-                elif sa_error_info['status'] == 409:  # Patch issues a 204 and no content on success:
-                    messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" is already registered.' \
-                        .format(service_account_id)
-                else:
+                if sa_error_info['status'] == 409:  # Patch issues a 204 and no content on success:
+                    messages.append('The requested service account "{}" is already registered.'.format(service_account_id))
+                elif sa_error_info['status'] != 200:
                     # When a 409 code was returned, we did not get the following key returned, so let's be cautious
                     sa_error_validity = sa_error_info['service_account_validity'] if 'service_account_validity' in sa_error_info else None
                     if sa_error_validity is not None:
-                        print(sa_error_validity)
                         info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
-                        print(info_for_sa)
                         is_ok, combined = _write_sa_summary(info_for_sa, True, gcp_id)
                         if is_ok:
                             logger.error(
                                 "[ERROR] Inconsistent success response from DCF! Code: {} Eval: {}".format(sa_error_info['status'],
-                                                                                                      is_ok))
-
+                                                                                                           is_ok))
                         err_msg = combined
                     else:
                         err_msg = sa_error_info["error_description"]
-                    messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" cannot be ' \
-                                                                   'accepted because: "{}"'.format(service_account_id,
-                                                                                                   err_msg)
+                    messages.append('The requested service account "{}" was not '
+                                    'accepted because: "{}"'.format(service_account_id, err_msg))
 
                 # This is the evaluation of the PROJECT:
                 gcp_error_info = error_info['google_project_id']
-                if gcp_error_info['status'] == 200:
-                    messages['dcf_analysis_project_summary'] = "Google Cloud Project {} meets all requirements".format(gcp_id)
-                else:
-                    messages['dcf_analysis_project_summary'] = \
-                        'Google Cloud Project {} had the following issues preventing verification: "{}"'\
-                            .format(gcp_id, gcp_error_info['error_description'].strip())
+                if gcp_error_info['status'] != 200:
+                    messages.append('Google Cloud Project {} had the following issues: "{}"'
+                                    .format(gcp_id, gcp_error_info['error_description'].strip()))
 
                 # This is the evaluation of the ALL SERVICE ACCOUNTS IN THE PROJECT:
                 gcp_sa_validity_info = gcp_error_info['service_account_validity']
                 for sa_email in gcp_sa_validity_info:
                     sa_info = gcp_sa_validity_info[sa_email]
                     is_ok, combined = _write_sa_summary(sa_info, False, gcp_id)
-                    messages['dcf_analysis_sas'].append({"id" : sa_email, "ok" : is_ok, "err": combined})
+                    if not is_ok:
+                        messages.append('Service account "{}" was not '
+                                        'accepted because: "{}"'.format(service_account_id, combined))
 
                 # This is the evaluation of the MEMBERS ON THE PROJECT:
                 member_error_info = gcp_error_info['membership_validity']
                 is_ok, combined = _write_project_member_summary(member_error_info, gcp_id)
-                if is_ok:
-                    member_msg = "All Google Cloud Project roles meet requirements. Roles are assigned to either \
-                    service accounts or to users who have registered with the Data Commons Framework."
-                else:
-                    member_msg = 'The Google Cloud Project membership has errors "{}"'.format(combined)
-                messages['dcf_analysis_project_members'] = member_msg
+                if not is_ok:
+                    messages.append('The Google Cloud Project membership had errors "{}"'.format(combined))
 
         else:
             logger.error("[ERROR] Unexpected response from DCF: {}".format(resp.status_code))
-            messages['dcf_problems'].append("Unexpected response from Data Commons Framework")
+            messages.append("Unexpected response from Data Commons Framework")
     else:
-        messages['dcf_problems'].append("Empty response from Data Commons Framework")
+        messages.append("Empty response from Data Commons Framework")
 
     return success, messages
 
@@ -459,11 +552,20 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map, sa_
     :raise RefreshTokenExpired:
     """
 
-    sa_data = {
-        "service_account_email": service_account_id,
-        "google_project_id": gcp_id,
-        "project_access": datasets
-    }
+    if not sa_in_use:
+        sa_data = {
+            "service_account_email": service_account_id,
+            "google_project_id": gcp_id,
+            "project_access": datasets
+        }
+        use_mode = 'post'
+        full_url = DCF_GOOGLE_SA_VERIFY_URL
+    else:
+        sa_data = {
+            "project_access": datasets
+        }
+        use_mode = 'patch'
+        full_url = '{0}/{1}'.format(DCF_GOOGLE_SA_VERIFY_URL, service_account_id)
 
     #
     # Call DCF to see if there would be problems with the service account registration.
@@ -472,7 +574,10 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map, sa_
     try:
         # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
         headers = {'Content-Type': 'application/json'}
-        resp = _dcf_call(DCF_GOOGLE_SA_VERIFY_URL, user_id, mode='post', post_body=json_dumps(sa_data), headers=headers)
+
+        print("Into verify call")
+        resp = _dcf_call(full_url, user_id, mode=use_mode, post_body=json_dumps(sa_data), headers=headers)
+        print("Return from verify call")
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
@@ -480,7 +585,7 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map, sa_
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
 
-    return _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_in_use)
+    return _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_in_use)
 
 
 def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
