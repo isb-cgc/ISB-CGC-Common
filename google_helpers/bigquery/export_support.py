@@ -350,10 +350,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     'table_id': job_is_done['configuration']['query']['destinationTable']['tableId']
                 }
         else:
-            msg = "Export did not complete in the time allowed"
-            logger.error("[ERROR] {}.".format(msg))
-            result['status'] = 'error'
-            result['message'] = msg + "--please consider exporting a reduced set of data."
+            logger.error("[WARNING] Export is taking a long time to run, informing user.")
+            result['status'] = 'long_running'
 
         return result
 
