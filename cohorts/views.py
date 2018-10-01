@@ -2329,13 +2329,23 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         "'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""
                     ))
         else:
-            result['message'] = "Cohort {} was successfully exported to {}.".format(
-                str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
-                "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
-                if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
-                    gcs_bucket, file_name, result['message']
+            # If the export is taking a while, inform the user
+            if result['status'] == 'long_running':
+                result['message'] = "The export of cohort {} to {} ".format(
+                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                    if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
+                        gcs_bucket, file_name, result['message']
+                    )
+                ) + "is underway; check your {} in 1-2 minutes for the results.".format("BQ dataset" if export_dest == 'table' else "GCS bucket")
+            else:
+                result['message'] = "Cohort {} was successfully exported to {}.".format(
+                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                    if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
+                        gcs_bucket, file_name, result['message']
+                    )
                 )
-            )
 
     except Exception as e:
         logger.error("[ERROR] While trying to export Cohort {}:".format(
