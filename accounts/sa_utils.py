@@ -41,12 +41,14 @@ from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFac
 from dataset_utils.dataset_config import DatasetGoogleGroupPair
 from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_name
 
-from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf,  \
+from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf, extend_sa_at_dcf, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         GoogleLinkState, get_auth_elapsed_time, unregister_sa_via_dcf, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
-                        compare_google_ids, service_account_info_from_dcf
+                        compare_google_ids, service_account_info_from_dcf, \
+                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf, service_account_info_from_dcf_for_project_and_sa, \
+                        service_account_info_from_dcf_for_project
 
 logger = logging.getLogger('main_logger')
 
@@ -70,6 +72,7 @@ def _derive_sa_mode(is_refresh, is_adjust, remove_all):
     We have three different flag driving only four different modes. Try to make this more
     comprehensible:
     """
+    print("IR {} IA {} RA {}".format(is_refresh, is_adjust, remove_all))
     if is_adjust:
         if is_refresh:
             if remove_all:
@@ -122,28 +125,48 @@ def _load_black_and_white(st_logger, log_name, service_account):
     return sab, msa, gow, None
 
 
-def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email):
+def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
+                             controlled_datasets, user_email, user_id, gcp_id):
+    """
     # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already
     # exists with the same datasets
 
-    sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=1)
-    if len(sa_qset) == 0:
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+
+    sa_info, messages = service_account_info_from_dcf_for_project_and_sa(user_id, gcp_id, service_account)
+
+    #ret_entry = {
+    #    'gcp_id': sa['google_project_id'],
+    #    'sa_dataset_ids': sa['project_access'],
+    #    'sa_name': sa['service_account_email'],
+    #    'sa_exp': sa['project_access_exp']
+    #}
+
+    # Note the pre-DCF version checked if "active = 1", so we were looking at non-deleted service accounts.
+    # We previously stored info for all service accounts that had ever been registered, with an active flag = 1
+    # checked for this test.
+    if sa_info is None:
         if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.EXTEND:
             return {
                 'message': 'Service account {} was not found so cannot be {}.'.format(escape(service_account), (
                 "adjusted" if (sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST) else "refreshed")),
                 'level': 'error'
             }
-        # determine if this is a re-registration, or a brand-new one
-        sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
-        if len(sa_qset) > 0:
-            logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
-                                                                                                user_email))
-            st_logger.write_text_log_entry(log_name,
-                                           "[STATUS] Verification for SA {} being re-registered by user {}".format(
-                                           service_account, user_email))
-    else:
-        sa = sa_qset.first()
+        # We previously stored info for *all* service accounts that had ever been registered, with an active flag
+        # of 0 for "deleted" accounts. If we detected a reregisration, all we seem to have done is write
+        # a log message (and pull that set out of the DB)
+        # sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
+        # if len(sa_qset) > 0:
+        #    logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
+        #                                                                                        user_email))
+        #    st_logger.write_text_log_entry(log_name,
+        #                                   "[STATUS] Verification for SA {} being re-registered by user {}".format(
+        #                                   service_account, user_email))
+    else: # this SA is known to DCF:
         if sa_mode == SAModes.REGISTER:
             return {
                 'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(escape(service_account)),
@@ -151,27 +174,37 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
             }
 
         # if is_adjust or not is_refresh:
+        print('samode is {}'.format(sa_mode))
         if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.REGISTER:
             reg_change = False
+            #
+            # Used to be we checked the ServiceAccountAuthorizedDatasets to see what data sets we were on. Now that info
+            # comes back in the DCF response
+            #
+            print(str(sa_info))
+            have_datasets = len(sa_info['sa_dataset_ids']) > 0
+
             # Check the private datasets to see if there's a registration change
-            saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
+            # saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
 
             # If we're removing all datasets and there are 1 or more, this is automatically a registration change
-            if (sa_mode == SAModes.REMOVE_ALL) and saads.count():
+            if (sa_mode == SAModes.REMOVE_ALL) and have_datasets:
                 reg_change = True
+                print("we got datasets that are gonna go")
             else:
-                if controlled_datasets.count() or saads.count():
+                if controlled_datasets.count() or have_datasets:
                     ads = controlled_datasets.values_list('whitelist_id', flat=True)
                     # A private dataset missing from either list means this is a registration change
                     for ad in ads:
-                        if ad not in saads:
+                        if ad not in sa_info['sa_dataset_ids']:
                             reg_change = True
                     if not reg_change:
-                        for saad in saads:
+                        for saad in sa_info['sa_dataset_ids']:
                             if saad not in ads:
                                 reg_change = True
-                else:
-                    reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
+                #else:
+                    # This says we have a reg change if we are currently not authorized for a public dataset. Registering for a public dataset goes away with the move to DCF.
+                    #reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
             # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
             if not reg_change:
                 return {
@@ -182,20 +215,42 @@ def _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_d
 
 
 def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     try:
         if settings.SA_VIA_DCF:
             return _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
         else:
             return _verify_service_account_isb(gcp_id, service_account, datasets, user_email, is_refresh, is_adjust, remove_all)
-    except Exception as e:
-        logger.error("[ERROR] Exception while verifying ServiceAccount")
-        logger.exception(e)
-        return {'message': 'An error occurred while validating the service account.'}
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        raise e
 
 
 def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
-
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
+
+    #
+    # Previously, the "removal of all datasets" meant that all project users had to be approved for "Open Datasets".
+    # We don't have open datasets anymore. So verification for SAModes.REMOVE_ALL is a no-brainer:
+    #
+
+    if sa_mode == SAModes.REMOVE_ALL:
+        roles_and_registered = {}
+        roles_and_registered['all_user_datasets_verified'] = True
+        roles_and_registered['dcf_messages'] = {}
+        roles_and_registered['dcf_messages']['dcf_analysis_reg_sas_summary'] = 'All controlled access datasets can be removed.'
+
+        return roles_and_registered
 
     # Only verify for protected datasets
     controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
@@ -227,28 +282,179 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
     # Check SA sanity:
     #
 
-    msg = _check_sa_sanity(st_logger, log_name, service_account, sa_mode, controlled_datasets, user_email)
+    msg = _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
+                                   controlled_datasets, user_email, user_id, gcp_id)
     if msg:
         return msg
 
     #
-    # Ask DCF if we are cool:
+    # We already have some useful info, such as whether everybody on the project is registered with us and
+    # linked to NIH. So check that first, and bag it if we are not up to snuff:
+    #
+
+    roles_and_registered = _get_project_users(gcp_id, service_account, user_email, st_logger, log_name)
+
+    if not roles_and_registered['all_users_registered']:
+        roles_and_registered['all_user_datasets_verified'] = False
+        return roles_and_registered
+
+    phs_map = {}
+    controlled_datasets = AuthorizedDataset.objects.filter(public=False)
+    for dataset in controlled_datasets:
+        phs_map[dataset.whitelist_id] = dataset.name
+
+    #
+    # Ask DCF if we are cool. If we are just doing an adjustment, we need to let DCF know that we are doing
+    # a _dry_run for a PATCH condition.
     #
 
     try:
-        messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets)
-        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
-        if messages:
-            return {
-              'message': '\n'.join(messages),
-              'level': 'error'
-            }
+        sa_in_use = (sa_mode == SAModes.ADJUST)
+        success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets, phs_map, sa_in_use)
+        print('verify_sa_at_dcf {}'.format(success))
+        if not success:
+            # We want to be more structured with any error messages we receive from DCF instead of a narrative
+            # error block at the top of the page.
+            roles_and_registered['all_user_datasets_verified'] = False
+            roles_and_registered['dcf_messages'] = dcf_messages
+            return roles_and_registered
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.exception(e)
-        return {'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
+        raise e
 
-    return_obj = {'roles': 'FIXME!!',
-                  'all_user_datasets_verified': 'FIXME!!'}
+    roles_and_registered['all_user_datasets_verified'] = True
+    roles_and_registered['dcf_messages'] = dcf_messages
+    return roles_and_registered
+
+
+def _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp):
+    """
+    For registering a service account for a project, we need to insure the user is currently on the project. If they
+    are not, then we want to drop them form our DB table
+    """
+    try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1].lower()
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
+
+        # 2) Verify that the current user is on the GCP project:
+        if not user_email.lower() in roles:
+            log_msg = '[STATUS] During SA operations, user email {0} was not in the IAM policy of GCP {1}.'.format(user_email, gcp_id)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': log_msg
+            })
+            user_gcp.user.set(user_gcp.user.all().exclude(id=User.objects.get(email=user_email).id))
+            user_gcp.save()
+            return False, "You are not currently a member of the project."
+
+    except HttpError as e:
+        logger.error("[ERROR] While verifying user {} for project {}: ".format(user_email, gcp_id))
+        logger.exception(e)
+        return False, "There was an error accessing your project. Please verify that you have set the permissions correctly."
+    except Exception as e:
+        logger.error("[ERROR] While verifying user {} for project {}: ".format(user_email, gcp_id))
+        logger.exception(e)
+        return False, "There was an error while verifying your project. Please contact feedback@isb-cgc.org."
+
+    return True, None
+
+
+def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name):
+    """
+    While we can no longer show the user with a listing of what datasets each project user has access to (DCF will not
+    provide that), we can still enumerate who is on the project, if they are registered, and if they are linked to
+    NIH. That info is available to us.
+    """
+    try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1].lower()
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
+
+        # 2) Verify that the current user is on the GCP project:
+        if not user_email.lower() in roles:
+            log_msg = '[STATUS] While verifying SA {0}: User email {1} is not in the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {
+                'message': log_msg
+            })
+
+            return {
+                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of a project in order to {} its service accounts.'.format(user_email, gcp_id, "refresh" if is_refresh else "register"),
+                'redirect': True,
+                'user_not_found': True,
+                'all_users_registered': False
+            }
+
+        # 3) Verify all users are registered with with NIH:
+        all_users_registered = True
+
+        for email in roles:
+            member = roles[email]
+
+            # IF USER IS REGISTERED
+            if member['registered_user']:
+                user = User.objects.get(email=email)
+                nih_user = None
+                # FIND NIH_USER FOR USER
+                try:
+                    nih_user = NIH_User.objects.get(user_id=user.id, linked=True)
+                except ObjectDoesNotExist:
+                    nih_user = None
+                except MultipleObjectsReturned:
+                    st_logger.write_struct_log_entry(log_name, {'message': 'Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True)))})
+                    raise Exception('Found more than one linked NIH_User for email address {}: {}'.format(email, ",".join(nih_user.values_list('NIH_username',flat=True))))
+
+                member['nih_registered'] = bool(nih_user)
+
+                if not nih_user:
+                    all_users_registered = False
+
+            else:
+                member['nih_registered'] = False
+                all_users_registered = False
+
+    except HttpError as e:
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
+        logger.exception(e)
+        return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
+    except Exception as e:
+        logger.error("[STATUS] While verifying service account {}: ".format(service_account))
+        logger.exception(e)
+        return {'message': "There was an error while verifying this service account. Please contact feedback@isb-cgc.org."}
+
+    return_obj = {'roles': roles,
+                  'all_users_registered': all_users_registered}
     return return_obj
 
 
@@ -591,7 +797,7 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
     except Exception as e:
         logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
-        return {'message': "There was an error while verifying this service account. Please contact the administrator."}
+        return {'message': "There was an error while verifying this service account. Please contact feedback@isb-cgc.org."}
 
     return_obj = {'roles': roles,
                   'all_user_datasets_verified': all_user_datasets_verified}
@@ -599,25 +805,46 @@ def _verify_service_account_isb(gcp_id, service_account, datasets, user_email, i
 
 
 def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+    """
+    Register a service account
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+
     try:
+        # log the reports using Cloud logging API
+        st_logger = StackDriverLogger.build_from_django_settings()
+        user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+
         if settings.SA_VIA_DCF:
-            return _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+            return _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust,
+                                                 remove_all, st_logger, user_gcp)
         else:
-            return _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
+            return _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust,
+                                                 remove_all, st_logger, user_gcp)
+
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        raise e
     except Exception as e:
         logger.error("[ERROR] Exception while registering ServiceAccount")
         logger.exception(e)
-        return {('An error occurred while registering the service account.', 'error')}
+        raise e
 
+def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh,
+                                  is_adjust, remove_all, st_logger, user_gcp):
+    """
+    Register a service account using DCF
 
-def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
 
-    ret_msg = []
-
-    # log the reports using Cloud logging API
-    st_logger = StackDriverLogger.build_from_django_settings()
-
-    user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+    sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
     # If we've received a remove-all request, ignore any provided datasets
     if remove_all:
@@ -625,46 +852,75 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
 
     if len(datasets) == 1 and datasets[0] == '':
         datasets = []
-    # datasets are now identified by their whitelist id:
-    #else:
-    #    datasets = map(int, datasets)
-
-    # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-    result = _verify_service_account_dcf(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
-    logger.info("[INFO] FIXME ACTUALLY CHECK RESULTS")
-
-    err_msgs = []
 
     #
-    # Ask DCF if we are cool:
+    # Previously, when the user tried to register an SA, we *reran* the verification step here just before
+    # doing the registration. But now DCF is doing that checking as they register, so that is superfluous.
     #
-
-    try:
-        messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets)
-        logger.info("[INFO] messages from DCF {}".format(','.join(messages)))
-        if messages:
-            return {
-                'message': '\n'.join(messages),
-                'level': 'error'
-            }
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-        logger.exception(e)
-        return {
-            'message': "FIXME There was an error while verifying this service account. Please contact the administrator."}
-
-    return_obj = {'roles': 'FIXME!!',
-                  'all_user_datasets_verified': 'FIXME!!'}
-    return return_obj
-
-
-def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+    # However, we can still check to see that the user is on the GCP, and if they are not, we can remove them
+    # from the project, and do not continue.
+    #
 
     ret_msg = []
 
-    # log the reports using Cloud logging API
-    st_logger = StackDriverLogger.build_from_django_settings()
+    success, message = _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp)
 
-    user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+    if not success:
+        # Note the previous ISB approach agressively dropped the datasets following a verification failure. But if we
+        # detect that the user doing this request is no longer on the project, it would appear unlikely that we could
+        # use this user's token to drop all the datasets for the project! Note also this was a vector for denial of
+        # service: if a user not on the project made the request, they could get the SA dropped on the project.
+        # Instead, if an SA is out of bounds, DCF monitoring will presumably do the job and kick off the SA.
+
+        ret_msg.append((message, "error"))
+        return ret_msg
+
+    phs_map = {}
+    controlled_datasets = AuthorizedDataset.objects.filter(public=False)
+    for dataset in controlled_datasets:
+        phs_map[dataset.whitelist_id] = dataset.name
+
+    try:
+        if sa_mode == SAModes.CANNOT_OCCUR:
+            success = False
+            messages = ["This cannot happen"]
+        elif sa_mode == SAModes.REMOVE_ALL:
+            success, messages = remove_sa_datasets_at_dcf(user_id, gcp_id, user_sa, phs_map)
+        elif sa_mode == SAModes.ADJUST:
+            success, messages = adjust_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
+        elif sa_mode == SAModes.EXTEND:
+            success, messages = extend_sa_at_dcf(user_id, gcp_id, user_sa, phs_map)
+        elif sa_mode == SAModes.REGISTER:
+            success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
+
+        logger.info("[INFO] messages from DCF {}".format(str(messages)))
+
+        #
+        # For these operations, we do not expect any errors, as we have previously run e.g. verification steps
+        # to catch errors. But we still could have race conditions arise, and need to handle those:
+        #
+        if not success:
+            if messages is not None and len(messages) > 0:
+                ret_msg.append(("The following errors were encountered while registering this Service Account:\n{}\n".format(
+                    "\n".join(messages)), "error"))
+            #
+            # In a similar fashion to the above, if e.g. a failure to extend the SA at DCF was due to a verification
+            # failure, it is their responsiblity to detect that the project is out of bounds and respond appropriately.
+            # So we *do not* issue a call the remove all datasets!
+            #
+
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.error("[ERROR] Exception while registering ServiceAccount")
+        logger.exception(e)
+        raise e
+
+    return ret_msg
+
+
+def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refresh,
+                                  is_adjust, remove_all, st_logger, user_gcp):
+
+    ret_msg = []
 
     # If we've received a remove-all request, ignore any provided datasets
     if remove_all:
@@ -783,7 +1039,7 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
                     saad.delete()
 
         if len(err_msgs):
-            ret_msg.append(("The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format(
+            ret_msg.append(("The following errors were encountered while registering this Service Account: {}\nPlease contact feedback@isb-cgc.org.".format(
                     "\n".join(err_msgs)), "error"))
 
         return ret_msg
@@ -847,19 +1103,29 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
 
         return ret_msg
 
+
 def unregister_all_gcp_sa(user_id, gcp_id):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+    success = True
     if settings.SA_VIA_DCF:
-        # FIXME Throws ex ceptions:
-        success = None
-        msgs = None
-        #success, msgs = unregister_all_gcp_sa_via_dcf(user_id, gcp_id)
-        pass
+        msgs = []
+        all_sa_for_proj = service_account_info_from_dcf_for_project(user_id, gcp_id)
+        for sa in all_sa_for_proj:
+            one_success, one_msgs = unregister_sa_via_dcf(user_id, sa['sa_name'])
+            success = success and one_success
+            if one_msgs is not None:
+                msgs.append(one_msgs)
     else:
-        success = None
         msgs = None
         _unregister_all_gcp_sa_db(user_id, gcp_id)
 
-    return success, msgs
+    return success, (msgs if (msgs is not None and len(msgs) > 0) else None)
+
 
 def _unregister_all_gcp_sa_db(user_id, gcp_id):
     gcp = GoogleProject.objects.get(id=gcp_id, active=1)
@@ -871,11 +1137,17 @@ def _unregister_all_gcp_sa_db(user_id, gcp_id):
 
 
 def unregister_sa(user_id, sa_name):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+
     if settings.SA_VIA_DCF:
-        # FIXME Throws exceptions:
         success, msgs = unregister_sa_via_dcf(user_id, sa_name)
     else:
-        success = None
+        success = True
         msgs = None
         _unregister_sa_db(user_id, sa_name)
     return success, msgs
@@ -940,15 +1212,25 @@ def controlled_auth_datasets():
 
 
 def service_account_dict(user_id, sa_id):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     if settings.SA_VIA_DCF:
-        # FIXME This is throwing DCF token exceptions!
         return _service_account_dict_from_dcf(user_id, sa_id)
     else:
         return _service_account_dict_from_db(sa_id)
 
 
 def _service_account_dict_from_dcf(user_id, sa_name):
-
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
     #
     # DCF currently (8/2/18) requires us to provide the list of Google projects
     # that we want service accounts for. If we are just given the SA ID, we need
@@ -1060,7 +1342,7 @@ def _process_actions(unlink_accounts_result):
         except Exception as e:
             logger.error("[ERROR] When trying to remove from the Google Group:")
             logger.exception(e)
-            return "Encountered an error when trying to unlink this account--please contact the administrator."
+            return "Encountered an error when trying to unlink this account--please contact feedback@isb-cgc.org."
 
     return None
 
@@ -1075,7 +1357,7 @@ def unlink_accounts_and_get_acl_tasks(user_id):
     except Exception as e:
         logger.error("[ERROR] When trying to get the unlink actions:")
         logger.exception(e)
-        return None, "Encountered an error when trying to unlink this account--please contact the administrator."
+        return None, "Encountered an error when trying to unlink this account--please contact feedback@isb-cgc.org."
     return unlink_accounts_result, None
 
 
@@ -1833,9 +2115,11 @@ def get_nih_user_details(user_id, force_logout):
         # to the user, as our database view could be stale.
         #
         # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
-        # flag. This is the *minimun* we chould be doing, no matter what. Note that in DCF-based Brave New World, we no
+        # flag. This is the *minimun* we should be doing, no matter what. Note that in DCF-based Brave New World, we no
         # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
-        # need to give the user an accurate picture of the state when they hit this page.
+        # need to give the user an accurate picture of the state when they hit this page. NO!! ACTUALLY (9/18/18),
+        # the active flag is still used by the File Browser page to determine if a user is allowed to click on a file.
+        # We are using the cron sweeper to remove the active status.
         #
 
         if nih_user.active:
