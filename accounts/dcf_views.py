@@ -48,8 +48,8 @@ from jwt.contrib.algorithms.pycrypto import RSAAlgorithm
 from json import loads as json_loads
 
 # Shut this up unless we need to do debug of HTTP request contents
-import httplib as http_client
-http_client.HTTPConnection.debuglevel = 1
+#import httplib as http_client
+#http_client.HTTPConnection.debuglevel = 1
 
 logger = logging.getLogger('main_logger')
 
