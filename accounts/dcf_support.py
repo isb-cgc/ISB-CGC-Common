@@ -220,7 +220,14 @@ def service_account_info_from_dcf(user_id, proj_list):
             }
             retval[sa['service_account_email']] = ret_entry
     elif resp.status_code == 403:
-        messages = ["User is not a member on one or more of these Google projects: {}".format(proj_string)]
+        #
+        # (10/1/18) We query DCF based upon *our* list of Google Projects for the user. If DCF cannot say if user is
+        # in project (e.g. no monitoring SA in the project), it will return a 403. We need to swallow this silently.
+        # Possible FIXME? Return warning message that if they want to see SAs registered for a project, they need to
+        # insure that the DCF monitoring SA is in the project?
+        #
+        #messages = ["User is not a member on one or more of these Google projects: {}".format(proj_string)]
+        pass
     elif resp.status_code == 401: # Have seen this when the google sa scope was not requested in key
         messages = ["User does not have permissions for this operation on one or more of these Google projects:".format(proj_string)]
     elif resp.status_code == 400: # If they don't like the request, say it was empty:

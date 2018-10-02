@@ -292,7 +292,7 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
     # linked to NIH. So check that first, and bag it if we are not up to snuff:
     #
 
-    roles_and_registered = _get_project_users(gcp_id, service_account, user_email, st_logger, log_name)
+    roles_and_registered = _get_project_users(gcp_id, service_account, user_email, st_logger, log_name, is_refresh)
 
     if not roles_and_registered['all_users_registered']:
         roles_and_registered['all_user_datasets_verified'] = False
@@ -375,7 +375,7 @@ def _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp):
     return True, None
 
 
-def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name):
+def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name, is_refresh):
     """
     While we can no longer show the user with a listing of what datasets each project user has access to (DCF will not
     provide that), we can still enumerate who is on the project, if they are registered, and if they are linked to
@@ -1240,10 +1240,27 @@ def _service_account_dict_from_dcf(user_id, sa_name):
     #
     user = User.objects.get(id=user_id)
     gcp_list = GoogleProject.objects.filter(user=user, active=1)
-    proj_list = [x.project_id for x in gcp_list]
 
-    sa_dict, messages = service_account_info_from_dcf(user_id, proj_list)
-    return sa_dict[sa_name] if sa_name in sa_dict else None, messages
+    #
+    # (10/1/18) Here is an issue that arises if the user is a member of a Google
+    # project that DCF does not have access to (or no previous record of?) If you
+    # provide a *list* of Google projects, any any *one* of the projects is
+    # something that DCF cannot deal with, the underlying call returns a 403
+    # for the whole query. So we need to do it project-by-project, where
+    # we can just have the call return an empty list.
+    #
+    # proj_list = [x.project_id for x in gcp_list] NO!
+    # sa_dict, messages = service_account_info_from_dcf(user_id, proj_list) NO!
+
+    all_messages = []
+    for proj in gcp_list:
+        sa_dict, messages = service_account_info_from_dcf_for_project(user_id, proj.project_id)
+        if messages:
+            all_messages.extend(messages)
+        if sa_name in sa_dict:
+            return sa_dict[sa_name], all_messages
+
+    return None, all_messages
 
 
 def _service_account_dict_from_db(sa_name):
