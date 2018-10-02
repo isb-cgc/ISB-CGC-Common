@@ -39,7 +39,7 @@ from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, \
                      unregister_all_gcp_sa, unregister_sa, service_account_dict, \
-                     do_nih_unlink, deactivate_nih_add_to_open, controlled_auth_datasets
+                     do_nih_unlink, deactivate_nih_add_to_open, controlled_auth_datasets, have_linked_user
 
 from dcf_support import service_account_info_from_dcf_for_project, TokenFailure, \
                         InternalTokenError, RefreshTokenExpired, DCFCommFailure
@@ -124,13 +124,17 @@ def user_gcp_list(request, user_id):
                 }
 
                 gcp_and_sa_tuples = []
+                is_linked = have_linked_user(user_id)
                 for gcp in gcp_list:
-                    sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
-                    if sa_err_msg is not None:
-                        template = '500.html'
-                        return render(request, template, context)
+                    if is_linked:
+                        sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                        if sa_err_msg is not None:
+                            template = '500.html'
+                            return render(request, template, context)
+                    else:
+                        sa_dicts = []
                     gcp_and_sa_tuples.append((gcp, sa_dicts))
-                context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples}
+                context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples, 'linked': is_linked}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")

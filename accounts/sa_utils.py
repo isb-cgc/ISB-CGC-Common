@@ -1256,12 +1256,13 @@ def _service_account_dict_from_dcf(user_id, sa_name):
     all_messages = []
     for proj in gcp_list:
         logger.info('[INFO] sainfo {0}'.format(str(proj.project_id)))
-        sa_dict, messages = service_account_info_from_dcf_for_project(user_id, proj.project_id)
+        sa_dict_list, messages = service_account_info_from_dcf_for_project(user_id, proj.project_id)
         if messages:
             all_messages.extend(messages)
-        logger.info('[INFO] sadict {0}'.format(sa_dict))
-        if sa_name in sa_dict:
-            return sa_dict[sa_name], all_messages
+        logger.info('[INFO] sadict {0}'.format(sa_dict_list))
+        for sa_dict in sa_dict_list:
+            if sa_dict['sa_name'] == sa_name:
+                return sa_dict, all_messages
 
     logger.info('[INFO] returning none')
     return None, all_messages
