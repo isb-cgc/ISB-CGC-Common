@@ -559,10 +559,11 @@ def verify_sa(request, user_id):
                     print(str(result))
                     logger.info("[INFO] not all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
-                    if result['dcf_messages']['dcf_problems']:
+                    if 'dcf_messages' in result and 'dcf_problems' in result['dcf_messages']:
                         result = {'message': result['dcf_messages']['dcf_problems']}
                         status = '503'
                         return JsonResponse(result, status=status)
+
                 print(str(result))
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
