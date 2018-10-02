@@ -1236,15 +1236,16 @@ def _service_account_dict_from_dcf(user_id, sa_name):
     # that we want service accounts for. If we are just given the SA ID, we need
     # to query for all projects and then use those results to find the SA matching
     # the ID (unless we go through funny business trying to parse the project out
-    # of the service account name:
+    # of the service account name):
     #
     user = User.objects.get(id=user_id)
     gcp_list = GoogleProject.objects.filter(user=user, active=1)
+    logger.info('[INFO] length of gcp_list is {0}'.format(str(len(gcp_list))))
 
     #
     # (10/1/18) Here is an issue that arises if the user is a member of a Google
     # project that DCF does not have access to (or no previous record of?) If you
-    # provide a *list* of Google projects, any any *one* of the projects is
+    # provide a *list* of Google projects, if any *one* of the projects is
     # something that DCF cannot deal with, the underlying call returns a 403
     # for the whole query. So we need to do it project-by-project, where
     # we can just have the call return an empty list.
@@ -1254,12 +1255,15 @@ def _service_account_dict_from_dcf(user_id, sa_name):
 
     all_messages = []
     for proj in gcp_list:
+        logger.info('[INFO] sainfo {0}'.format(str(proj.project_id)))
         sa_dict, messages = service_account_info_from_dcf_for_project(user_id, proj.project_id)
         if messages:
             all_messages.extend(messages)
+        logger.info('[INFO] sadict {0}'.format(sa_dict))
         if sa_name in sa_dict:
             return sa_dict[sa_name], all_messages
 
+    logger.info('[INFO] returning none')
     return None, all_messages
 
 
