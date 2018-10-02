@@ -670,6 +670,7 @@ def register_sa(request, user_id):
         messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
     except Exception as e:
         logger.error("[ERROR]: Unexpected Exception registering a Service Account {}".format(str(e)))
+        logger.exception(e)
         messages.error(request, "Unable to register this Service Account - please contact feedback@isb-cgc.org.")
 
     return redirect('user_gcp_list', user_id=user_id)
