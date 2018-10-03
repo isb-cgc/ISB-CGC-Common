@@ -179,7 +179,6 @@ def _sa_dict_to_data(retval, gcp_id, sa_dict):
     sa_data['num_auth'] = len(sa_dict['sa_dataset_ids'])
     logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(sa_dict['sa_dataset_ids'])))
     for auth_data in sa_dict['sa_dataset_ids']:
-        print("[INFO] AD {} {}:".format(gcp_id, str(auth_data)))
         logger.info("[INFO] AD {} {}:".format(gcp_id, str(auth_data)))
         protected_dataset = AuthorizedDataset.objects.get(whitelist_id=auth_data)
         auth_names.append(protected_dataset.name)
@@ -411,26 +410,28 @@ def register_gcp(request, user_id):
     return redirect(reverse(redirect_view, kwargs=args))
 
 
-
 @login_required
 def gcp_detail(request, user_id, gcp_id):
     try:
         logger.info("[INFO] gcp_detail {}:".format(gcp_id))
+        is_linked = have_linked_user(user_id)
         context = {}
+        context['is_linked'] = is_linked
         context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
         logger.info("[INFO] Listing SAs for GCP {}:".format(gcp_id))
         if settings.SA_VIA_DCF:
             context['sa_list'] = []
-            gcp_project_id = context['gcp'].project_id
-            sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_project_id)
-            if sa_messages:
-                for message in sa_messages:
-                    logger.error("[ERROR] {}:".format(message))
-                    messages.error(request, message)
-                return render(request, 'GenespotRE/gcp_detail.html', context)
+            if is_linked:
+                gcp_project_id = context['gcp'].project_id
+                sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_project_id)
+                if sa_messages:
+                    for message in sa_messages:
+                        logger.error("[ERROR] {}:".format(message))
+                        messages.error(request, message)
+                    return render(request, 'GenespotRE/gcp_detail.html', context)
 
-            for sa_dict in sa_info:
-                _sa_dict_to_data(context['sa_list'], gcp_id, sa_dict)
+                for sa_dict in sa_info:
+                    _sa_dict_to_data(context['sa_list'], gcp_id, sa_dict)
 
         else:
             context['sa_list'] = []
