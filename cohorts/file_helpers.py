@@ -123,7 +123,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-diseasecode': 'bc.disease_code',
                 'col-projectname': 'bc.project_short_name',
                 'col-studydesc': 'ds.StudyDescription',
-                'col-studyuid': 'ds.StudyInstanceUID'
+                'col-studyuid': 'ds.StudyInstanceUID',
+                'col-filesize': 'ds.StudyInstanceUID'
             }
 
             if limit > 0:
@@ -183,7 +184,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             select_clause_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, substring_index(md.file_name_key, '/', -1) as file_name, md.file_name_key,
                   md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category,
-                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
+                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name, md.file_size
                  FROM {metadata_table} md
                  JOIN (
                      SELECT DISTINCT case_barcode
@@ -209,7 +210,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-platform': 'platform',
                 'col-datacat': 'data_category',
                 'col-datatype': 'data_type',
-                'col-dataformat': 'data_format'
+                'col-dataformat': 'data_format',
+                'col-filesize': 'file_size'
             }
 
             if type == 'igv':
@@ -306,6 +308,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                             'access': (item['access'] or 'N/A'),
                             'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
+                            'filesize': item['file_size'] or 'N/A',
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
                             'datacat': item['data_category'] or 'N/A',
