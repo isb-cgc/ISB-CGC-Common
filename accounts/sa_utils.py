@@ -311,7 +311,6 @@ def _verify_service_account_dcf(gcp_id, service_account, datasets, user_email, u
     try:
         sa_in_use = (sa_mode == SAModes.ADJUST)
         success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets, phs_map, sa_in_use)
-        print('verify_sa_at_dcf {}'.format(success))
         if not success:
             # We want to be more structured with any error messages we receive from DCF instead of a narrative
             # error block at the top of the page.

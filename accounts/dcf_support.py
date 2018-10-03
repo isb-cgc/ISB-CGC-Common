@@ -283,10 +283,11 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
 
         dataset_validity_info = project_access_info['project_validity']
         for dataset_name in dataset_validity_info:
-            dataset = dataset_validity_info[dataset_name]
-            is_ok, combined = _write_dataset_summary(dataset, dataset_name, phs_map)
-            full_name = '{} ({})'.format(phs_map[dataset_name], dataset_name)
-            messages['dcf_analysis_data'].append({"id": full_name, "ok": is_ok, "err": combined})
+            if dataset_name in datasets:
+                dataset = dataset_validity_info[dataset_name]
+                is_ok, combined = _write_dataset_summary(dataset, dataset_name, phs_map)
+                full_name = '{} ({})'.format(phs_map[dataset_name], dataset_name)
+                messages['dcf_analysis_data'].append({"id": full_name, "ok": is_ok, "err": combined})
 
         # This is the evaluation of the REQUESTED service account. We do this even for a refresh verification case, since
         # a "refresh" can refer to the reuse of a previously expired service account, and it may have gone out of
