@@ -83,6 +83,9 @@ FILE_LIST_EXPORT_SCHEMA = {
         }, {
             'name': 'cloud_storage_location',
             'type': 'STRING'
+        }, {
+            'name': 'file_size',
+            'type': 'INTEGER'
         }
     ]
 }
@@ -161,7 +164,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return response
 
-    def _table_to_gcs(self, file_format, dataset_and_table, export_type, table_job_id):
+    def _table_to_gcs(self, file_format, dataset_and_table, export_type, table_job_id=None):
 
         bq_service = get_bigquery_service()
 
@@ -172,21 +175,21 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         # presence of a table_job_id means the export query was still running when this
         # method was called; give it another round of checks
-        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=table_job_id).execute()
         if table_job_id:
+            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=table_job_id).execute()
             retries = 0
             while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
                 retries += 1
                 sleep(1)
                 job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=table_job_id).execute()
 
-        if job_is_done and not job_is_done['status']['state'] == 'DONE':
-            logger.debug(str(job_is_done))
-            msg = "Export of {} to gs://{}/{} did not complete in the time allowed".format(export_type, self.bucket_path, self.file_name)
-            logger.error("[ERROR] {}.".format(msg))
-            result['status'] = 'error'
-            result['message'] = msg + "--please contact the administrator."
-            return result
+            if job_is_done and not job_is_done['status']['state'] == 'DONE':
+                logger.debug(str(job_is_done))
+                msg = "Export of {} to gs://{}/{} did not complete in the time allowed".format(export_type, self.bucket_path, self.file_name)
+                logger.error("[ERROR] {}.".format(msg))
+                result['status'] = 'error'
+                result['message'] = msg + "--please contact the administrator."
+                return result
 
         job_id = str(uuid4())
 
@@ -437,6 +440,7 @@ class BigQueryExportFileList(BigQueryExport):
             'data_type': data['datatype'],
             'data_format': data['dataformat'],
             'cloud_storage_location': data['cloudstorage_location'],
+            'file_size': data['file_size'],
             'date_added': date_added
         }
         return entry_dict
