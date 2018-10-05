@@ -72,7 +72,6 @@ def _derive_sa_mode(is_refresh, is_adjust, remove_all):
     We have three different flag driving only four different modes. Try to make this more
     comprehensible:
     """
-    print("IR {} IA {} RA {}".format(is_refresh, is_adjust, remove_all))
     if is_adjust:
         if is_refresh:
             if remove_all:
@@ -174,14 +173,12 @@ def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
             }
 
         # if is_adjust or not is_refresh:
-        print('samode is {}'.format(sa_mode))
         if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.REGISTER:
             reg_change = False
             #
             # Used to be we checked the ServiceAccountAuthorizedDatasets to see what data sets we were on. Now that info
             # comes back in the DCF response
             #
-            print(str(sa_info))
             have_datasets = len(sa_info['sa_dataset_ids']) > 0
 
             # Check the private datasets to see if there's a registration change
@@ -190,7 +187,6 @@ def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
             # If we're removing all datasets and there are 1 or more, this is automatically a registration change
             if (sa_mode == SAModes.REMOVE_ALL) and have_datasets:
                 reg_change = True
-                print("we got datasets that are gonna go")
             else:
                 if controlled_datasets.count() or have_datasets:
                     ads = controlled_datasets.values_list('whitelist_id', flat=True)
