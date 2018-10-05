@@ -209,7 +209,7 @@ def service_account_info_from_dcf(user_id, proj_list):
     messages = None
     if resp.status_code == 200:
         response_dict = json_loads(resp.text)
-        print('response text {}'.format(resp.text))
+        logger.info("[INFO] DCF response text {}".format(resp.text))
         sa_list = response_dict['service_accounts']
         for sa in sa_list:
             ret_entry = {
@@ -223,8 +223,8 @@ def service_account_info_from_dcf(user_id, proj_list):
         #
         # (10/1/18) We query DCF based upon *our* list of Google Projects for the user. If DCF cannot say if user is
         # in project (e.g. no monitoring SA in the project), it will return a 403. We need to swallow this silently.
-        # Possible FIXME? Return warning message that if they want to see SAs registered for a project, they need to
-        # insure that the DCF monitoring SA is in the project?
+        # Once they add the monitoring SA, the user is identified as a project member and the 403s will stop.
+        # FIXME? On project details page, could add a warning message if DCF monitoring SA not installed
         #
         #messages = ["User is not a member on one or more of these Google projects: {}".format(proj_string)]
         pass
@@ -259,7 +259,6 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         logger.info("[INFO] DCF SA verification response code was {}".format(resp.status_code))
         logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
         success = (resp.status_code == 200)
-        print("from parser success: {}".format(success))
 
         if resp.status_code != 200 and resp.status_code != 400:
             logger.error("[ERROR] DCF SA verification UNEXPECTED response code was {}".format(resp.status_code))
@@ -583,9 +582,7 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map, sa_
         # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
         headers = {'Content-Type': 'application/json'}
 
-        print("Into verify call")
         resp = _dcf_call(full_url, user_id, mode=use_mode, post_body=json_dumps(sa_data), headers=headers)
-        print("Return from verify call")
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
         raise e
