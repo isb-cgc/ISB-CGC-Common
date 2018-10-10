@@ -436,11 +436,6 @@ def gcp_detail(request, user_id, gcp_id):
         else:
             context['sa_list'] = []
 
-            #google_project = models.ForeignKey(GoogleProject, null=False)
-            #service_account = models.CharField(max_length=1024, null=False)
-            #active = models.BooleanField(default=False, null=False)
-            #authorized_date = models.DateTimeField(auto_now=True)
-
             active_sas = context['gcp'].active_service_accounts()
             for service_account in active_sas:
                 logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
@@ -479,7 +474,6 @@ def gcp_detail(request, user_id, gcp_id):
         logger.exception(e)
         messages.error(request,
                        "Encountered an error while trying to detail this Google Cloud Project - please contact feedback@isb-cgc.org.")
-
 
     return render(request, 'GenespotRE/gcp_detail.html', context)
 
@@ -561,8 +555,7 @@ def verify_sa(request, user_id):
                     logger.info("[INFO] all verified")
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
                 else:
-                    print(str(result))
-                    logger.info("[INFO] not all verified")
+                    logger.info("[INFO] not all verified: {}".format(str(result)))
                     st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
                     if 'dcf_messages' in result and \
                        'dcf_problems' in result['dcf_messages'] and \
@@ -572,7 +565,6 @@ def verify_sa(request, user_id):
                         status = '503'
                         return JsonResponse(result, status=status)
 
-                print(str(result))
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
                 status = '200'
@@ -616,10 +608,9 @@ def register_sa(request, user_id):
             if request.GET.get('sa_name'):
                 template = 'GenespotRE/adjust_sa.html'
                 sa_dict, sa_msgs = service_account_dict(user_id, request.GET.get('sa_name'))
-                # FIXME!!! What to do next if there is an error message (Coming from DCF)??
-                # This is distinct from exceptions, handled below.
-                # this is stuff like user is not allowed to ask about the service account.
-                # Usual answer is to pop to user_gcp_list page:
+                # If there is an error message coming from DCF, which is distinct from exceptions (handled below),
+                # the traditional approach if to pop to user_gcp_list page.
+                # (This is stuff like user is not allowed to ask about the service account.)
                 if sa_msgs:
                     for sa_msg in sa_msgs:
                         messages.error(request, sa_msg)
