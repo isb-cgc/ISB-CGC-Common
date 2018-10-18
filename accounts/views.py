@@ -50,6 +50,7 @@ logger = logging.getLogger('main_logger')
 
 OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
+GCP_REG_LOG_NAME = settings.GCP_ACTIVITY_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
@@ -397,6 +398,19 @@ def register_gcp(request, user_id):
             if request.POST.get('detail','') == 'true':
                 redirect_view = 'gcp_detail'
                 args['gcp_id'] = gcp.id
+
+            reg_type = "NEW GCP REGISTRATION"
+            if is_refresh:
+                reg_type = "GCP REFRESH"
+
+            st_logger.write_text_log_entry(
+                GCP_REG_LOG_NAME,"[{}] User {} has {} GCP {} at {}".formast(
+                    reg_type,
+                    User.objects.get(id=user_id).email,
+                    ("refreshed" if is_refresh else "registered"),
+                    gcp.project_id,datetime.datetime.utcnow()
+                )
+            )
 
             return redirect(reverse(redirect_view, kwargs=args))
 
