@@ -33,6 +33,11 @@ from google_helpers.bigquery.cohort_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
+FILTER_DATA_FORMAT = {
+    'igv': 'BAM',
+    'camic': 'SVS',
+    'pdf': 'PDF'
+}
 
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, type=None, do_filter_count=True):
 
@@ -214,14 +219,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-filesize': 'file_size'
             }
 
-            if type == 'igv':
+            if type in ('igv', 'camic', 'pdf'):
                 if 'data_format' not in inc_filters:
                     inc_filters['data_format'] = []
-                inc_filters['data_format'].append('BAM')
-            elif type == 'camic':
-                if 'data_format' not in inc_filters:
-                    inc_filters['data_format'] = []
-                inc_filters['data_format'].append('SVS')
+                inc_filters['data_format'].append(FILTER_DATA_FORMAT[type])
 
             db = get_sql_connection()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
