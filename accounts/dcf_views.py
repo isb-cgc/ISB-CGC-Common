@@ -910,7 +910,7 @@ def dcf_disconnect_user(request):
     except TokenFailure:
         # Token problem? Don't care; it is about to be blown away
         pass
-    except (InternalTokenError, Exception):
+    except (InternalTokenError, Exception) as e:
         messages.warning(request, "Internal problem encountered disconnecting from Data Commons. Please report this to feedback@isb-cgc.org")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
