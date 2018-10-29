@@ -1851,11 +1851,11 @@ def streaming_csv_view(request, cohort_id=0):
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
-            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "Access Type"],)
+            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "File Size (B)", "Access Type"],)
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
                           file['datatype'], file['dataformat'], file['cloudstorage_location'],
-                          file['access'].replace("-", " ")],)
+                          file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
@@ -2192,7 +2192,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
 
         if export_type == 'file_manifest':
             query_string_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
+                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size,
                   md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                   md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
                   {cohort_id} as cohort_id, "{build}" as build,
@@ -2205,7 +2205,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  ) cs
                  ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
                  WHERE TRUE {filter_conditions}
-                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location,
+                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, md.file_size,
                   md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
                   gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
                  ORDER BY md.sample_barcode
@@ -2329,13 +2329,23 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         "'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""
                     ))
         else:
-            result['message'] = "Cohort {} was successfully exported to {}.".format(
-                str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
-                "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
-                if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
-                    gcs_bucket, file_name, result['message']
+            # If the export is taking a while, inform the user
+            if result['status'] == 'long_running':
+                result['message'] = "The export of cohort {} to {} ".format(
+                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                    if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
+                        gcs_bucket, file_name, result['message']
+                    )
+                ) + "is underway; check your {} in 1-2 minutes for the results.".format("BQ dataset" if export_dest == 'table' else "GCS bucket")
+            else:
+                result['message'] = "Cohort {} was successfully exported to {}.".format(
+                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                    if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
+                        gcs_bucket, file_name, result['message']
+                    )
                 )
-            )
 
     except Exception as e:
         logger.error("[ERROR] While trying to export Cohort {}:".format(
