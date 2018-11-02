@@ -84,7 +84,7 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'cloud_storage_location',
             'type': 'STRING'
         }, {
-            'name': 'file_size',
+            'name': 'file_size_bytes',
             'type': 'INTEGER'
         }
     ]
@@ -440,7 +440,7 @@ class BigQueryExportFileList(BigQueryExport):
             'data_type': data['datatype'],
             'data_format': data['dataformat'],
             'cloud_storage_location': data['cloudstorage_location'],
-            'file_size': data['file_size'],
+            'file_size_bytes': data['file_size'],
             'date_added': date_added
         }
         return entry_dict
