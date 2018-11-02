@@ -2192,7 +2192,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
 
         if export_type == 'file_manifest':
             query_string_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size,
+                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                   md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                   md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
                   {cohort_id} as cohort_id, "{build}" as build,
@@ -2205,7 +2205,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  ) cs
                  ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
                  WHERE TRUE {filter_conditions}
-                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, md.file_size,
+                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                   md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
                   gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
                  ORDER BY md.sample_barcode
