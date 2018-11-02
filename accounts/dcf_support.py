@@ -296,6 +296,17 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         if sa_error_info['status'] == 200:
             messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" meets all requirements.'\
                 .format(service_account_id)
+        # Per Slack thread 10/31/18, this field can be 403 if unauthorized:
+        elif sa_error_info['status'] == 403:
+            messages['dcf_analysis_reg_sas_summary'] = 'You are not authorized to register service account "{}".'\
+                .format(service_account_id)
+        # Per Slack thread 10/31/18, this field can now also be 404 if the SA does not show up in IAM policy (this
+        # will go along with an SA detail field of policy_accessible = false):
+        elif sa_error_info['status'] == 404:
+            messages['dcf_analysis_reg_sas_summary'] = \
+                'The requested service account "{}" could not be found. (Note that deleted service accounts can ' \
+                'still retain project roles; these must be removed).'\
+                    .format(service_account_id)
         elif sa_error_info['status'] == 409:
             if (sa_in_use is not None) and sa_in_use:
                 logger.error(
@@ -306,7 +317,7 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
                 messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" is already registered.'\
                     .format(service_account_id)
         else:
-            # Have seen the following key not returned (though in a 409 case...), but let's be cautious
+            # Have seen the following key *not* returned (though in a 409 case...), but let's be cautious
             sa_error_validity = sa_error_info['service_account_validity'] if 'service_account_validity' in sa_error_info else None
             if sa_error_validity is not None:
                 info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
@@ -462,6 +473,12 @@ def _write_sa_summary(sa_info, for_registered_sa, project_id):
     is_internal = internal_tested and internal
     internal_message = "Service account has assigned roles or generated keys" if not_internal else None
 
+    can_find = sa_info["policy_accessible"]
+    find_tested = can_find is not None
+    not_found = find_tested and not can_find
+    is_found = find_tested and can_find
+    not_found_message = "Service account not found (possibly deleted but still with project roles)" if not_found else None
+
     not_valid = False
     is_valid = True
     if for_registered_sa:
@@ -471,7 +488,7 @@ def _write_sa_summary(sa_info, for_registered_sa, project_id):
         valid_message = "Service account must be either from project {} or " \
                         "the Compute Engine Default account.".format(project_id) if not_valid else None
 
-    is_ok = is_owned and ((not internal_tested) or is_internal) and is_valid
+    is_ok = is_owned and ((not internal_tested) or is_internal) and is_valid and ((not find_tested) or is_found)
     combination = []
     combo_msg = ""
     if not is_ok:
@@ -481,6 +498,8 @@ def _write_sa_summary(sa_info, for_registered_sa, project_id):
             combination.append(internal_message)
         if not_valid:
             combination.append(valid_message)
+        if not_found:
+            combination.append(not_found_message)
         if len(combination) > 0:
             combo_msg = "; ".join(combination)
             combo_msg += "."
