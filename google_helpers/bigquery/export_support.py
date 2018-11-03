@@ -190,6 +190,11 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 result['status'] = 'error'
                 result['message'] = msg + "--please contact the administrator."
                 return result
+            else:
+                dataset_and_table = {
+                    'dataset_id': job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                    'table_id': job_is_done['configuration']['query']['destinationTable']['tableId']
+                }
 
         job_id = str(uuid4())
 
