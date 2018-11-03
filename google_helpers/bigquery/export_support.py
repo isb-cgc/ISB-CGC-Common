@@ -356,6 +356,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['status'] = 'success'
                         result['message'] = int(export_table['numRows'])
                     else:
+                        logger.warning("[WARNING] Rows not found, job info:")
+                        logger.warning(str(job_is_done))
                         msg = "Table {}:{}.{} created, but no rows found. Export of {} may not have succeeded".format(
                             self.project_id,
                             self.dataset_id,
