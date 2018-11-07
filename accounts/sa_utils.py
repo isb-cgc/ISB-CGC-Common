@@ -1115,7 +1115,7 @@ def unregister_all_gcp_sa(user_id, gcp_id):
     else:
         msgs = None
         _unregister_all_gcp_sa_db(user_id, gcp_id)
-
+    logger.info("[INFO] Unregister all SA step 4: {}".format(gcp_id))
     return success, (msgs if (msgs is not None and len(msgs) > 0) else None)
 
 

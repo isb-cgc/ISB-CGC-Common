@@ -501,9 +501,11 @@ def user_gcp_delete(request, user_id, gcp_id):
             logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
             gcp = GoogleProject.objects.get(id=gcp_id, active=1)
             success, msg = unregister_all_gcp_sa(user_id, gcp_id)
+            logger.info("[STATUS] User {} is unregistering GCP {}: SAs dropped".format(user.email, gcp_id))
             gcp.user.clear()
             gcp.active=False
             gcp.save()
+            logger.info("[STATUS] User {} has unregistered GCP {}".format(user.email, gcp_id))
 
     except TokenFailure:
         messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
