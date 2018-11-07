@@ -386,12 +386,13 @@ def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, p
 
     if resp is not None:
         logger.info("[INFO] DCF SA action response code was {}".format(resp.status_code))
+        logger.info("[INFO] Unexpected DCF response text: {}".format(resp.text))
         if resp.status_code == 200:
             logger.info("[INFO] DCF SA action response body: {} ".format(resp.text))
             success = True
         elif resp.status_code == 204: # Patch issues a 204 and *no content* on success:
             success = True
-        elif resp.status_code == 400:
+        elif resp.status_code == 400 or resp.status_code == 401 or resp.status_code == 403:
             logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
             response_dict = json_loads(resp.text)
             error_info = response_dict['errors']
@@ -401,8 +402,6 @@ def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, p
                 msg = 'The requested dataset list [{}] was not approved, because: "{}"'. \
                     format(', '.join(named_datasets), project_access_info['error_description'].strip())
                 messages.append(msg)
-
-
 
             if sa_in_use is None or not sa_in_use:
                 # This is the evaluation of the REQUESTED service account:
@@ -542,7 +541,7 @@ def _write_project_member_summary(member_info, project_id):
     if not is_ok:
         if fence_message:
             combination.append(fence_message)
-        if member_message:
+        if member_message and member_message != fence_message:
             combination.append(member_message)
         combo_msg = "; ".join(combination)
         combo_msg += "."
