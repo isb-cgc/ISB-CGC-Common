@@ -404,7 +404,7 @@ def register_gcp(request, user_id):
                 reg_type = "GCP REFRESH"
 
             st_logger.write_text_log_entry(
-                GCP_REG_LOG_NAME,"[{}] User {} has {} GCP {} at {}".formast(
+                GCP_REG_LOG_NAME,"[{}] User {} has {} GCP {} at {}".format(
                     reg_type,
                     User.objects.get(id=user_id).email,
                     ("refreshed" if is_refresh else "registered"),
