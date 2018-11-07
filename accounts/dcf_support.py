@@ -260,10 +260,25 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
         success = (resp.status_code == 200)
 
-        if resp.status_code != 200 and resp.status_code != 400:
+        #
+        # These are all the status codes that we see for either POST or PATCH:
+        #
+        if resp.status_code != 200 and resp.status_code != 400 and resp.status_code != 401 and resp.status_code != 403:
             logger.error("[ERROR] DCF SA verification UNEXPECTED response code was {}".format(resp.status_code))
             messages['dcf_problems'].append(
                 "Unexpected response from Data Commons Framework. Please contact feedback@isb-cgc.org.")
+            return success, messages
+
+        #
+        # These two codes can be returned by a PATCH call. As of now (11/7/18), the response
+        # body is an HTML page stating there is a permission problem, not JSON to parse.
+        # If we see these responses, we need to give the user some rational information to
+        # work with:
+        #
+        if resp.status_code == 401 or resp.status_code == 403:
+            messages['dcf_problems'].append('To register a service account, your Google Cloud Project '
+                                            'must have the DCF monitoring service account installed and you '
+                                            'must be a member of the project.')
             return success, messages
 
         response_dict = json_loads(resp.text)
@@ -392,7 +407,18 @@ def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, p
             success = True
         elif resp.status_code == 204: # Patch issues a 204 and *no content* on success:
             success = True
-        elif resp.status_code == 400 or resp.status_code == 401 or resp.status_code == 403:
+        #
+        # These two codes can be returned by a PATCH call. As of now (11/7/18), the response
+        # body is an HTML page stating there is a permission problem, not JSON to parse.
+        # If we see these responses, we need to give the user some rational information to
+        # work with:
+        #
+        elif resp.status_code == 401 or resp.status_code == 403:
+            logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
+            msg = 'Request was not approved. Your Google Cloud Project must have the DCF monitoring service account ' \
+                  'installed and you must be a member of the project.'
+            messages.append(msg)
+        elif resp.status_code == 400:
             logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
             response_dict = json_loads(resp.text)
             error_info = response_dict['errors']
