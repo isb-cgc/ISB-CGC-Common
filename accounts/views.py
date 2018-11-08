@@ -265,6 +265,7 @@ def verify_gcp(request, user_id):
         roles = {}
         user = User.objects.get(id=user_id)
         user_found = False
+        fence_sa_found = False
 
         for val in bindings:
             role = val['role']
@@ -279,6 +280,8 @@ def verify_gcp(request, user_id):
                         roles[email]['registered_user'] = bool(User.objects.filter(email=email).first())
                     if user.email.lower() == email.lower():
                         user_found = True
+                    if settings.DCF_MONITORING_SA.lower() == email.lower():
+                        fence_sa_found = True
                     roles[email]['roles'].append(role)
 
         if not user_found:
@@ -291,7 +294,11 @@ def verify_gcp(request, user_id):
                 gcp.save()
                 response['redirect']=reverse('user_gcp_list',kwargs={'user_id': user.id})
         else:
-            response = {'roles': roles,'gcp_id': gcp_id}
+            response = {'roles': roles, 'gcp_id': gcp_id}
+            if not fence_sa_found:
+                logger.warning("[WARNING] DCF Fence SA was not added to the IAM policy for GCP {}".format(gcp_id))
+                response['message'] = "The DCF Monitoring Service Account {} was not added to your project's IAM ".format(settings.DCF_MONITORING_SA) \
+                    + "policies. Note that without this Service Account added to your project you will not be able to access controlled data."
             status='200'
 
     except Exception as e:
@@ -500,7 +507,12 @@ def user_gcp_delete(request, user_id, gcp_id):
             user = User.objects.get(id=user_id)
             logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
             gcp = GoogleProject.objects.get(id=gcp_id, active=1)
-            success, msg = unregister_all_gcp_sa(user_id, gcp_id)
+            success, msgs = unregister_all_gcp_sa(user_id, gcp_id)
+            # If we encounter problems deleting SAs, stop the process:
+            if not success:
+                for msg in msgs:
+                    messages.error(request, msg)
+                return redirect('user_gcp_list', user_id=request.user.id)
             logger.info("[STATUS] User {} is unregistering GCP {}: SAs dropped".format(user.email, gcp_id))
             gcp.user.clear()
             gcp.active=False
