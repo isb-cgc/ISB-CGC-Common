@@ -1103,7 +1103,9 @@ def unregister_all_gcp_sa(user_id, gcp_id):
     success = True
     if settings.SA_VIA_DCF:
         msgs = []
-        all_sa_for_proj = service_account_info_from_dcf_for_project(user_id, gcp_id)
+        all_sa_for_proj, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
+        if messages is not None and len(messages > 0):
+            msgs.extend(messages)
         for sa in all_sa_for_proj:
             one_success, one_msgs = unregister_sa_via_dcf(user_id, sa['sa_name'])
             success = success and one_success
@@ -1112,7 +1114,6 @@ def unregister_all_gcp_sa(user_id, gcp_id):
     else:
         msgs = None
         _unregister_all_gcp_sa_db(user_id, gcp_id)
-
     return success, (msgs if (msgs is not None and len(msgs) > 0) else None)
 
 

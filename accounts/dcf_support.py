@@ -260,10 +260,25 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
         success = (resp.status_code == 200)
 
-        if resp.status_code != 200 and resp.status_code != 400:
+        #
+        # These are all the status codes that we see for either POST or PATCH:
+        #
+        if resp.status_code != 200 and resp.status_code != 400 and resp.status_code != 401 and resp.status_code != 403:
             logger.error("[ERROR] DCF SA verification UNEXPECTED response code was {}".format(resp.status_code))
             messages['dcf_problems'].append(
                 "Unexpected response from Data Commons Framework. Please contact feedback@isb-cgc.org.")
+            return success, messages
+
+        #
+        # These two codes can be returned by a PATCH call. As of now (11/7/18), the response
+        # body is an HTML page stating there is a permission problem, not JSON to parse.
+        # If we see these responses, we need to give the user some rational information to
+        # work with:
+        #
+        if resp.status_code == 401 or resp.status_code == 403:
+            messages['dcf_problems'].append('To register a service account, your Google Cloud Project '
+                                            'must have the DCF monitoring service account installed and you '
+                                            'must be a member of the project.')
             return success, messages
 
         response_dict = json_loads(resp.text)
@@ -386,11 +401,23 @@ def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, p
 
     if resp is not None:
         logger.info("[INFO] DCF SA action response code was {}".format(resp.status_code))
+        logger.info("[INFO] Unexpected DCF response text: {}".format(resp.text))
         if resp.status_code == 200:
             logger.info("[INFO] DCF SA action response body: {} ".format(resp.text))
             success = True
         elif resp.status_code == 204: # Patch issues a 204 and *no content* on success:
             success = True
+        #
+        # These two codes can be returned by a PATCH call. As of now (11/7/18), the response
+        # body is an HTML page stating there is a permission problem, not JSON to parse.
+        # If we see these responses, we need to give the user some rational information to
+        # work with:
+        #
+        elif resp.status_code == 401 or resp.status_code == 403:
+            logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
+            msg = 'Request was not approved. Your Google Cloud Project must have the DCF monitoring service account ' \
+                  'installed and you must be a member of the project.'
+            messages.append(msg)
         elif resp.status_code == 400:
             logger.info("[INFO] DCF SA verification response body: {} ".format(resp.text))
             response_dict = json_loads(resp.text)
@@ -401,8 +428,6 @@ def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, p
                 msg = 'The requested dataset list [{}] was not approved, because: "{}"'. \
                     format(', '.join(named_datasets), project_access_info['error_description'].strip())
                 messages.append(msg)
-
-
 
             if sa_in_use is None or not sa_in_use:
                 # This is the evaluation of the REQUESTED service account:
@@ -511,17 +536,30 @@ def _write_project_member_summary(member_info, project_id):
     """
     We get back a dictionary of results from DCF for project membership. Take this dict and write a summary string to
     show the user. Returns a tuple of (success, message)
+    11/6/18: Seeing at least first key missing if monitoring SA not present. Harden this to handle.
     """
 
-    in_fence = member_info["members_exist_in_fence"]
+    have_fence_key = "members_exist_in_fence" in member_info
+    in_fence = member_info["members_exist_in_fence"] if have_fence_key else None
     not_in_fence = in_fence is not None and not in_fence
     is_in_fence = in_fence is not None and in_fence
-    fence_message = "Not all project members have registered with the Data Commons Framework" if not_in_fence else None
+    if not have_fence_key:
+        fence_message = "Could not obtain project members"
+    elif not_in_fence:
+        fence_message = "Not all project members have registered with the Data Commons Framework"
+    else:
+        fence_message = None
 
-    valid_members = member_info["valid_member_types"]
+    have_valid_key = "valid_member_types" in member_info
+    valid_members = member_info["valid_member_types"] if have_valid_key else None
     not_valid_members = valid_members is not None and not valid_members
     is_valid_members = valid_members is not None and valid_members
-    member_message = "Project {} has one or more Google groups as members".format(project_id) if not_valid_members else None
+    if not have_valid_key:
+        member_message = "Could not obtain project members"
+    elif not_valid_members:
+        member_message = "Project {} has one or more Google groups as members".format(project_id)
+    else:
+        member_message = None
 
     is_ok = is_in_fence and is_valid_members
     combination = []
@@ -529,7 +567,7 @@ def _write_project_member_summary(member_info, project_id):
     if not is_ok:
         if fence_message:
             combination.append(fence_message)
-        if member_message:
+        if member_message and member_message != fence_message:
             combination.append(member_message)
         combo_msg = "; ".join(combination)
         combo_msg += "."
@@ -541,20 +579,32 @@ def _write_dataset_summary(dataset_info, dataset_id, phs_map):
     """
     We get back a dictionary of results from DCF for project membership. Take this dict and write a summary string to
     show the user. Returns a tuple of (success, message)
+    11/6/18: Since above routing hardened to handle missing keys, do this here too.
     """
 
     full_name = '{} ({})'.format(phs_map[dataset_id], dataset_id)
 
-
-    all_access = dataset_info["all_users_have_access"]
+    have_access_key = "all_users_have_access" in dataset_info
+    all_access = dataset_info["all_users_have_access"] if have_access_key else None
     not_all_access = all_access is not None and not all_access
     is_all_access = all_access is not None and all_access
-    access_message = 'Not all project members have access to dataset "{}"'.format(full_name) if not_all_access else None
+    if not have_access_key:
+        access_message = 'Could not obtain project members'
+    elif not_all_access:
+        access_message = 'Not all project members have access to dataset "{}"'.format(full_name)
+    else:
+        access_message = None
 
-    set_exists = dataset_info["exists"]
+    have_exists_key = "exists" in dataset_info
+    set_exists = dataset_info["exists"] if have_exists_key else None
     not_set_exists = set_exists is not None and not set_exists
     is_set_exists = set_exists is not None and set_exists
-    exists_message = 'Dataset "{}" does not exist'.format(full_name) if not_set_exists else None
+    if not have_exists_key:
+        exists_message = 'Could not obtain project members'
+    elif not_set_exists:
+        exists_message = 'Dataset "{}" does not exist'.format(full_name)
+    else:
+        exists_message = None
 
     is_ok = is_all_access and is_set_exists
     combination = []
