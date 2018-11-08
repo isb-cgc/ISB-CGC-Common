@@ -1106,12 +1106,16 @@ def unregister_all_gcp_sa(user_id, gcp_id):
         logger.info("[INFO] Unregister all SA step 1: {}".format(gcp_id))
         all_sa_for_proj = service_account_info_from_dcf_for_project(user_id, gcp_id)
         logger.info("[INFO] Unregister all SA step 2: {} >{}<".format(gcp_id, str(all_sa_for_proj)))
-        for sa in all_sa_for_proj:
-            one_success, one_msgs = unregister_sa_via_dcf(user_id, sa['sa_name'])
-            logger.info("[INFO] Unregister all SA steps 3: {} >{}<".format(gcp_id, sa))
-            success = success and one_success
-            if one_msgs is not None:
-                msgs.append(one_msgs)
+        try:
+            for sa in all_sa_for_proj:
+                one_success, one_msgs = unregister_sa_via_dcf(user_id, sa['sa_name'])
+                logger.info("[INFO] Unregister all SA steps 3: {} >{}<".format(gcp_id, sa))
+                success = success and one_success
+                if one_msgs is not None:
+                    msgs.append(one_msgs)
+        except Exception as e:
+            logger.exception(e)
+            raise e
     else:
         msgs = None
         _unregister_all_gcp_sa_db(user_id, gcp_id)
