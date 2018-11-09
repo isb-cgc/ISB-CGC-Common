@@ -290,10 +290,11 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         if project_access_info['status'] == 200:
             messages['dcf_analysis_data_summary'] = "The requested dataset list [{}] was approved.".format(
                 ', '.join(named_datasets))
-        else:
+        else: # This includes the 400 code case that is now returned if no monitoring SA ia in the project
             messages['dcf_analysis_data_summary'] = \
                 'The requested dataset list [{}] was not approved, because: "{}"'. \
                     format(', '.join(named_datasets), project_access_info['error_description'].strip())
+            messages['dcf_analysis_data'].append({"id": "N/A", "ok": False, "err": "Cannot verify project"})
 
         dataset_validity_info = project_access_info['project_validity']
         for dataset_name in dataset_validity_info:
@@ -311,6 +312,10 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         if sa_error_info['status'] == 200:
             messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" meets all requirements.'\
                 .format(service_account_id)
+        # As of 11/08/18, this field can be 400 if no monitoring account is found:
+        elif sa_error_info['status'] == 400:
+            err_msg = sa_error_info["error_description"] if "error_description" in sa_error_info else None
+            messages['dcf_analysis_reg_sas_summary'] = err_msg if err_msg is not None else "Validation could not be completed."
         # Per Slack thread 10/31/18, this field can be 403 if unauthorized:
         elif sa_error_info['status'] == 403:
             messages['dcf_analysis_reg_sas_summary'] = 'You are not authorized to register service account "{}".'\
@@ -334,17 +339,19 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         else:
             # Have seen the following key *not* returned (though in a 409 case...), but let's be cautious
             sa_error_validity = sa_error_info['service_account_validity'] if 'service_account_validity' in sa_error_info else None
-            if sa_error_validity is not None:
+            if sa_error_validity:
                 info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
                 is_ok, combined = _write_sa_summary(info_for_sa, True, gcp_id)
                 if is_ok:
                     logger.error(
                         "[ERROR] Inconsistent success response from DCF! Code: {} Eval: {}".format(sa_error_info['status'],
-                                                                                              is_ok))
-
+                                                                                                   is_ok))
                 err_msg = combined
-            else:
+            elif 'error_description' in sa_error_info:
                 err_msg = sa_error_info["error_description"]
+            else:
+                err_msg = "service account could not be validated"
+
             messages['dcf_analysis_reg_sas_summary'] = 'The requested service account "{}" cannot be ' \
                                                            'accepted because: "{}"'.format(service_account_id,
                                                                                            err_msg)
@@ -360,10 +367,13 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
 
         # This is the evaluation of the ALL SERVICE ACCOUNTS IN THE PROJECT:
         gcp_sa_validity_info = gcp_error_info['service_account_validity']
-        for sa_email in gcp_sa_validity_info:
-            sa_info = gcp_sa_validity_info[sa_email]
-            is_ok, combined = _write_sa_summary(sa_info, False, gcp_id)
-            messages['dcf_analysis_sas'].append({"id" : sa_email, "ok" : is_ok, "err": combined})
+        if not gcp_sa_validity_info:
+            messages['dcf_analysis_sas'].append({"id": "N/A", "ok": False, "err": "Cannot verify project"})
+        else:
+            for sa_email in gcp_sa_validity_info:
+                sa_info = gcp_sa_validity_info[sa_email]
+                is_ok, combined = _write_sa_summary(sa_info, False, gcp_id)
+                messages['dcf_analysis_sas'].append({"id" : sa_email, "ok" : is_ok, "err": combined})
 
         # This is the evaluation of the MEMBERS ON THE PROJECT:
         member_error_info = gcp_error_info['membership_validity']
