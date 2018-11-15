@@ -294,9 +294,12 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
             messages['dcf_analysis_data_summary'] = \
                 'The requested dataset list [{}] was not approved, because: "{}"'. \
                     format(', '.join(named_datasets), project_access_info['error_description'].strip())
-            messages['dcf_analysis_data'].append({"id": "N/A", "ok": False, "err": "Cannot verify project"})
 
         dataset_validity_info = project_access_info['project_validity']
+        if not dataset_validity_info:
+            messages['dcf_analysis_data'].append({"id": "N/A", "ok": False, "err": "Cannot verify project"})
+
+
         for dataset_name in dataset_validity_info:
             if dataset_name in datasets:
                 dataset = dataset_validity_info[dataset_name]
