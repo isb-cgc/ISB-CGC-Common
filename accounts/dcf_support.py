@@ -919,8 +919,8 @@ def get_google_link_from_user_dict(the_user_dict):
     The dict schema and keys vary depending on whether is comes from token or user data endpoint. Hide this fact!
 
     """
-    gotta_google_link = the_user_dict.has_key('google') and \
-                        the_user_dict['google'].has_key('linked_google_account')
+    gotta_google_link = 'google' in the_user_dict and \
+                        'linked_google_account' in the_user_dict['google']
     google_link = the_user_dict['google']['linked_google_account'] if gotta_google_link else None
     return google_link
 
@@ -1025,7 +1025,7 @@ def massage_user_data_for_dev(the_user):
     """
 
     dcf_secrets = _read_dict(settings.DCF_CLIENT_SECRETS)
-    if not dcf_secrets.has_key('DEV_1_EMAIL'):
+    if 'DEV_1_EMAIL' not in dcf_secrets:
         return the_user
 
     nih_from_dcf = get_nih_id_from_user_dict(the_user)
@@ -1172,7 +1172,7 @@ def _refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_fro
     refresh_expire_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(refresh_token_dict['exp']))
 
     # This refers to the *access key* expiration (~20 minutes)
-    if token_dict.has_key('expires_at'):
+    if 'expires_at' in token_dict:
         expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
     else:
         expiration_time = pytz.utc.localize(
@@ -1211,7 +1211,7 @@ def _access_token_storage(token_dict, cgc_uid):
     """
 
     # This refers to the *access key* expiration (~20 minutes)
-    if token_dict.has_key('expires_at'):
+    if 'expires_at' in token_dict:
         expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
     else:
         expiration_time = pytz.utc.localize(
@@ -1362,7 +1362,7 @@ def _access_token_storage(token_dict, cgc_uid):
     """
 
     # This refers to the *access key* expiration (~20 minutes)
-    if token_dict.has_key('expires_at'):
+    if 'expires_at' in token_dict:
         expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
     else:
         expiration_time = pytz.utc.localize(
@@ -1432,7 +1432,7 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
     refresh_expire_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(dcf_expire_timestamp))
 
     # This refers to the *access key* expiration (~20 minutes)
-    if token_dict.has_key('expires_at'):
+    if 'expires_at' in token_dict:
         expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
     else:
         expiration_time = pytz.utc.localize(
