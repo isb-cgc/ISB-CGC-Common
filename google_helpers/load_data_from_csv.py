@@ -102,7 +102,6 @@ def poll_job(bigquery, job):
         if result['status']['state'] == 'DONE':
             if 'errorResult' in result['status']:
                 raise RuntimeError(result['status']['errorResult'])
-            print >> sys.stdout, 'Job complete.'
             logger.info('poll_job complete.')
             return
 
