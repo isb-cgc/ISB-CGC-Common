@@ -280,9 +280,11 @@ def verify_gcp(request, user_id):
                         roles[email]['registered_user'] = bool(User.objects.filter(email=email).first())
                     if user.email.lower() == email.lower():
                         user_found = True
+                    roles[email]['roles'].append(role)
+                if member.startswith('serviceAccount:'):
+                    email = member.split(':')[1]
                     if settings.DCF_MONITORING_SA.lower() == email.lower():
                         fence_sa_found = True
-                    roles[email]['roles'].append(role)
 
         if not user_found:
             status='403'

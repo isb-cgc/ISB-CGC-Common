@@ -621,8 +621,6 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
             if item.shared_with_users and item.owner.id == request.user.id:
                 shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
-        # print local_zone.localize(item.last_date_saved)
-
     # Used for autocomplete listing
     cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
     cohort_listing = []
@@ -1076,7 +1074,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 @login_required
 @csrf_protect
 def delete_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = 'cohort_list'
     cohort_ids = request.POST.getlist('id')
     Cohort.objects.filter(id__in=cohort_ids).update(active=False)
@@ -1259,7 +1257,7 @@ def clone_cohort(request, cohort_id):
 @login_required
 @csrf_protect
 def set_operation(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     db = None
@@ -1494,7 +1492,7 @@ def set_operation(request):
 @login_required
 @csrf_protect
 def union_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     return redirect(redirect_url)

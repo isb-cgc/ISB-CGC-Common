@@ -842,7 +842,7 @@ def sql_simple_number_by_200(value, field):
 
 
 def sql_simple_days_by_ranges(value, field):
-    if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = ''
 
     if isinstance(value, basestring):
@@ -900,7 +900,7 @@ def sql_simple_days_by_ranges(value, field):
 
 
 def sql_year_by_ranges(value):
-    if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = ''
 
     if isinstance(value, basestring):
@@ -936,7 +936,7 @@ def sql_year_by_ranges(value):
 
 
 def sql_bmi_by_ranges(value):
-    if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = ''
     if isinstance(value, basestring):
         value = [value]
@@ -1171,7 +1171,7 @@ def data_availability_sort(key, value, attr_details):
 
 # TODO: Convert to slider
 def normalize_bmi(bmis):
-    if debug: print >> sys.stderr, 'Called ' + sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     bmi_list = {'underweight': 0, 'normal weight': 0, 'overweight': 0, 'obese': 0, 'None': 0}
     for bmi, count in bmis.items():
         if type(bmi) != dict:
@@ -1192,7 +1192,7 @@ def normalize_bmi(bmis):
 
 # TODO: Convert to slider
 def normalize_ages(ages,bin_by_five=False):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     new_age_list = None
     if bin_by_five:
         new_age_list = {'0 to 4': 0, '5 to 9': 0, '10 to 14': 0, '15 to 19': 0, '20 to 24': 0, '25 to 29': 0, '30 to 34':0, '35 to 39': 0, 'Over 40': 0, 'None': 0}
@@ -1238,14 +1238,13 @@ def normalize_ages(ages,bin_by_five=False):
                 new_age_list['None'] += int(count)
         else:
             logger.warn("[WARNING] Age was sent as a dict.")
-            print >> sys.stdout, "[WARNING] Age was sent as a dict."
 
     return new_age_list
 
 
 # TODO: Convert to slider
 def normalize_years(years):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     new_year_list = {'1976 to 1980': 0, '1981 to 1985': 0, '1986 to 1990': 0, '1991 to 1995': 0, '1996 to 2000': 0, '2001 to 2005': 0, '2006 to 2010': 0, '2011 to 2015': 0, 'None': 0}
     for year, count in years.items():
         if type(year) != dict:
@@ -1269,15 +1268,13 @@ def normalize_years(years):
                     new_year_list['2011 to 2015'] += int(count)
             else:
                 new_year_list['None'] += int(count)
-        else:
-            print year
 
     return new_year_list
 
 
 # TODO: Convert to slider
 def normalize_simple_days(days):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     new_day_list = {'1 to 500': 0, '501 to 1000': 0, '1001 to 1500': 0, '1501 to 2000': 0, '2001 to 2500': 0,
                     '2501 to 3000': 0, '3001 to 3500': 0, '3501 to 4000': 0, '4001 to 4500': 0, '4501 to 5000': 0,
                     '5001 to 5500': 0, '5501 to 6000': 0, 'None': 0}
@@ -1317,7 +1314,7 @@ def normalize_simple_days(days):
 
 # TODO: Convert to slider
 def normalize_negative_days(days):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     new_day_list = {'0 to -5000': 0, '-5001 to -10000': 0, '-10001 to -15000': 0, '-15001 to -20000': 0, '-20001 to -25000': 0,
                     '-25001 to -30000': 0, '-30001 to -35000': 0, 'None': 0}
     for day, count in days.items():
