@@ -221,6 +221,7 @@ def service_account_info_from_dcf(user_id, proj_list):
             }
             retval[sa['service_account_email']] = ret_entry
     elif resp.status_code == 403:
+        logger.info("[INFO] DCF response of 403 for projects {}".format(proj_string))
         #
         # (10/1/18) We query DCF based upon *our* list of Google Projects for the user. If DCF cannot say if user is
         # in project (e.g. no monitoring SA in the project), it will return a 403. We need to swallow this silently.
