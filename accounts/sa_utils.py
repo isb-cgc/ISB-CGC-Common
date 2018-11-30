@@ -1103,9 +1103,10 @@ def unregister_all_gcp_sa(user_id, gcp_id):
     success = True
     if settings.SA_VIA_DCF:
         msgs = []
+        logger.info("[STATUS] Asking DCF for SA info for project {}".format(gcp_id))
         all_sa_for_proj, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
         logger.info("[STATUS] Finding {} SAs for project {}".format(len(all_sa_for_proj), gcp_id))
-        if messages is not None and len(messages > 0):
+        if messages is not None and len(messages) > 0:
             msgs.extend(messages)
         for sa in all_sa_for_proj:
             logger.info("[STATUS] Deleting SA {} for project {}".format(sa['sa_name'], gcp_id))
