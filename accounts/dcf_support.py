@@ -119,6 +119,7 @@ def unregister_sa_via_dcf(user_id, sa_id):
     try:
         full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, sa_id)
         resp = _dcf_call(full_url, user_id, mode='delete')
+        logger.info("[STATUS] Deletion status for SA {}: {}".format(sa_id, resp.status_code))
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA information (user {})".format(user_id))
         raise e
