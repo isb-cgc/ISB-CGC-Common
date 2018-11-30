@@ -1093,7 +1093,7 @@ def _register_service_account_isb(user_email, gcp_id, user_sa, datasets, is_refr
         return ret_msg
 
 
-def unregister_all_gcp_sa(user_id, gcp_id):
+def unregister_all_gcp_sa(user_id, gcp_id, project_id):
     """
     :raises TokenFailure:
     :raises InternalTokenError:
@@ -1103,13 +1103,13 @@ def unregister_all_gcp_sa(user_id, gcp_id):
     success = True
     if settings.SA_VIA_DCF:
         msgs = []
-        logger.info("[STATUS] Asking DCF for SA info for project {}".format(gcp_id))
-        all_sa_for_proj, messages = service_account_info_from_dcf_for_project(user_id, gcp_id)
-        logger.info("[STATUS] Finding {} SAs for project {}".format(len(all_sa_for_proj), gcp_id))
+        logger.info("[STATUS] Asking DCF for SA info for project {}".format(project_id))
+        all_sa_for_proj, messages = service_account_info_from_dcf_for_project(user_id, project_id)
+        logger.info("[STATUS] Finding {} SAs for project {}".format(len(all_sa_for_proj), project_id))
         if messages is not None and len(messages) > 0:
             msgs.extend(messages)
         for sa in all_sa_for_proj:
-            logger.info("[STATUS] Deleting SA {} for project {}".format(sa['sa_name'], gcp_id))
+            logger.info("[STATUS] Deleting SA {} for project {}".format(sa['sa_name'], project_id))
             one_success, one_msgs = unregister_sa_via_dcf(user_id, sa['sa_name'])
             logger.info("[STATUS] Deletion status for SA {}: {}".format(sa['sa_name'], one_success))
             success = success and one_success
