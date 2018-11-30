@@ -1107,7 +1107,9 @@ def unregister_all_gcp_sa(user_id, gcp_id):
         if messages is not None and len(messages > 0):
             msgs.extend(messages)
         for sa in all_sa_for_proj:
+            logger.info("[STATUS] Deleting SA {} for project {}".format(sa['sa_name'], gcp_id))
             one_success, one_msgs = unregister_sa_via_dcf(user_id, sa['sa_name'])
+            logger.info("[STATUS] Deletion status for SA {}: {}".format(sa['sa_name'], one_success))
             success = success and one_success
             if one_msgs is not None:
                 msgs.append(one_msgs)
