@@ -509,9 +509,11 @@ def user_gcp_delete(request, user_id, gcp_id):
             user = User.objects.get(id=user_id)
             logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
             gcp = GoogleProject.objects.get(id=gcp_id, active=1)
-            success, msgs = unregister_all_gcp_sa(user_id, gcp_id)
+            success, msgs = unregister_all_gcp_sa(user_id, gcp_id, gcp.project_id)
             # If we encounter problems deleting SAs, stop the process:
             if not success:
+                messages.error(request, "Unregistering service accounts from Data Commons Framework was not successful.")
+                logger.info("[STATUS] SA Unregistration was unsuccessful {}".format(user.email, gcp_id))
                 for msg in msgs:
                     messages.error(request, msg)
                 return redirect('user_gcp_list', user_id=request.user.id)
