@@ -221,19 +221,8 @@ def service_account_info_from_dcf(user_id, proj_list):
             # overwrite the existing project access, probably with the same values anyway
             #
 
-            #
-            # TESTING HACK:
-            #
-
-            if sa['service_account_email'].startswith('866257'):
-                sa['project_access_exp'] = 0
-
-            #
-            # END TESTING HACK
-            #
-
             if sa['project_access_exp'] == 0:
-                use_dids = {}
+                use_dids = []
                 logger.info("[INFO] Converting DCF expired dataset semantics from: {} to: {}".
                             format(str(sa['project_access']), str(use_dids)))
             else:
