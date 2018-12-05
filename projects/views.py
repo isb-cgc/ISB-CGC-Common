@@ -67,7 +67,7 @@ def program_list(request, is_public=False):
 
 @login_required
 def program_detail(request, program_id=0):
-    # """ if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name """
+    # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     template = 'projects/program_detail.html'
 
     ownedPrograms = request.user.program_set.filter(active=True)
@@ -324,7 +324,6 @@ def upload_files(request):
 
                 if datatype == "user_gen":
                     for column in descriptor['columns']:
-                        print column
                         if column['ignored']:
                             continue
 
@@ -390,7 +389,6 @@ def upload_files(request):
                 bq_table_items.append(Project_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
             Project_BQ_Tables.objects.bulk_create(bq_table_items)
 
-            # print settings.PROCESSING_ENABLED
             if settings.PROCESSING_ENABLED:
                 files = {'config.json': ('config.json', json.dumps(config))}
                 post_args = {
@@ -425,7 +423,8 @@ def upload_files(request):
                     upload.status = 'No Server Response'
                     status = 'error'
                     message = 'Could not connect to data upload server'
-                    print >> sys.stdout, "[ERROR] No UDU Server response: {0}".format(e)
+                    logger.error("[ERROR] No UDU Server response: {0}".format(e))
+                    logger.exception(e)
                 else:
                     if r.status_code < 400:
                         upload.status = 'Processing'
@@ -444,7 +443,7 @@ def upload_files(request):
             resp['redirect_url'] = '/programs/' + str(program.id) + '/'
 
     except ObjectDoesNotExist as e:
-        print >> sys.stdout, "[ERROR] ObjectDoesNotExist exception in upload_files:"
+        logger.error("[ERROR] ObjectDoesNotExist exception in upload_files:")
         logger.exception(e)
 
         resp = {
@@ -459,7 +458,7 @@ def upload_files(request):
         if request.POST['program-type'] == 'new':
             program.delete()
 
-        print >> sys.stdout, e
+        logger.exception(e)
         if e.resp.status == 403:
             resp = {
                 'status': "error",
@@ -763,7 +762,6 @@ def system_data_dict(request):
         attr_list_all[prog['name']] = attr_list
 
         for attr in results:
-            # print attr
             name = attr[0]
             type = attr[1]
             if name not in exclusion_list and not name.startswith('has_'):
