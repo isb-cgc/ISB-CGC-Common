@@ -83,6 +83,9 @@ FILE_LIST_EXPORT_SCHEMA = {
         }, {
             'name': 'cloud_storage_location',
             'type': 'STRING'
+        }, {
+            'name': 'file_size_bytes',
+            'type': 'INTEGER'
         }
     ]
 }
@@ -161,8 +164,38 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return response
 
-    def _table_to_gcs(self, file_format, dataset_and_table, export_type):
+    def _table_to_gcs(self, file_format, dataset_and_table, export_type, table_job_id=None):
+
         bq_service = get_bigquery_service()
+
+        result = {
+            'status': None,
+            'message': None
+        }
+
+        # presence of a table_job_id means the export query was still running when this
+        # method was called; give it another round of checks
+        if table_job_id:
+            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=table_job_id).execute()
+            retries = 0
+            while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
+                retries += 1
+                sleep(1)
+                job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=table_job_id).execute()
+
+            if job_is_done and not job_is_done['status']['state'] == 'DONE':
+                logger.debug(str(job_is_done))
+                msg = "Export of {} to gs://{}/{} did not complete in the time allowed".format(export_type, self.bucket_path, self.file_name)
+                logger.error("[ERROR] {}.".format(msg))
+                result['status'] = 'error'
+                result['message'] = msg + "--please contact the administrator."
+                return result
+            else:
+                dataset_and_table = {
+                    'dataset_id': job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                    'table_id': job_is_done['configuration']['query']['destinationTable']['tableId']
+                }
+
         job_id = str(uuid4())
 
         export_config = {
@@ -197,11 +230,6 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             retries += 1
             sleep(1)
             job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=job_id).execute()
-
-        result = {
-            'status': None,
-            'message': None
-        }
 
         logger.debug("[STATUS] extraction job_is_done: {}".format(str(job_is_done)))
 
@@ -333,6 +361,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['status'] = 'success'
                         result['message'] = int(export_table['numRows'])
                     else:
+                        logger.warning("[WARNING] Rows not found, job info:")
+                        logger.warning(str(job_is_done))
                         msg = "Table {}:{}.{} created, but no rows found. Export of {} may not have succeeded".format(
                             self.project_id,
                             self.dataset_id,
@@ -350,10 +380,9 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     'table_id': job_is_done['configuration']['query']['destinationTable']['tableId']
                 }
         else:
-            msg = "Export did not complete in the time allowed"
-            logger.error("[ERROR] {}.".format(msg))
-            result['status'] = 'error'
-            result['message'] = msg + "--please consider exporting a reduced set of data."
+            logger.error("[WARNING] Export is taking a long time to run, informing user.")
+            result['status'] = 'long_running'
+            result['jobId'] = job_id
 
         return result
 
@@ -418,6 +447,7 @@ class BigQueryExportFileList(BigQueryExport):
             'data_type': data['datatype'],
             'data_format': data['dataformat'],
             'cloud_storage_location': data['cloudstorage_location'],
+            'file_size_bytes': data['file_size'],
             'date_added': date_added
         }
         return entry_dict
@@ -447,8 +477,13 @@ class BigQueryExportFileList(BigQueryExport):
         # Export the query to our temp table
         query_result = self.export_query_to_bq(None, query, parameters, "cohort file manifest", True)
 
-        if query_result['status'] == 'success':
-            export_result = self._table_to_gcs(file_format, query_result['message'], "cohort file manifest")
+        if query_result['status'] == 'success' or query_result['status'] == 'long_running':
+            export_result = self._table_to_gcs(
+                file_format,
+                query_result['message'],
+                "cohort file manifest",
+                query_result['jobId'] if 'jobId' in query_result else None
+            )
             return export_result
         else:
             return {
@@ -496,8 +531,12 @@ class BigQueryExportCohort(BigQueryExport):
         # Export the query to our temp table
         query_result = self.export_query_to_bq(None, query, parameters, "cohort", True)
 
-        if query_result['status'] == 'success':
-            export_result = self._table_to_gcs(file_format, query_result['message'], "cohort")
+        if query_result['status'] == 'success' or query_result['status'] == 'long_running':
+            export_result = self._table_to_gcs(
+                file_format, query_result['message'],
+                "cohort",
+                query_result['jobId'] if 'jobId' in query_result else None
+            )
             return export_result
         else:
             return {

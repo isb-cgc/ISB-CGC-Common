@@ -1008,7 +1008,7 @@ def user_metadata_counts(user, user_data_filters, cohort_id):
             'data_counts': [],
         }
 
-    except Exception, e:
+    except Exception as e:
         logger.error('[ERROR] Exception when counting user metadata: ')
         logger.exception(e)
 
