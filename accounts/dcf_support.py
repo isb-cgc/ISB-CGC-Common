@@ -1563,6 +1563,10 @@ def compare_google_ids(dcf_version, cgc_version, user_email):
     """
     When we get new tokens from DCF, we want to sanity check if the Google IDs are in agreement.
     """
+    # Fix for 2530:
+    dcf_version = dcf_version.lower() if dcf_version else dcf_version
+    cgc_version = cgc_version.lower() if cgc_version else cgc_version
+    user_email = user_email.lower() if user_email else user_email
 
     if dcf_version != cgc_version:
         # Most likely possibility is that either DCF or us thinks the google ID is None and the other doesn't. Another
