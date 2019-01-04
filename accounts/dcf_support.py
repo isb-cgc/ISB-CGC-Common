@@ -213,9 +213,25 @@ def service_account_info_from_dcf(user_id, proj_list):
         logger.info("[INFO] DCF response text {}".format(resp.text))
         sa_list = response_dict['service_accounts']
         for sa in sa_list:
+            #
+            # Fix for issue 2505. After a service account expires, DCF returns that the SA is still tied to
+            # the datasets it was registered to, but with an expiration timestamp of zero. Our registration and
+            # SA display semantics are that once an SA expires, it is disconnected from the datasets. To maintain
+            # our semantics, we will *EMPTY OUT* the project access dictionary if the expiration time is zero.
+            # Note that when we PATCH the endpoint when re-registering the SA following the expiration, it will
+            # overwrite the existing project access, probably with the same values anyway
+            #
+
+            if sa['project_access_exp'] == 0:
+                use_dids = []
+                logger.info("[INFO] Converting DCF expired dataset semantics from: {} to: {}".
+                            format(str(sa['project_access']), str(use_dids)))
+            else:
+                use_dids = sa['project_access']
+
             ret_entry = {
                 'gcp_id': sa['google_project_id'],
-                'sa_dataset_ids': sa['project_access'],
+                'sa_dataset_ids': use_dids,
                 'sa_name': sa['service_account_email'],
                 'sa_exp': sa['project_access_exp']
             }
@@ -1547,6 +1563,10 @@ def compare_google_ids(dcf_version, cgc_version, user_email):
     """
     When we get new tokens from DCF, we want to sanity check if the Google IDs are in agreement.
     """
+    # Fix for 2530:
+    dcf_version = dcf_version.lower() if dcf_version else dcf_version
+    cgc_version = cgc_version.lower() if cgc_version else cgc_version
+    user_email = user_email.lower() if user_email else user_email
 
     if dcf_version != cgc_version:
         # Most likely possibility is that either DCF or us thinks the google ID is None and the other doesn't. Another
