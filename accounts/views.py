@@ -37,7 +37,7 @@ from django.contrib.auth.models import User
 from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
-from sa_utils import verify_service_account, register_service_account, \
+from sa_utils import verify_service_account, register_service_account, get_project_deleters, \
                      unregister_all_gcp_sa, unregister_sa, service_account_dict, \
                      do_nih_unlink, deactivate_nih_add_to_open, controlled_auth_datasets, have_linked_user
 
@@ -508,16 +508,43 @@ def user_gcp_delete(request, user_id, gcp_id):
         if request.POST:
             user = User.objects.get(id=user_id)
             logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
-            gcp = GoogleProject.objects.get(id=gcp_id, active=1)
-            success, msgs = unregister_all_gcp_sa(user_id, gcp_id, gcp.project_id)
-            # If we encounter problems deleting SAs, stop the process:
-            if not success:
-                messages.error(request, "Unregistering service accounts from Data Commons Framework was not successful.")
-                logger.info("[STATUS] SA Unregistration was unsuccessful {}".format(user.email, gcp_id))
-                for msg in msgs:
-                    messages.error(request, msg)
+
+            #
+            # In the new DCF-centric world, the user has to be logged into DCF if they are trying to
+            # delete a project with a service account on it. But users who have never been anywhere near
+            # DCF can register projects just to use webapp services.
+            # So, if user HAS EVER linked to DCF, they gotta be logged in to do this. If not, then if someone
+            # else on the project HAS EVER linked to DCF, they gotta be logged in. If nobody fits that bill,
+            # we let them delete the project.
+            # Note we also catch the case where a user not on a project is trying to delete it (requires custom
+            # crafted POST):
+            #
+
+            deleter_analysis = get_project_deleters(gcp_id, user.email, logger, SERVICE_ACCOUNT_LOG_NAME)
+            if 'message' in deleter_analysis:
+                messages.error(request, deleter_analysis['message'])
                 return redirect('user_gcp_list', user_id=request.user.id)
-            logger.info("[STATUS] User {} is unregistering GCP {}: SAs dropped".format(user.email, gcp_id))
+
+            do_sa_unregister = True
+            if not deleter_analysis['this_user_registered']:
+                if deleter_analysis['some_user_registered']:
+                    messages.error(request, "Only a project member who has registered with the Data Commons Framework can unregister this project")
+                    logger.info("[STATUS] User {} with no DCF status tried to unregister {}".format(user.email, gcp_id))
+                    return redirect('user_gcp_list', user_id=request.user.id)
+                else: # Nobody on the project has ever done an NIH Linking. Skip the SA step...
+                    do_sa_unregister = False
+
+            if do_sa_unregister:
+                gcp = GoogleProject.objects.get(id=gcp_id, active=1)
+                success, msgs = unregister_all_gcp_sa(user_id, gcp_id, gcp.project_id)
+                # If we encounter problems deleting SAs, stop the process:
+                if not success:
+                    messages.error(request, "Unregistering service accounts from Data Commons Framework was not successful.")
+                    logger.info("[STATUS] SA Unregistration was unsuccessful {}".format(user.email, gcp_id))
+                    for msg in msgs:
+                        messages.error(request, msg)
+                    return redirect('user_gcp_list', user_id=request.user.id)
+                logger.info("[STATUS] User {} is unregistering GCP {}: SAs dropped".format(user.email, gcp_id))
             gcp.user.clear()
             gcp.active=False
             gcp.save()

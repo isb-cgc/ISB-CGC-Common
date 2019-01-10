@@ -44,7 +44,6 @@ from dcf_support import get_stored_dcf_token, \
                         unlink_at_dcf, refresh_at_dcf, decode_token_chunk, calc_expiration_time
 
 from requests_oauthlib.oauth2_session import OAuth2Session
-from jwt.contrib.algorithms.pycrypto import RSAAlgorithm
 from json import loads as json_loads
 
 # Shut this up unless we need to do debug of HTTP request contents
@@ -220,7 +219,6 @@ def oauth2_callback(request):
         #
 
         my_jwt = jwt.PyJWT()
-        my_jwt.register_algorithm('RS256', RSAAlgorithm(RSAAlgorithm.SHA256))
 
         #
         # DCF's key endpoint provides a list of keys they use. Right now, only one, but to future-proof, we want
