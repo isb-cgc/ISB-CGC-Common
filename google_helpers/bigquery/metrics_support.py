@@ -17,26 +17,17 @@ limitations under the License.
 """
 
 import logging
-import re
-from time import sleep
-from uuid import uuid4
-import copy
 from django.conf import settings
-from abstract import SheetsABC
-from sheets_service import get_sheet_service
+from bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
-
-class SheetsSupport(SheetsABC):
-    def __init__(self, project_id, executing_project=None):
-        # Project which will execute any jobs run by this class
-        self.executing_project = executing_project or settings.BIGQUERY_PROJECT_NAME
-        # Destination project
-        self.project_id = project_id
-
-        self.sheet_service = get_sheet_service()
+MAX_INSERT = settings.MAX_BQ_INSERT
 
 
+class BigQueryMetricsSupport(BigQuerySupport):
+
+    def __init__(self):
+        super(BigQueryMetricsSupport, self).__init__(settings.BIGQUERY_PROJECT_NAME, settings.METRICS_BQ_DATASET, settings.METRICS_BQ_TABLE)
 
 
