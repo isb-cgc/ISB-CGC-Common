@@ -520,7 +520,8 @@ def user_gcp_delete(request, user_id, gcp_id):
             # crafted POST):
             #
 
-            deleter_analysis = get_project_deleters(gcp_id, user.email, logger, SERVICE_ACCOUNT_LOG_NAME)
+            gcp = GoogleProject.objects.get(id=gcp_id, active=1)
+            deleter_analysis = get_project_deleters(gcp.project_id, user.email, logger, SERVICE_ACCOUNT_LOG_NAME)
             if 'message' in deleter_analysis:
                 messages.error(request, deleter_analysis['message'])
                 return redirect('user_gcp_list', user_id=request.user.id)
@@ -535,7 +536,6 @@ def user_gcp_delete(request, user_id, gcp_id):
                     do_sa_unregister = False
 
             if do_sa_unregister:
-                gcp = GoogleProject.objects.get(id=gcp_id, active=1)
                 success, msgs = unregister_all_gcp_sa(user_id, gcp_id, gcp.project_id)
                 # If we encounter problems deleting SAs, stop the process:
                 if not success:
