@@ -364,6 +364,102 @@ def _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp):
     return True, None
 
 
+def get_project_deleters(gcp_id, user_email, st_logger, log_name):
+    """
+    User says they want to unregister a project. The problem is we need to insure that if the project has service
+    accounts (SAs) registered at DCF, we need to get those unregistered too. But the SAs do not need to be active, so
+    there is no requirement that everybody in the project be DCF registered to have an SA sitting there. In fact, if
+    an SA has been registered by Dr. X, who has since left the lab after adding Dr. Y to the project, and Dr. X has
+    been dropped, there does not actually have to be ANYBODY on the project with DCF connections to have an SA. But
+    that is beyond our control. However, if the current user doing the operation has EVER had an NIH linkage, we
+    need to tell them to register at DCF first. If the current user has NEVER had a NIH linkage, we check to see if
+    anybody else has such a linkage. If yes, we say that the linked person needs to do the job. If nobody on the
+    project has ever been near DCF, we let the deletion continue, since this implies the project was added just to
+    use CGC features.
+    """
+    try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
+        all_users_in_our_db = True
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1].lower()
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        if not registered_user:
+                            all_users_in_our_db = False
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
+
+        # 2) Verify that the current user is on the GCP project. Somebody can only get
+        # here by hacking a custom POST command:
+        if not user_email.lower() in roles:
+            log_msg = '[STATUS] While unregistering GCP {0}: User email {1} is not in the GCP IAM policy.'.format(gcp_id, user_email)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {
+                'message': log_msg
+            })
+
+            return {
+                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of the project in order to unregister it.'.format(user_email, gcp_id),
+            }
+
+        # 3) Verify which users have ever registered with with NIH:
+        some_user_registered = False
+        this_user_registered = False
+        all_users_nih_linkage_history = True
+
+        for email in roles:
+            member = roles[email]
+
+            member_is_this_user = (user_email.lower() == email)
+
+            # IF USER IS REGISTERED
+            if member['registered_user']:
+                user = User.objects.get(email=email)
+                nih_user = None
+                # FIND NIH_USER FOR USER
+                # Since we are not checking "linked" state, we may have more than one:
+                nih_users = NIH_User.objects.filter(user_id=user.id)
+                member['nih_registered'] = len(nih_users) > 0
+
+                if member['nih_registered']:
+                    some_user_registered = True
+                    if member_is_this_user:
+                        this_user_registered = True
+                else:
+                    all_users_nih_linkage_history = False
+
+            else:
+                member['nih_registered'] = False
+                all_users_nih_linkage_history = False
+
+    except HttpError as e:
+        logger.error("[STATUS] While surveying GCP deleter status {}: ".format(gcp_id))
+        logger.exception(e)
+        return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
+    except Exception as e:
+        logger.error("[STATUS] While surveying GCP deleter status {}: ".format(gcp_id))
+        logger.exception(e)
+        return {'message': "There was an error accessing a GCP project. Please contact feedback@isb-cgc.org."}
+
+    return_obj = {'roles': roles,
+                  'some_user_registered': some_user_registered,
+                  'this_user_registered': this_user_registered,
+                  'all_users_in_our_db': all_users_in_our_db,
+                  'all_users_nih_linkage_history': all_users_nih_linkage_history}
+    return return_obj
+
+
 def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name, is_refresh):
     """
     While we can no longer show the user with a listing of what datasets each project user has access to (DCF will not
