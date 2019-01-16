@@ -27,7 +27,15 @@ MAX_INSERT = settings.MAX_BQ_INSERT
 
 class BigQueryMetricsSupport(BigQuerySupport):
 
-    def __init__(self):
-        super(BigQueryMetricsSupport, self).__init__(settings.BIGQUERY_PROJECT_NAME, settings.METRICS_BQ_DATASET, settings.METRICS_BQ_TABLE)
+    def __init__(self, metrics_table):
+        super(BigQueryMetricsSupport, self).__init__(settings.BIGQUERY_PROJECT_NAME, settings.METRICS_BQ_DATASET, metrics_table)
+        
+    # Add rows to the metrics table specified by table
+    # Note that this is a class method therefor the rows must be supplied formatted ready
+    # for insertion, build_row will not be called!
+    @classmethod
+    def add_rows_to_table(cls, rows, table):
+        bqs = cls(table)
+        return bqs._streaming_insert(rows)
 
 
