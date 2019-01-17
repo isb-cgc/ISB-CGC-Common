@@ -366,11 +366,24 @@ class BigQuerySupport(BigQueryABC):
     def fetch_job_resource(self, job_ref):
         return self.bq_service.jobs().get(**job_ref).execute(num_retries=5)
 
-    # Execute a query to be saved on a temp table (shorthand to instance method above), optionally parameterized
-    # and fetch its results
+    # Add rows to the table specified by project.dataset.table
+    # Note that this is a class method therefor the rows must be supplied formatted ready
+    # for insertion, build_row will not be called! (build_row is implemented in derived classes only)
+    @classmethod
+    def add_rows_to_table(cls, rows, project, dataset, table):
+        bqs = cls(project, dataset, table)
+        return bqs._streaming_insert(rows)
+
+    # Execute a query, optionally parameterized, and fetch its results
     @classmethod
     def execute_query_and_fetch_results(cls, query, parameters=None):
         bqs = cls(None, None, None)
+        return bqs.execute_query(query, parameters)
+
+    @classmethod
+    # Execute a query, optionally parameterized, to be saved on a temp table
+    def execute_query_to_table(cls, query, project, dataset, table, parameters=None):
+        bqs = cls(project, dataset, table)
         return bqs.execute_query(query, parameters)
 
     # Insert a BQ job for a query to be saved on a temp table (shorthand to instance method above), optionally
