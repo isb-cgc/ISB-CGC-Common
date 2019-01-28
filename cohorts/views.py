@@ -1028,7 +1028,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                         ).save()
 
                 # Store cohort to BigQuery
-                bq_project_id = settings.BQ_PROJECT_ID
+                bq_project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
                 bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in results.keys()] for item in sublist])
@@ -1239,7 +1239,7 @@ def clone_cohort(request, cohort_id):
         samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
 
         # Store cohort to BigQuery
-        bq_project_id = settings.BQ_PROJECT_ID
+        bq_project_id = settings.BIGQUERY_PROJECT_ID
         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
@@ -1451,7 +1451,7 @@ def set_operation(request):
                 samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
 
                 # Store cohort to BigQuery
-                project_id = settings.BQ_PROJECT_ID
+                project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
                 bcs.add_cohort_to_bq(new_cohort.id, samples_and_cases['items'])
@@ -1583,7 +1583,7 @@ def save_cohort_from_plot(request):
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
         # Store cohort to BigQuery
-        bq_project_id = settings.BQ_PROJECT_ID
+        bq_project_id = settings.BIGQUERY_PROJECT_ID
         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
@@ -2228,8 +2228,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                 union_queries.append(
                     query_string_base.format(
                         metadata_table=metadata_table,
-                        deployment_project=settings.BIGQUERY_PROJECT_NAME,
-                        deployment_dataset=settings.COHORT_DATASET_ID,
+                        deployment_project=settings.BIGQUERY_PROJECT_ID,
+                        deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
@@ -2289,8 +2289,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         clin_table=program_bq_tables.clin_bq_table,
-                        deployment_project=settings.BIGQUERY_PROJECT_NAME,
-                        deployment_dataset=settings.COHORT_DATASET_ID,
+                        deployment_project=settings.BIGQUERY_PROJECT_ID,
+                        deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
