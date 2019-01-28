@@ -67,8 +67,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             offset_clause = ""
 
             bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-            bq_cohort_dataset = settings.COHORT_DATASET_ID
-            bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
+            bq_cohort_dataset = settings.BIGQUERY_COHORT_DATASET_ID
+            bq_cohort_project_id = settings.BIGQUERY_PROJECT_ID
             data_project = settings.BIGQUERY_DATA_PROJECT_NAME
 
             built_clause = None
