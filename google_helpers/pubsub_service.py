@@ -23,7 +23,7 @@ import httplib2
 
 
 GOOGLE_APPLICATION_CREDENTIALS = settings.GOOGLE_APPLICATION_CREDENTIALS
-PROJECT_ID = settings.PROJECT_ID
+PROJECT_ID = settings.GCLOUD_PROJECT_ID
 
 PUBSUB_SCOPES = ["https://www.googleapis.com/auth/pubsub"]
 
