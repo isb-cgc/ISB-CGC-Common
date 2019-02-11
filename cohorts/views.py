@@ -298,7 +298,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 sample_barcode_col = bq_table_info['sample_barcode_col']
                 bq_dataset = bq_table_info['dataset']
                 bq_table = bq_table_info['table']
-                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
+                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_ID
 
                 # Build the query for any filter which *isn't* a not-any query.
                 query_template = \
@@ -2221,7 +2221,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper()).first()
 
                 metadata_table = "{}.{}.{}".format(
-                    settings.BIGQUERY_DATA_PROJECT_NAME, program_bq_tables.bq_dataset,
+                    settings.BIGQUERY_DATA_PROJECT_ID, program_bq_tables.bq_dataset,
                     program_bq_tables.data_table.lower(),
                 )
 
@@ -2279,14 +2279,14 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                 biospec_clause = ""
                 if program_bq_tables.biospec_bq_table:
                     biospec_clause = biospec_clause_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         biospec_table=program_bq_tables.biospec_bq_table
                     )
 
                 union_queries.append(
                     query_string_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         clin_table=program_bq_tables.clin_bq_table,
                         deployment_project=settings.BIGQUERY_PROJECT_ID,
