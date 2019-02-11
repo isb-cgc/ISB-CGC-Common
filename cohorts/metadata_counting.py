@@ -439,7 +439,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 sample_barcode_col = bq_table_info['sample_barcode_col']
                 bq_dataset = bq_table_info['dataset']
                 bq_table = bq_table_info['table']
-                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
+                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_ID
 
                 # Build the query for any filter which *isn't* a not-any query.
                 query_template = \
