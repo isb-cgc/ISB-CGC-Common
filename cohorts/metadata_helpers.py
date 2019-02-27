@@ -187,36 +187,6 @@ BQ_MOLECULAR_ATTR_TABLES = {
     'TARGET': None,
 }
 
-BQ_METADATA_DATA_TABLES = {
-    'TCGA': {
-        'HG19': {
-            'table': 'tcga_metadata_data_hg19_250718',
-            'dataset': 'TCGA_hg19_data_v0',
-        },
-        'HG38': {
-            'table': 'tcga_metadata_data_hg38_250718',
-            'dataset': 'TCGA_hg38_data_v0',
-        },
-    },
-    'CCLE': None,
-    'TARGET': None,
-}
-
-BQ_BIOCLIN_DATA_TABLES = {
-    'TCGA': {
-        'table': 'Clinical',
-        'dataset': 'TCGA_bioclin_v0',
-    },
-    'CCLE': {
-        'table': 'clinical_v0',
-        'dataset': 'CCLE_bioclin_v0',
-    },
-    'TARGET': {
-        'table': 'Clinical',
-        'dataset': 'TARGET_bioclin_v0',
-    },
-}
-
 
 # Get a set of random characters of 'length'
 def make_id(length):
