@@ -27,8 +27,6 @@ urlpatterns = [
     # url(r'^logout', account_views.logout, name='account_logout'),
     url(r'^logout', views.extended_logout_view, name='account_logout'),
     url(r'^login/$', google_views.oauth2_login, name='account_login'),
-    # url(r'^nih_login/$', views.nih_login, name='nih_login'),
-    url(r'^unlink_accounts/', views.unlink_accounts, name='unlink_accounts'),
     # Following urls for new DCF flows
     url(r'^dcf_login/$', dcf_views.oauth2_login, name='dcf_login'),
     url(r'^dcf_simple_logout/$', dcf_views.dcf_simple_logout, name='dcf_simple_logout'),

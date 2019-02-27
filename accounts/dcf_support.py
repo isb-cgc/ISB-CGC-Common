@@ -107,7 +107,7 @@ def drop_dcf_token(user_id):
     return None
 
 
-def unregister_sa_via_dcf(user_id, sa_id):
+def unregister_sa(user_id, sa_id):
     """
     Delete the given service account
 
