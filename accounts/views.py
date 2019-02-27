@@ -38,17 +38,16 @@ from models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
 from sa_utils import verify_service_account, register_service_account, get_project_deleters, \
-                     unregister_all_gcp_sa, unregister_sa, service_account_dict, \
-                     do_nih_unlink, deactivate_nih_add_to_open, controlled_auth_datasets, have_linked_user
+                     unregister_all_gcp_sa, service_account_dict, \
+                     controlled_auth_datasets, have_linked_user
 
-from dcf_support import service_account_info_from_dcf_for_project, TokenFailure, \
+from dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
                         InternalTokenError, RefreshTokenExpired, DCFCommFailure
 
 from json import loads as json_loads
 
 logger = logging.getLogger('main_logger')
 
-OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 GCP_REG_LOG_NAME = settings.GCP_ACTIVITY_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
@@ -60,41 +59,13 @@ def extended_logout_view(request):
 
     response = None
     try:
-        # deactivate NIH_username entry if exists
-        user = User.objects.get(id=request.user.id)
-        deactivate_nih_add_to_open(request.user.id, user.email)
         response = account_views.logout(request)
-
-    except ObjectDoesNotExist as e:
-        logger.error("[ERROR] User with ID of {} not found!".format(str(request.user.id)))
-        logger.exception(e)
-        messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
-        return redirect(reverse('landing_page'))
     except Exception as e:
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
         messages.error(request,"There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
     return response
-
-@login_required
-def unlink_accounts(request):
-    user_id = request.user.id
-
-    try:
-        message = do_nih_unlink(user_id)
-        if message:
-            messages.error(request, message)
-            return redirect(reverse('user_detail', args=[user_id]))
-
-    except Exception as e:
-        logger.error("[ERROR] While unlinking accounts:")
-        logger.exception(e)
-        messages.error(request, 'There was an error when attempting to unlink your NIH user account - please contact feedback@isb-cgc.org.')
-
-    # redirect to user detail page
-    return redirect(reverse('user_detail', args=[user_id]))
-
 
 # GCP RELATED VIEWS
 
