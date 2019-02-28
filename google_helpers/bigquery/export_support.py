@@ -176,12 +176,12 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         # presence of a table_job_id means the export query was still running when this
         # method was called; give it another round of checks
         if table_job_id:
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=table_job_id).execute()
+            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=table_job_id).execute()
             retries = 0
             while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
                 retries += 1
                 sleep(1)
-                job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=table_job_id).execute()
+                job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=table_job_id).execute()
 
             if job_is_done and not job_is_done['status']['state'] == 'DONE':
                 logger.debug(str(job_is_done))
@@ -218,10 +218,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         }
 
         export_job = bq_service.jobs().insert(
-            projectId=settings.BIGQUERY_PROJECT_NAME,
+            projectId=settings.BIGQUERY_PROJECT_ID,
             body=export_config).execute(num_retries=5)
 
-        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
+        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
                                             jobId=job_id).execute()
 
         retries = 0
@@ -229,7 +229,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=job_id).execute()
+            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
 
         logger.debug("[STATUS] extraction job_is_done: {}".format(str(job_is_done)))
 
@@ -247,7 +247,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 if not exported_file:
                     msg = "Export file {}/{} not found".format(self.bucket_path, self.file_name)
                     logger.error("[ERROR] ".format({msg}))
-                    export_result = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=job_id).execute()
+                    export_result = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
                     if 'errors' in export_result:
                         logger.error('[ERROR] Errors seen: {}'.format(export_result['errors'][0]['message']))
                     result['status'] = 'error'
@@ -284,7 +284,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         query_data = {
             'jobReference': {
-                'projectId': settings.BIGQUERY_PROJECT_NAME,
+                'projectId': settings.BIGQUERY_PROJECT_ID,
                 'jobId': job_id
             },
             'configuration': {
@@ -307,17 +307,17 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             query_data['configuration']['query']['queryParameters'] = parameters
 
         query_job = bq_service.jobs().insert(
-            projectId=settings.BIGQUERY_PROJECT_NAME,
+            projectId=settings.BIGQUERY_PROJECT_ID,
             body=query_data).execute(num_retries=5)
 
-        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME, jobId=job_id).execute()
+        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
 
         retries = 0
 
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_NAME,
+            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
                               jobId=job_id).execute()
 
         result = {
@@ -348,7 +348,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 if not export_table:
                     msg = "Export table {}:{}.{} not found".format(self.project_id,self.dataset_id,self.table_id)
                     logger.error("[ERROR] ".format({msg}))
-                    bq_result = bq_service.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_NAME,
+                    bq_result = bq_service.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_ID,
                                   jobId=job_id).execute()
                     if 'errors' in bq_result:
                         logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
