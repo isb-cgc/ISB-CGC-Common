@@ -367,6 +367,8 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
             if err_msg is None:
                 messages['dcf_analysis_reg_sas_summary'] = 'You are not authorized to register service account "{}".'\
                 .format(service_account_id)
+            else:
+                messages['dcf_analysis_reg_sas_summary'] = err_msg
         # Per Slack thread 10/31/18, this field can now also be 404 if the SA does not show up in IAM policy (this
         # will go along with an SA detail field of policy_accessible = false):
         elif sa_error_info['status'] == 404:
