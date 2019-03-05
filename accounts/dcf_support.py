@@ -428,8 +428,8 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         member_error_info = gcp_error_info['membership_validity']
         is_ok, combined = _write_project_member_summary(member_error_info, gcp_id)
         if is_ok:
-            member_msg = "All Google Cloud Project roles meet requirements. Roles are assigned to either \
-            service accounts or to users who have registered with the Data Commons Framework."
+            member_msg = "All Google Cloud Project roles meet requirements, including the service accounts not being " \
+                         " registered, and all users have registered with the Data Commons Framework."
         else:
             member_msg = 'The Google Cloud Project membership has errors "{}"'.format(combined)
         messages['dcf_analysis_project_members'] = member_msg
