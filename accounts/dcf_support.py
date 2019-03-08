@@ -107,7 +107,7 @@ def drop_dcf_token(user_id):
     return None
 
 
-def unregister_sa_via_dcf(user_id, sa_id):
+def unregister_sa(user_id, sa_id):
     """
     Delete the given service account
 
@@ -317,7 +317,6 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         if not dataset_validity_info:
             messages['dcf_analysis_data'].append({"id": "N/A", "ok": False, "err": "Cannot verify project"})
 
-
         for dataset_name in dataset_validity_info:
             if dataset_name in datasets:
                 dataset = dataset_validity_info[dataset_name]
@@ -337,10 +336,39 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         elif sa_error_info['status'] == 400:
             err_msg = sa_error_info["error_description"] if "error_description" in sa_error_info else None
             messages['dcf_analysis_reg_sas_summary'] = err_msg if err_msg is not None else "Validation could not be completed."
-        # Per Slack thread 10/31/18, this field can be 403 if unauthorized:
+        # Per Slack thread 10/31/18, this field can be 403 if unauthorized.
+        # 02/28/19 Per Issue #2548, if a key has been minted for a service account, you can get back a 403 as
+        # well. This seems to be new behavior? Regardless, parse out info present in the return, and only issue the
+        # "you are not authorized to register service account" message if that fails:
+        # "service_account_email": {
+        #   "status": 403,
+        #   "service_account_validity": {
+        #     "866257449475-compute@developer.gserviceaccount.com": {
+        #        "owned_by_project": true, "no_external_access": false, "policy_accessible": true, "valid_type": true
+        #     }
+        #   },
+        #   "error_description": "Service account requested for registration is invalid.",
+        #   "error": "unauthorized"
+        #
         elif sa_error_info['status'] == 403:
-            messages['dcf_analysis_reg_sas_summary'] = 'You are not authorized to register service account "{}".'\
+            sa_error_validity = sa_error_info['service_account_validity'] if 'service_account_validity' in sa_error_info else None
+            if sa_error_validity is not None:
+                info_for_sa = sa_error_validity[next(iter(sa_error_validity))]
+                is_ok, combined = _write_sa_summary(info_for_sa, True, gcp_id)
+                if is_ok:
+                    logger.error(
+                        "[ERROR] Inconsistent success response from DCF! Code: {} Eval: {}".format(
+                            sa_error_info['status'],
+                            is_ok))
+                err_msg = combined
+            else:
+                err_msg = sa_error_info["error_description"] if "error_description" in sa_error_info else None
+
+            if err_msg is None:
+                messages['dcf_analysis_reg_sas_summary'] = 'You are not authorized to register service account "{}".'\
                 .format(service_account_id)
+            else:
+                messages['dcf_analysis_reg_sas_summary'] = err_msg
         # Per Slack thread 10/31/18, this field can now also be 404 if the SA does not show up in IAM policy (this
         # will go along with an SA detail field of policy_accessible = false):
         elif sa_error_info['status'] == 404:
@@ -400,8 +428,8 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         member_error_info = gcp_error_info['membership_validity']
         is_ok, combined = _write_project_member_summary(member_error_info, gcp_id)
         if is_ok:
-            member_msg = "All Google Cloud Project roles meet requirements. Roles are assigned to either \
-            service accounts or to users who have registered with the Data Commons Framework."
+            member_msg = "All Google Cloud Project roles meet requirements, including the service accounts not being " \
+                         " registered, and all users have registered with the Data Commons Framework."
         else:
             member_msg = 'The Google Cloud Project membership has errors "{}"'.format(combined)
         messages['dcf_analysis_project_members'] = member_msg
@@ -412,7 +440,7 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
     return success, messages
 
 
-def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_in_use):
+def _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, sa_in_use):
     """
     Service account operations should not fail, as we verify beforehand that everything is okay before
     proceeding. But DCF does return an extensive data structure if there is a problem (in fact, the same
@@ -432,7 +460,6 @@ def _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, p
 
     if resp is not None:
         logger.info("[INFO] DCF SA action response code was {}".format(resp.status_code))
-        logger.info("[INFO] Unexpected DCF response text: {}".format(resp.text))
         if resp.status_code == 200:
             logger.info("[INFO] DCF SA action response body: {} ".format(resp.text))
             success = True
@@ -723,7 +750,7 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
         logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
         raise e
 
-    success, messages = _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, None)
+    success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, None)
 
     return success, messages
 
@@ -757,7 +784,7 @@ def extend_sa_at_dcf(user_id, gcp_id, service_account_id, phs_map):
     if resp.status_code == 204:
         success, messages = True, {}
     else:
-        success, messages = _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, None, phs_map, None)
+        success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, None, phs_map, None)
 
     return success, messages
 
@@ -809,7 +836,7 @@ def adjust_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
     if resp.status_code == 204:
         success, messages = True, {}
     else:
-        success, messages = _parse_unexpected_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, None)
+        success, messages = _parse_dcf_response(resp, gcp_id, service_account_id, datasets, phs_map, None)
 
     return success, messages
 
