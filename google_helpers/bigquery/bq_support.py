@@ -62,7 +62,7 @@ class BigQuerySupport(BigQueryABC):
 
     def __init__(self, project_id, dataset_id, table_id, executing_project=None, table_schema=None):
         # Project which will execute any jobs run by this class
-        self.executing_project = executing_project or settings.BIGQUERY_PROJECT_NAME
+        self.executing_project = executing_project or settings.BIGQUERY_PROJECT_ID
         # Destination project
         self.project_id = project_id
         # Destination dataset
