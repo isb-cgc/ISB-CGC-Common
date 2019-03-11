@@ -98,7 +98,7 @@ class StackDriverLogger(object):
     @classmethod
     def build_from_django_settings(cls):
         from django.conf import settings
-        project_name = settings.BIGQUERY_PROJECT_NAME
+        project_name = settings.BIGQUERY_PROJECT_ID
         credentials = ServiceAccountCredentials.from_json_keyfile_name(
             settings.GOOGLE_APPLICATION_CREDENTIALS, cls.LOGGING_SCOPES)
 
