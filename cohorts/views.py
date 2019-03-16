@@ -2138,7 +2138,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     table = request.POST.get('table-name', None)
 
         elif export_dest == 'gcs':
-            bq_proj_id = settings.BIGQUERY_DATA_PROJECT_ID
+            bq_proj_id = settings.GCLOUD_PROJECT_ID
             file_name = request.POST.get('file-name', None)
             if file_name:
                 file_name = request.POST.get('file-name', '')[0:1024]
