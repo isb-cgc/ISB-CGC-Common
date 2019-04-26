@@ -13,7 +13,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from __future__ import absolute_import
 
+from builtins import str
 import logging
 import jwt
 import os
@@ -31,11 +33,11 @@ from django.http import HttpResponseRedirect
 
 from google_helpers.stackdriver import StackDriverLogger
 
-from sa_utils import found_linking_problems, DemoLoginResults, \
+from .sa_utils import found_linking_problems, DemoLoginResults, \
                      handle_user_db_update_for_dcf_linking, \
                      unlink_account_in_db_for_dcf, refresh_user_projects, have_linked_user
 
-from dcf_support import get_stored_dcf_token, \
+from .dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \

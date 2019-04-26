@@ -24,8 +24,8 @@ from django.conf import settings
 from uuid import uuid4
 from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.storage_service import get_storage_resource
-from abstract import BigQueryExportABC
-from bq_support import BigQuerySupport
+from google_helpers.bigquery.abstract import BigQueryExportABC
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 BQ_ATTEMPT_MAX = 10
 

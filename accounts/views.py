@@ -13,7 +13,9 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from __future__ import absolute_import
 
+from builtins import str
 import logging
 
 from allauth.account import views as account_views
@@ -34,14 +36,14 @@ from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from googleapiclient.errors import HttpError
 from django.contrib.auth.models import User
-from models import *
+from .models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
-from sa_utils import verify_service_account, register_service_account, get_project_deleters, \
+from .sa_utils import verify_service_account, register_service_account, get_project_deleters, \
                      unregister_all_gcp_sa, service_account_dict, \
                      controlled_auth_datasets, have_linked_user
 
-from dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
+from .dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
                         InternalTokenError, RefreshTokenExpired, DCFCommFailure
 
 from json import loads as json_loads
@@ -565,14 +567,14 @@ def verify_sa(request, user_id):
             #
             # Early failures are identified with a "message" key:
             #
-            if 'message' in result.keys():
+            if 'message' in list(result.keys()):
                 logger.info("[INFO] Gotta message")
                 status = '400'
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
                 # Users attempting to refresh a project they're not on go back to their GCP list (because this GCP was probably removed from it)
-                if 'redirect' in result.keys():
+                if 'redirect' in list(result.keys()):
                     result['redirect'] = reverse('user_gcp_list', kwargs={'user_id': request.user.id})
-                if 'user_not_found' in result.keys():
+                if 'user_not_found' in list(result.keys()):
                     gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
                     user=User.objects.get(id=request.user.id)
                     gcp.user.set(gcp.user.all().exclude(id=user.id))
@@ -778,7 +780,7 @@ def register_bucket(request, user_id, gcp_id):
             storage_service = get_storage_resource()
             buckets = storage_service.buckets().list(project=gcp.project_id).execute()
 
-            if 'items' in buckets.keys():
+            if 'items' in list(buckets.keys()):
                 bucket_list = buckets['items']
 
                 for bucket in bucket_list:
@@ -861,7 +863,7 @@ def register_bqdataset(request, user_id, gcp_id):
             bq_service = get_bigquery_service()
             datasets = bq_service.datasets().list(projectId=gcp.project_id).execute()
 
-            if 'datasets' in datasets.keys():
+            if 'datasets' in list(datasets.keys()):
                 dataset_list = datasets['datasets']
 
                 for dataset in dataset_list:

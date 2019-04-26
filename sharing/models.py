@@ -1,3 +1,4 @@
+from builtins import range
 import operator
 
 from django.db import models

@@ -15,11 +15,12 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+from __future__ import absolute_import
 
 from oauth2client.service_account import ServiceAccountCredentials
 from django.conf import settings
 from httplib2 import Http
-from utils import build_with_retries
+from .utils import build_with_retries
 
 
 GOOGLE_GROUP_ADMIN = settings.GOOGLE_GROUP_ADMIN

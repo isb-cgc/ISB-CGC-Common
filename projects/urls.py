@@ -1,6 +1,7 @@
+from __future__ import absolute_import
 from django.conf.urls import url
 
-import views
+from . import views
 
 urlpatterns = [
     url(r'^$', views.program_list, name='programs'),

@@ -5,11 +5,12 @@ Uploads user or other data to either the cloud or the local environment
 depending on the environment.
 """
 
+from builtins import object
 from google_helpers import storage_service
 from googleapiclient import http
 from django.conf import settings
 
-class CloudUploadService():
+class CloudUploadService(object):
 
     def __init__(self):
         self.storage = storage_service.get_storage_resource()
@@ -22,7 +23,7 @@ class CloudUploadService():
             media_body=media
         ).execute()
 
-class LocalUploadService():
+class LocalUploadService(object):
 
     def __init__(self):
         pass
@@ -31,7 +32,7 @@ class LocalUploadService():
         pass
 
 
-class UploadService():
+class UploadService(object):
 
     def __init__(self):
         if settings.GCLOUD_BUCKET is not None:

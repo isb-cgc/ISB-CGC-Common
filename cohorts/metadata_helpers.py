@@ -18,6 +18,8 @@ limitations under the License.
 Helper methods for fetching, curating, and managing cohort metadata
 """
 
+from builtins import str
+from past.builtins import basestring
 import sys
 import random
 import string
@@ -464,7 +466,7 @@ def fetch_metadata_value_set(program=None):
 
         preformatted_values = get_preformatted_values(program)
 
-        if len(METADATA_ATTR[program][METADATA_ATTR[program].keys()[0]]['values']) <= 0:
+        if len(METADATA_ATTR[program][list(METADATA_ATTR[program].keys())[0]]['values']) <= 0:
             db = get_sql_connection()
             cursor = db.cursor()
 
@@ -606,9 +608,9 @@ def format_for_display(item):
     if item is None or item == 'null':
         formatted_item = 'None'
     else:
-        formatted_item = string.replace(formatted_item, '_', ' ')
+        formatted_item = formatted_item.replace('_', ' ')
         formatted_item = string.capwords(formatted_item)
-        formatted_item = string.replace(formatted_item,' To ', ' to ')
+        formatted_item = formatted_item.replace(' To ', ' to ')
 
     return formatted_item
 
@@ -625,7 +627,7 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
 
     grouped_filters = None
 
-    for key, value in filters.items():
+    for key, value in list(filters.items()):
         gene = None
         invert = False
 
@@ -741,7 +743,7 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
                 big_query_str += ' %s in (' % key
                 i = 0
                 for val in value:
-                    value_tuple += (val.strip(),) if type(val) is unicode else (val,)
+                    value_tuple += (val.strip(),) if type(val) is str else (val,)
                     if i == 0:
                         query_str += '%s'
                         big_query_str += '"' + str(val) + '"'
@@ -774,7 +776,7 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
                     big_query_str += ' %s=' % key
                     query_str += '%s'
                     big_query_str += '"%s"' % value
-                    value_tuple += (value.strip(),) if type(value) is unicode else (value,)
+                    value_tuple += (value.strip(),) if type(value) is str else (value,)
 
     # Handle our data buckets
     if grouped_filters:
@@ -798,7 +800,7 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
                 big_query_str += ' %s=' % filter['filter']
                 query_str += '%s'
                 big_query_str += '"%s"' % filter['value']
-                value_tuple += (filter['value'].strip(),) if type(filter['value']) is unicode else (filter['value'],)
+                value_tuple += (filter['value'].strip(),) if type(filter['value']) is str else (filter['value'],)
 
             query_str += ' )'
             big_query_str += ' )'
@@ -1173,7 +1175,7 @@ def data_availability_sort(key, value, attr_details):
 def normalize_bmi(bmis):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     bmi_list = {'underweight': 0, 'normal weight': 0, 'overweight': 0, 'obese': 0, 'None': 0}
-    for bmi, count in bmis.items():
+    for bmi, count in list(bmis.items()):
         if type(bmi) != dict:
             if bmi and bmi != 'None':
                 fl_bmi = float(bmi)
@@ -1198,7 +1200,7 @@ def normalize_ages(ages,bin_by_five=False):
         new_age_list = {'0 to 4': 0, '5 to 9': 0, '10 to 14': 0, '15 to 19': 0, '20 to 24': 0, '25 to 29': 0, '30 to 34':0, '35 to 39': 0, 'Over 40': 0, 'None': 0}
     else:
         new_age_list = {'10 to 39': 0, '40 to 49': 0, '50 to 59': 0, '60 to 69': 0, '70 to 79': 0, 'Over 80': 0, 'None': 0}
-    for age, count in ages.items():
+    for age, count in list(ages.items()):
         if type(age) != dict:
             if age and age != 'None':
                 int_age = float(age)
@@ -1246,7 +1248,7 @@ def normalize_ages(ages,bin_by_five=False):
 def normalize_years(years):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     new_year_list = {'1976 to 1980': 0, '1981 to 1985': 0, '1986 to 1990': 0, '1991 to 1995': 0, '1996 to 2000': 0, '2001 to 2005': 0, '2006 to 2010': 0, '2011 to 2015': 0, 'None': 0}
-    for year, count in years.items():
+    for year, count in list(years.items()):
         if type(year) != dict:
             if year and year != 'None':
                 int_year = float(year)
@@ -1278,7 +1280,7 @@ def normalize_simple_days(days):
     new_day_list = {'1 to 500': 0, '501 to 1000': 0, '1001 to 1500': 0, '1501 to 2000': 0, '2001 to 2500': 0,
                     '2501 to 3000': 0, '3001 to 3500': 0, '3501 to 4000': 0, '4001 to 4500': 0, '4501 to 5000': 0,
                     '5001 to 5500': 0, '5501 to 6000': 0, 'None': 0}
-    for day, count in days.items():
+    for day, count in list(days.items()):
         if type(day) != dict:
             if day and day != 'None':
                 int_day = float(day)
@@ -1317,7 +1319,7 @@ def normalize_negative_days(days):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     new_day_list = {'0 to -5000': 0, '-5001 to -10000': 0, '-10001 to -15000': 0, '-15001 to -20000': 0, '-20001 to -25000': 0,
                     '-25001 to -30000': 0, '-30001 to -35000': 0, 'None': 0}
-    for day, count in days.items():
+    for day, count in list(days.items()):
         if type(day) != dict:
             if day and day != 'None':
                 int_day = float(day)
@@ -1346,7 +1348,7 @@ def normalize_by_200(values):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     new_value_list = {'0 to 200': 0, '200.01 to 400': 0, '400.01 to 600': 0, '600.01 to 800': 0, '800.01 to 1000': 0,
                     '1000.01 to 1200': 0, '1200.01 to 1400': 0, '1400.01+': 0, 'None': 0}
-    for value, count in values.items():
+    for value, count in list(values.items()):
         if type(value) != dict:
             if value and value != 'None':
                 int_value = float(value)

@@ -15,7 +15,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+from __future__ import absolute_import
 
+from builtins import str
 import traceback
 import time
 import copy
@@ -23,7 +25,7 @@ from time import sleep
 
 import django
 import re
-from metadata_helpers import *
+from .metadata_helpers import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery.service import authorize_credentials_with_Google
 from google_helpers.bigquery.cohort_support import BigQuerySupport
@@ -681,7 +683,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             if not col_headers[0] in counts:
                 # If this is a categorical attribute, fetch its list of possible values (so we can know what didn't come
                 # back in the query)
-                values = { k: 0 for k in metadata_attr_values[col_headers[0]]['values'].keys() } if metadata_attr_values[col_headers[0]]['type'] == 'C' else {}
+                values = { k: 0 for k in list(metadata_attr_values[col_headers[0]]['values'].keys()) } if metadata_attr_values[col_headers[0]]['type'] == 'C' else {}
                 counts[col_headers[0]] = {
                     'counts': values,
                     'total': 0,
@@ -691,7 +693,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 counts[col_headers[0]]['total'] += int(row[1])
 
         # Query the data type counts
-        if len(metadata_data_type_values.keys()) > 0:
+        if len(list(metadata_data_type_values.keys())) > 0:
             data_avail_query = None
             params = ()
             # If no proper filter table was built, or, it was but without data filters, we can use the 'filter table'
@@ -766,7 +768,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
             for row in cursor.fetchall():
                 if not row[1] in data_counts:
-                    values = {int(k): 0 for k in metadata_data_type_values[row[1]]['values'].keys()}
+                    values = {int(k): 0 for k in list(metadata_data_type_values[row[1]]['values'].keys())}
                     data_counts[row[1]] = {
                         'counts': values,
                         'total': 0,
@@ -799,7 +801,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                             item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type] = [build, ]
                         elif build not in item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type]:
                             item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type].append(build)
-                for type in METADATA_DATA_AVAIL_PLOT_MAP.values():
+                for type in list(METADATA_DATA_AVAIL_PLOT_MAP.values()):
                     if type not in item:
                         item[type] = 'None'
 
@@ -875,7 +877,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 elif attr == 'wbc_at_diagnosis':
                     feature['values'] = normalize_by_200(counts[attr]['counts'])
 
-                for value, count in feature['values'].items():
+                for value, count in list(feature['values'].items()):
                     # Supports #2018. This value object is the only information that gets used to
                     # stock cohort checkboxes in the template. To support clicking on a treemap to
                     # trigger the checkbox, we need have an id that glues the attribute name to the
@@ -902,7 +904,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                     'total': data_counts[data_type]['total'],
                 }
 
-                for value, count in feature['values'].items():
+                for value, count in list(feature['values'].items()):
 
                     val_obj = {'value': value, 'count': count, }
 
@@ -1133,7 +1135,7 @@ def validate_and_count_barcodes(barcodes, user_id):
 
         # Convert the project names into project IDs
         for prog in projects_to_lookup:
-            proj_names = projects_to_lookup[prog].keys()
+            proj_names = list(projects_to_lookup[prog].keys())
             projects = Project.objects.filter(name__in=proj_names, program=Program.objects.get(name=prog, active=1))
             for proj in projects:
                 projects_to_lookup[prog][proj.name] = proj.id

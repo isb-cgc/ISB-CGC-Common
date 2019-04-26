@@ -15,7 +15,9 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+from __future__ import absolute_import
 
+from builtins import str
 import logging
 import time
 import MySQLdb
@@ -23,8 +25,8 @@ import MySQLdb
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 
-from metadata_counting import count_public_data_type
-from metadata_helpers import get_sql_connection, build_where_clause
+from .metadata_counting import count_public_data_type
+from .metadata_helpers import get_sql_connection, build_where_clause
 
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from cohorts.models import Cohort, Cohort_Perms

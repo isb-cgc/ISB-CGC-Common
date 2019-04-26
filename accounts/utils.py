@@ -16,6 +16,7 @@ limitations under the License.
 
 """
 
+from builtins import object
 from json import loads as json_loads
 import logging
 from re import compile as re_compile
@@ -252,7 +253,7 @@ def is_email_in_iam_roles(roles, user_email):
     Returns: True if user_email is in any role, otherwise False.
     """
     found = False
-    for role, user_list in roles.iteritems():
+    for role, user_list in roles.items():
         if user_email.lower() in [user_item['email'].lower() for user_item in user_list]:
             found = True
             break

@@ -23,7 +23,7 @@ from uuid import uuid4
 import copy
 from django.conf import settings
 from google_helpers.bigquery.service import get_bigquery_service
-from abstract import BigQueryABC
+from google_helpers.bigquery.abstract import BigQueryABC
 
 logger = logging.getLogger('main_logger')
 
@@ -519,7 +519,7 @@ class BigQuerySupport(BigQueryABC):
                     filter_string += " OR "
                 if len(values) == 1:
                     # Scalar param
-                    query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
+                    query_param['parameterType']['type'] = ('STRING' if re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
                         if '%' in values[0]:
@@ -541,7 +541,7 @@ class BigQuerySupport(BigQueryABC):
                                 param_name
                             )
                 elif len(values) == 2 and attr.endswith('_btw'):
-                    query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
+                    query_param['parameterType']['type'] = ('STRING' if re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     param_name_1 = param_name + '_btw_1'
                     param_name_2 = param_name + '_btw_2'
                     filter_string += "{}{} BETWEEN @{} AND @{}".format(
@@ -561,7 +561,7 @@ class BigQuerySupport(BigQueryABC):
                     # Array param
                     query_param['parameterType']['type'] = "ARRAY"
                     query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
-                    query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')}
+                    query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')}
                     filter_string += "{}{} IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
