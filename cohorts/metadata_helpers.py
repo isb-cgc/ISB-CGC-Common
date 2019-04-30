@@ -28,8 +28,11 @@ import warnings
 import copy
 import MySQLdb
 import string
+import time
+from time import sleep
 import re
-from projects.models import Program, Public_Data_Tables
+from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 from uuid import uuid4
 from django.conf import settings
@@ -500,6 +503,7 @@ def fetch_metadata_value_set(program=None):
                         }
 
             # Fetch the tooltip strings for Disease Codes
+            cursor.close()
             cursor = db.cursor()
             cursor.callproc('get_project_tooltips', (program,))
 
@@ -1374,13 +1378,188 @@ def normalize_by_200(values):
     return new_value_list
 
 
-def get_sample_metadata(sample_barcode):
+def get_full_sample_metadata(barcodes):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+    result = {
+        'total_found': 0
+    }
+    db = None
+    cursor = None
+
+    barcodes_by_program = {}
+
+    for barcode in barcodes:
+        dash = barcode.find("-")
+        if dash >= 0:
+            prog = barcode[0:dash]
+            if prog not in ['TCGA', 'TARGET']:
+                prog = 'CCLE'
+        else:
+            prog = 'CCLE'
+        if prog not in barcodes_by_program:
+            barcodes_by_program[prog] = ()
+        barcodes_by_program[prog] += (barcode,)
+
+    programs = Program.objects.filter(name__in=barcodes_by_program.keys(), active=True, is_public=True)
+
+    items = {}
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        for program in programs:
+            program_tables = program.get_metadata_tables()
+            program_data_tables = program.get_data_tables()
+
+            cursor.execute("""
+                SELECT biospec.sample_barcode as sb, biospec.case_barcode as cb, biospec.*
+                FROM {} biospec
+                WHERE biospec.sample_barcode IN ({}) AND biospec.endpoint_type = 'current'
+            """.format(program_tables.biospec_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
+                           barcodes_by_program[program.name])
+
+            fields = cursor.description
+            skip = ['endpoint_type', 'metadata_clinical_id', 'metadata_biospecimen_id', 'sb', 'cb']
+
+            for row in cursor.fetchall():
+                items[row[0]] = {
+                    'sample_barcode': row[0],
+                    'case_barcode': row[1],
+                    'biospecimen_data': {fields[index][0]: column for index, column in enumerate(row) if
+                                      fields[index][0] not in skip},
+                    'data_details': {}
+                }
+
+            for build in program_data_tables:
+                cursor.execute("""
+                    SELECT md.sample_barcode as sb, md.*
+                    FROM {} md
+                    WHERE md.sample_barcode IN ({}) AND NOT(md.sample_barcode = '') AND md.sample_barcode IS NOT NULL 
+                """.format(build.data_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
+                               barcodes_by_program[program.name])
+
+                fields = cursor.description
+                for row in cursor.fetchall():
+                    if not build.build in items[row[0]]['data_details']:
+                        items[row[0]]['data_details'][build.build] = []
+                    items[row[0]]['data_details'][build.build].append(
+                        {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip}
+                    )
+
+            # TODO: Once we have aliquots in the database again, add those here
+
+            result['total_found'] += 1
+            result['samples'] = [item for item in items.values()]
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return result
+
+
+def get_full_case_metadata(barcodes):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+    result = {
+        'total_found': 0
+    }
+    db = None
+    cursor = None
+
+    barcodes_by_program = {}
+
+    for barcode in barcodes:
+        dash = barcode.find("-")
+        if dash >= 0:
+            prog = barcode[0:dash]
+            if prog not in ['TCGA','TARGET']:
+                prog = 'CCLE'
+        else:
+            prog = 'CCLE'
+        if prog not in barcodes_by_program:
+            barcodes_by_program[prog] = ()
+        barcodes_by_program[prog] += (barcode,)
+
+    programs = Program.objects.filter(name__in=barcodes_by_program.keys(),active=True,is_public=True)
+
+    items = {}
+
+    try:
+        db = get_sql_connection()
+        cursor = db.cursor()
+
+        for program in programs:
+            program_tables = program.get_metadata_tables()
+            program_data_tables = program.get_data_tables()
+
+            cursor.execute("""
+                SELECT clin.case_barcode as cb, clin.*
+                FROM {} clin
+                WHERE clin.case_barcode IN ({}) AND clin.endpoint_type = 'current'
+            """.format(program_tables.clin_table, ",".join(["%s"]*(len(barcodes_by_program[program.name])))), barcodes_by_program[program.name])
+
+            fields = cursor.description
+            skip = ['endpoint_type', 'metadata_clinical_id', 'metadata_biospecimen_id', 'cb']
+
+            for row in cursor.fetchall():
+                items[row[0]] = {
+                    'case_barcode': row[0],
+                    'clinical_data': {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip},
+                    'samples': [],
+                    'data_details': {}
+                }
+
+            cursor.execute("""
+                SELECT case_barcode, sample_barcode
+                FROM {} 
+                WHERE case_barcode IN ({}) AND endpoint_type = 'current'
+            """.format(program_tables.biospec_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))), barcodes_by_program[program.name])
+
+            for row in cursor.fetchall():
+                items[row[0]]['samples'].append(row[1])
+
+            for build in program_data_tables:
+                cursor.execute("""
+                    SELECT md.case_barcode as cb, md.*
+                    FROM {} md
+                    WHERE md.case_barcode IN ({}) AND (md.sample_barcode = '' OR md.sample_barcode IS NULL) 
+                """.format(build.data_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
+                               barcodes_by_program[program.name])
+
+                fields = cursor.description
+                for row in cursor.fetchall():
+                    if not build.build in items[row[0]]['data_details']:
+                        items[row[0]]['data_details'][build.build] = []
+                    items[row[0]]['data_details'][build.build].append(
+                        {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip}
+                    )
+
+            # TODO: Once we have aliquots in the database again, add those here
+
+            result['total_found'] += 1
+            result['cases'] = [item for item in items.values()]
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+    return result
+
+
+def get_sample_metadata(barcode):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = {}
     db = None
     cursor = None
 
-    program_samples_table = Program.objects.get(name=('TCGA' if 'TCGA-' in sample_barcode else 'TARGET' if 'TARGET-' in sample_barcode else 'CCLE'),active=True,is_public=True).get_metadata_tables().samples_table
+    program_tables = Program.objects.get(name=('TCGA' if 'TCGA-' in barcode else 'TARGET' if 'TARGET-' in barcode else 'CCLE'),active=True,is_public=True).get_metadata_tables()
 
     try:
         db = get_sql_connection()
@@ -1390,7 +1569,7 @@ def get_sample_metadata(sample_barcode):
             SELECT case_barcode, sample_barcode, disease_code, project_short_name, program_name
             FROM {}
             WHERE sample_barcode = {}
-        """.format(program_samples_table, "%s"), (sample_barcode,))
+        """.format(program_tables.samples_table, "%s"), (barcode,))
 
         for row in cursor.fetchall():
             result['case_barcode'] = row[0]
@@ -1400,10 +1579,904 @@ def get_sample_metadata(sample_barcode):
             result['program'] = row[4]
 
     except Exception as e:
-        logger.error("[ERROR] While fetching sample metadata for {}:".format(sample_barcode))
+        logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
 
     return result
+
+
+# Get samples and cases by querying BQ tables
+def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='OR', long_form=False):
+
+    comb_mut_filters = comb_mut_filters.upper()
+
+    results = {}
+
+    cohort_query = """
+        SELECT sample_barcode
+        FROM `{deployment_project}.{cohort_dataset}.{cohort_table}`
+        WHERE cohort_id = @cohort
+    """
+
+    data_avail_sample_query = """
+        SELECT DISTINCT sample_barcode
+        FROM %s
+    """
+
+    prog_query_jobs = {}
+
+    try:
+
+        for prog in inc_filters:
+            mutation_filters = None
+            filters = {
+                'biospec': {},
+                'clin': {}
+            }
+            data_type_filters = {}
+
+            data_type_where_clause = None
+
+            program = Program.objects.get(name=prog,active=1,is_public=1)
+            program_tables = program.get_metadata_tables()
+
+            data_avail_table = '`{}.{}.{}`'.format(settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.sample_data_availability_table)
+            biospec_table = '`{}.{}.{}`'.format(settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.biospec_bq_table)
+            clin_table = '`{}.{}.{}`'.format(settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.clin_bq_table)
+
+            biospec_fields = BigQuerySupport.get_table_schema(settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.biospec_bq_table)
+            clin_fields = BigQuerySupport.get_table_fields(settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.clin_bq_table)
+
+            field_types = {x['name'].lower(): {'type':'biospec', 'proper_name': x['name']} for x in biospec_fields}
+            for x in clin_fields:
+                field_types[x.lower()] = {'type':'clin', 'proper_name': x}
+
+            invalid_keys = []
+
+            # It's possible a user wants all samples and cases from a given program. In this case, there will
+            # be no filters, just the program keys.
+            if not len(inc_filters[prog].keys()):
+                filters['clin']['program_name'] = prog
+            else:
+                # Divide our filters into mutation, data type, clin, and biospec sets
+                for key in inc_filters[prog]:
+                    invalid_keys = []
+                    if 'MUT:' in key:
+                        if not mutation_filters:
+                            mutation_filters = {}
+                        mutation_filters[key] = inc_filters[prog][key]
+                    elif 'data_type' in key:
+                        data_type_filters[key.split(':')[-1]] = inc_filters[prog][key]
+                    else:
+                        # The field names are case sensitive, so we need to normalize for improper casing
+                        # Additionally, if lte, gte, or btw were used, we need to strip those modifiers and
+                        # store them for WHERE clause building, but otherwise ignore them for validation of
+                        # the field itself.
+                        key_split = key.split(':')[-1]
+                        key_field = key_split.lower()
+                        key_field_type = key_field
+                        m = re.compile(r'_[gl]te?|_btw', re.UNICODE).search(key_split)
+                        if m:
+                            key_field_type = key_split.split(m.group(0))[0]
+                            key_field = field_types[key_field_type]['proper_name'] + m.group(0)
+                        if key_field_type not in field_types:
+                            invalid_keys.append({"program": prog, "filter": key_split})
+                        else:
+                            filters[field_types[key_field_type]['type']][key_field] = inc_filters[prog][key_split]
+
+            if len(invalid_keys) > 0:
+                raise Exception("Improper filter(s) supplied for program {}: '{}'".format(prog, ("', '".join(invalid_keys))))
+            parameters = []
+            where_clause = {
+                'clin': None,
+                'biospec': None
+            }
+            joins = ""
+
+            if len(data_type_filters) > 0:
+                data_type_where_clause = BigQuerySupport.build_bq_filter_and_params(data_type_filters)
+                data_avail_sample_subquery = (data_avail_sample_query % data_avail_table) + ' WHERE ' + \
+                                             data_type_where_clause['filter_string']
+                parameters += data_type_where_clause['parameters']
+                joins += (' JOIN (%s) da ON da.sample_barcode = biospec.sample_barcode' % data_avail_sample_subquery)
+
+            # Construct the WHERE clauses and parameter sets, and create the counting toggle switch
+            if len(filters) > 0:
+                if len(filters['biospec'].keys()):
+                    # Send in a type schema for Biospecimen, because sample_type is an integer encoded as a string,
+                    # so detection will not work properly
+                    type_schema = {x['name']: x['type'] for x in biospec_fields}
+                    where_clause['biospec'] = BigQuerySupport.build_bq_filter_and_params(filters['biospec'], field_prefix='bs.', type_schema=type_schema)
+                if len(filters['clin'].keys()):
+                    where_clause['clin'] = BigQuerySupport.build_bq_filter_and_params(filters['clin'], field_prefix='cl.')
+
+            mut_query_job = None
+
+            # If there is a mutation filter, kick off that query
+            if mutation_filters:
+                if BQ_MOLECULAR_ATTR_TABLES[prog]:
+                    build_queries = {}
+
+                    # Split the filters into 'not any' and 'all other filters'
+                    for mut_filt in mutation_filters:
+                        build = mut_filt.split(':')[1]
+
+                        if build not in build_queries:
+                            build_queries[build] = {
+                                'raw_filters': {},
+                                'filter_str_params': [],
+                                'queries': [],
+                                'not_any': None
+                            }
+
+                        if 'NOT:' in mut_filt and 'category' in mut_filt and 'any' in mutation_filters[mut_filt]:
+                            if not build_queries[build]['not_any']:
+                                build_queries[build]['not_any'] = {}
+                            build_queries[build]['not_any'][mut_filt] = mutation_filters[mut_filt]
+                        else:
+                            build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
+
+                    # If the combination is with AND, further split the 'not-not-any' filters, because they must be
+                    # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
+                    # a single query.
+                    for build in build_queries:
+                        if comb_mut_filters == 'AND':
+                            filter_num = 0
+                            for filter in build_queries[build]['raw_filters']:
+                                this_filter = {}
+                                this_filter[filter] = build_queries[build]['raw_filters'][filter]
+                                build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                                    this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
+                                ))
+                                filter_num += 1
+                        elif comb_mut_filters == 'OR':
+                            build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                                build_queries[build]['raw_filters'], comb_mut_filters, build
+                            ))
+
+                    # Create the queries and their parameters
+                    for build in build_queries:
+                        bq_table_info = BQ_MOLECULAR_ATTR_TABLES[prog][build]
+                        sample_barcode_col = bq_table_info['sample_barcode_col']
+                        bq_dataset = bq_table_info['dataset']
+                        bq_table = bq_table_info['table']
+                        bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_ID
+
+                        # Build the query for any filter which *isn't* a not-any query.
+                        query_template = \
+                            ("SELECT case_barcode, {barcode_col}"
+                             " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                             " WHERE {where_clause}"
+                             " GROUP BY {barcode_col} ")
+
+                        for filter_str_param in build_queries[build]['filter_str_params']:
+                            build_queries[build]['queries'].append(
+                                query_template.format(dataset_name=bq_dataset, data_project_id=bq_data_project_id,
+                                                      table_name=bq_table, barcode_col=sample_barcode_col,
+                                                      where_clause=filter_str_param['filter_string']))
+
+                        # Here we build not-any queries
+                        if build_queries[build]['not_any']:
+                            query_template = \
+                                    ("SELECT case_barcode, {barcode_col}"
+                                     " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                                     " WHERE {barcode_col} NOT IN ("
+                                     "SELECT {barcode_col}"
+                                     " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                                     " WHERE {where_clause}"
+                                     " GROUP BY {barcode_col}) "
+                                     " GROUP BY {barcode_col}")
+
+                            any_count = 0
+                            for not_any in build_queries[build]['not_any']:
+                                filter = not_any.replace("NOT:","")
+                                any_filter = {}
+                                any_filter[filter] = build_queries[build]['not_any'][not_any]
+                                filter_str_param = BigQuerySupport.build_bq_filter_and_params(
+                                    any_filter,param_suffix=build+'_any_{}'.format(any_count)
+                                )
+
+                                build_queries[build]['filter_str_params'].append(filter_str_param)
+
+                                any_count += 1
+
+                                build_queries[build]['queries'].append(query_template.format(
+                                    dataset_name=bq_dataset, data_project_id=bq_data_project_id, table_name=bq_table,
+                                    barcode_col=sample_barcode_col, where_clause=filter_str_param['filter_string']))
+
+                    # Collect the queries for chaining below with UNION or JOIN
+                    queries = [q for build in build_queries for q in build_queries[build]['queries']]
+                    # Because our parameters are uniquely named, they can be combined into a single list
+                    params = [z for build in build_queries for y in build_queries[build]['filter_str_params'] for z in y['parameters']]
+
+                    if len(queries) > 1:
+                        if comb_mut_filters == 'OR':
+                            query = """ UNION DISTINCT """.join(queries)
+                        else:
+                            query_template = """
+                                SELECT q0.case_barcode, q0.sample_barcode_tumor
+                                FROM ({query1}) q0
+                                {join_clauses}
+                            """
+
+                            join_template = """
+                                JOIN ({query}) q{ct}
+                                ON q{ct}.sample_barcode_tumor = q0.sample_barcode_tumor
+                            """
+
+                            joins = []
+
+                            for i, val in enumerate(queries[1:]):
+                                joins.append(join_template.format(query=val, ct=str(i+1)))
+
+                            query = query_template.format(query1=queries[0], join_clauses=" ".join(joins))
+                    else:
+                        query = queries[0]
+                    mut_query_job = BigQuerySupport.insert_query_job(query, params)
+                # Mutation filters supplied for a program without a Somatic Mutation table - skip
+                else:
+                    logger.warn("[WARNING] Mutation filters supplied for program {}, but no Somatic Mutation".format(prog) +
+                                " table is registered! Skipping.")
+                    mut_query_job = None
+
+            joins = ""
+            if mut_query_job:
+                tmp_mut_table = "`{}.{}.{}`".format(
+                    settings.BIGQUERY_DATA_PROJECT_ID,
+                    mut_query_job['configuration']['query']['destinationTable']['datasetId'],
+                    mut_query_job['configuration']['query']['destinationTable']['tableId']
+                )
+                joins += (' JOIN %s mfltr ON mfltr.sample_barcode_tumor = biospec.sample_barcode ' % tmp_mut_table)
+            if cohort_id:
+                joins += (' JOIN {} cs ON cs.sample_barcode = biospec.sample_barcode'.format(
+                    cohort_query.format(
+                        deployment_project=settings.BIGQUERY_PROJECT_ID,
+                        cohort_dataset=settings.COHORT_DATASET_ID,
+                        cohort_table=settings.BIGQUERY_COHORT_TABLE_ID
+                    )
+                ))
+                parameters += [{
+                    'name': 'cohort',
+                    'parameterType': {
+                        'type': 'INT64'
+                    },
+                    'parameterValue': {
+                        'value': cohort_id
+                    }
+                }]
+
+            # Confirm completion of the mutation filter job, if there was one.
+            if mut_query_job:
+                not_done = True
+                still_checking = True
+                num_retries = 0
+                while still_checking and not_done:
+                    not_done = not(BigQuerySupport.check_job_is_done(mut_query_job))
+                    if not_done:
+                        sleep(1)
+                        num_retries += 1
+                        still_checking = (num_retries < settings.BQ_MAX_ATTEMPTS)
+
+                if not_done:
+                    raise Exception("[ERROR] Timed out while trying to fetch mutation filter results in BQ.")
+
+            # Since we will always need sample barcodes, always start with biospec table
+            if where_clause['biospec']:
+                parameters += where_clause['biospec']['parameters']
+                biospec_where_clause = "WHERE {}".format(where_clause['biospec']['filter_string'])
+            else:
+                biospec_where_clause = ""
+
+            if where_clause['clin']:
+                clin_query = """
+                    SELECT {prefix}.case_barcode
+                    FROM {table_name} {prefix}
+                    WHERE {where_clause}
+                """.format(prefix="cl", table_name=clin_table, where_clause=where_clause['clin']['filter_string'])
+
+                joins += """
+                    JOIN ({clin_query}) clin
+                    ON clin.case_barcode = biospec.case_barcode
+                """.format(clin_query=clin_query)
+
+                parameters += where_clause['clin']['parameters']
+
+            full_query = """
+                #standardSQL
+                SELECT biospec.case_barcode, biospec.sample_barcode, biospec.project_short_name
+                FROM (
+                    SELECT bs.case_barcode, bs.sample_barcode, bs.project_short_name
+                    FROM {biospec_table_name} bs
+                    {where_clause}
+                    GROUP BY bs.case_barcode, bs.sample_barcode, bs.project_short_name
+                ) biospec
+                {joins}
+                GROUP BY biospec.case_barcode, biospec.sample_barcode, biospec.project_short_name
+            """.format(biospec_table_name=biospec_table, where_clause=biospec_where_clause, joins=joins)
+
+            prog_query_jobs[prog] = BigQuerySupport.insert_query_job(full_query, parameters)
+
+        start = time.time()
+        not_done = True
+        still_checking = True
+        num_retries = 0
+
+        while still_checking and not_done:
+            not_done = False
+            for prog in prog_query_jobs:
+                if not BigQuerySupport.check_job_is_done(prog_query_jobs[prog]):
+                    not_done = True
+            if not_done:
+                sleep(1)
+                num_retries += 1
+                still_checking = (num_retries < settings.BQ_MAX_ATTEMPTS)
+
+        if not_done:
+            logger.error("[ERROR] Timed out while trying to count case/sample totals in BQ")
+        else:
+            stop = time.time()
+            logger.debug("[BENCHMARKING] Time to finish BQ case and sample list: {}s".format(str(((stop-start)/1000))))
+
+            for prog in prog_query_jobs:
+                bq_results = BigQuerySupport.get_job_results(prog_query_jobs[prog]['jobReference'])
+                if prog not in results:
+                    results[prog] = {
+                        'cases': {},
+                        'samples': []
+                    }
+                    if long_form:
+                        results[prog]['items'] = []
+
+                for row in bq_results:
+                    if long_form:
+                        results[prog]['items'].append({
+                            'sample_barcode': row['f'][1]['v'],
+                            'case_barcode': row['f'][0]['v'],
+                            'project_short_name': row['f'][2]['v']
+                        })
+
+                    results[prog]['cases'][row['f'][0]['v']] = 1
+                    results[prog]['samples'].append(row['f'][1]['v'])
+
+                results[prog]['cases'] = list(results[prog]['cases'].keys())
+                results[prog]['case_count'] = len(results[prog]['cases'])
+                results[prog]['sample_count'] = len(results[prog]['samples'])
+
+    except Exception as e:
+        logger.error("[ERROR] While queueing up program case/sample list jobs: ")
+        logger.exception(e)
+        results = {
+            'msg': str(e)
+        }
+    return results
+
+
+def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
+
+    if program_id is None and cohort_id is None:
+        # We must always have a program_id or a cohort_id - we cannot have neither, because then
+        # we have no way to know where to source our samples from
+        raise Exception("No Program or Cohort ID was provided when trying to obtain sample and case lists!")
+
+    if inc_filters and program_id is None:
+        # You cannot filter samples without specifying the program they apply to
+        raise Exception("Filters were supplied, but no program was indicated - you cannot filter samples without knowing the program!")
+
+    samples_and_cases = {'samples': [], 'cases': [], 'project_counts': {}}
+
+    user_id = 0
+    if user:
+        user_id = user.id
+
+    sample_ids = {}
+    sample_tables = {}
+    valid_attrs = {}
+    project_ids = ()
+    filters = {}
+    mutation_filters = None
+    user_data_filters = None
+    data_type_filters = False
+
+    if inc_filters is None:
+        inc_filters = {}
+
+    # Divide our filters into 'mutation' and 'non-mutation' sets
+    for key in inc_filters:
+        if 'MUT:' in key:
+            if not mutation_filters:
+                mutation_filters = {}
+            mutation_filters[key] = inc_filters[key]['values']
+
+        elif 'user_' in key:
+            if not user_data_filters:
+                user_data_filters = {}
+            user_data_filters[key] = inc_filters[key]
+        else:
+            if 'data_type' in key:
+                data_type_filters = True
+            filters[key] = inc_filters[key]
+
+    # User data filters trump all other filters; if there are any which came along
+    # with the rest, only those count
+    if user_data_filters:
+        if user:
+
+            db = None
+            cursor = None
+            filtered_programs = None
+            filtered_projects = None
+
+            try:
+                db = get_sql_connection()
+                cursor = db.cursor()
+                project_table_set = []
+                if 'user_program' in user_data_filters:
+                    for project_id in user_data_filters['user_program']['values']:
+                        if filtered_programs is None:
+                            filtered_programs = {}
+                        filtered_programs[project_id] = 1
+
+                if 'user_project' in user_data_filters:
+                    for project_id in user_data_filters['user_project']['values']:
+                        if filtered_projects is None:
+                            filtered_projects = {}
+                            filtered_projects[project_id] = 1
+
+                for project in Project.get_user_projects(user):
+                    if (filtered_programs is None or project.program.id in filtered_programs) and (filtered_projects is None or project.id in filtered_projects):
+                        project_ms_table = None
+                        for tables in User_Data_Tables.objects.filter(project_id=project.id):
+                            if 'user_' not in tables.metadata_samples_table:
+                                logger.warn('[WARNING] User project metadata_samples table may have a malformed name: '
+                                    + (tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
+                                    + ' for project ' + str(project.id) + '; skipping')
+                            else:
+                                project_ms_table = tables.metadata_samples_table
+                                # Do not include projects that are low level data
+                                datatype_query = ("SELECT data_type from %s where project_id=" % tables.metadata_data_table) + '%s'
+                                cursor = db.cursor()
+                                cursor.execute(datatype_query, (project.id,))
+                                for row in cursor.fetchall():
+                                    if row[0] == 'low_level':
+                                        project_ms_table = None
+
+                        if project_ms_table is not None:
+                            project_table_set.append({'project': project.id, 'table': project_ms_table})
+
+                if len(project_table_set) > 0:
+                    for project_table in project_table_set:
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('sample_barcode, case_barcode', project_table['table'],))
+                        for row in cursor.fetchall():
+                            samples_and_cases['items'].append({'sample_barcode': row[0], 'project_id': project_table['project'], 'case_barcode': row[1]})
+
+                        samples_and_cases['count'] = len(samples_and_cases['items'])
+
+                        cursor.execute("SELECT DISTINCT %s FROM %s;" % ('case_barcode', project_table['table'],))
+
+                        for row in cursor.fetchall():
+                            if row[0] is not None:
+                                samples_and_cases['cases'].append(row[0])
+                else:
+                    logger.warn('[WARNING] No valid project tables were found!')
+
+            except Exception as e:
+                logger.exception(e)
+            finally:
+                if cursor: cursor.close()
+                if db and db.open: db.close()
+        else:
+            logger.error("[ERROR] User not authenticated; can't create a user data cohort!")
+
+        return samples_and_cases
+        # end user_data
+
+    cohort_query = """
+        SELECT sample_barcode cs_sample_barcode, project_id
+        FROM cohorts_samples
+        WHERE cohort_id = %s
+    """
+
+    data_type_query = """
+        SELECT sample_barcode da_sample_barcode, metadata_data_type_availability_id
+        FROM %s
+    """
+
+    # returns an object or None
+    program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
+    data_avail_table = None
+    data_type_subquery = None
+
+    db = None
+    cursor = None
+
+    try:
+        params_tuple = ()
+
+        db = get_sql_connection()
+        cursor = db.cursor()
+        db.autocommit(True)
+
+        where_clause = None
+
+        # construct the WHERE clauses needed
+        if len(filters) > 0:
+            filter_copy = copy.deepcopy(filters)
+            where_clause = build_where_clause(filter_copy, program=program_id)
+
+        filter_table = None
+        tmp_mut_table = None
+        tmp_filter_table = None
+        base_table = None
+
+        if program_id:
+            base_table = program_tables.samples_table
+        elif cohort_id and len(filters) <= 0:
+            base_table = 'cohorts_samples'
+
+        if program_id:
+            data_avail_table = program_tables.sample_data_availability_table
+
+        db.autocommit(True)
+
+        # If there is a mutation filter, make a temporary table from the sample barcodes that this query
+        # returns
+        if mutation_filters:
+            build_queries = {}
+
+            # Split the filters into 'not any' and 'all other filters'
+            for mut_filt in mutation_filters:
+                build = mut_filt.split(':')[1]
+
+                if build not in build_queries:
+                    build_queries[build] = {
+                        'raw_filters': {},
+                        'filter_str_params': [],
+                        'queries': [],
+                        'not_any': None
+                    }
+
+                if 'NOT:' in mut_filt and 'category' in mut_filt and 'any' in mutation_filters[mut_filt]:
+                    if not build_queries[build]['not_any']:
+                        build_queries[build]['not_any'] = {}
+                    build_queries[build]['not_any'][mut_filt] = mutation_filters[mut_filt]
+                else:
+                    build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
+
+            # If the combination is with AND, further split the 'not-not-any' filters, because they must be
+            # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
+            # a single query.
+            for build in build_queries:
+                if comb_mut_filters == 'AND':
+                    filter_num = 0
+                    for filter in build_queries[build]['raw_filters']:
+                        # Individual selection filters need to be broken out if we're ANDing
+                        if ':specific' in filter:
+                            for indiv_selex in build_queries[build]['raw_filters'][filter]:
+                                this_filter = {}
+                                this_filter[filter] = [indiv_selex,]
+                                build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                                    this_filter, comb_mut_filters, build + '_{}'.format(str(filter_num))
+                                ))
+                                filter_num += 1
+                        else:
+                            this_filter = {}
+                            this_filter[filter] = build_queries[build]['raw_filters'][filter]
+                            build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                                this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
+                            ))
+                            filter_num += 1
+                elif comb_mut_filters == 'OR':
+                    if len(build_queries[build]['raw_filters']):
+                        build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
+                            build_queries[build]['raw_filters'], comb_mut_filters, build
+                        ))
+
+            # Create the queries and their parameters
+            for build in build_queries:
+                bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
+                sample_barcode_col = bq_table_info['sample_barcode_col']
+                bq_dataset = bq_table_info['dataset']
+                bq_table = bq_table_info['table']
+                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_ID
+
+                # Build the query for any filter which *isn't* a not-any query.
+                query_template = \
+                    ("SELECT {barcode_col}"
+                     " FROM `{data_project_id}.{dataset_name}.{table_name}`"
+                     " WHERE {where_clause}"
+                     " GROUP BY {barcode_col} ")
+
+                for filter_str_param in build_queries[build]['filter_str_params']:
+                    build_queries[build]['queries'].append(
+                        query_template.format(dataset_name=bq_dataset, data_project_id=bq_data_project_id,
+                                              table_name=bq_table, barcode_col=sample_barcode_col,
+                                              where_clause=filter_str_param['filter_string']))
+
+                # Here we build not-any queries
+                if build_queries[build]['not_any']:
+                    query_template = """
+                        SELECT {barcode_col}
+                        FROM `{data_project_id}.{dataset_name}.{table_name}`
+                        WHERE {barcode_col} NOT IN (
+                          SELECT {barcode_col}
+                          FROM `{data_project_id}.{dataset_name}.{table_name}`
+                          WHERE {where_clause}
+                          GROUP BY {barcode_col})
+                        GROUP BY {barcode_col}
+                    """
+
+                    any_count = 0
+                    for not_any in build_queries[build]['not_any']:
+                        filter = not_any.replace("NOT:", "")
+                        any_filter = {}
+                        any_filter[filter] = build_queries[build]['not_any'][not_any]
+                        any_filter_str_param = BigQuerySupport.build_bq_filter_and_params(
+                            any_filter,param_suffix=build+'_any_{}'.format(any_count)
+                        )
+
+                        build_queries[build]['filter_str_params'].append(any_filter_str_param)
+
+                        any_count += 1
+
+                        build_queries[build]['queries'].append(query_template.format(
+                            dataset_name=bq_dataset, data_project_id=bq_data_project_id, table_name=bq_table,
+                            barcode_col=sample_barcode_col, where_clause=any_filter_str_param['filter_string']))
+
+            query = None
+            # Collect the queries for chaining below with UNION or JOIN
+            queries = [q for build in build_queries for q in build_queries[build]['queries']]
+            # Because our parameters are uniquely named, they can be combined into a single list
+            params = [z for build in build_queries for y in build_queries[build]['filter_str_params'] for z in y['parameters']]
+
+            if len(queries) > 1:
+                if comb_mut_filters == 'OR':
+                    query = """ UNION DISTINCT """.join(queries)
+                else:
+                    query_template = """
+                        SELECT q0.sample_barcode_tumor
+                        FROM ({query1}) q0
+                        {join_clauses}
+                    """
+
+                    join_template = """
+                        JOIN ({query}) q{ct}
+                        ON q{ct}.sample_barcode_tumor = q0.sample_barcode_tumor
+                    """
+
+                    joins = []
+
+                    for i,val in enumerate(queries[1:]):
+                        joins.append(join_template.format(query=val, ct=str(i+1)))
+
+                    query = query_template.format(query1=queries[0], join_clauses=" ".join(joins))
+            else:
+                query = queries[0]
+
+            barcodes = []
+            results = BigQuerySupport.execute_query_and_fetch_results(query, params)
+
+            if results and len(results) > 0:
+                for barcode in results:
+                    barcodes.append(str(barcode['f'][0]['v']))
+
+            else:
+                logger.info("Mutation filter result returned no results!")
+                # Put in one 'not found' entry to zero out the rest of the queries
+                barcodes = ['NONE_FOUND', ]
+
+            tmp_mut_table = 'bq_res_table_' + str(user_id) + "_" + make_id(6)
+
+            make_tmp_mut_table_str = """
+                CREATE TEMPORARY TABLE %s (
+                   tumor_sample_id VARCHAR(100)
+               );
+            """ % tmp_mut_table
+
+            cursor.execute(make_tmp_mut_table_str)
+
+            insert_tmp_table_str = """
+                INSERT INTO %s (tumor_sample_id) VALUES
+            """ % tmp_mut_table
+
+            param_vals = ()
+            first = True
+
+            for barcode in barcodes:
+                param_vals += (barcode,)
+                if first:
+                    insert_tmp_table_str += '(%s)'
+                    first = False
+                else:
+                    insert_tmp_table_str += ',(%s)'
+
+            insert_tmp_table_str += ';'
+
+            cursor.execute(insert_tmp_table_str, param_vals)
+            db.commit()
+
+        # If there is a cohort, make a temporary table based on it and make it the base table
+        start = time.time()
+
+        if data_avail_table:
+            data_type_subquery = data_type_query % data_avail_table
+
+        data_type_join = ''
+
+        # If there are filters, create a temporary table filtered off the base table
+        if len(filters) > 0:
+            tmp_filter_table = "filtered_samples_tmp_" + user_id.__str__() + "_" + make_id(6)
+            filter_table = tmp_filter_table
+
+            if data_type_subquery and data_type_filters:
+                data_type_join = 'LEFT JOIN (%s) da ON da_sample_barcode = sample_barcode ' % data_type_subquery
+
+            if cohort_id:
+                cohort_subquery = cohort_query % cohort_id
+
+                make_tmp_table_str = """
+                    CREATE TEMPORARY TABLE %s
+                    (INDEX (sample_barcode))
+                    SELECT sample_barcode, case_barcode, project_id
+                    FROM %s
+                    JOIN (%s) cs ON cs_sample_barcode = sample_barcode
+                    %s
+                  """ % (tmp_filter_table, base_table, cohort_subquery, data_type_join,)
+
+            else:
+                make_tmp_table_str = """
+                  CREATE TEMPORARY TABLE %s
+                  (INDEX (sample_barcode))
+                  SELECT sample_barcode, case_barcode, project_short_name
+                  FROM %s
+                  %s
+                """ % (tmp_filter_table, base_table, data_type_join,)
+
+            if tmp_mut_table:
+                make_tmp_table_str += ' JOIN %s ON tumor_sample_id = sample_barcode' % tmp_mut_table
+
+            make_tmp_table_str += ' WHERE %s ' % where_clause['query_str']
+            params_tuple += where_clause['value_tuple']
+
+            make_tmp_table_str += ";"
+
+            cursor.execute(make_tmp_table_str, params_tuple)
+            db.commit()
+
+        elif tmp_mut_table:
+            tmp_filter_table = "filtered_samples_tmp_" + user_id.__str__() + "_" + make_id(6)
+            filter_table = tmp_filter_table
+            make_tmp_table_str = """
+                CREATE TEMPORARY TABLE %s
+                (INDEX (sample_barcode))
+                SELECT *
+                FROM %s
+                JOIN %s ON tumor_sample_id = sample_barcode
+            """ % (tmp_filter_table, base_table, tmp_mut_table,)
+
+            if cohort_id and program_id:
+                cohort_subquery = cohort_query % cohort_id
+                make_tmp_table_str += ' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_subquery
+
+            cursor.execute(make_tmp_table_str)
+            db.commit()
+        elif cohort_id:
+            filter_table = 'cohorts_samples'
+        else:
+            filter_table = base_table
+
+        # Query the resulting 'filter_table' (which might just be our original base_table) for the samples
+        # and cases
+        # If there was a cohort ID, project IDs will have been stored in the cohort_samples table and we do not
+        # need to look them up; if there was no cohort, we must do a join to projects_project and auth_user to
+        # determine the project based on the program
+        if cohort_id:
+            if len(filters) <= 0 and not mutation_filters:
+                cursor.execute(('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table) + ' WHERE cohort_id = %s;', (cohort_id,))
+            else:
+                cursor.execute('SELECT DISTINCT sample_barcode, case_barcode, project_id FROM %s' % filter_table)
+        else:
+            cursor.execute("""
+                SELECT DISTINCT ms.sample_barcode, ms.case_barcode, ps.name
+                FROM %s ms JOIN (
+                    SELECT pp.id AS id, pp.name AS name
+                    FROM projects_project pp
+                      JOIN auth_user au ON au.id = pp.owner_id
+                    WHERE au.is_active = 1 AND au.username = 'isb' AND au.is_superuser = 1 AND pp.active = 1
+                      AND pp.program_id = %s
+                ) ps ON ps.name = SUBSTRING(ms.project_short_name,LOCATE('-',ms.project_short_name)+1);
+            """ % (filter_table, program_id,))
+
+        for row in cursor.fetchall():
+            samples_and_cases['samples'].append(row[0])
+            if row[1] not in samples_and_cases['cases']:
+                samples_and_cases['cases'].append(row[1])
+            if row[2] not in samples_and_cases['project_counts']:
+                samples_and_cases['project_counts'][row[2]] = 0
+            samples_and_cases['project_counts'][row[2]] += 1
+
+        samples_and_cases['sample_count'] = len(samples_and_cases['samples'])
+        samples_and_cases['case_count'] = len(samples_and_cases['cases'])
+
+
+        return samples_and_cases
+
+    except Exception as e:
+        logger.error("[ERROR] While getting the sample and case list:")
+        logger.exception(e)
+    finally:
+        if cursor: cursor.close()
+        if db and db.open: db.close()
+
+
+def get_acls_by_uuid(uuids):
+
+    acls = []
+
+    query_base = """
+        SELECT acl
+        FROM `{bq_project}.{bq_dataset}.{table_name}`
+        WHERE {where_clause}
+        GROUP BY acl
+    """
+
+    uuid_filters = {'file_gdc_id': uuids}
+
+    where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
+
+    tables = [{'table': y.data_table, 'dataset': y.bq_dataset} for x in Program.get_public_programs() for y in x.get_data_tables()]
+
+    query = """ UNION DISTINCT """.join(
+        [query_base.format(
+            bq_project=settings.BIGQUERY_DATA_PROJECT_ID,
+            bq_dataset=table['dataset'],
+            table_name=table['table'].lower(),
+            where_clause=where_clause['filter_string']
+        ) for table in tables]
+    )
+
+    results = BigQuerySupport.execute_query_and_fetch_results(query, where_clause['parameters'])
+
+    acls = [row['f'][0]['v'] for row in results]
+
+    return acls
+
+
+def get_paths_by_uuid(uuids):
+    paths = []
+
+    query_base = """
+        SELECT file_gdc_id, file_name_key, index_file_name_key
+        FROM `{bq_project}.{bq_dataset}.{table_name}`
+        WHERE {where_clause}
+    """
+
+    uuid_filters = {'file_gdc_id': uuids}
+
+    where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
+
+    tables = [{'table': y.data_table, 'dataset': y.bq_dataset} for x in Program.get_public_programs() for y in x.get_data_tables()]
+
+    query = """ UNION DISTINCT """.join(
+        [query_base.format(
+            bq_project=settings.BIGQUERY_DATA_PROJECT_ID,
+            bq_dataset=table['dataset'],
+            table_name=table['table'].lower(),
+            where_clause=where_clause['filter_string']
+        ) for table in tables]
+    )
+
+    results = BigQuerySupport.execute_query_and_fetch_results(query, where_clause['parameters'])
+
+    for row in results:
+        item = {
+            'gdc_file_uuid': row['f'][0]['v'],
+            'gcs_path': row['f'][1]['v']
+        }
+        if row['f'][2]['v'] is not None and not row['f'][2]['v'] == '':
+            item['index_file_path'] = row['f'][2]['v']
+        paths.append(item)
+
+    return paths

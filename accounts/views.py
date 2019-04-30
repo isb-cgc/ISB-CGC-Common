@@ -30,7 +30,6 @@ from django.core.urlresolvers import reverse
 from django.views.decorators.csrf import csrf_protect
 from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery.service import get_bigquery_service
-from google_helpers.directory_service import get_directory_resource
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -42,6 +41,7 @@ from django.utils.html import escape
 from .sa_utils import verify_service_account, register_service_account, get_project_deleters, \
                      unregister_all_gcp_sa, service_account_dict, \
                      controlled_auth_datasets, have_linked_user
+from .utils import verify_gcp_for_reg, register_or_refresh_gcp
 
 from .dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
                         InternalTokenError, RefreshTokenExpired, DCFCommFailure
@@ -55,6 +55,7 @@ GCP_REG_LOG_NAME = settings.GCP_ACTIVITY_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
+
 
 @login_required
 def extended_logout_view(request):
@@ -70,6 +71,7 @@ def extended_logout_view(request):
     return response
 
 # GCP RELATED VIEWS
+
 
 '''
 Returns page that has user Google Cloud Projects
@@ -218,74 +220,20 @@ def verify_gcp(request, user_id):
     status = None
     response = {}
     try:
-        gcp = None
+
         gcp_id = request.GET.get('gcp-id', None)
         is_refresh = bool(request.GET.get('is_refresh', '')=='true')
 
-        try:
-            gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
-            # Can't register the same GCP twice - return immediately
-            if not is_refresh:
-                return JsonResponse({'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(gcp_id)}, status='500')
-        except ObjectDoesNotExist:
-            if is_refresh:
-                return JsonResponse({'message': 'GCP ID {} does not exist and so cannot be refreshed'.format(str(gcp_id))}, status='500')
+        response, status = verify_gcp_for_reg(User.objects.get(id=user_id), gcp_id, is_refresh)
 
-        crm_service = get_special_crm_resource()
-        iam_policy = crm_service.projects().getIamPolicy(
-            resource=gcp_id, body={}).execute()
-        bindings = iam_policy['bindings']
-        roles = {}
-        user = User.objects.get(id=user_id)
-        user_found = False
-        fence_sa_found = False
-
-        for val in bindings:
-            role = val['role']
-            members = val['members']
-
-            for member in members:
-                if member.startswith('user:'):
-                    email = member.split(':')[1]
-                    if email not in roles:
-                        roles[email] = {}
-                        roles[email]['roles'] = []
-                        roles[email]['registered_user'] = bool(User.objects.filter(email=email).first())
-                    if user.email.lower() == email.lower():
-                        user_found = True
-                    roles[email]['roles'].append(role)
-                if member.startswith('serviceAccount:'):
-                    email = member.split(':')[1]
-                    if settings.DCF_MONITORING_SA.lower() == email.lower():
-                        fence_sa_found = True
-
-        if not user_found:
-            status='403'
-            logger.error("[ERROR] While attempting to {} GCP ID {}: ".format("register" if not is_refresh else "refresh",gcp_id))
-            logger.error("User {} was not found on GCP {}'s IAM policy.".format(user.email,gcp_id))
-            response['message'] = 'Your user email ({}) was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,gcp_id,"register" if not is_refresh else "refresh")
-            if is_refresh:
-                gcp.user.set(gcp.user.all().exclude(id=user.id))
-                gcp.save()
-                response['redirect']=reverse('user_gcp_list',kwargs={'user_id': user.id})
-        else:
-            response = {'roles': roles, 'gcp_id': gcp_id}
-            if not fence_sa_found:
-                logger.warning("[WARNING] DCF Fence SA was not added to the IAM policy for GCP {}".format(gcp_id))
-                response['message'] = "The DCF Monitoring Service Account {} was not added to your project's IAM ".format(settings.DCF_MONITORING_SA) \
-                    + "policies. Note that without this Service Account added to your project you will not be able to access controlled data."
-            status='200'
+        if status == '403':
+            response['redirect'] = reverse('user_gcp_list', kwargs={'user_id': user_id})
 
     except Exception as e:
-        if type(e) is HttpError:
-            logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(gcp_id))
-            response['message'] = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
-            status = '403'
-        else:
-            logger.error("[ERROR] While trying to verify GCP ID {}:".format(gcp_id))
-            response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
-            status = '500'
+        logger.error("[ERROR] While attempting to verify GCP {}:")
         logger.exception(e)
+        response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
+        status = '500'
 
     return JsonResponse(response, status=status)
 
@@ -298,101 +246,23 @@ def register_gcp(request, user_id):
     args={'user_id': request.user.id}
 
     try:
-        # log the reports using Cloud logging API
-        st_logger = StackDriverLogger.build_from_django_settings()
-        log_name = SERVICE_ACCOUNT_LOG_NAME
-
         if request.POST:
-            crm_service = get_special_crm_resource()
-
             project_id = request.POST.get('gcp_id', None)
             register_users = request.POST.getlist('register_users')
             is_refresh = bool(request.POST.get('is_refresh', '') == 'true')
 
-            project = crm_service.projects().get(projectId=project_id).execute()
+            register, status = register_or_refresh_gcp(User.objects.get(id=user_id), project_id, register_users, is_refresh)
 
-            project_name = project['name']
+            if status == 200:
+                if 'message' in register:
+                    messages.info(request, register['message'])
 
-            gcp_users = User.objects.filter(email__in=register_users)
-
-            if not user_id:
-                raise Exception("User ID not provided.")
-            elif not project_id:
-                raise Exception("Project ID not provided.")
-            elif not len(register_users) or not gcp_users.count():
-                # A set of users to register or refresh is required
-                msg = "[STATUS] No registered user set found for GCP {} of project {}; {} aborted.".format(
-                    "refresh" if is_refresh else "registration",project_id,"refresh" if is_refresh else "registration")
-                logger.warn(msg)
-                st_logger.write_text_log_entry(log_name,msg)
-                messages.error(request, "The registered user set was empty, so the project could not be {}.".format("refreshed" if is_refresh else "registered"))
-                return redirect('user_gcp_list', user_id=request.user.id)
             else:
-                try:
-                    gcp = GoogleProject.objects.get(project_id=project_id,
-                                                    active=1)
-                    if not is_refresh:
-                        messages.info(request, "A Google Cloud Project with the id {} already exists.".format(project_id))
-
-                except ObjectDoesNotExist:
-                    gcp,created = GoogleProject.objects.update_or_create(
-                        project_name=project_name,project_id=project_id,
-                        defaults={
-                           'big_query_dataset': '',
-                           'active': 1
-                        }
-                    )
-                    gcp.save()
-                    if not created:
-                        msg="[STATUS] User {} has re-registered GCP {}".format(User.objects.get(id=user_id).email,project_id)
-                        logger.info(msg)
-                        st_logger.write_text_log_entry(log_name,msg)
-
-            if is_refresh:
-                if project_name != gcp.project_name:
-                    gcp.project_name = project_name
-
-                users_to_add = gcp_users.exclude(id__in=gcp.user.all())
-                users_to_remove = gcp.user.all().exclude(id__in=gcp_users)
-                if len(users_to_add):
-                    msg = "The following user{} added to GCP {}: {}".format(
-                        ("s were" if len(users_to_add) > 1 else " was"),
-                        project_id,
-                        ", ".join(users_to_add.values_list('email',flat=True)))
-                else:
-                    msg = "There were no new users to add to GCP {}.".format(project_id)
-                if len(users_to_remove):
-                    msg += " The following user{} removed from GCP {}: {}".format(
-                        ("s were" if len(users_to_remove) > 1 else " was"),
-                        project_id,
-                        ", ".join(users_to_remove.values_list('email',flat=True)))
-                else:
-                    msg += " There were no users to remove from GCP {}.".format(project_id)
-
-                messages.info(request, msg)
-
-            gcp.user.set(gcp_users)
-            gcp.save()
-
-            if not gcp.user.all().count():
-                raise Exception("GCP {} has no users!".format(project_id))
+                messages.error(request, register['message'])
 
             if request.POST.get('detail','') == 'true':
                 redirect_view = 'gcp_detail'
-                args['gcp_id'] = gcp.id
-
-            reg_type = "NEW GCP REGISTRATION"
-            if is_refresh:
-                reg_type = "GCP REFRESH"
-
-            st_logger.write_text_log_entry(
-                GCP_REG_LOG_NAME,"[{}] User {} has {} GCP {} at {}".format(
-                    reg_type,
-                    User.objects.get(id=user_id).email,
-                    ("refreshed" if is_refresh else "registered"),
-                    gcp.project_id,datetime.datetime.utcnow()
-                )
-            )
+                args['gcp_id'] = project_id
 
             return redirect(reverse(redirect_view, kwargs=args))
 

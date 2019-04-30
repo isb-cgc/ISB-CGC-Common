@@ -727,6 +727,7 @@ def auth_dataset_whitelists_for_user(user_id):
     expired_time = nih_user.NIH_assertion_expiration
     now_time = pytz.utc.localize(datetime.datetime.utcnow())
     if now_time >= expired_time:
+        logger.info("[STATUS] Access for user {} has expired.".format(nih_user.user.email))
         return None
 
     has_access = None

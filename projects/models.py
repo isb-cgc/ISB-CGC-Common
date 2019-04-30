@@ -55,6 +55,12 @@ class Program(models.Model):
     def get_metadata_tables(self):
         return self.public_metadata_tables_set.first()
 
+    def get_data_tables(self):
+        return self.public_data_tables_set.all()
+    
+    def get_all_projects(self):
+        return self.project_set.filter(active=1)
+
     @classmethod
     def get_user_programs(cls, user, includeShared=True, includePublic=False):
         programs = user.program_set.filter(active=True)
@@ -68,7 +74,7 @@ class Program(models.Model):
         programs = programs.distinct()
 
         return programs
-
+    
     @classmethod
     def get_public_programs(cls):
         return cls.objects.filter(is_public=True, active=True)

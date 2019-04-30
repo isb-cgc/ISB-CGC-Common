@@ -95,6 +95,10 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
     samples_and_cases = {'items': [], 'cases': [], 'count': 0}
 
+    user_id = 0
+    if user:
+        user_id = user.id
+
     sample_ids = {}
     sample_tables = {}
     valid_attrs = {}
@@ -155,7 +159,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                         for tables in User_Data_Tables.objects.filter(project_id=project.id):
                             if 'user_' not in tables.metadata_samples_table:
                                 logger.warn('[WARNING] User project metadata_samples table may have a malformed name: '
-                                    + (tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
+                                    + (str(tables.metadata_samples_table) if tables.metadata_samples_table is not None else 'None')
                                     + ' for project ' + str(project.id) + '; skipping')
                             else:
                                 project_ms_table = tables.metadata_samples_table
@@ -391,7 +395,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
-            tmp_mut_table = 'bq_res_table_' + str(user.id) + "_" + make_id(6)
+            tmp_mut_table = 'bq_res_table_' + str(user_id) + "_" + make_id(6)
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
@@ -431,7 +435,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
-            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
             filter_table = tmp_filter_table
 
             if data_type_subquery and data_type_filters:
@@ -470,7 +474,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             db.commit()
 
         elif tmp_mut_table:
-            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = """
                 CREATE TEMPORARY TABLE %s
@@ -993,7 +997,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
 
                 # Set permission for user to be owner
@@ -1219,7 +1223,7 @@ def clone_cohort(request, cohort_id):
         bulk_start = time.time()
         Samples.objects.bulk_create(sample_list)
         bulk_stop = time.time()
-        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+        logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
         # Clone the filters
         filters = Filters.objects.filter(resulting_cohort=parent_cohort)
@@ -1301,7 +1305,7 @@ def set_operation(request):
                 samples = [{'id': x[0], 'case': x[1], 'project': x[2]} for x in union_samples]
 
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to build union sample set: ' + str(stop - start))
 
             elif op == 'intersect':
 
@@ -1394,7 +1398,7 @@ def set_operation(request):
 
                     stop = time.time()
 
-                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
+                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + str(stop - start))
 
             elif op == 'complement':
                 base_id = request.POST.get('base-id')
@@ -1451,7 +1455,7 @@ def set_operation(request):
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
                 # get the full resulting sample and case ID set
                 samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
@@ -1475,7 +1479,7 @@ def set_operation(request):
                         source.save()
 
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+str(stop - start))
                 messages.info(request, 'Cohort "%s" created successfully.' % escape(new_cohort.name))
             else:
                 message = 'Operation resulted in empty set of samples. Cohort not created.'
@@ -1584,7 +1588,7 @@ def save_cohort_from_plot(request):
         bulk_start = time.time()
         Samples.objects.bulk_create(sample_list)
         bulk_stop = time.time()
-        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+        logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 

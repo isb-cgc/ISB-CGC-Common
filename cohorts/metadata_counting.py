@@ -80,7 +80,7 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         for tables in User_Data_Tables.objects.filter(project_id=project.id):
             if 'user_' not in tables.metadata_samples_table:
                 logger.warn('[WARNING] User project metadata_samples table may have a malformed name: '
-                    +(tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
+                    +(str(tables.metadata_samples_table) if tables.metadata_samples_table is not None else 'None')
                     + ' for project '+str(project.id)+'; skipping')
             else:
                 project_ms_table = tables.metadata_samples_table
@@ -284,6 +284,9 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
 # Tally counts for metadata filters of public programs
 def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19', comb_mut_filters='OR'):
     comb_mut_filters = comb_mut_filters.upper()
+    user_id = 0
+    if user:
+        user_id = user.id
 
     counts_and_total = {
         'counts': [],
@@ -533,7 +536,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
-            tmp_mut_table = 'bq_res_table_' + str(user.id) + "_" + make_id(6)
+            tmp_mut_table = 'bq_res_table_' + str(user_id) + "_" + make_id(6)
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
@@ -567,7 +570,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
-            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
             filter_table = tmp_filter_table
 
             make_tmp_table_str = """
@@ -594,7 +597,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             cursor.execute(make_tmp_table_str, params_tuple)
 
         elif tmp_mut_table:
-            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
             filter_table = tmp_filter_table
 
             make_tmp_table_str = """
@@ -952,10 +955,10 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None,
     stop = time.time()
     logger.debug(
         "[BENCHMARKING] Time to call metadata_counts from view metadata_counts_platform_list"
-        + (" for cohort " + cohort_id if cohort_id is not None else "")
-        + (" and" if cohort_id is not None and filters.__len__() > 0 else "")
-        + (" filters " + filters.__str__() if filters.__len__() > 0 else "")
-        + ": " + (stop - start).__str__()
+        + (" for cohort {}".format(cohort_id if cohort_id is not None else ""))
+        + (" and" if cohort_id is not None and len(filters) > 0 else "")
+        + (" filters {}".format(str(filters) if len(filters) > 0 else ""))
+        + ": {}".format(str((stop - start)))
     )
 
     return_vals = {
