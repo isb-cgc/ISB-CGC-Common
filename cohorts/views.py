@@ -999,7 +999,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 bulk_stop = time.time()
                 logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
-
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
                 perm.save()
