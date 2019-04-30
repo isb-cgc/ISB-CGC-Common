@@ -13,7 +13,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from __future__ import absolute_import
 
+from builtins import str
+from builtins import object
 import operator
 import string
 import sys
@@ -26,7 +29,8 @@ from django.utils.html import escape
 from projects.models import Project, Program, User_Feature_Definitions
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
-from metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
+from .metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
+from functools import reduce
 
 logger = logging.getLogger('main_logger')
 
@@ -348,7 +352,7 @@ class Cohort(models.Model):
                     else:
                         cohort_filter['displ_val'] = cohort_filter['value']
 
-    class Meta:
+    class Meta(object):
         verbose_name_plural = "Saved Cohorts"
 
 

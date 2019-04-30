@@ -13,7 +13,10 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 """
+from __future__ import absolute_import
 
+from builtins import str
+from builtins import object
 import traceback
 import time
 import datetime
@@ -27,12 +30,12 @@ from google_helpers.stackdriver import StackDriverLogger
 
 import logging
 from .utils import ServiceAccountBlacklist, GoogleOrgWhitelist, ManagedServiceAccounts
-from models import *
+from .models import *
 from django.conf import settings
 
 from google_helpers.resourcemanager_service import get_special_crm_resource
 
-from dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf, extend_sa_at_dcf, \
+from .dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf, extend_sa_at_dcf, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         GoogleLinkState, get_auth_elapsed_time, unregister_sa, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
@@ -50,7 +53,7 @@ MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
 
 
-class SAModes:
+class SAModes(object):
     REMOVE_ALL = 1
     ADJUST = 2
     EXTEND = 3
@@ -724,6 +727,7 @@ def auth_dataset_whitelists_for_user(user_id):
     expired_time = nih_user.NIH_assertion_expiration
     now_time = pytz.utc.localize(datetime.datetime.utcnow())
     if now_time >= expired_time:
+        logger.info("[STATUS] Access for user {} has expired.".format(nih_user.user.email))
         return None
 
     has_access = None
@@ -984,7 +988,7 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
             logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
 
 
-class RefreshCode:
+class RefreshCode(object):
     NO_TOKEN = 1
     TOKEN_EXPIRED = 2
     INTERNAL_ERROR = 3
