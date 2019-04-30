@@ -1984,86 +1984,94 @@ def get_metadata(request):
 
 @login_required
 def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
-    # Check program ID against public programs
-    public_program = Program.objects.filter(id=program_id).first()
-    user = request.user
 
-    if public_program:
-        # Public Program
-        template = 'cohorts/isb-cgc-data.html'
+    template = 'cohorts/isb-cgc-data.html'
+    template_values = {}
+    # TODO: Need error template
 
-        filters = None
+    try:
+        # Check program ID against public programs
+        public_program = Program.objects.filter(id=program_id).first()
+        user = request.user
 
-        # If we want to automatically select some filters for a new cohort, do it here
-        if not cohort_id:
-            # Currently we do not select anything by default
+        if public_program:
+            # Public Program
             filters = None
 
-        clin_attr = fetch_program_attr(program_id)
+            # If we want to automatically select some filters for a new cohort, do it here
+            if not cohort_id:
+                # Currently we do not select anything by default
+                filters = None
 
-        molecular_attr = {}
-        molecular_attr_builds = None
+            clin_attr = fetch_program_attr(program_id)
 
-        if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
-            molecular_attr = {
-                'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
-                'attrs': MOLECULAR_ATTR
+            molecular_attr = {}
+            molecular_attr_builds = None
+
+            if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
+                molecular_attr = {
+                    'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
+                    'attrs': MOLECULAR_ATTR
+                }
+
+                molecular_attr_builds = [
+                    {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in list(BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys()) if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
+                ]
+
+                # Note which attributes are in which categories
+                for cat in molecular_attr['categories']:
+                    for attr in cat['attrs']:
+                        ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
+                        if ma:
+                            ma['category'] = cat['value']
+
+            data_types = fetch_program_data_types(program_id)
+
+            results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
+
+            template_values = {
+                'request': request,
+                'attr_counts': results['count'] if 'count' in results else [],
+                'data_type_counts': results['data_counts'] if 'data_counts' in results else [],
+                'total_samples': int(results['total']),
+                'clin_attr': clin_attr,
+                'molecular_attr': molecular_attr,
+                'molecular_attr_builds': molecular_attr_builds,
+                'data_types': data_types,
+                'metadata_filters': filters or {},
+                'program': public_program,
+                'metadata_counts': results
             }
 
-            molecular_attr_builds = [
-                {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in list(BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys()) if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
-            ]
+            if cohort_id:
+                template_values['cohort'] = Cohort.objects.get(id=cohort_id)
 
-            # Note which attributes are in which categories
-            for cat in molecular_attr['categories']:
-                for attr in cat['attrs']:
-                    ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
-                    if ma:
-                        ma['category'] = cat['value']
+        else:
+            # Requesting User Data filter panel
+            template = 'cohorts/user-data.html'
 
-        data_types = fetch_program_data_types(program_id)
-
-        results = public_metadata_counts(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
-
-        template_values = {
-            'request': request,
-            'attr_counts': results['count'] if 'count' in results else [],
-            'data_type_counts': results['data_counts'] if 'data_counts' in results else [],
-            'total_samples': int(results['total']),
-            'clin_attr': clin_attr,
-            'molecular_attr': molecular_attr,
-            'molecular_attr_builds': molecular_attr_builds,
-            'data_types': data_types,
-            'metadata_filters': filters or {},
-            'program': public_program,
-            'metadata_counts': results
-        }
-
-        if cohort_id:
-            template_values['cohort'] = Cohort.objects.get(id=cohort_id)
-
-    else:
-        # Requesting User Data filter panel
-        template = 'cohorts/user-data.html'
-
-        filters = None
-
-        # If we want to automatically select some filters for a new cohort, do it here
-        if not cohort_id:
-            # Currently we do not select anything by default
             filters = None
 
-        results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
+            # If we want to automatically select some filters for a new cohort, do it here
+            if not cohort_id:
+                # Currently we do not select anything by default
+                filters = None
 
-        template_values = {
-            'request': request,
-            'attr_counts': results['count'],
-            'total_samples': int(results['total']),
-            'total_cases': int(results['cases']),
-            'metadata_filters': filters or {},
-            'metadata_counts': results,
-            'program': 0
-        }
+            results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
+
+            template_values = {
+                'request': request,
+                'attr_counts': results['count'],
+                'total_samples': int(results['total']),
+                'total_cases': int(results['cases']),
+                'metadata_filters': filters or {},
+                'metadata_counts': results,
+                'program': 0
+            }
+
+    except Exception as e:
+        logger.error("[ERROR] While building the filter panel:")
+        logger.exception(e)
 
     return render(request, template, template_values)
 
