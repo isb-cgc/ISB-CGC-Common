@@ -504,10 +504,9 @@ def unreg_gcp(user, gcp_id):
             success, msgs = unregister_all_gcp_sa(user.id, gcp_id, gcp.project_id)
             # If we encounter problems deleting SAs, stop the process:
             if not success:
-                response['message'] = "Unregistering service accounts from Data Commons Framework was not successful."
+                response['message'] = ["Unregistering service accounts from Data Commons Framework was not successful."]
                 logger.info("[STATUS] SA Unregistration was unsuccessful {}".format(user.email, gcp_id))
                 for msg in msgs:
-                    response['message'] = [response['message']]
                     response['message'].append(msg)
                     status=400
                     return response, status
