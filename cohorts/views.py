@@ -2016,7 +2016,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
             data_types = fetch_program_data_types(program_id)
 
-            results = public_metadata_counts(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
+            results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
 
             template_values = {
                 'request': request,
