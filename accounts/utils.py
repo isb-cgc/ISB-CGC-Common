@@ -30,6 +30,8 @@ from django.conf import settings
 from googleapiclient.errors import HttpError
 from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.resourcemanager_service import get_special_crm_resource
+from .dcf_support import TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure
+from .sa_utils import get_project_deleters, unregister_all_gcp_sa
 
 
 from accounts.models import GoogleProject
@@ -37,6 +39,7 @@ from accounts.models import GoogleProject
 logger = logging.getLogger('main_logger')
 
 GCP_REG_LOG_NAME = settings.GCP_ACTIVITY_LOG_NAME
+SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 
 class ServiceObjectBase(object):
     """
@@ -459,3 +462,76 @@ def register_or_refresh_gcp(user, gcp_id, user_list, is_refresh=False):
         status = 500
 
     return response, status
+
+
+def unreg_gcp(user, gcp_id):
+    
+    response = {}
+    status = 200
+    
+    try:
+    
+        logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
+        #
+        # In the new DCF-centric world, the user has to be logged into DCF if they are trying to
+        # delete a project with a service account on it. But users who have never been anywhere near
+        # DCF can register projects just to use webapp services.
+        # So, if user HAS EVER linked to DCF, they gotta be logged in to do this. If not, then if someone
+        # else on the project HAS EVER linked to DCF, they gotta be logged in. If nobody fits that bill,
+        # we let them delete the project.
+        # Note we also catch the case where a user not on a project is trying to delete it (requires custom
+        # crafted POST):
+        #
+
+        gcp = GoogleProject.objects.get(id=gcp_id, active=1)
+        deleter_analysis = get_project_deleters(gcp.project_id, user.email, logger, SERVICE_ACCOUNT_LOG_NAME)
+        if 'message' in deleter_analysis:
+            response['message'] = deleter_analysis['message']
+            status=400
+
+        do_sa_unregister = True
+        if not deleter_analysis['this_user_registered']:
+            if deleter_analysis['some_user_registered']:
+                response['message'] = "Only a project member who has registered with the Data Commons Framework can unregister this project"
+                logger.info("[STATUS] User {} with no DCF status tried to unregister {}".format(user.email, gcp_id))
+                status=403
+                return response, status
+            else: # Nobody on the project has ever done an NIH Linking. Skip the SA step...
+                do_sa_unregister = False
+
+        if do_sa_unregister:
+            success, msgs = unregister_all_gcp_sa(user.id, gcp_id, gcp.project_id)
+            # If we encounter problems deleting SAs, stop the process:
+            if not success:
+                response['message'] = "Unregistering service accounts from Data Commons Framework was not successful."
+                logger.info("[STATUS] SA Unregistration was unsuccessful {}".format(user.email, gcp_id))
+                for msg in msgs:
+                    response['message'] += "\n{}".format(msg)
+                    status=400
+                    return response, status        
+            logger.info("[STATUS] User {} is unregistering GCP {}: SAs dropped".format(user.email, gcp_id))
+            
+        gcp.user.clear()
+        gcp.active=False
+        gcp.save()
+        logger.info("[STATUS] User {} has unregistered GCP {}".format(user.email, gcp_id))
+
+    except TokenFailure:
+        response['message'] = "Your Data Commons Framework identity needs to be reestablished to complete this task."
+        status=403
+    except InternalTokenError:
+        response['message'] = "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931")
+        status=400
+    except RefreshTokenExpired:
+        response['message'] = "Your login to the Data Commons Framework has expired. You will need to log in again."
+        status=403
+    except DCFCommFailure:
+        response['message'] = "There was a communications problem contacting the Data Commons Framework."
+        status=500
+    except Exception as e:
+        logger.error("[ERROR]: Unexpected Exception {}".format(str(e)))
+        response['message'] = "Encountered an error while trying to delete this Google Cloud Project - please contact feedback@isb-cgc.org."
+        status=500
+
+    return response, status
+
