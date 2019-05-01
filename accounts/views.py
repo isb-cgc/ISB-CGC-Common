@@ -38,10 +38,9 @@ from django.contrib.auth.models import User
 from .models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
-from .sa_utils import verify_service_account, register_service_account, get_project_deleters, \
-                     unregister_all_gcp_sa, service_account_dict, \
+from .sa_utils import verify_service_account, register_service_account, service_account_dict, \
                      controlled_auth_datasets, have_linked_user
-from .utils import verify_gcp_for_reg, register_or_refresh_gcp
+from .utils import verify_gcp_for_reg, register_or_refresh_gcp, unreg_gcp
 
 from .dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
                         InternalTokenError, RefreshTokenExpired, DCFCommFailure
@@ -347,67 +346,28 @@ def gcp_detail(request, user_id, gcp_id):
 @login_required
 def user_gcp_delete(request, user_id, gcp_id):
 
+    template = 'user_gcp_list'
+
     try:
         if request.POST:
             user = User.objects.get(id=user_id)
-            logger.info("[STATUS] User {} is unregistering GCP {}".format(user.email,gcp_id))
 
-            #
-            # In the new DCF-centric world, the user has to be logged into DCF if they are trying to
-            # delete a project with a service account on it. But users who have never been anywhere near
-            # DCF can register projects just to use webapp services.
-            # So, if user HAS EVER linked to DCF, they gotta be logged in to do this. If not, then if someone
-            # else on the project HAS EVER linked to DCF, they gotta be logged in. If nobody fits that bill,
-            # we let them delete the project.
-            # Note we also catch the case where a user not on a project is trying to delete it (requires custom
-            # crafted POST):
-            #
-
-            gcp = GoogleProject.objects.get(id=gcp_id, active=1)
-            deleter_analysis = get_project_deleters(gcp.project_id, user.email, logger, SERVICE_ACCOUNT_LOG_NAME)
-            if 'message' in deleter_analysis:
-                messages.error(request, deleter_analysis['message'])
-                return redirect('user_gcp_list', user_id=request.user.id)
-
-            do_sa_unregister = True
-            if not deleter_analysis['this_user_registered']:
-                if deleter_analysis['some_user_registered']:
-                    messages.error(request, "Only a project member who has registered with the Data Commons Framework can unregister this project")
-                    logger.info("[STATUS] User {} with no DCF status tried to unregister {}".format(user.email, gcp_id))
-                    return redirect('user_gcp_list', user_id=request.user.id)
-                else: # Nobody on the project has ever done an NIH Linking. Skip the SA step...
-                    do_sa_unregister = False
-
-            if do_sa_unregister:
-                success, msgs = unregister_all_gcp_sa(user_id, gcp_id, gcp.project_id)
-                # If we encounter problems deleting SAs, stop the process:
-                if not success:
-                    messages.error(request, "Unregistering service accounts from Data Commons Framework was not successful.")
-                    logger.info("[STATUS] SA Unregistration was unsuccessful {}".format(user.email, gcp_id))
-                    for msg in msgs:
+            response, status = unreg_gcp(user, gcp_id)
+            if status != 200:
+                if type(response['message']) is list:
+                    for msg in response['message']:
                         messages.error(request, msg)
-                    return redirect('user_gcp_list', user_id=request.user.id)
-                logger.info("[STATUS] User {} is unregistering GCP {}: SAs dropped".format(user.email, gcp_id))
-            gcp.user.clear()
-            gcp.active=False
-            gcp.save()
-            logger.info("[STATUS] User {} has unregistered GCP {}".format(user.email, gcp_id))
-
-    except TokenFailure:
-        messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
-        return redirect(reverse('user_detail', args=[request.user.id]))
-    except InternalTokenError:
-        messages.error(request, "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931"))
-    except RefreshTokenExpired:
-        messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
-        return redirect(reverse('user_detail', args=[request.user.id]))
-    except DCFCommFailure:
-        messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
+                else:
+                    messages.error(request, response['message'])
+                
+                if status == 401:
+                    template = 'user_detail'
+                    
     except Exception as e:
-        logger.error("[ERROR]: Unexpected Exception {}".format(str(e)))
-        messages.error(request, "Encountered an error while trying to delete this Google Cloud Project - please contact feedback@isb-cgc.org.")
+        logger.error("[ERROR] While user ID {} was unregistring GCP {}: ".format(user_id, gcp_id))
+        logger.exception(e)
 
-    return redirect('user_gcp_list', user_id=request.user.id)
+    return redirect(template, user_id=request.user.id)
 
 
 @login_required

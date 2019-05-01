@@ -488,7 +488,8 @@ def unreg_gcp(user, gcp_id):
         if 'message' in deleter_analysis:
             response['message'] = deleter_analysis['message']
             status=400
-
+            return response, status
+        
         do_sa_unregister = True
         if not deleter_analysis['this_user_registered']:
             if deleter_analysis['some_user_registered']:
@@ -506,9 +507,11 @@ def unreg_gcp(user, gcp_id):
                 response['message'] = "Unregistering service accounts from Data Commons Framework was not successful."
                 logger.info("[STATUS] SA Unregistration was unsuccessful {}".format(user.email, gcp_id))
                 for msg in msgs:
-                    response['message'] += "\n{}".format(msg)
+                    response['message'] = [response['message']]
+                    response['message'].append(msg)
                     status=400
-                    return response, status        
+                    return response, status
+                
             logger.info("[STATUS] User {} is unregistering GCP {}: SAs dropped".format(user.email, gcp_id))
             
         gcp.user.clear()
@@ -518,13 +521,13 @@ def unreg_gcp(user, gcp_id):
 
     except TokenFailure:
         response['message'] = "Your Data Commons Framework identity needs to be reestablished to complete this task."
-        status=403
+        status=401
     except InternalTokenError:
         response['message'] = "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931")
-        status=400
+        status=500
     except RefreshTokenExpired:
         response['message'] = "Your login to the Data Commons Framework has expired. You will need to log in again."
-        status=403
+        status=401
     except DCFCommFailure:
         response['message'] = "There was a communications problem contacting the Data Commons Framework."
         status=500
