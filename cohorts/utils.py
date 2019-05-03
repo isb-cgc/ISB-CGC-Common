@@ -31,33 +31,62 @@ from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 
 
-def create_cohort(user, filters, name, desc=None):
-    cohort_info = ()
+def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
 
-    barcodes = get_sample_case_list_bq(None, filters, long_form=True)
+    if not filters and not name and not desc:
+        # Can't save/edit a cohort when nothing is being changed!
+        return None
 
-    # Need at least 1 case in 1 program for this to be a valid cohort
-    cases_found = False
+    source = None
+    source_progs = None
 
-    for prog in barcodes:
-        if barcodes[prog]['case_count'] > 0:
-            cases_found = True
+    if source_id:
+        source = Cohort.objects.filter(id=source_id).first()
+        source_progs = source.get_programs()
 
-    if not cases_found:
-        return {
-            'result': 'error',
-            'msg': 'No cases or samples were found which match the supplied filters.'
-        }
+    if source and not filters or (len(filters) <= 0):
+        # If we're only changing the name and/or desc, just edit the cohort and update it
+        source.update(name=name, description=desc)
+        return { 'cohort_id': source.id }
 
     # Make and save cohort
 
+    barcodes = None
+
+    if filters:
+        barcodes = get_sample_case_list_bq(source_id, filters)
+
+        if source_progs:
+            for prog in source_progs:
+                if prog.name not in list(barcodes.keys()):
+                    barcodes[prog.name] = get_sample_case_list_bq(source_id)
+
+        # Need at least 1 case in 1 program for this to be a valid cohort
+        cases_found = False
+
+        for prog in barcodes:
+            if barcodes[prog]['case_count'] > 0:
+                cases_found = True
+
+        if not cases_found:
+            return {
+                'result': 'error',
+                'message': 'No cases or samples were found which match the supplied filters.'
+            }
+
     # Create new cohort
-    cohort = Cohort.objects.create(name=name)
+    cohort = Cohort.objects.create(name=name, description=desc)
     cohort.save()
 
     # Set permission for user to be owner
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
+
+    # if there's a source, deactivate it and link it to the new cohort
+    if source:
+        source.active = False
+        source.save()
+        Source.objects.create(parent=source, cohort=cohort, type=Source.FILTERS).save()
 
     # Make and save filters
     for prog in filters:
@@ -121,6 +150,7 @@ def create_cohort(user, filters, name, desc=None):
         else:
             err_msg = 'There was an insertion error '
 
-        return {'msg': err_msg + ' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.'}
+        return {'message': err_msg + ' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.'}
 
     return {'cohort_id': cohort.id}
+
