@@ -44,11 +44,7 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
         source = Cohort.objects.filter(id=source_id).first()
         source_progs = source.get_programs()
 
-    # we only deactivate the source if we are applying filters to a previously-existing
-    # source cohort
-    deactivate_sources = (len(filters) > 0) and source is not None
-
-    if not deactivate_sources:
+    if source and not filters or (len(filters) <= 0):
         # If we're only changing the name and/or desc, just edit the cohort and update it
         source.update(name=name, description=desc)
         return { 'cohort_id': source.id }
@@ -86,7 +82,8 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    if deactivate_sources:
+    # if there's a source, deactivate it and link it to the new cohort
+    if source:
         source.active = False
         source.save()
         Source.objects.create(parent=source, cohort=cohort, type=Source.FILTERS).save()
