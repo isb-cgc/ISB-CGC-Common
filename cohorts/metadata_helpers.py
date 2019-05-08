@@ -2470,13 +2470,14 @@ def get_paths_by_uuid(uuids):
 
     results = BigQuerySupport.execute_query_and_fetch_results(query, where_clause['parameters'])
 
-    for row in results:
-        item = {
-            'gdc_file_uuid': row['f'][0]['v'],
-            'gcs_path': row['f'][1]['v']
-        }
-        if row['f'][2]['v'] is not None and not row['f'][2]['v'] == '':
-            item['index_file_path'] = row['f'][2]['v']
-        paths.append(item)
+    if results:
+        for row in results:
+            item = {
+                'gdc_file_uuid': row['f'][0]['v'],
+                'gcs_path': row['f'][1]['v']
+            }
+            if row['f'][2]['v'] is not None and not row['f'][2]['v'] == '':
+                item['index_file_path'] = row['f'][2]['v']
+            paths.append(item)
 
     return paths
