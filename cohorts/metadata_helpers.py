@@ -1663,7 +1663,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                             key_field_type = key_split.split(m.group(0))[0]
                             key_field = field_types[key_field_type]['proper_name'] + m.group(0)
                         if key_field_type not in field_types:
-                            invalid_keys.append({"program": prog, "filter": key_split})
+                            invalid_keys.append(key_split)
                         else:
                             filters[field_types[key_field_type]['type']][key_field] = inc_filters[prog][key_split]
 
