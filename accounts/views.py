@@ -225,6 +225,8 @@ def verify_gcp(request, user_id):
 
         response, status = verify_gcp_for_reg(User.objects.get(id=user_id), gcp_id, is_refresh)
 
+        logger.info("[STATUS] Response: {}".format(str(response)))
+
         if status == '403':
             response['redirect'] = reverse('user_gcp_list', kwargs={'user_id': user_id})
 
