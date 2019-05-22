@@ -137,6 +137,38 @@ class Cohort(models.Model):
         return filter_list
 
     '''
+    Returns a list of filters used on this cohort and all of its parents that were created using a filters, as a JSON-
+    compatible object
+
+    Filters are only returned if each of the parents were created using 1+ filters.
+    If a cohort is created using some other method, the chain is broken.
+    '''
+    def get_filters(self):
+        filter_list = []
+        dict_filters = {}
+        cohort = self
+        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
+        while cohort:
+            filter_list.extend(Filters.objects.filter(resulting_cohort=cohort))
+            sources = Source.objects.filter(cohort=cohort)
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
+                cohort = sources[0].parent
+            else:
+                cohort = None
+
+        for filter in filter_list:
+            if filter.program.name not in dict_filters:
+                dict_filters[filter.program.name] = {}
+            prog_filters = dict_filters[filter.program.name]
+            if filter.name not in prog_filters:
+                prog_filters[filter.name] = []
+            values = prog_filters[filter.name]
+            if filter.value not in values:
+                values.append(filter.value)
+
+        return dict_filters
+
+    '''
     Returns the current filters which are active (i.e. strips anything which is mututally exclusive)
     '''
     def get_current_filters(self):
