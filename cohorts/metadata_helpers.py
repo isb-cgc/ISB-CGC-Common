@@ -1596,10 +1596,23 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
     results = {}
 
     cohort_query = """
-        SELECT sample_barcode
+        SELECT case_barcode, sample_barcode
         FROM `{deployment_project}.{cohort_dataset}.{cohort_table}`
         WHERE cohort_id = @cohort
     """
+
+    cohort_param = None
+
+    if cohort_id:
+        cohort_param = {
+            'name': 'cohort',
+            'parameterType': {
+                'type': 'INT64'
+            },
+            'parameterValue': {
+                'value': cohort_id
+            }
+        }
 
     data_avail_sample_query = """
         SELECT DISTINCT sample_barcode
@@ -1609,6 +1622,22 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
     prog_query_jobs = {}
 
     try:
+
+        # Special case: cohort ID but no filter set. This means all we're retrieving is a list of cohort
+        # barcodes, and so don't need to do anything but query the cohort table
+        if cohort_id and not inc_filters:
+            # ...unless this is long form, in which case we need to get the project_short_name, which is only
+            # accessible via the Clinical table.
+            if long_form:
+                inc_filters = {x.name: {} for x in Program.objects.filter(active=True, is_public=True)}
+            else:
+                inc_filters = {}
+                # If all we need are the barcodes, the cohort table itself can provide that
+                prog_query_jobs['all'] = BigQuerySupport.insert_query_job(cohort_query.format(
+                    deployment_project=settings.BIGQUERY_PROJECT_ID,
+                    cohort_dataset=settings.COHORT_DATASET_ID,
+                    cohort_table=settings.BIGQUERY_COHORT_TABLE_ID
+                ), [cohort_param])
 
         for prog in inc_filters:
             mutation_filters = None
@@ -1831,22 +1860,14 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                 )
                 joins += (' JOIN %s mfltr ON mfltr.sample_barcode_tumor = biospec.sample_barcode ' % tmp_mut_table)
             if cohort_id:
-                joins += (' JOIN {} cs ON cs.sample_barcode = biospec.sample_barcode'.format(
+                joins += (' JOIN ({}) cs ON cs.sample_barcode = biospec.sample_barcode'.format(
                     cohort_query.format(
                         deployment_project=settings.BIGQUERY_PROJECT_ID,
                         cohort_dataset=settings.COHORT_DATASET_ID,
                         cohort_table=settings.BIGQUERY_COHORT_TABLE_ID
                     )
                 ))
-                parameters += [{
-                    'name': 'cohort',
-                    'parameterType': {
-                        'type': 'INT64'
-                    },
-                    'parameterValue': {
-                        'value': cohort_id
-                    }
-                }]
+                parameters += [cohort_param]
 
             # Confirm completion of the mutation filter job, if there was one.
             if mut_query_job:
