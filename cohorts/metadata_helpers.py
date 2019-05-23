@@ -1635,7 +1635,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                 # If all we need are the barcodes, the cohort table itself can provide that
                 prog_query_jobs['all'] = BigQuerySupport.insert_query_job(cohort_query.format(
                     deployment_project=settings.BIGQUERY_PROJECT_ID,
-                    cohort_dataset=settings.COHORT_DATASET_ID,
+                    cohort_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                     cohort_table=settings.BIGQUERY_COHORT_TABLE_ID
                 ), [cohort_param])
 
