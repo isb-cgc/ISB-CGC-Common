@@ -2210,7 +2210,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                   md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                   md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                  {cohort_id} as cohort_id, "{build}" as build,
+                  {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                  md.index_file_id as index_file_gdc_uuid,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                  FROM `{metadata_table}` md
                  JOIN (SELECT case_barcode, sample_barcode
