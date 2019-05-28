@@ -1858,10 +1858,11 @@ def streaming_csv_view(request, cohort_id=0):
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
-            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "File Size (B)", "Access Type"],)
+            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
+                      "Data Format", "GCS Location", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
-                          file['datatype'], file['dataformat'], file['cloudstorage_location'],
+                          file['datatype'], file['dataformat'], file['cloudstorage_location'], file['index_name'],
                           file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
@@ -2210,7 +2211,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                   md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                   md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                  {cohort_id} as cohort_id, "{build}" as build,
+                  {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                  md.index_file_id as index_file_gdc_uuid,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                  FROM `{metadata_table}` md
                  JOIN (SELECT case_barcode, sample_barcode
