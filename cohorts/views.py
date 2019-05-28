@@ -1858,10 +1858,11 @@ def streaming_csv_view(request, cohort_id=0):
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
-            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "File Size (B)", "Access Type"],)
+            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
+                      "Data Format", "GCS Location", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
-                          file['datatype'], file['dataformat'], file['cloudstorage_location'],
+                          file['datatype'], file['dataformat'], file['cloudstorage_location'], file['index_name'],
                           file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
