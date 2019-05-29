@@ -1,6 +1,7 @@
+from __future__ import absolute_import
 from django.conf.urls import url
 
-import views
+from . import views
 
 urlpatterns = [
     url(r'^(?P<sharing_id>\d+)/$', views.sharing_add, name='sharing_add'),

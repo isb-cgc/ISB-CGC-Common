@@ -16,6 +16,8 @@ limitations under the License.
 
 """
 
+from builtins import str
+from builtins import object
 from django.db import models
 from django.contrib.auth.models import User
 import logging
@@ -33,7 +35,7 @@ class NIH_User(models.Model):
     active = models.BooleanField(default=True)
     linked = models.BooleanField(default=True)
 
-    class Meta:
+    class Meta(object):
         verbose_name = "NIH User"
         verbose_name_plural = "NIH Users"
 
@@ -94,7 +96,7 @@ class BqDataset(models.Model):
     google_project = models.ForeignKey(GoogleProject, null=False)
     dataset_name = models.CharField(null=False, max_length=155)
 
-    class Meta:
+    class Meta(object):
         unique_together = (("google_project", "dataset_name"),)
 
 
@@ -113,7 +115,7 @@ class UserAuthorizedDatasets(models.Model):
     nih_user = models.ForeignKey(NIH_User, null=False)
     authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
 
-    class Meta:
+    class Meta(object):
         unique_together = (("nih_user", "authorized_dataset"),)
 
     def __str__(self):
@@ -175,5 +177,5 @@ class DCFToken(models.Model):
     refresh_expires_at = models.DateTimeField(null=False)
     google_id = models.TextField(null=True)
 
-    class Meta:
+    class Meta(object):
         unique_together = (("user", "nih_username_lower"),)

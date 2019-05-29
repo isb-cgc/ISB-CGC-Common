@@ -18,7 +18,7 @@ limitations under the License.
 
 import logging
 from django.conf import settings
-from bq_support import BigQuerySupport
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 

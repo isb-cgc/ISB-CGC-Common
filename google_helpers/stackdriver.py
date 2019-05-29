@@ -16,8 +16,11 @@ limitations under the License.
 
 """
 
+from future import standard_library
+standard_library.install_aliases()
+from builtins import object
 import logging as logger
-from urllib2 import quote as urllib2_quote
+from urllib.parse import quote as urllib2_quote
 
 from oauth2client.service_account import ServiceAccountCredentials
 from googleapiclient import discovery
