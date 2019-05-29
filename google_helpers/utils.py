@@ -16,12 +16,15 @@ limitations under the License.
 
 """
 
+from future import standard_library
+standard_library.install_aliases()
+from builtins import str
 from googleapiclient import discovery
 from googleapiclient.errors import HttpError
 from google.appengine.runtime.apiproxy_errors import DeadlineExceededError as APIDeadlineExceededError
 from google.appengine.api.urlfetch_errors import DeadlineExceededError as FetchDeadlineExceededError
 from google.appengine.api.remote_socket._remote_socket_error import error as GoogleSocketError
-from httplib import HTTPException
+from http.client import HTTPException
 import logging
 
 logger = logging.getLogger('main_logger')

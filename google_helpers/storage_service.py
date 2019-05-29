@@ -15,10 +15,11 @@ See the License for the specific language governing permissions and
 limitations under the License.
 
 """
+from __future__ import absolute_import
 
 from oauth2client.client import GoogleCredentials
 from django.conf import settings
-from utils import build_with_retries
+from .utils import build_with_retries
 
 STORAGE_SCOPES = [
     'https://www.googleapis.com/auth/devstorage.read_only',

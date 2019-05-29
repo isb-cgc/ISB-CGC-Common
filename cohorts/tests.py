@@ -19,11 +19,12 @@ when you run "manage.py test".
 
 Replace this with more appropriate tests for your application.
 """
+from __future__ import absolute_import
 from django import http
 from django.test import TestCase
 from django.test.client import Client
 
-from models import *
+from .models import *
 
 # class ModelTest(TestCase):
 #     def setUp(self):

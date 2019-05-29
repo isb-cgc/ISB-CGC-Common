@@ -24,8 +24,8 @@ from django.conf import settings
 from uuid import uuid4
 from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.storage_service import get_storage_resource
-from abstract import BigQueryExportABC
-from bq_support import BigQuerySupport
+from google_helpers.bigquery.abstract import BigQueryExportABC
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 BQ_ATTEMPT_MAX = 10
 
@@ -86,6 +86,12 @@ FILE_LIST_EXPORT_SCHEMA = {
         }, {
             'name': 'file_size_bytes',
             'type': 'INTEGER'
+        }, {
+            'name': 'index_file_gdc_uuid',
+            'type': 'STRING'
+        }, {
+            'name': 'index_file_cloud_storage_location',
+            'type': 'STRING'
         }
     ]
 }
@@ -450,6 +456,10 @@ class BigQueryExportFileList(BigQueryExport):
             'file_size_bytes': data['file_size'],
             'date_added': date_added
         }
+        if 'index_file_gdc_uuid' in data:
+            entry_dict['index_file_cloud_storage_location'] = data['index_file_cloudstorage_location'],
+            entry_dict['index_file_gdc_uuid'] = data['index_file_gdc_uuid']
+            
         return entry_dict
 
     # Export a file list into the BQ table referenced by project_id:dataset_id:table_id

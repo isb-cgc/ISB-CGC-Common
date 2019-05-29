@@ -21,6 +21,7 @@ limitations under the License.
 Cloud file storage is a custom file storage object to store files on GCS
 """
 
+from builtins import range
 import uuid
 import random
 import string
