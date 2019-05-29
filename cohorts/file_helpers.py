@@ -190,7 +190,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             select_clause_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, substring_index(md.file_name_key, '/', -1) as file_name, md.file_name_key,
-                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category,
+                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category, md.index_file_id,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name, md.file_size
                  FROM {metadata_table} md
                  JOIN (
@@ -320,6 +320,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                             'program': item['project_short_name'].split("-")[0],
                             'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
                             'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
+                            'index_file_gdc_id': (item['index_file_id'] or 'N/A'),
                             'project_short_name': (item['project_short_name'] or 'N/A'),
                             'cohort_id': cohort_id
                         })

@@ -1859,10 +1859,10 @@ def streaming_csv_view(request, cohort_id=0):
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
             rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
-                      "Data Format", "GCS Location", "Index File GCS Location", "File Size (B)", "Access Type"],)
+                      "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
-                          file['datatype'], file['dataformat'], file['cloudstorage_location'], file['index_name'],
+                          file['datatype'], file['dataformat'], file['file_gdc_id'], file['cloudstorage_location'], file['index_file_gdc_id'], file['index_name'],
                           file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
@@ -2224,7 +2224,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  WHERE TRUE {filter_conditions}
                  GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                   md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
+                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                  md.index_file_name_key, md.index_file_id
                  ORDER BY md.sample_barcode
             """
 
