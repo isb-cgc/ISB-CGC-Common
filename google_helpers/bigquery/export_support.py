@@ -16,6 +16,7 @@ limitations under the License.
 
 """
 
+from builtins import str
 from copy import deepcopy
 import logging
 import datetime

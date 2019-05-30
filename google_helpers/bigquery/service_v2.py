@@ -16,6 +16,7 @@ limitations under the License.
 
 """
 
+from builtins import object
 from oauth2client.client import GoogleCredentials
 from googleapiclient import discovery
 import httplib2

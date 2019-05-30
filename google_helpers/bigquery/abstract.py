@@ -16,13 +16,13 @@ limitations under the License.
 
 """
 
+from builtins import object
 from abc import ABCMeta, abstractmethod
+from future.utils import with_metaclass
 
 
 # Base Abstract class which defines the shared methods and properties for interaction with BigQuery
-class BigQueryABC:
-    __metaclass__ = ABCMeta
-
+class BigQueryABC(with_metaclass(ABCMeta, object)):
     @abstractmethod
     def __init__(self):
         pass
