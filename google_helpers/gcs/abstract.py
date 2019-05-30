@@ -14,12 +14,12 @@
 # limitations under the License.
 #
 
+from builtins import object
 from abc import ABCMeta, abstractmethod
+from future.utils import with_metaclass
 
 # Base Abstract class which defines the 3 main methods and properties used to place rows into BQ
-class GCSABC:
-    __metaclass__ = ABCMeta
-
+class GCSABC(with_metaclass(ABCMeta, object)):
     @abstractmethod
     def _write(self, content):
         pass

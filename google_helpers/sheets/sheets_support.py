@@ -14,14 +14,16 @@
 # limitations under the License.
 #
 
+from __future__ import absolute_import
+
 import logging
 import re
 from time import sleep
 from uuid import uuid4
 import copy
 from django.conf import settings
-from abstract import SheetsABC
-from sheets_service import get_sheet_service
+from .abstract import SheetsABC
+from .sheets_service import get_sheet_service
 
 logger = logging.getLogger('main_logger')
 
