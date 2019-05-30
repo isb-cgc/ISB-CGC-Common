@@ -254,7 +254,7 @@ def is_email_in_iam_roles(roles, user_email):
     Returns: True if user_email is in any role, otherwise False.
     """
     found = False
-    for role, user_list in roles.items():
+    for role, user_list in list(roles.items()):
         if user_email.lower() in [user_item['email'].lower() for user_item in user_list]:
             found = True
             break
