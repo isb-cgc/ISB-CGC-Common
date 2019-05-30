@@ -16,6 +16,7 @@ limitations under the License.
 
 """
 
+from builtins import str
 import logging
 import re
 from time import sleep
@@ -470,7 +471,7 @@ class BigQuerySupport(BigQueryABC):
 
         mut_filtr_count = 1
         # 'Mutation' filters, special category for MUT: type filters
-        for attr, values in mutation_filters.items():
+        for attr, values in list(mutation_filters.items()):
             if type(values) is not list:
                 values = [values]
             gene = attr.split(':')[2]
@@ -519,7 +520,7 @@ class BigQuerySupport(BigQueryABC):
             mut_filtr_count += 1
 
         # Standard query filters
-        for attr, values in other_filters.items():
+        for attr, values in list(other_filters.items()):
             if type(values) is not list:
                 values = [values]
 
