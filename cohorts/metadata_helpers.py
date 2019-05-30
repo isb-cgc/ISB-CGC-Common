@@ -17,7 +17,9 @@ limitations under the License.
 """
 Helper methods for fetching, curating, and managing cohort metadata
 """
+from __future__ import division
 
+from past.utils import old_div
 from builtins import str
 from past.builtins import basestring
 import sys
@@ -1400,7 +1402,7 @@ def get_full_sample_metadata(barcodes):
             barcodes_by_program[prog] = ()
         barcodes_by_program[prog] += (barcode,)
 
-    programs = Program.objects.filter(name__in=barcodes_by_program.keys(), active=True, is_public=True)
+    programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
 
     items = {}
 
@@ -1450,7 +1452,7 @@ def get_full_sample_metadata(barcodes):
             # TODO: Once we have aliquots in the database again, add those here
 
             result['total_found'] += 1
-            result['samples'] = [item for item in items.values()]
+            result['samples'] = [item for item in list(items.values())]
 
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
@@ -1484,7 +1486,7 @@ def get_full_case_metadata(barcodes):
             barcodes_by_program[prog] = ()
         barcodes_by_program[prog] += (barcode,)
 
-    programs = Program.objects.filter(name__in=barcodes_by_program.keys(),active=True,is_public=True)
+    programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()),active=True,is_public=True)
 
     items = {}
 
@@ -1541,7 +1543,7 @@ def get_full_case_metadata(barcodes):
             # TODO: Once we have aliquots in the database again, add those here
 
             result['total_found'] += 1
-            result['cases'] = [item for item in items.values()]
+            result['cases'] = [item for item in list(items.values())]
 
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
@@ -1667,7 +1669,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
 
             # It's possible a user wants all samples and cases from a given program. In this case, there will
             # be no filters, just the program keys.
-            if not len(inc_filters[prog].keys()):
+            if not len(list(inc_filters[prog].keys())):
                 filters['clin']['program_name'] = prog
             else:
                 # Divide our filters into mutation, data type, clin, and biospec sets
@@ -1714,12 +1716,12 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
 
             # Construct the WHERE clauses and parameter sets, and create the counting toggle switch
             if len(filters) > 0:
-                if len(filters['biospec'].keys()):
+                if len(list(filters['biospec'].keys())):
                     # Send in a type schema for Biospecimen, because sample_type is an integer encoded as a string,
                     # so detection will not work properly
                     type_schema = {x['name']: x['type'] for x in biospec_fields}
                     where_clause['biospec'] = BigQuerySupport.build_bq_filter_and_params(filters['biospec'], field_prefix='bs.', type_schema=type_schema)
-                if len(filters['clin'].keys()):
+                if len(list(filters['clin'].keys())):
                     where_clause['clin'] = BigQuerySupport.build_bq_filter_and_params(filters['clin'], field_prefix='cl.')
 
             mut_query_job = None
@@ -1939,7 +1941,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
             logger.error("[ERROR] Timed out while trying to count case/sample totals in BQ")
         else:
             stop = time.time()
-            logger.debug("[BENCHMARKING] Time to finish BQ case and sample list: {}s".format(str(((stop-start)/1000))))
+            logger.debug("[BENCHMARKING] Time to finish BQ case and sample list: {}s".format(str((old_div((stop-start),1000)))))
 
             for prog in prog_query_jobs:
                 bq_results = BigQuerySupport.get_job_results(prog_query_jobs[prog]['jobReference'])
