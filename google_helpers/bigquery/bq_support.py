@@ -1,21 +1,20 @@
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
-Copyright 2018, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-"""
-
+from builtins import str
 import logging
 import re
 from time import sleep
@@ -470,7 +469,7 @@ class BigQuerySupport(BigQueryABC):
 
         mut_filtr_count = 1
         # 'Mutation' filters, special category for MUT: type filters
-        for attr, values in mutation_filters.items():
+        for attr, values in list(mutation_filters.items()):
             if type(values) is not list:
                 values = [values]
             gene = attr.split(':')[2]
@@ -519,7 +518,7 @@ class BigQuerySupport(BigQueryABC):
             mut_filtr_count += 1
 
         # Standard query filters
-        for attr, values in other_filters.items():
+        for attr, values in list(other_filters.items()):
             if type(values) is not list:
                 values = [values]
 

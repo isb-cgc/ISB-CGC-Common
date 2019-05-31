@@ -1,18 +1,18 @@
-"""
-Copyright 2017-2018, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 from __future__ import absolute_import
 
 from builtins import map
@@ -76,7 +76,7 @@ def convert(data):
     if isinstance(data, basestring):
         return str(data)
     elif isinstance(data, collections.Mapping):
-        return dict(list(map(convert, iter(data.items()))))
+        return dict(list(map(convert, iter(list(data.items())))))
     elif isinstance(data, collections.Iterable):
         return type(data)(list(map(convert, data)))
     else:
@@ -1858,10 +1858,11 @@ def streaming_csv_view(request, cohort_id=0):
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
-            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "File Size (B)", "Access Type"],)
+            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
+                      "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
-                          file['datatype'], file['dataformat'], file['cloudstorage_location'],
+                          file['datatype'], file['dataformat'], file['file_gdc_id'], file['cloudstorage_location'], file['index_file_gdc_id'], file['index_name'],
                           file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
@@ -2210,7 +2211,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                   md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                   md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                  {cohort_id} as cohort_id, "{build}" as build,
+                  {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                  md.index_file_id as index_file_gdc_uuid,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                  FROM `{metadata_table}` md
                  JOIN (SELECT case_barcode, sample_barcode
@@ -2222,7 +2224,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  WHERE TRUE {filter_conditions}
                  GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                   md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
+                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                  md.index_file_name_key, md.index_file_id
                  ORDER BY md.sample_barcode
             """
 

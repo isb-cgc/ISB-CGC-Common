@@ -1,20 +1,18 @@
-"""
-
-Copyright 2018, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0how to c
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 from __future__ import absolute_import
 
 from builtins import str
@@ -190,7 +188,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             select_clause_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, substring_index(md.file_name_key, '/', -1) as file_name, md.file_name_key,
-                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category,
+                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category, md.index_file_id,
                   md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name, md.file_size
                  FROM {metadata_table} md
                  JOIN (
@@ -320,6 +318,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                             'program': item['project_short_name'].split("-")[0],
                             'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
                             'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
+                            'index_file_gdc_id': (item['index_file_id'] or 'N/A'),
                             'project_short_name': (item['project_short_name'] or 'N/A'),
                             'cohort_id': cohort_id
                         })

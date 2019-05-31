@@ -1,23 +1,25 @@
-"""
-Copyright 2017, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
 """
 Helper methods for fetching, curating, and managing cohort metadata
 """
+from __future__ import division
 
+from past.utils import old_div
 from builtins import str
 from past.builtins import basestring
 import sys
@@ -1400,7 +1402,7 @@ def get_full_sample_metadata(barcodes):
             barcodes_by_program[prog] = ()
         barcodes_by_program[prog] += (barcode,)
 
-    programs = Program.objects.filter(name__in=barcodes_by_program.keys(), active=True, is_public=True)
+    programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
 
     items = {}
 
@@ -1450,7 +1452,7 @@ def get_full_sample_metadata(barcodes):
             # TODO: Once we have aliquots in the database again, add those here
 
             result['total_found'] += 1
-            result['samples'] = [item for item in items.values()]
+            result['samples'] = [item for item in list(items.values())]
 
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
@@ -1484,7 +1486,7 @@ def get_full_case_metadata(barcodes):
             barcodes_by_program[prog] = ()
         barcodes_by_program[prog] += (barcode,)
 
-    programs = Program.objects.filter(name__in=barcodes_by_program.keys(),active=True,is_public=True)
+    programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()),active=True,is_public=True)
 
     items = {}
 
@@ -1541,7 +1543,7 @@ def get_full_case_metadata(barcodes):
             # TODO: Once we have aliquots in the database again, add those here
 
             result['total_found'] += 1
-            result['cases'] = [item for item in items.values()]
+            result['cases'] = [item for item in list(items.values())]
 
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
@@ -1596,10 +1598,23 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
     results = {}
 
     cohort_query = """
-        SELECT sample_barcode
+        SELECT case_barcode, sample_barcode
         FROM `{deployment_project}.{cohort_dataset}.{cohort_table}`
         WHERE cohort_id = @cohort
     """
+
+    cohort_param = None
+
+    if cohort_id:
+        cohort_param = {
+            'name': 'cohort',
+            'parameterType': {
+                'type': 'INT64'
+            },
+            'parameterValue': {
+                'value': cohort_id
+            }
+        }
 
     data_avail_sample_query = """
         SELECT DISTINCT sample_barcode
@@ -1609,6 +1624,22 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
     prog_query_jobs = {}
 
     try:
+
+        # Special case: cohort ID but no filter set. This means all we're retrieving is a list of cohort
+        # barcodes, and so don't need to do anything but query the cohort table
+        if cohort_id and not inc_filters:
+            # ...unless this is long form, in which case we need to get the project_short_name, which is only
+            # accessible via the Clinical table.
+            if long_form:
+                inc_filters = {x.name: {} for x in Program.objects.filter(active=True, is_public=True)}
+            else:
+                inc_filters = {}
+                # If all we need are the barcodes, the cohort table itself can provide that
+                prog_query_jobs['all'] = BigQuerySupport.insert_query_job(cohort_query.format(
+                    deployment_project=settings.BIGQUERY_PROJECT_ID,
+                    cohort_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
+                    cohort_table=settings.BIGQUERY_COHORT_TABLE_ID
+                ), [cohort_param])
 
         for prog in inc_filters:
             mutation_filters = None
@@ -1638,7 +1669,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
 
             # It's possible a user wants all samples and cases from a given program. In this case, there will
             # be no filters, just the program keys.
-            if not len(inc_filters[prog].keys()):
+            if not len(list(inc_filters[prog].keys())):
                 filters['clin']['program_name'] = prog
             else:
                 # Divide our filters into mutation, data type, clin, and biospec sets
@@ -1685,12 +1716,12 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
 
             # Construct the WHERE clauses and parameter sets, and create the counting toggle switch
             if len(filters) > 0:
-                if len(filters['biospec'].keys()):
+                if len(list(filters['biospec'].keys())):
                     # Send in a type schema for Biospecimen, because sample_type is an integer encoded as a string,
                     # so detection will not work properly
                     type_schema = {x['name']: x['type'] for x in biospec_fields}
                     where_clause['biospec'] = BigQuerySupport.build_bq_filter_and_params(filters['biospec'], field_prefix='bs.', type_schema=type_schema)
-                if len(filters['clin'].keys()):
+                if len(list(filters['clin'].keys())):
                     where_clause['clin'] = BigQuerySupport.build_bq_filter_and_params(filters['clin'], field_prefix='cl.')
 
             mut_query_job = None
@@ -1831,22 +1862,14 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                 )
                 joins += (' JOIN %s mfltr ON mfltr.sample_barcode_tumor = biospec.sample_barcode ' % tmp_mut_table)
             if cohort_id:
-                joins += (' JOIN {} cs ON cs.sample_barcode = biospec.sample_barcode'.format(
+                joins += (' JOIN ({}) cs ON cs.sample_barcode = biospec.sample_barcode'.format(
                     cohort_query.format(
                         deployment_project=settings.BIGQUERY_PROJECT_ID,
                         cohort_dataset=settings.COHORT_DATASET_ID,
                         cohort_table=settings.BIGQUERY_COHORT_TABLE_ID
                     )
                 ))
-                parameters += [{
-                    'name': 'cohort',
-                    'parameterType': {
-                        'type': 'INT64'
-                    },
-                    'parameterValue': {
-                        'value': cohort_id
-                    }
-                }]
+                parameters += [cohort_param]
 
             # Confirm completion of the mutation filter job, if there was one.
             if mut_query_job:
@@ -1918,7 +1941,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
             logger.error("[ERROR] Timed out while trying to count case/sample totals in BQ")
         else:
             stop = time.time()
-            logger.debug("[BENCHMARKING] Time to finish BQ case and sample list: {}s".format(str(((stop-start)/1000))))
+            logger.debug("[BENCHMARKING] Time to finish BQ case and sample list: {}s".format(str((old_div((stop-start),1000)))))
 
             for prog in prog_query_jobs:
                 bq_results = BigQuerySupport.get_job_results(prog_query_jobs[prog]['jobReference'])

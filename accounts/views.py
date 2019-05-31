@@ -1,18 +1,18 @@
-"""
-Copyright 2017-2018, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 from __future__ import absolute_import
 
 from builtins import str
@@ -225,6 +225,8 @@ def verify_gcp(request, user_id):
 
         response, status = verify_gcp_for_reg(User.objects.get(id=user_id), gcp_id, is_refresh)
 
+        logger.info("[STATUS] Response: {}".format(str(response)))
+
         if status == '403':
             response['redirect'] = reverse('user_gcp_list', kwargs={'user_id': user_id})
 
@@ -247,6 +249,7 @@ def register_gcp(request, user_id):
     try:
         if request.POST:
             project_id = request.POST.get('gcp_id', None)
+            gcp = GoogleProject.objects.get(project_id=project_id)
             register_users = request.POST.getlist('register_users')
             is_refresh = bool(request.POST.get('is_refresh', '') == 'true')
 
@@ -261,7 +264,7 @@ def register_gcp(request, user_id):
 
             if request.POST.get('detail','') == 'true':
                 redirect_view = 'gcp_detail'
-                args['gcp_id'] = project_id
+                args['gcp_id'] = gcp.id
 
             return redirect(reverse(redirect_view, kwargs=args))
 
@@ -269,7 +272,10 @@ def register_gcp(request, user_id):
 
     except Exception as e:
         logger.error("[ERROR] While {} a Google Cloud Project:".format("refreshing" if is_refresh else "registering"))
-        logger.exception(e)
+        if type(e) is ObjectDoesNotExist:
+            logger.error("GCP {} was not found.".format(project_id))
+        else:
+            logger.exception(e)
         messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact feedback@isb-cgc.org.")
 
     return redirect(reverse(redirect_view, kwargs=args))

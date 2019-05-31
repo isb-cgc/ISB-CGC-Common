@@ -1,19 +1,20 @@
-"""
-Copyright 2017, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 from __future__ import absolute_import
+from .metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
 
 from builtins import str
 from builtins import object
@@ -29,7 +30,6 @@ from django.utils.html import escape
 from projects.models import Project, Program, User_Feature_Definitions
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
-from .metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
 from functools import reduce
 
 logger = logging.getLogger('main_logger')
@@ -135,6 +135,38 @@ class Cohort(models.Model):
                 cohort = None
 
         return filter_list
+
+    '''
+    Returns a list of filters used on this cohort and all of its parents that were created using a filters, as a JSON-
+    compatible object
+
+    Filters are only returned if each of the parents were created using 1+ filters.
+    If a cohort is created using some other method, the chain is broken.
+    '''
+    def get_filters(self):
+        filter_list = []
+        dict_filters = {}
+        cohort = self
+        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
+        while cohort:
+            filter_list.extend(Filters.objects.filter(resulting_cohort=cohort))
+            sources = Source.objects.filter(cohort=cohort)
+            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
+                cohort = sources[0].parent
+            else:
+                cohort = None
+
+        for filter in filter_list:
+            if filter.program.name not in dict_filters:
+                dict_filters[filter.program.name] = {}
+            prog_filters = dict_filters[filter.program.name]
+            if filter.name not in prog_filters:
+                prog_filters[filter.name] = []
+            values = prog_filters[filter.name]
+            if filter.value not in values:
+                values.append(filter.value)
+
+        return dict_filters
 
     '''
     Returns the current filters which are active (i.e. strips anything which is mututally exclusive)

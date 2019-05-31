@@ -1,21 +1,20 @@
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
-Copyright 2018, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-"""
-
+from builtins import str
 from copy import deepcopy
 import logging
 import datetime
@@ -86,6 +85,12 @@ FILE_LIST_EXPORT_SCHEMA = {
         }, {
             'name': 'file_size_bytes',
             'type': 'INTEGER'
+        }, {
+            'name': 'index_file_gdc_uuid',
+            'type': 'STRING'
+        }, {
+            'name': 'index_file_cloud_storage_location',
+            'type': 'STRING'
         }
     ]
 }
@@ -450,6 +455,10 @@ class BigQueryExportFileList(BigQueryExport):
             'file_size_bytes': data['file_size'],
             'date_added': date_added
         }
+        if 'index_file_gdc_uuid' in data:
+            entry_dict['index_file_cloud_storage_location'] = data['index_file_cloudstorage_location'],
+            entry_dict['index_file_gdc_uuid'] = data['index_file_gdc_uuid']
+            
         return entry_dict
 
     # Export a file list into the BQ table referenced by project_id:dataset_id:table_id
