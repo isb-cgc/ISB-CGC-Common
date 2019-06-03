@@ -1,21 +1,20 @@
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
-Copyright 2018, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-"""
-
+from builtins import str
 import logging
 import re
 from time import sleep
@@ -23,7 +22,7 @@ from uuid import uuid4
 import copy
 from django.conf import settings
 from google_helpers.bigquery.service import get_bigquery_service
-from abstract import BigQueryABC
+from google_helpers.bigquery.abstract import BigQueryABC
 
 logger = logging.getLogger('main_logger')
 
@@ -90,7 +89,7 @@ class BigQuerySupport(BigQueryABC):
         next = 0
         response = None
 
-        while index < len(rows) and next is not None:
+        while next is not None and index < len(rows):
             next = MAX_INSERT+index
             body = None
             if next > len(rows):
@@ -127,7 +126,7 @@ class BigQuerySupport(BigQueryABC):
                                           'table_id': table['tableReference']['tableId']})
 
         return bq_tables
-
+        
     # Check if the dataset referenced by dataset_id exists in the project referenced by project_id
     def _dataset_exists(self):
         datasets = self.bq_service.datasets().list(projectId=self.project_id).execute(num_retries=5)
@@ -416,6 +415,20 @@ class BigQuerySupport(BigQueryABC):
     def get_job_resource(cls, job_id, project_id):
         bqs = cls(None, None, None)
         return bqs.fetch_job_resource({'jobId': job_id, 'projectId': project_id})
+    
+    @classmethod
+    def get_table_fields(cls, projectId, datasetId, tableId):
+        bqs = cls(None, None, None)
+        table = bqs.bq_service.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
+
+        return [x['name'] for x in table['schema']['fields']]
+
+    @classmethod
+    def get_table_schema(cls, projectId, datasetId, tableId):
+        bqs = cls(None, None, None)
+        table = bqs.bq_service.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
+
+        return [{'name': x['name'], 'type': x['type']} for x in table['schema']['fields']]
 
     # Builds a BQ API v2 QueryParameter set and WHERE clause string from a set of filters of the form:
     # {
@@ -429,10 +442,11 @@ class BigQuerySupport(BigQueryABC):
     # Support for Greater/Less than (or equal to) via [gl]t[e]{0,1} in attr name,
     #     eg. {"age_at_diagnosis_gte": [50,]}
     # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
+    # Support for providing an explicit schema of the fields being searched
     #
     # TODO: add support for DATES
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None):
         result = {
             'filter_string': '',
             'parameters': []
@@ -455,9 +469,11 @@ class BigQuerySupport(BigQueryABC):
 
         mut_filtr_count = 1
         # 'Mutation' filters, special category for MUT: type filters
-        for attr, values in mutation_filters.items():
+        for attr, values in list(mutation_filters.items()):
+            if type(values) is not list:
+                values = [values]
             gene = attr.split(':')[2]
-            filter_type = attr.split(':')[-1]
+            filter_type = attr.split(':')[-1].lower()
             invert = bool(attr.split(':')[3] == 'NOT')
             param_name = 'gene{}{}'.format(str(mut_filtr_count), '_{}'.format(param_suffix) if param_suffix else '')
             filter_string = '{}Hugo_Symbol = @{} AND '.format('' if not field_prefix else field_prefix, param_name)
@@ -482,7 +498,7 @@ class BigQuerySupport(BigQueryABC):
                 }
             }
 
-            if filter_type == 'category' and values[0] == 'any':
+            if filter_type == 'category' and values[0].lower() == 'any':
                 filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix,)
                 var_query_param = None
             else:
@@ -502,12 +518,25 @@ class BigQuerySupport(BigQueryABC):
             mut_filtr_count += 1
 
         # Standard query filters
-        for attr, values in other_filters.items():
+        for attr, values in list(other_filters.items()):
+            if type(values) is not list:
+                values = [values]
+
+            parameter_type = None
+            if type_schema and attr in type_schema and type_schema[attr]:
+                parameter_type = ('INT64' if type_schema[attr] == 'INTEGER' else 'STRING')
+            else:
+                parameter_type = (
+                    'STRING' if (
+                        type(values[0]) is not int and re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0])
+                    ) else 'INT64'
+                )
+
             filter_string = ''
             param_name = attr + '{}'.format('_{}'.format(param_suffix) if param_suffix else '')
             query_param = {
                 'name': param_name,
-                'parameterType': {},
+                'parameterType': {'type': parameter_type},
                 'parameterValue': {}
             }
             if 'None' in values:
@@ -519,7 +548,6 @@ class BigQuerySupport(BigQueryABC):
                     filter_string += " OR "
                 if len(values) == 1:
                     # Scalar param
-                    query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
                         if '%' in values[0]:
@@ -540,8 +568,12 @@ class BigQuerySupport(BigQueryABC):
                                 '=' if attr.endswith('_lte') else '',
                                 param_name
                             )
+                        else:
+                            filter_string += "{}{} = @{}".format(
+                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                param_name
+                            )
                 elif len(values) == 2 and attr.endswith('_btw'):
-                    query_param['parameterType']['type'] = ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')
                     param_name_1 = param_name + '_btw_1'
                     param_name_2 = param_name + '_btw_2'
                     filter_string += "{}{} BETWEEN @{} AND @{}".format(
@@ -560,8 +592,11 @@ class BigQuerySupport(BigQueryABC):
                 else:
                     # Array param
                     query_param['parameterType']['type'] = "ARRAY"
+                    query_param['parameterType']['arrayType'] = {
+                        'type': parameter_type
+                    }
                     query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
-                    query_param['parameterType']['arrayType'] = {'type': ('STRING' if re.compile(ur'[^0-9\.,]', re.UNICODE).search(values[0]) else 'INT64')}
+
                     filter_string += "{}{} IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:

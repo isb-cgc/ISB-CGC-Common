@@ -20,6 +20,7 @@ This sample is used on this page:
 For more information, see the README.md under /bigquery.
 """
 
+from builtins import str
 import argparse
 import logging
 import json

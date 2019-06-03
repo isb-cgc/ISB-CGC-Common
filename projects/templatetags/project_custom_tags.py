@@ -1,7 +1,6 @@
-import string
-
 from django.template.defaulttags import register
 from projects.models import Program
+import string
 
 @register.simple_tag
 def public_program_count():
