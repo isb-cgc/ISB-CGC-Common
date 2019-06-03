@@ -1,19 +1,23 @@
-"""
-Copyright 2017-2018, Institute for Systems Biology
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+from __future__ import absolute_import
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
+from builtins import str
+from builtins import next
+from builtins import object
 import logging
 import requests
 import datetime
@@ -21,7 +25,7 @@ import pytz
 
 from django.conf import settings
 
-from models import DCFToken, NIH_User
+from .models import DCFToken, NIH_User
 from requests_oauthlib.oauth2_session import OAuth2Session
 from oauthlib.oauth2 import MissingTokenError
 from base64 import urlsafe_b64decode
@@ -1080,7 +1084,7 @@ def massage_user_data_for_dev(the_user):
 
     dict_o_projects = get_projects_from_user_dict(the_user)
     new_dict_o_projects = {}
-    for project in dict_o_projects.keys():
+    for project in list(dict_o_projects.keys()):
         perm_list = dict_o_projects[project]
         # DCF QA returns bogus project info. Do this mapping as a workaround:
         if project == dcf_secrets['DEV_1_PROJ']:
@@ -1574,7 +1578,7 @@ def unlink_at_dcf(user_id, do_refresh):
     return
 
 
-class GoogleLinkState:
+class GoogleLinkState(object):
     BOTH_NULL = 1
     DCF_NULL_CGC_NON_NULL = 2
     DCF_BAD_CGC_NULL = 3

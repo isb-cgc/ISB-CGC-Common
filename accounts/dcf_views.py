@@ -1,19 +1,21 @@
-"""
-Copyright 2017-2018, Institute for Systems Biology
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+from __future__ import absolute_import
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
+from builtins import str
 import logging
 import jwt
 import os
@@ -31,11 +33,11 @@ from django.http import HttpResponseRedirect
 
 from google_helpers.stackdriver import StackDriverLogger
 
-from sa_utils import found_linking_problems, DemoLoginResults, \
+from .sa_utils import found_linking_problems, DemoLoginResults, \
                      handle_user_db_update_for_dcf_linking, \
                      unlink_account_in_db_for_dcf, refresh_user_projects, have_linked_user
 
-from dcf_support import get_stored_dcf_token, \
+from .dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
@@ -79,7 +81,7 @@ def oauth2_login(request):
 
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
         # to do data queries. Starting to recognize a pattern here...
-        oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'google_service_account'])
+        oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'google_service_account', 'google_link'])
         authorization_url, state = oauth.authorization_url(DCF_AUTH_URL)
 
         # stash the state string in the session!
