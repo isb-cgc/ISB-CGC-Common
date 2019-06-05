@@ -1,3 +1,4 @@
+from builtins import object
 import operator
 
 from django.db import models
@@ -6,6 +7,7 @@ from django.db.models import Q
 from data_upload.models import UserUpload
 from accounts.models import GoogleProject, Bucket, BqDataset
 from sharing.models import Shared_Resource
+from functools import reduce
 
 
 class ProgramManager(models.Manager):
@@ -53,6 +55,12 @@ class Program(models.Model):
     def get_metadata_tables(self):
         return self.public_metadata_tables_set.first()
 
+    def get_data_tables(self):
+        return self.public_data_tables_set.all()
+    
+    def get_all_projects(self):
+        return self.project_set.filter(active=1)
+
     @classmethod
     def get_user_programs(cls, user, includeShared=True, includePublic=False):
         programs = user.program_set.filter(active=True)
@@ -66,7 +74,7 @@ class Program(models.Model):
         programs = programs.distinct()
 
         return programs
-
+    
     @classmethod
     def get_public_programs(cls):
         return cls.objects.filter(is_public=True, active=True)
@@ -164,7 +172,7 @@ class Project(models.Model):
     def __str__(self):
         return self.name
 
-    class Meta:
+    class Meta(object):
         verbose_name_plural = "projects"
 
 
@@ -199,7 +207,7 @@ class User_Data_Tables(models.Model):
     google_bucket = models.ForeignKey(Bucket)
     google_bq_dataset = models.ForeignKey(BqDataset)
 
-    class Meta:
+    class Meta(object):
         verbose_name = "user data table"
         verbose_name_plural = "user data tables"
 
@@ -218,7 +226,7 @@ class Public_Data_Tables(models.Model):
     bq_dataset = models.CharField(max_length=100, null=True)
     annot2data_table = models.CharField(max_length=100, null=True)
 
-    class Meta:
+    class Meta(object):
         verbose_name = "Public Data Table"
         verbose_name_plural = "Public Data Tables"
 
@@ -232,7 +240,7 @@ class Public_Annotation_Tables(models.Model):
     annot2biospec_table = models.CharField(max_length=100, null=True)
     annot2clin_table = models.CharField(max_length=100, null=True)
 
-    class Meta:
+    class Meta(object):
         verbose_name = "Public Annotation Table"
         verbose_name_plural = "Public Annotation Tables"
 
@@ -254,7 +262,7 @@ class Public_Metadata_Tables(models.Model):
     clin_bq_table = models.CharField(max_length=100, null=True)
     biospec_bq_table = models.CharField(max_length=100, null=True)
 
-    class Meta:
+    class Meta(object):
         verbose_name = "Public Metadata Table"
         verbose_name_plural = "Public Metadata Tables"
 
