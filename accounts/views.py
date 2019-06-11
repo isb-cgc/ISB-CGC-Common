@@ -254,7 +254,7 @@ def register_gcp(request, user_id):
 
             register, status = register_or_refresh_gcp(User.objects.get(id=user_id), project_id, register_users, is_refresh)
 
-            gcp = GoogleProject.objects.get(project_id=project_id)
+            gcp = GoogleProject.objects.get(project_id=project_id, active=1)
 
             if status == 200:
                 if 'message' in register:
