@@ -249,11 +249,12 @@ def register_gcp(request, user_id):
     try:
         if request.POST:
             project_id = request.POST.get('gcp_id', None)
-            gcp = GoogleProject.objects.get(project_id=project_id)
             register_users = request.POST.getlist('register_users')
             is_refresh = bool(request.POST.get('is_refresh', '') == 'true')
 
             register, status = register_or_refresh_gcp(User.objects.get(id=user_id), project_id, register_users, is_refresh)
+
+            gcp = GoogleProject.objects.get(project_id=project_id)
 
             if status == 200:
                 if 'message' in register:
@@ -273,7 +274,7 @@ def register_gcp(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While {} a Google Cloud Project:".format("refreshing" if is_refresh else "registering"))
         if type(e) is ObjectDoesNotExist:
-            logger.error("GCP {} was not found.".format(project_id))
+            logger.error("GCP {} was not found post-registration.".format(project_id))
         else:
             logger.exception(e)
         messages.error(request, "There was an error while attempting to register/refresh this Google Cloud Project - please contact feedback@isb-cgc.org.")
