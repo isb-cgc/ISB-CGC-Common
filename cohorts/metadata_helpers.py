@@ -1388,25 +1388,25 @@ def get_full_sample_metadata(barcodes):
     db = None
     cursor = None
 
-    barcodes_by_program = {}
-
-    for barcode in barcodes:
-        dash = barcode.find("-")
-        if dash >= 0:
-            prog = barcode[0:dash]
-            if prog not in ['TCGA', 'TARGET']:
-                prog = 'CCLE'
-        else:
-            prog = 'CCLE'
-        if prog not in barcodes_by_program:
-            barcodes_by_program[prog] = ()
-        barcodes_by_program[prog] += (barcode,)
-
-    programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
-
-    items = {}
-
     try:
+        barcodes_by_program = {}
+
+        for barcode in barcodes:
+            dash = barcode.find("-")
+            if dash >= 0:
+                prog = barcode[0:dash]
+                if prog not in ['TCGA', 'TARGET']:
+                    prog = 'CCLE'
+            else:
+                prog = 'CCLE'
+            if prog not in barcodes_by_program:
+                barcodes_by_program[prog] = ()
+            barcodes_by_program[prog] += (barcode,)
+
+        programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
+
+        items = {}
+
         db = get_sql_connection()
         cursor = db.cursor()
 
@@ -1454,14 +1454,14 @@ def get_full_sample_metadata(barcodes):
             result['total_found'] += 1
             result['samples'] = [item for item in list(items.values())]
 
+        return result
+
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
-
-    return result
 
 
 def get_full_case_metadata(barcodes):
@@ -1472,25 +1472,25 @@ def get_full_case_metadata(barcodes):
     db = None
     cursor = None
 
-    barcodes_by_program = {}
-
-    for barcode in barcodes:
-        dash = barcode.find("-")
-        if dash >= 0:
-            prog = barcode[0:dash]
-            if prog not in ['TCGA','TARGET']:
-                prog = 'CCLE'
-        else:
-            prog = 'CCLE'
-        if prog not in barcodes_by_program:
-            barcodes_by_program[prog] = ()
-        barcodes_by_program[prog] += (barcode,)
-
-    programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()),active=True,is_public=True)
-
-    items = {}
-
     try:
+        barcodes_by_program = {}
+
+        for barcode in barcodes:
+            dash = barcode.find("-")
+            if dash >= 0:
+                prog = barcode[0:dash]
+                if prog not in ['TCGA', 'TARGET']:
+                    prog = 'CCLE'
+            else:
+                prog = 'CCLE'
+            if prog not in barcodes_by_program:
+                barcodes_by_program[prog] = ()
+            barcodes_by_program[prog] += (barcode,)
+
+        programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
+
+        items = {}
+
         db = get_sql_connection()
         cursor = db.cursor()
 
@@ -1545,14 +1545,14 @@ def get_full_case_metadata(barcodes):
             result['total_found'] += 1
             result['cases'] = [item for item in list(items.values())]
 
+        return result
+
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
-
-    return result
 
 
 def get_sample_metadata(barcode):
