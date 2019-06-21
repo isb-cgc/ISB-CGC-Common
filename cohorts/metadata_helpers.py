@@ -1526,26 +1526,27 @@ def get_full_case_metadata(barcodes):
             for row in cursor.fetchall():
                 items[row[0]]['samples'].append(row[1])
 
-            for build in program_data_tables:
-                cursor.execute("""
-                    SELECT md.case_barcode as cb, md.*
-                    FROM {} md
-                    WHERE md.case_barcode IN ({}) AND (md.sample_barcode = '' OR md.sample_barcode IS NULL) 
-                """.format(build.data_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
-                               barcodes_by_program[program.name])
+            if len(list(items.keys())):
+                for build in program_data_tables:
+                    cursor.execute("""
+                        SELECT md.case_barcode as cb, md.*
+                        FROM {} md
+                        WHERE md.case_barcode IN ({}) AND (md.sample_barcode = '' OR md.sample_barcode IS NULL) 
+                    """.format(build.data_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
+                                   barcodes_by_program[program.name])
 
-                fields = cursor.description
-                for row in cursor.fetchall():
-                    if not build.build in items[row[0]]['data_details']:
-                        items[row[0]]['data_details'][build.build] = []
-                    items[row[0]]['data_details'][build.build].append(
-                        {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip}
-                    )
+                    fields = cursor.description
+                    for row in cursor.fetchall():
+                        if not build.build in items[row[0]]['data_details']:
+                            items[row[0]]['data_details'][build.build] = []
+                        items[row[0]]['data_details'][build.build].append(
+                            {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip}
+                        )
 
-            # TODO: Once we have aliquots in the database again, add those here
+                # TODO: Once we have aliquots in the database again, add those here
 
-            result['total_found'] += 1
-            result['cases'] = [item for item in list(items.values())]
+                result['total_found'] += 1
+                result['cases'] = [item for item in list(items.values())]
 
         return result
 
