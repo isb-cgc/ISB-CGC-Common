@@ -1433,26 +1433,27 @@ def get_full_sample_metadata(barcodes):
                     'data_details': {}
                 }
 
-            for build in program_data_tables:
-                cursor.execute("""
-                    SELECT md.sample_barcode as sb, md.*
-                    FROM {} md
-                    WHERE md.sample_barcode IN ({}) AND NOT(md.sample_barcode = '') AND md.sample_barcode IS NOT NULL 
-                """.format(build.data_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
-                               barcodes_by_program[program.name])
+            if len(list(items.keys())):
+                for build in program_data_tables:
+                    cursor.execute("""
+                        SELECT md.sample_barcode as sb, md.*
+                        FROM {} md
+                        WHERE md.sample_barcode IN ({}) AND NOT(md.sample_barcode = '') AND md.sample_barcode IS NOT NULL 
+                    """.format(build.data_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
+                                   barcodes_by_program[program.name])
 
-                fields = cursor.description
-                for row in cursor.fetchall():
-                    if not build.build in items[row[0]]['data_details']:
-                        items[row[0]]['data_details'][build.build] = []
-                    items[row[0]]['data_details'][build.build].append(
-                        {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip}
-                    )
+                    fields = cursor.description
+                    for row in cursor.fetchall():
+                        if not build.build in items[row[0]]['data_details']:
+                            items[row[0]]['data_details'][build.build] = []
+                        items[row[0]]['data_details'][build.build].append(
+                            {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip}
+                        )
 
-            # TODO: Once we have aliquots in the database again, add those here
+                # TODO: Once we have aliquots in the database again, add those here
 
-            result['total_found'] += 1
-            result['samples'] = [item for item in list(items.values())]
+                result['total_found'] += 1
+                result['samples'] = [item for item in list(items.values())]
 
         return result
 
@@ -1460,6 +1461,7 @@ def get_full_sample_metadata(barcodes):
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
     finally:
+        logger.info("[STATUS] Closing connection in sample metadata.")
         if cursor: cursor.close()
         if db and db.open: db.close()
 
