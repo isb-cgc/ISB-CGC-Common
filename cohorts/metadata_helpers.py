@@ -1486,62 +1486,84 @@ def get_full_case_metadata(barcodes):
             else:
                 prog = 'CCLE'
             if prog not in barcodes_by_program:
-                barcodes_by_program[prog] = ()
-            barcodes_by_program[prog] += (barcode,)
+                barcodes_by_program[prog] = []
+            barcodes_by_program[prog].append(barcode)
 
         programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
 
         items = {}
 
-        db = get_sql_connection()
-        cursor = db.cursor()
-
         for program in programs:
             program_tables = program.get_metadata_tables()
             program_data_tables = program.get_data_tables()
+            
+            bq_search = BigQuerySupport.build_bq_filter_and_params({'case_barcode': barcodes_by_program[program.name]})
 
-            cursor.execute("""
+            case_job = BigQuerySupport.insert_query_job("""
                 SELECT clin.case_barcode as cb, clin.*
-                FROM {} clin
-                WHERE clin.case_barcode IN ({}) AND clin.endpoint_type = 'current'
-            """.format(program_tables.clin_table, ",".join(["%s"]*(len(barcodes_by_program[program.name])))), barcodes_by_program[program.name])
+                FROM `{}` clin
+                WHERE {}
+            """.format("{}.{}.{}".format(
+                settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.clin_bq_table),
+                bq_search['filter_str']), bq_search['parameters'])
 
-            fields = cursor.description
-            skip = ['endpoint_type', 'metadata_clinical_id', 'metadata_biospecimen_id', 'cb']
+            bq_results = BigQuerySupport.wait_for_done_and_get_results(case_job['jobReference'])
+            result_schema = BigQuerySupport.get_result_schema(case_job['jobReference'])
 
-            for row in cursor.fetchall():
-                items[row[0]] = {
-                    'case_barcode': row[0],
-                    'clinical_data': {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip},
+            skip = ['endpoint_type', 'metadata_clinical_id', 'metadata_biospecimen_id', 'cb', 'summary_file_count']
+
+            for row in bq_results:
+                items[row['f'][0]['v']] = {
+                    'case_barcode': row['f'][0]['v'],
                     'samples': [],
-                    'data_details': {}
+                    'data_details': {},
+                    'clinlical_data': {result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip}
                 }
 
-            cursor.execute("""
-                SELECT case_barcode, sample_barcode
-                FROM {} 
-                WHERE case_barcode IN ({}) AND endpoint_type = 'current'
-            """.format(program_tables.biospec_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))), barcodes_by_program[program.name])
-
-            for row in cursor.fetchall():
-                items[row[0]]['samples'].append(row[1])
-
             if len(list(items.keys())):
-                for build in program_data_tables:
-                    cursor.execute("""
-                        SELECT md.case_barcode as cb, md.*
-                        FROM {} md
-                        WHERE md.case_barcode IN ({}) AND (md.sample_barcode = '' OR md.sample_barcode IS NULL) 
-                    """.format(build.data_table, ",".join(["%s"] * (len(barcodes_by_program[program.name])))),
-                                   barcodes_by_program[program.name])
+                queries = []
+                
+                for build_table in program_data_tables:
+                    queries.append({
+                        'query': """
+                            SELECT md.case_barcode as cb, md.*
+                            FROM `{}` md
+                            WHERE {} AND (md.sample_barcode = '' OR md.sample_barcode IS NULL)                     
+                        """.format(
+                            "{}.{}.{}".format(
+                                settings.BIGQUERY_DATA_PROJECT_ID, program_data_tables.bq_dataset, program_data_tables.data_table),
+                            bq_search['filter_str']),
+                        'parameters': bq_search['parameters'],
+                        'query_type': 'data_details',
+                        'build': build_table.build
+                    })
 
-                    fields = cursor.description
-                    for row in cursor.fetchall():
-                        if not build.build in items[row[0]]['data_details']:
-                            items[row[0]]['data_details'][build.build] = []
-                        items[row[0]]['data_details'][build.build].append(
-                            {fields[index][0]: column for index, column in enumerate(row) if fields[index][0] not in skip}
-                        )
+                queries.append({
+                    'query': """
+                        SELECT case_barcode, sample_barcode
+                        FROM {} 
+                        WHERE {}
+                    """.format("{}.{}.{}".format(
+                        settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.biospec_bq_table,
+                        bq_search['filter_str'])),
+                    'parameters': bq_search['parameters'],
+                    'query_type': 'samples'
+                })
+
+                results = BigQuerySupport.insert_job_batch_and_get_results(queries)
+
+                for result in results:
+                    bq_results = result['bq_results']
+                    if result['query_type'] == 'samples':
+                        for row in bq_results:
+                            items[row['f'][0]['v']]['samples'].append(row['f'][1]['v'])
+                    else:
+                        for row in bq_results:
+                            if 'data_details' not in items[row['f'][0]['v']] or result['build'] not in items[row['f'][0]['v']]['data_details']:
+                                items[row['f'][0]['v']]['data_details'][result['build']] = []
+                            items[row['f'][0]['v']]['data_details'][result['build']].append({
+                                result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip
+                            })
 
                 # TODO: Once we have aliquots in the database again, add those here
 
@@ -1554,6 +1576,7 @@ def get_full_case_metadata(barcodes):
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
     finally:
+        logger.info("[STATUS] Closing connection in case metadata.")
         if cursor: cursor.close()
         if db and db.open: db.close()
 
