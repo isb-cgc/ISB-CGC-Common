@@ -741,7 +741,7 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map, sa_
     try:
         # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
         headers = {'Content-Type': 'application/json'}
-
+        logger.info("[INFO] DCF verification request: {} {}".format(json_dumps(sa_data, service_account_id)))
         resp = _dcf_call(full_url, user_id, mode=use_mode, post_body=json_dumps(sa_data), headers=headers)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA verification failed (user {})".format(user_id))
