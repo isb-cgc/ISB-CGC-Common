@@ -231,7 +231,8 @@ class Public_Data_Tables(models.Model):
         verbose_name_plural = "Public Data Tables"
 
     def __str__(self):
-        return self.program__name + " " + self.build + " Data Tables"
+        return "{} [{}] Data Tables".format(self.program.name,self.build)
+
 
 class Public_Annotation_Tables(models.Model):
     program = models.ForeignKey(Program, null=False)
