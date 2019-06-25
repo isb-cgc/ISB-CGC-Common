@@ -1435,7 +1435,7 @@ def get_full_sample_metadata(barcodes):
                     'sample_barcode': row['f'][0]['v'],
                     'case_barcode': row['f'][1]['v'],
                     'data_details': {
-                        x.build: 'NONE_FOUND' for x in program_data_tables
+                        x.build: [] for x in program_data_tables
                     },
                     'biospecimen_data': {result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip}
                 }
@@ -1470,8 +1470,6 @@ def get_full_sample_metadata(barcodes):
                         logger.warn("{}".format(bq_result['query']))
                         continue
                     for row in bq_results:
-                        if items[row['f'][0]['v']]['data_details'][bq_result['build']] == 'NONE_FOUND':
-                            items[row['f'][0]['v']]['data_details'][bq_result['build']] = []
                         items[row['f'][0]['v']]['data_details'][bq_result['build']].append({
                             result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip
                         })
@@ -1544,7 +1542,7 @@ def get_full_case_metadata(barcodes):
                     'case_barcode': row['f'][0]['v'],
                     'samples': [],
                     'data_details': {
-                        x.build: 'NONE_FOUND' for x in program_data_tables
+                        x.build: [] for x in program_data_tables
                     },
                     'clinlical_data': {result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip}
                 }
@@ -1592,8 +1590,6 @@ def get_full_case_metadata(barcodes):
                             items[row['f'][0]['v']]['samples'].append(row['f'][1]['v'])
                     else:
                         for row in bq_results:
-                            if items[row['f'][0]['v']]['data_details'][bq_result['build']] == 'NONE_FOUND':
-                                items[row['f'][0]['v']]['data_details'][bq_result['build']] = []
                             items[row['f'][0]['v']]['data_details'][bq_result['build']].append({
                                 result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip
                             })
