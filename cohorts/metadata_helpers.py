@@ -1385,8 +1385,6 @@ def get_full_sample_metadata(barcodes):
     result = {
         'total_found': 0
     }
-    db = None
-    cursor = None
 
     try:
         barcodes_by_program = {}
@@ -1484,10 +1482,6 @@ def get_full_sample_metadata(barcodes):
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
-    finally:
-        logger.info("[STATUS] Closing connection in sample metadata.")
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def get_full_case_metadata(barcodes):
@@ -1495,8 +1489,6 @@ def get_full_case_metadata(barcodes):
     result = {
         'total_found': 0
     }
-    db = None
-    cursor = None
 
     try:
         barcodes_by_program = {}
@@ -1604,10 +1596,6 @@ def get_full_case_metadata(barcodes):
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
-    finally:
-        logger.info("[STATUS] Closing connection in case metadata.")
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def get_sample_metadata(barcode):
