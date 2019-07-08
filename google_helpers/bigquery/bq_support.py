@@ -302,16 +302,7 @@ class BigQuerySupport(BigQueryABC):
                     'total_bytes_processed': query_job['statistics']['query']['totalBytesProcessed']
                 }
 
-        job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
-                                                 jobId=job_id).execute(num_retries=5)
-
-        retries = 0
-
-        while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
-            retries += 1
-            sleep(1)
-            job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
-                                                     jobId=job_id).execute(num_retries=5)
+        job_is_done = self.await_job_is_done(query_job)
 
         # Parse the final disposition
         if job_is_done and job_is_done['status']['state'] == 'DONE':
@@ -333,6 +324,20 @@ class BigQuerySupport(BigQueryABC):
 
         return query_results
 
+    # Check for a job's status for the maximum number of attempts, return the final resulting response
+    def await_job_is_done(self, query_job):
+        done = self.job_is_done(query_job)
+        retries = 0
+
+        while not done and retries < BQ_ATTEMPT_MAX:
+            retries += 1
+            sleep(1)
+            done = self.job_is_done(query_job)
+
+        return self.bq_service.jobs().get(
+            projectId=self.executing_project, jobId=query_job['jobReference']['jobId']
+        ).execute(num_retries=5)
+
     # Check to see if query job is done
     def job_is_done(self, query_job):
         job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
@@ -342,6 +347,7 @@ class BigQuerySupport(BigQueryABC):
 
     # Fetch the results of a job based on the reference provided
     def fetch_job_results(self, job_ref):
+        logger.info(str(job_ref))
         result = []
         page_token = None
 
@@ -394,9 +400,9 @@ class BigQuerySupport(BigQueryABC):
 
     # Check the status of a BQ job
     @classmethod
-    def check_job_is_done(cls, job_ref):
+    def check_job_is_done(cls, query_job):
         bqs = cls(None, None, None)
-        return bqs.job_is_done(job_ref)
+        return bqs.job_is_done(query_job)
 
     # Do a 'dry run' query, which estimates the cost
     @classmethod
@@ -404,11 +410,19 @@ class BigQuerySupport(BigQueryABC):
         bqs = cls(None, None, None)
         return bqs.execute_query(query, parameters, cost_est=True)
 
-    # Given a BQ service and a job reference, fetch out the results
+    # Given a job reference, fetch out the results
     @classmethod
     def get_job_results(cls, job_reference):
         bqs = cls(None, None, None)
         return bqs.fetch_job_results(job_reference)
+
+    # Given a job reference for a running job, await the completion,
+    # then fetch and return the results
+    @classmethod
+    def wait_for_done_and_get_results(cls, query_job):
+        bqs = cls(None, None, None)
+        check_done = bqs.await_job_is_done(query_job)
+        return bqs.fetch_job_results(check_done['jobReference'])
 
     # Given a BQ service and a job reference, fetch out the results
     @classmethod
@@ -429,6 +443,51 @@ class BigQuerySupport(BigQueryABC):
         table = bqs.bq_service.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
 
         return [{'name': x['name'], 'type': x['type']} for x in table['schema']['fields']]
+
+    @classmethod
+    def get_result_schema(cls, job_ref):
+        bqs = cls(None, None, None)
+        results = bqs.bq_service.jobs().getQueryResults(**job_ref).execute(num_retries=5)
+
+        return results['schema']
+    
+    # Method for submitting a group of jobs and awaiting the results of the whole set
+    @classmethod
+    def insert_job_batch_and_get_results(cls, query_set):
+        logger.info(str(query_set))
+        bqs = cls(None, None, None)
+        submitted_job_set = {}
+        for query in query_set:
+            job_obj = bqs.insert_bq_query_job(query['query'],query['parameters'])
+            query['job_id'] = job_obj['jobReference']['jobId']
+            submitted_job_set[job_obj['jobReference']['jobId']] = job_obj
+
+        not_done = True
+        still_checking = True
+        num_retries = 0
+
+        while still_checking and not_done:
+            not_done = False
+            for job in submitted_job_set:
+                if not BigQuerySupport.check_job_is_done(submitted_job_set[job]):
+                    not_done = True
+            if not_done:
+                sleep(1)
+                num_retries += 1
+                still_checking = (num_retries < settings.BQ_MAX_ATTEMPTS)
+
+        if not_done:
+            logger.warn("[WARNING] Not all of the queries completed!")
+
+        for query in query_set:
+            if bqs.job_is_done(submitted_job_set[query['job_id']]):
+                query['bq_results'] = bqs.fetch_job_results(submitted_job_set[query['job_id']]['jobReference'])
+                query['result_schema'] = BigQuerySupport.get_result_schema(submitted_job_set[query['job_id']]['jobReference'])
+            else:
+                query['bq_results'] = None
+                query['result_schema'] = None
+
+        return query_set
 
     # Builds a BQ API v2 QueryParameter set and WHERE clause string from a set of filters of the form:
     # {
