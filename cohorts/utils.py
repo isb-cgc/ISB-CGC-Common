@@ -41,13 +41,14 @@ def create_cohort(user, filters=None, name=None, description=None, source_id=Non
     source_progs = None
 
     if source_id:
-        source = Cohort.objects.filter(id=source_id)
-        source_progs = source.get_programs()
-
-    if source and not filters or (len(filters) <= 0):
-        # If we're only changing the name and/or desc, just edit the cohort and update it
-        source.update(name=name, description=description)
-        return { 'cohort_id': source.id }
+        if not filters or (len(filters) <= 0):
+            source = Cohort.objects.filter(id=source_id).first()
+            # If we're only changing the name and/or desc, just edit the cohort and update it
+            source.update(name=name, description=description)
+            return { 'cohort_id': source.id }
+        else:
+            source = Cohort.objects.filter(id=source_id).first()
+            source_progs = source.get_programs()
 
     # Make and save cohort
 
