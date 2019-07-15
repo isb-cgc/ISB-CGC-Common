@@ -41,7 +41,7 @@ def create_cohort(user, filters=None, name=None, description=None, source_id=Non
     source_progs = None
 
     if source_id:
-        source = Cohort.objects.filter(id=source_id).first()
+        source = Cohort.objects.filter(id=source_id)
         source_progs = source.get_programs()
 
     if source and not filters or (len(filters) <= 0):
