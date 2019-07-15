@@ -31,9 +31,9 @@ from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 
 
-def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
+def create_cohort(user, filters=None, name=None, description=None, source_id=None):
 
-    if not filters and not name and not desc:
+    if not filters and not name and not description:
         # Can't save/edit a cohort when nothing is being changed!
         return None
 
@@ -46,7 +46,7 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
 
     if source and not filters or (len(filters) <= 0):
         # If we're only changing the name and/or desc, just edit the cohort and update it
-        source.update(name=name, description=desc)
+        source.update(name=name, description=description)
         return { 'cohort_id': source.id }
 
     # Make and save cohort
@@ -75,7 +75,7 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
             }
 
     # Create new cohort
-    cohort = Cohort.objects.create(name=name, description=desc)
+    cohort = Cohort.objects.create(name=name, description=description)
     cohort.save()
 
     # Set permission for user to be owner
