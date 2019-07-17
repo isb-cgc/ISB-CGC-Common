@@ -1,20 +1,18 @@
-"""
-
-Copyright 2015, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-"""
+# 
+# Copyright 2015-2019, Institute for Systems Biology
+# 
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+# 
+#    http://www.apache.org/licenses/LICENSE-2.0
+# 
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# 
 
 from django.conf.urls import url, include
 from allauth.socialaccount.providers.google import urls as google_urls, views as google_views
@@ -27,8 +25,6 @@ urlpatterns = [
     # url(r'^logout', account_views.logout, name='account_logout'),
     url(r'^logout', views.extended_logout_view, name='account_logout'),
     url(r'^login/$', google_views.oauth2_login, name='account_login'),
-    # url(r'^nih_login/$', views.nih_login, name='nih_login'),
-    url(r'^unlink_accounts/', views.unlink_accounts, name='unlink_accounts'),
     # Following urls for new DCF flows
     url(r'^dcf_login/$', dcf_views.oauth2_login, name='dcf_login'),
     url(r'^dcf_simple_logout/$', dcf_views.dcf_simple_logout, name='dcf_simple_logout'),
@@ -50,7 +46,7 @@ urlpatterns = [
     url(r'^users/(?P<user_id>\d+)/register_sa/$', views.register_sa, name='register_sa'),
     url(r'^users/(?P<user_id>\d+)/verify_sa/$', views.verify_sa, name='verify_sa'),
     url(r'^users/(?P<user_id>\d+)/adjust_sa/$', views.register_sa, name='adjust_sa'),
-    url(r'^users/(?P<user_id>\d+)/delete_sa/(?P<sa_id>\d+)/$', views.delete_sa, name='delete_sa'),
+    url(r'^users/(?P<user_id>\d+)/delete_sa/(?P<sa_name>[-a-zA-Z0-9@.]+)/$', views.delete_sa, name='delete_sa'),
     url(r'^users/(?P<user_id>\d+)/register_bucket/(?P<gcp_id>\d+)/$', views.register_bucket, name='register_bucket'),
     url(r'^users/(?P<user_id>\d+)/delete_bucket/(?P<bucket_id>\d+)/$', views.delete_bucket, name='delete_bucket'),
     url(r'^users/(?P<user_id>\d+)/register_bqdataset/(?P<gcp_id>\d+)/$', views.register_bqdataset, name='register_bqdataset'),

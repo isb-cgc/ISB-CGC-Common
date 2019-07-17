@@ -1,23 +1,22 @@
-"""
-Copyright 2018, Institute for Systems Biology
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+from __future__ import absolute_import
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
-import re
-import base64
-from json import dumps as json_dumps, loads as json_loads
-from base64 import urlsafe_b64decode
+from builtins import str
+from builtins import object
 import traceback
 import time
 import datetime
@@ -26,59 +25,80 @@ import pytz
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.utils.html import escape
 from googleapiclient.errors import HttpError
-from google_helpers.directory_service import get_directory_resource
 from django.contrib.auth.models import User
 from google_helpers.stackdriver import StackDriverLogger
 
 import logging
-from .utils import ServiceAccountBlacklist, GoogleOrgWhitelist, ManagedServiceAccounts
-from models import *
+from .service_obj import ServiceAccountBlacklist, GoogleOrgWhitelist, ManagedServiceAccounts
+from .models import *
 from django.conf import settings
 
 from google_helpers.resourcemanager_service import get_special_crm_resource
-from google_helpers.iam_service import get_iam_resource
-from dataset_utils.dataset_access_support_factory import DatasetAccessSupportFactory
-from dataset_utils.dataset_config import DatasetGoogleGroupPair
-from google_helpers.pubsub_service import get_pubsub_service, get_full_topic_name
 
-from dcf_support import get_stored_dcf_token, \
+from .dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf, extend_sa_at_dcf, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
-                        GoogleLinkState, get_auth_elapsed_time, \
+                        GoogleLinkState, get_auth_elapsed_time, unregister_sa, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
-                        compare_google_ids
+                        compare_google_ids, service_account_info_from_dcf, \
+                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf, service_account_info_from_dcf_for_project_and_sa, \
+                        service_account_info_from_dcf_for_project
 
 logger = logging.getLogger('main_logger')
 
-OPEN_ACL_GOOGLE_GROUP = settings.OPEN_ACL_GOOGLE_GROUP
 SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
+LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
 
 
-def verify_service_account(gcp_id, service_account, datasets, user_email, is_refresh=False, is_adjust=False, remove_all=False):
+class SAModes(object):
+    REMOVE_ALL = 1
+    ADJUST = 2
+    EXTEND = 3
+    REGISTER = 4
+    CANNOT_OCCUR = 5
 
-    # Only verify for protected datasets
-    controlled_datasets = AuthorizedDataset.objects.filter(id__in=datasets, public=False)
-    controlled_dataset_names = controlled_datasets.values_list('name', flat=True)
-    project_id_re = re.compile(ur'(@' + re.escape(gcp_id) + ur'\.)', re.UNICODE)
-    projectNumber = None
-    sab = None
-    gow = None
-    sa = None
-    is_compute = False
 
-    # log the reports using Cloud logging API
-    st_logger = StackDriverLogger.build_from_django_settings()
+def _derive_sa_mode(is_refresh, is_adjust, remove_all):
+    """
+    We have three different flag driving only four different modes. Try to make this more
+    comprehensible:
+    """
+    if is_adjust:
+        if is_refresh:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.CANNOT_OCCUR
+        else:
+            if remove_all:
+                return SAModes.REMOVE_ALL
+            else:
+                return SAModes.ADJUST
+    else:
+        if is_refresh:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.EXTEND
+        else:
+            if remove_all:
+                return SAModes.CANNOT_OCCUR
+            else:
+                return SAModes.REGISTER
 
-    log_name = SERVICE_ACCOUNT_LOG_NAME
-    resp = {
-        'message': '{0}: Begin verification of service account.'.format(service_account)
-    }
-    st_logger.write_struct_log_entry(log_name, resp)
 
+def _load_black_and_white(st_logger, log_name, service_account):
+    """
+    Even with DCF handling registration, we would still maybe want to e.g. catch our SAs:
+    """
+
+    #
     # Block verification of service accounts used by the application
+    # We should keep this around even with DCF, since we can catch these without even asking.
+    #
     try:
         sab = ServiceAccountBlacklist.from_json_file_path(SERVICE_ACCOUNT_BLACKLIST_PATH)
         msa = ManagedServiceAccounts.from_json_file_path(MANAGED_SERVICE_ACCOUNTS_PATH)
@@ -89,123 +109,203 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
         trace_msg = traceback.format_exc()
         st_logger.write_text_log_entry(log_name, "[ERROR] Exception while creating ServiceAccountBlacklist or GoogleOrgWhitelist instance: ")
         st_logger.write_text_log_entry(log_name, trace_msg)
-        return {'message': 'An error occurred while validating the service account.'}
+        return None, None, None, {'message': 'An error occurred while validating the service account.'}
 
     if sab.is_blacklisted(service_account):
         st_logger.write_text_log_entry(log_name, "Cannot register {0}: Service account is blacklisted.".format(service_account))
-        return {'message': 'This service account cannot be registered.'}
+        return None, None, None, {'message': 'This service account cannot be registered.'}
 
-    # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already exists with the same datasets
-    try:
-        sa = ServiceAccount.objects.get(service_account=service_account, active=1)
-        if not is_adjust and not is_refresh:
+    return sab, msa, gow, None
+
+
+def _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
+                             controlled_datasets, user_email, user_id, gcp_id):
+    """
+    # Refreshes and adjustments require a service account to exist, and, you cannot register an account if it already
+    # exists with the same datasets
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+
+    sa_info, messages = service_account_info_from_dcf_for_project_and_sa(user_id, gcp_id, service_account)
+
+    #ret_entry = {
+    #    'gcp_id': sa['google_project_id'],
+    #    'sa_dataset_ids': sa['project_access'],
+    #    'sa_name': sa['service_account_email'],
+    #    'sa_exp': sa['project_access_exp']
+    #}
+
+    # Note the pre-DCF version checked if "active = 1", so we were looking at non-deleted service accounts.
+    # We previously stored info for all service accounts that had ever been registered, with an active flag = 1
+    # checked for this test.
+    if sa_info is None:
+        if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.EXTEND:
+            return {
+                'message': 'Service account {} was not found so cannot be {}.'.format(escape(service_account), (
+                "adjusted" if (sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST) else "refreshed")),
+                'level': 'error'
+            }
+        # We previously stored info for *all* service accounts that had ever been registered, with an active flag
+        # of 0 for "deleted" accounts. If we detected a reregisration, all we seem to have done is write
+        # a log message (and pull that set out of the DB)
+        # sa_qset = ServiceAccount.objects.filter(service_account=service_account, active=0)
+        # if len(sa_qset) > 0:
+        #    logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,
+        #                                                                                        user_email))
+        #    st_logger.write_text_log_entry(log_name,
+        #                                   "[STATUS] Verification for SA {} being re-registered by user {}".format(
+        #                                   service_account, user_email))
+    else: # this SA is known to DCF:
+        if sa_mode == SAModes.REGISTER:
             return {
                 'message': 'Service account {} has already been registered. Please use the adjustment and refresh options to add/remove datasets or extend your access.'.format(escape(service_account)),
                 'level': 'error'
             }
 
-        if is_adjust or not is_refresh:
+        # if is_adjust or not is_refresh:
+        if sa_mode == SAModes.REMOVE_ALL or sa_mode == SAModes.ADJUST or sa_mode == SAModes.REGISTER:
             reg_change = False
+            #
+            # Used to be we checked the ServiceAccountAuthorizedDatasets to see what data sets we were on. Now that info
+            # comes back in the DCF response
+            #
+            have_datasets = len(sa_info['sa_dataset_ids']) > 0
+
             # Check the private datasets to see if there's a registration change
-            saads = AuthorizedDataset.objects.filter( id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
+            # saads = AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=False).values_list('whitelist_id', flat=True)
 
             # If we're removing all datasets and there are 1 or more, this is automatically a registration change
-            if remove_all and saads.count():
+            if (sa_mode == SAModes.REMOVE_ALL) and have_datasets:
                 reg_change = True
             else:
-                if controlled_datasets.count() or saads.count():
+                if controlled_datasets.count() or have_datasets:
                     ads = controlled_datasets.values_list('whitelist_id', flat=True)
                     # A private dataset missing from either list means this is a registration change
                     for ad in ads:
-                        if ad not in saads:
+                        if ad not in sa_info['sa_dataset_ids']:
                             reg_change = True
                     if not reg_change:
-                        for saad in saads:
+                        for saad in sa_info['sa_dataset_ids']:
                             if saad not in ads:
                                 reg_change = True
-                else:
-                    reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
+                #else:
+                    # This says we have a reg change if we are currently not authorized for a public dataset. Registering for a public dataset goes away with the move to DCF.
+                    #reg_change = (len(AuthorizedDataset.objects.filter(id__in=ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa).values_list('authorized_dataset', flat=True), public=True)) <= 0)
             # If this isn't a refresh but the requested datasets aren't changing (except to be removed), we don't need to do anything
             if not reg_change:
                 return {
-                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(escape(service_account),('re-registered' if not is_adjust else 'adjusted')),
+                    'message': 'Service account {} already exists with these datasets, and so does not need to be {}.'.format(escape(service_account),('re-registered' if (sa_mode == SAModes.REGISTER) else 'adjusted')),
                     'level': 'warning'
                 }
-    except ObjectDoesNotExist:
-        if is_refresh or is_adjust:
-            return {
-                'message': 'Service account {} was not found so cannot be {}.'.format(escape(service_account), ("adjusted" if is_adjust else "refreshed")),
-                'level': 'error'
-            }
+    return None
 
-        try:
-            # determine if this is a re-registratio, or a brand-new one
-            sa = ServiceAccount.objects.get(service_account=service_account, active=0)
-            logger.info("[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,user_email))
-            st_logger.write_text_log_entry(log_name,"[STATUS] Verification for SA {} being re-registered by user {}".format(service_account,user_email))
-        except ObjectDoesNotExist:
-            pass
 
-    crm_service = get_special_crm_resource()
-    iam_service = get_iam_resource()
+def verify_service_account(gcp_id, service_account, datasets, user_email, user_id, is_refresh=False, is_adjust=False, remove_all=False):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+    sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
-    # 0. VERIFY THE PROJECT'S ANCESTRY AND RETRIEVE THE NUMBER
+    #
+    # Previously, the "removal of all datasets" meant that all project users had to be approved for "Open Datasets".
+    # We don't have open datasets anymore. So verification for SAModes.REMOVE_ALL is a no-brainer:
+    #
+
+    if sa_mode == SAModes.REMOVE_ALL:
+        roles_and_registered = {}
+        roles_and_registered['all_user_datasets_verified'] = True
+        roles_and_registered['dcf_messages'] = {}
+        roles_and_registered['dcf_messages']['dcf_analysis_reg_sas_summary'] = 'All controlled access datasets can be removed.'
+
+        return roles_and_registered
+
+    # Only verify for protected datasets
+    controlled_datasets = AuthorizedDataset.objects.filter(whitelist_id__in=datasets, public=False)
+
+    # log the reports using Cloud logging API
+    st_logger = StackDriverLogger.build_from_django_settings()
+
+    log_name = SERVICE_ACCOUNT_LOG_NAME
+    resp = {
+        'message': '{0}: Begin verification of service account.'.format(service_account)
+    }
+    st_logger.write_struct_log_entry(log_name, resp)
+
+    #
+    # load the lists:
+    #
+
+    sab, msa, gow, msg = _load_black_and_white(st_logger, log_name, service_account)
+    if msg:
+        return msg
+
+    #
+    # Check SA sanity:
+    #
+
+    msg = _check_sa_sanity_via_dcf(st_logger, log_name, service_account, sa_mode,
+                                   controlled_datasets, user_email, user_id, gcp_id)
+    if msg:
+        return msg
+
+    #
+    # We already have some useful info, such as whether everybody on the project is registered with us and
+    # linked to NIH. So check that first, and bag it if we are not up to snuff:
+    #
+
+    roles_and_registered = _get_project_users(gcp_id, service_account, user_email, st_logger, log_name, is_refresh)
+
+    if not roles_and_registered['all_users_registered']:
+        roles_and_registered['all_user_datasets_verified'] = False
+        return roles_and_registered
+
+    phs_map = {}
+    controlled_datasets = AuthorizedDataset.objects.filter(public=False)
+    for dataset in controlled_datasets:
+        phs_map[dataset.whitelist_id] = dataset.name
+
+    #
+    # Ask DCF if we are cool. If we are just doing an adjustment, we need to let DCF know that we are doing
+    # a _dry_run for a PATCH condition.
+    #
+
     try:
-        # Retrieve project number and check for organization
-        # If we find an org, we reject
-
-        # Get the project number so we can validate SA source projects
-        project = crm_service.projects().get(projectId=gcp_id).execute()
-        if project:
-            projectNumber = project['projectNumber']
-
-            is_compute = (projectNumber+'-compute@') in service_account
-
-            # If we found an organization and this is a controlled dataset registration/adjustment, refuse registration
-            if ('parent' in project and project['parent']['type'] == 'organization') and not gow.is_whitelisted(project['parent']['id']) and controlled_datasets.count() > 0:
-                logger.info("[STATUS] While attempting to register GCP ID {}: ".format(str(gcp_id)))
-                logger.info("GCP {} was found to be in organization ID {}; its service accounts cannot be registered for use with controlled data.".format(str(gcp_id),project['parent']['id']))
-                return {
-                    'message': "GCP {} was found to be in organization ID {}; its service accounts cannot be registered for use with controlled data.".format(str(gcp_id),project['parent']['id']),
-                    'level': 'error'
-                }
-        else:
-            return {
-                'message': 'Unable to retrieve project information for GCP {} when registering SA {}; the SA cannot be registered.'.format(str(gcp_id),escape(service_account)),
-                'level': 'error'
-            }
-    except Exception as e:
-        logger.error("[ERROR] While attempting to retrieve project information for GCP {}:".format(gcp_id))
+        sa_in_use = (sa_mode == SAModes.ADJUST)
+        success, dcf_messages = verify_sa_at_dcf(user_id, gcp_id, service_account, datasets, phs_map, sa_in_use)
+        if not success:
+            # We want to be more structured with any error messages we receive from DCF instead of a narrative
+            # error block at the top of the page.
+            roles_and_registered['all_user_datasets_verified'] = False
+            roles_and_registered['dcf_messages'] = dcf_messages
+            return roles_and_registered
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.exception(e)
-        raise Exception("Unable to retrieve project information for GCP {}; its service accounts cannot be registered.".format(gcp_id))
+        raise e
 
-    # 1. VERIFY SA IS NOT A GOOGLE-MANAGED SA AND IS FROM THIS GCP
-    # If this SA is a Google-Managed SA or is not from the GCP, and this is a controlled data registration/refresh, deny
-    if controlled_datasets.count() > 0 and \
-            (not (service_account.startswith(projectNumber+'-') or project_id_re.search(service_account))
-             or msa.is_managed(service_account)):
-        msg = "Service Account {} is ".format(escape(service_account),)
-        if msa.is_managed(service_account):
-            msg += "a Google System Managed Service Account, and so cannot be regsitered. Please register a user-managed Service Account."
-        else:
-            msg += "not from GCP {}, and so cannot be regsitered. Only service accounts originating from this project can be registered.".format(str(gcp_id), )
-        return {
-            'message': msg,
-            'level': 'error'
-        }
+    roles_and_registered['all_user_datasets_verified'] = True
+    roles_and_registered['dcf_messages'] = dcf_messages
+    return roles_and_registered
 
-    # 2. VALIDATE ALL MEMBERS ON THE PROJECT.
+
+def _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp):
+    """
+    For registering a service account for a project, we need to insure the user is currently on the project. If they
+    are not, then we want to drop them form our DB table
+    """
     try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
         iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
         bindings = iam_policy['bindings']
         roles = {}
-        verified_sa = False
-        invalid_members = {
-            'keys_found': [],
-            'sa_roles': [],
-            'external_sa': [],
-            'other_members': []
-        }
         for val in bindings:
             role = val['role']
             members = val['members']
@@ -218,79 +318,153 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
                         roles[email]['registered_user'] = registered_user
                         roles[email]['roles'] = []
                     roles[email]['roles'].append(role)
-                elif member.startswith('serviceAccount'):
-                    member_sa = member.split(':')[1].lower()
-                    if member_sa == service_account.lower():
-                        verified_sa = True
 
-                    # If controlled-access data is involved, all SAs must be heavily vetted
-                    if controlled_datasets.count() > 0:
-
-                        # Check to see if this SA is internal (the SA being registered will always pass this if it
-                        # made it this far, since it is pre-validated for GCP sourcing)
-                        if not member_sa.startswith(projectNumber+'-') and not project_id_re.search(member_sa) and \
-                                not (msa.is_managed_this_project(member_sa, projectNumber, gcp_id)) and \
-                                not sab.is_blacklisted(member_sa):
-                            invalid_members['external_sa'].append(member_sa)
-
-                        # If we haven't already invalidated this member SA for being from outside the project, check to see if anyone
-                        # has been given roles on this service account--this could mean non-project members have access from outside the project
-                        # Note we exclude our own SAs from these checks, because they're ours, and we exclude managed SAs, because they will
-                        # 404 when being searched this way
-                        if member_sa not in [x for b in invalid_members.values() for x in b] and not sab.is_blacklisted(member_sa) and not msa.is_managed(member_sa):
-                            sa_iam_pol = iam_service.projects().serviceAccounts().getIamPolicy(
-                                resource="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa)
-                            ).execute()
-                            if sa_iam_pol and 'bindings' in sa_iam_pol:
-                                invalid_members['sa_roles'].append(member_sa)
-
-                            # If we haven't already invalidated this member SA for being from outside the project or having
-                            # an unallowed role, check its key status
-                            if member_sa not in [x for b in invalid_members.values() for x in b]:
-                                keys = iam_service.projects().serviceAccounts().keys().list(
-                                    name="projects/{}/serviceAccounts/{}".format(gcp_id, member_sa),
-                                    keyTypes="USER_MANAGED"
-                                ).execute()
-
-                                # User-managed keys are not allowed
-                                if keys and 'keys' in keys:
-                                    logger.info('[STATUS] User-managed keys found on SA {}: {}'.format(
-                                        member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']]))
-                                    )
-                                    st_logger.write_struct_log_entry(log_name, {
-                                        'message': '[STATUS] User-managed keys found on SA {}: {}'.format(
-                                            member_sa," - ".join([x['name'].split("/")[-1] for x in keys['keys']])
-                                        )
-                                    })
-                                    invalid_members['keys_found'].append(member_sa)
-
-                # Anything not an SA or a user is invalid if controlled data is involved
-                else:
-                    if controlled_datasets.count() > 0:
-                        invalid_members['other_members'].append(member)
-
-        # 3. If we found anything other than a user or a service account with a role in this project, or we found service accounts
-        # which do not belong to this project, and the registration is for controlled data, disallow
-        if sum([len(x) for x in invalid_members.values()]) and controlled_datasets.count() > 0:
-            log_msg = '[STATUS] While verifying SA {}, found one or more invalid members in the GCP membership list for {}: {}.'.format(
-                service_account,gcp_id,"; ".join([x for b in invalid_members.values() for x in b])
-            )
+        # 2) Verify that the current user is on the GCP project:
+        if not user_email.lower() in roles:
+            log_msg = '[STATUS] During SA operations, user email {0} was not in the IAM policy of GCP {1}.'.format(user_email, gcp_id)
             logger.info(log_msg)
-            st_logger.write_struct_log_entry(log_name, {'message': log_msg})
+            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                'message': log_msg
+            })
+            user_gcp.user.set(user_gcp.user.all().exclude(id=User.objects.get(email=user_email).id))
+            user_gcp.save()
+            return False, "You are not currently a member of the project."
 
-            msg = 'Service Account {} belongs to project {}, which has one or more invalid members. Controlled data can only be accessed from GCPs with valid members. Members were invalid for the following reasons: '.format(escape(service_account),gcp_id,"; ".join(invalid_members))
-            if len(invalid_members['keys_found']):
-                msg += " User-managed keys were found on service accounts ({}). User-managed keys on service accounts are not permitted.".format("; ".join(invalid_members['keys_found']))
-            if len(invalid_members['sa_roles']):
-                msg += " Roles were found applied to service accounts ({}). Roles cannot be assigned to service accounts.".format("; ".join(invalid_members['sa_roles']))
-            if len(invalid_members['external_sa']):
-                msg += " External service accounts from other projects were found ({}). External service accounts are not permitted.".format("; ".join(invalid_members['external_sa']))
-            if len(invalid_members['other_members']):
-                msg += " Non-user and non-Service Account members were found ({}). Only users and service accounts are permitted.".format("; ".join(invalid_members['other_members']))
+    except HttpError as e:
+        logger.error("[ERROR] While verifying user {} for project {}: ".format(user_email, gcp_id))
+        logger.exception(e)
+        return False, "There was an error accessing your project. Please verify that you have set the permissions correctly."
+    except Exception as e:
+        logger.error("[ERROR] While verifying user {} for project {}: ".format(user_email, gcp_id))
+        logger.exception(e)
+        return False, "There was an error while verifying your project. Please contact feedback@isb-cgc.org."
 
-            return {'message': msg}
+    return True, None
 
-        # 4. Verify that the current user is on the GCP project
+
+def get_project_deleters(gcp_id, user_email, st_logger, log_name):
+    """
+    User says they want to unregister a project. The problem is we need to insure that if the project has service
+    accounts (SAs) registered at DCF, we need to get those unregistered too. But the SAs do not need to be active, so
+    there is no requirement that everybody in the project be DCF registered to have an SA sitting there. In fact, if
+    an SA has been registered by Dr. X, who has since left the lab after adding Dr. Y to the project, and Dr. X has
+    been dropped, there does not actually have to be ANYBODY on the project with DCF connections to have an SA. But
+    that is beyond our control. However, if the current user doing the operation has EVER had an NIH linkage, we
+    need to tell them to register at DCF first. If the current user has NEVER had a NIH linkage, we check to see if
+    anybody else has such a linkage. If yes, we say that the linked person needs to do the job. If nobody on the
+    project has ever been near DCF, we let the deletion continue, since this implies the project was added just to
+    use CGC features.
+    """
+    try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
+        all_users_in_our_db = True
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1].lower()
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        if not registered_user:
+                            all_users_in_our_db = False
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
+
+        # 2) Verify that the current user is on the GCP project. Somebody can only get
+        # here by hacking a custom POST command:
+        if not user_email.lower() in roles:
+            log_msg = '[STATUS] While unregistering GCP {0}: User email {1} is not in the GCP IAM policy.'.format(gcp_id, user_email)
+            logger.info(log_msg)
+            st_logger.write_struct_log_entry(log_name, {
+                'message': log_msg
+            })
+
+            return {
+                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of the project in order to unregister it.'.format(user_email, gcp_id),
+            }
+
+        # 3) Verify which users have ever registered with with NIH:
+        some_user_registered = False
+        this_user_registered = False
+        all_users_nih_linkage_history = True
+
+        for email in roles:
+            member = roles[email]
+
+            member_is_this_user = (user_email.lower() == email)
+
+            # IF USER IS REGISTERED
+            if member['registered_user']:
+                user = User.objects.get(email=email)
+                nih_user = None
+                # FIND NIH_USER FOR USER
+                # Since we are not checking "linked" state, we may have more than one:
+                nih_users = NIH_User.objects.filter(user_id=user.id)
+                member['nih_registered'] = len(nih_users) > 0
+
+                if member['nih_registered']:
+                    some_user_registered = True
+                    if member_is_this_user:
+                        this_user_registered = True
+                else:
+                    all_users_nih_linkage_history = False
+
+            else:
+                member['nih_registered'] = False
+                all_users_nih_linkage_history = False
+
+    except HttpError as e:
+        logger.error("[STATUS] While surveying GCP deleter status {}: ".format(gcp_id))
+        logger.exception(e)
+        return {'message': 'There was an error accessing your project. Please verify that you have set the permissions correctly.'}
+    except Exception as e:
+        logger.error("[STATUS] While surveying GCP deleter status {}: ".format(gcp_id))
+        logger.exception(e)
+        return {'message': "There was an error accessing a GCP project. Please contact feedback@isb-cgc.org."}
+
+    return_obj = {'roles': roles,
+                  'some_user_registered': some_user_registered,
+                  'this_user_registered': this_user_registered,
+                  'all_users_in_our_db': all_users_in_our_db,
+                  'all_users_nih_linkage_history': all_users_nih_linkage_history}
+    return return_obj
+
+
+def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name, is_refresh):
+    """
+    While we can no longer show the user with a listing of what datasets each project user has access to (DCF will not
+    provide that), we can still enumerate who is on the project, if they are registered, and if they are linked to
+    NIH. That info is available to us.
+    """
+    try:
+        crm_service = get_special_crm_resource()
+
+        # 1) Get all the project members, record if they have registered with us:
+        iam_policy = crm_service.projects().getIamPolicy(resource=gcp_id, body={}).execute()
+        bindings = iam_policy['bindings']
+        roles = {}
+        for val in bindings:
+            role = val['role']
+            members = val['members']
+            for member in members:
+                if member.startswith('user:'):
+                    email = member.split(':')[1].lower()
+                    if email not in roles:
+                        roles[email] = {}
+                        registered_user = bool(User.objects.filter(email=email).first())
+                        roles[email]['registered_user'] = registered_user
+                        roles[email]['roles'] = []
+                    roles[email]['roles'].append(role)
+
+        # 2) Verify that the current user is on the GCP project:
         if not user_email.lower() in roles:
             log_msg = '[STATUS] While verifying SA {0}: User email {1} is not in the IAM policy of GCP {2}.'.format(service_account, user_email, gcp_id)
             logger.info(log_msg)
@@ -301,37 +475,20 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
             return {
                 'message': 'Your user email ({}) was not found in GCP {}. You must be a member of a project in order to {} its service accounts.'.format(user_email, gcp_id, "refresh" if is_refresh else "register"),
                 'redirect': True,
-                'user_not_found': True
+                'user_not_found': True,
+                'all_users_registered': False
             }
 
-        # 5. VERIFY SERVICE ACCOUNT IS IN THIS PROJECT
-        if not verified_sa:
-            log_msg = '[STATUS] While verifying SA {0}: Provided service account does not exist in GCP {1}.'.format(service_account, gcp_id)
-            logger.info(log_msg)
-            st_logger.write_struct_log_entry(log_name, {'message': log_msg})
-
-            # return error that the service account doesn't exist in this project
-            return {'message':
-                "Service Account ID '{}' wasn't found in Google Cloud Project {}. Please double-check the service account ID, and {}.".format(
-                    escape(service_account),gcp_id,
-                    ("be sure that Compute Engine has been enabled for this project" if is_compute else "be sure it has been given at least one Role in the project")
-                )
-            }
-
-        # 6. VERIFY ALL USERS ARE REGISTERED AND HAVE ACCESS TO APPROPRIATE DATASETS
-        all_user_datasets_verified = True
+        # 3) Verify all users are registered with with NIH:
+        all_users_registered = True
 
         for email in roles:
             member = roles[email]
-            member['datasets'] = []
 
             # IF USER IS REGISTERED
             if member['registered_user']:
-
                 user = User.objects.get(email=email)
-
                 nih_user = None
-
                 # FIND NIH_USER FOR USER
                 try:
                     nih_user = NIH_User.objects.get(user_id=user.id, linked=True)
@@ -343,49 +500,12 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
 
                 member['nih_registered'] = bool(nih_user)
 
-                # IF USER HAS LINKED ERA COMMONS ID
-                if nih_user:
+                if not nih_user:
+                    all_users_registered = False
 
-                    # FIND ALL DATASETS USER HAS ACCESS TO
-                    user_auth_datasets = AuthorizedDataset.objects.filter(id__in=UserAuthorizedDatasets.objects.filter(nih_user_id=nih_user.id).values_list('authorized_dataset', flat=True))
-
-                    # VERIFY THE USER HAS ACCESS TO THE PROPOSED DATASETS
-                    for dataset in controlled_datasets:
-                        member['datasets'].append({'name': dataset.name, 'valid': bool(dataset in user_auth_datasets)})
-
-                    valid_datasets = [x['name'] for x in member['datasets'] if x['valid']]
-                    invalid_datasets = [x['name'] for x in member['datasets'] if not x['valid']]
-
-                    logger.info("[STATUS] For user {}".format(nih_user.NIH_username))
-                    logger.info("[STATUS] valid datasets: {}".format(str(valid_datasets)))
-                    logger.info("[STATUS] invalid datasets: {}".format(str(invalid_datasets)))
-
-                    if not len(invalid_datasets):
-                        if len(valid_datasets):
-                            if controlled_datasets:
-                                st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} has access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
-                    else:
-                        all_user_datasets_verified = False
-                        if len(controlled_datasets):
-                            st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(invalid_datasets))})
-
-                # IF USER HAS NO ERA COMMONS ID
-                else:
-                    # IF TRYING TO USE PROTECTED DATASETS, DENY REQUEST
-                    if len(controlled_datasets):
-                        all_user_datasets_verified = False
-                        st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, user.email, ','.join(controlled_dataset_names))})
-                        for dataset in controlled_datasets:
-                            member['datasets'].append({'name': dataset.name, 'valid': False})
-
-            # IF USER HAS NEVER LOGGED INTO OUR SYSTEM
             else:
                 member['nih_registered'] = False
-                if len(controlled_datasets):
-                    st_logger.write_struct_log_entry(log_name, {'message': '{0}: {1} does not have access to datasets [{2}].'.format(service_account, email, ','.join(controlled_dataset_names))})
-                    all_user_datasets_verified = False
-                    for dataset in controlled_datasets:
-                        member['datasets'].append({'name': dataset.name, 'valid': False})
+                all_users_registered = False
 
     except HttpError as e:
         logger.error("[STATUS] While verifying service account {}: ".format(service_account))
@@ -394,21 +514,51 @@ def verify_service_account(gcp_id, service_account, datasets, user_email, is_ref
     except Exception as e:
         logger.error("[STATUS] While verifying service account {}: ".format(service_account))
         logger.exception(e)
-        return {'message': "There was an error while verifying this service account. Please contact the administrator."}
+        return {'message': "There was an error while verifying this service account. Please contact feedback@isb-cgc.org."}
 
     return_obj = {'roles': roles,
-                  'all_user_datasets_verified': all_user_datasets_verified}
+                  'all_users_registered': all_users_registered}
     return return_obj
 
 
-def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all):
+    """
+    Register a service account
 
-    ret_msg = []
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
 
-    # log the reports using Cloud logging API
-    st_logger = StackDriverLogger.build_from_django_settings()
+    try:
+        # log the reports using Cloud logging API
+        st_logger = StackDriverLogger.build_from_django_settings()
+        user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
 
-    user_gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+        return _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust,
+                                             remove_all, st_logger, user_gcp)
+
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        raise e
+    except Exception as e:
+        logger.error("[ERROR] Exception while registering ServiceAccount")
+        logger.exception(e)
+        raise e
+
+
+def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets, is_refresh,
+                                  is_adjust, remove_all, st_logger, user_gcp):
+    """
+    Register a service account using DCF
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+
+    sa_mode = _derive_sa_mode(is_refresh, is_adjust, remove_all)
 
     # If we've received a remove-all request, ignore any provided datasets
     if remove_all:
@@ -416,410 +566,178 @@ def register_service_account(user_email, gcp_id, user_sa, datasets, is_refresh, 
 
     if len(datasets) == 1 and datasets[0] == '':
         datasets = []
-    else:
-        datasets = map(int, datasets)
 
-    # VERIFY AGAIN JUST IN CASE USER TRIED TO GAME THE SYSTEM
-    result = verify_service_account(gcp_id, user_sa, datasets, user_email, is_refresh, is_adjust)
+    #
+    # Previously, when the user tried to register an SA, we *reran* the verification step here just before
+    # doing the registration. But now DCF is doing that checking as they register, so that is superfluous.
+    #
+    # However, we can still check to see that the user is on the GCP, and if they are not, we can remove them
+    # from the project, and do not continue.
+    #
 
-    err_msgs = []
+    ret_msg = []
 
-    # If the verification was successful, finalize access
-    if 'all_user_datasets_verified' in result and result['all_user_datasets_verified']:
-        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                         {'message': '{}: Service account was successfully verified for user {}.'.format(
-                                             user_sa, user_email)})
+    success, message = _user_on_project_or_drop(gcp_id, user_email, st_logger, user_gcp)
 
-        # Datasets verified, add service accounts to appropriate acl groups
-        protected_datasets = AuthorizedDataset.objects.filter(id__in=datasets)
+    if not success:
+        # Note the previous ISB approach agressively dropped the datasets following a verification failure. But if we
+        # detect that the user doing this request is no longer on the project, it would appear unlikely that we could
+        # use this user's token to drop all the datasets for the project! Note also this was a vector for denial of
+        # service: if a user not on the project made the request, they could get the SA dropped on the project.
+        # Instead, if an SA is out of bounds, DCF monitoring will presumably do the job and kick off the SA.
 
-        # ADD SERVICE ACCOUNT TO ALL PUBLIC AND PROTECTED DATASETS ACL GROUPS
-        public_datasets = AuthorizedDataset.objects.filter(public=True)
-        directory_service, http_auth = get_directory_resource()
-
-        service_account_obj, created = ServiceAccount.objects.update_or_create(
-            google_project=user_gcp, service_account=user_sa,
-            defaults={
-                'google_project': user_gcp,
-                'service_account': user_sa,
-                'active': True
-            })
-
-        if not created:
-            logger.info("[STATUS] User {} re-registered service account {}".format(user_email, user_sa))
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': "[STATUS] User {} re-registered service account {}".format(user_email, user_sa)})
-        for dataset in public_datasets | protected_datasets:
-            service_account_auth_dataset, created = ServiceAccountAuthorizedDatasets.objects.update_or_create(
-                service_account=service_account_obj, authorized_dataset=dataset,
-                defaults={
-                    'service_account': service_account_obj,
-                    'authorized_dataset': dataset
-                }
-            )
-
-            try:
-                body = {"email": service_account_obj.service_account, "role": "MEMBER"}
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,{
-                     'message': '{}: Attempting to add service account to Google Group {} for user {}.'.format(
-                         str(service_account_obj.service_account), dataset.acl_google_group,
-                         user_email)
-                })
-                directory_service.members().insert(groupKey=dataset.acl_google_group, body=body).execute(http=http_auth)
-
-                logger.info("Attempting to insert service account {} into Google Group {}. ".format(
-                    str(service_account_obj.service_account), dataset.acl_google_group)
-                )
-
-            except HttpError as e:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                     'message': '{}: There was an error in adding the service account to Google Group {} for user {}. {}'.format(
-                         str(service_account_obj.service_account), dataset.acl_google_group,
-                         user_email, e)
-                })
-                # We're not too concerned with 'Member already exists.' errors
-                if e.resp.status == 409 and e._get_reason() == 'Member already exists.':
-                    logger.info(e)
-                # ...but we are with others
-                else:
-                    logger.warn(e)
-                    err_msgs.append(
-                        "There was an error while user {} was registering Service Account {} for dataset '{}' - access to the dataset has not been granted.".format(
-                            user_email,
-                            str(service_account_obj.service_account),
-                            dataset.name
-                        ))
-                    # If there was an error, the SA isn't on the Google Group, so we should remove it's
-                    # ServiceAccountAuthorizedDataset entry
-                    service_account_auth_dataset.delete()
-
-        # If we're adjusting, check for currently authorized private datasets not in the incoming set, and delete those entries.
-        if is_adjust:
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj).filter(
-                authorized_dataset__public=0)
-            for saad in saads:
-                if saad.authorized_dataset not in protected_datasets or remove_all:
-                    try:
-                        directory_service, http_auth = get_directory_resource()
-                        directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                                           memberKey=saad.service_account.service_account).execute(
-                            http=http_auth)
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                            'message': '{0}: Attempting to remove service account from Google Group {1}.'.format(
-                                saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                        logger.info("Attempting to remove service account {} from group {}. ".format(
-                            saad.service_account.service_account,saad.authorized_dataset.acl_google_group)
-                        )
-                    except HttpError as e:
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                            'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
-                                str(saad.service_account.service_account),
-                                saad.authorized_dataset.acl_google_group)})
-                        # We're not concerned with 'user doesn't exist' errors
-                        if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
-                            logger.info(e)
-                        else:
-                            logger.error("[ERROR] When trying to remove SA {} from a Google Group:".format(
-                                str(saad.service_account.service_account)))
-                            logger.exception(e)
-
-                    saad.delete()
-
-        if len(err_msgs):
-            ret_msg.append(("The following errors were encountered while registering this Service Account: {}\nPlease contact the administrator.".format(
-                    "\n".join(err_msgs)), "error"))
-
+        ret_msg.append((message, "error"))
         return ret_msg
 
-    # if verification was unsuccessful, report errors, and revoke current access if there is any
-    else:
-        # Some sort of error when attempting to verify
-        if 'message' in result.keys():
-            ret_msg.append((result['message'], "error"))
-            logger.warn(result['message'])
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME,
-                                             {'message': '{0}: {1}'.format(user_sa, result['message'])})
+    phs_map = {}
+    controlled_datasets = AuthorizedDataset.objects.filter(public=False)
+    for dataset in controlled_datasets:
+        phs_map[dataset.whitelist_id] = dataset.name
 
-            # If the error is the user wasn't found on this GCP, remove them from it in the Web Application
-            if 'user_not_found' in result:
-                user_gcp.user.set(user_gcp.user.all().exclude(id=User.objects.get(email=user_email).id))
-                user_gcp.save()
+    try:
+        if sa_mode == SAModes.CANNOT_OCCUR:
+            success = False
+            messages = ["This cannot happen"]
+        elif sa_mode == SAModes.REMOVE_ALL:
+            success, messages = remove_sa_datasets_at_dcf(user_id, gcp_id, user_sa, phs_map)
+        elif sa_mode == SAModes.ADJUST:
+            success, messages = adjust_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
+        elif sa_mode == SAModes.EXTEND:
+            success, messages = extend_sa_at_dcf(user_id, gcp_id, user_sa, phs_map)
+        elif sa_mode == SAModes.REGISTER:
+            success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
 
-        # Verification passed before but failed now
-        elif not result['all_user_datasets_verified']:
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '{0}: Service account was not successfully verified.'.format(user_sa)})
-            logger.warn("[WARNING] {0}: Service account was not successfully verified.".format(user_sa))
-            ret_msg.append(('We were not able to verify all users with access to this Service Account for all of the datasets requested.', "error"))
+        logger.info("[INFO] messages from DCF {}".format(str(messages)))
 
-        # Check for current access and revoke
-        try:
-            service_account_obj = ServiceAccount.objects.get(service_account=user_sa, active=1)
-            saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=service_account_obj)
+        #
+        # For these operations, we do not expect any errors, as we have previously run e.g. verification steps
+        # to catch errors. But we still could have race conditions arise, and need to handle those:
+        #
+        if not success:
+            if messages is not None and len(messages) > 0:
+                ret_msg.append(("The following errors were encountered while registering this Service Account:\n{}\n".format(
+                    "\n".join(messages)), "error"))
+            #
+            # In a similar fashion to the above, if e.g. a failure to extend the SA at DCF was due to a verification
+            # failure, it is their responsiblity to detect that the project is out of bounds and respond appropriately.
+            # So we *do not* issue a call the remove all datasets!
+            #
 
-            # We can't be too sure, so revoke it all
-            for saad in saads:
-                if not saad.authorized_dataset.public:
-                    try:
-                        directory_service, http_auth = get_directory_resource()
-                        directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                                           memberKey=saad.service_account.service_account).execute(
-                            http=http_auth)
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                            'message': '{0}: Attempting to delete service account from Google Group {1}.'.format(
-                                saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-                        logger.info("Attempting to delete user {} from group {}. ".format(
-                            saad.service_account.service_account,saad.authorized_dataset.acl_google_group)
-                        )
-                    except HttpError as e:
-                        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                            'message': '{0}: There was an error in removing the service account to Google Group {1}.'.format(
-                                str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                        if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
-                            logger.info(e)
-                        else:
-                            logger.error("[ERROR] When trying to remove a service account from a Google Group:")
-                            logger.exception(e)
+    except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
+        logger.error("[ERROR] Exception while registering ServiceAccount")
+        logger.exception(e)
+        raise e
 
-                    saad.delete()
-
-        except ObjectDoesNotExist:
-            logger.info(
-                "[STATUS] Service Account {} could not be verified or failed to verify, but is not registered. No datasets to revoke.".format(
-                    user_sa))
-
-        return ret_msg
-
-def unregister_sa_with_id(user_id, sa_id):
-    unregister_sa(user_id, ServiceAccount.objects.get(id=sa_id).service_account)
+    return ret_msg
 
 
-def unregister_all_gcp_sa(user_id, gcp_id):
-    gcp = GoogleProject.objects.get(id=gcp_id, active=1)
+def unregister_all_gcp_sa(user_id, gcp_id, project_id):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+    success = True
+    msgs = []
+    logger.info("[STATUS] Asking DCF for SA info for project {}".format(project_id))
+    all_sa_for_proj, messages = service_account_info_from_dcf_for_project(user_id, project_id)
+    logger.info("[STATUS] Finding {} SAs for project {}".format(len(all_sa_for_proj), project_id))
+    if messages is not None and len(messages) > 0:
+        msgs.extend(messages)
+    for sa in all_sa_for_proj:
+        logger.info("[STATUS] Deleting SA {} for project {}".format(sa['sa_name'], project_id))
+        one_success, one_msgs = unregister_sa(user_id, sa['sa_name'])
+        logger.info("[STATUS] Deletion status for SA {}: {}".format(sa['sa_name'], one_success))
+        success = success and one_success
+        if one_msgs is not None:
+            msgs.append(one_msgs)
+    return success, (msgs if (msgs is not None and len(msgs) > 0) else None)
 
-    # Remove Service Accounts associated to this Google Project and remove them from acl_google_groups
-    service_accounts = ServiceAccount.objects.filter(google_project_id=gcp.id, active=1)
-    for service_account in service_accounts:
-        unregister_sa(user_id, service_account.service_account)
+
+def controlled_auth_datasets():
+    datasets = AuthorizedDataset.objects.filter(public=False)
+    return [{'whitelist_id': x.whitelist_id, 'name': x.name, 'duca': x.duca_id} for x in datasets]
 
 
-def unregister_sa(user_id, sa_name):
-    st_logger = StackDriverLogger.build_from_django_settings()
+def service_account_dict(user_id, sa_id):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+    return _service_account_dict_from_dcf(user_id, sa_id)
 
-    sa = ServiceAccount.objects.get(service_account=sa_name)
-    # papid multi-clicks on button can cause this sa to be inactive already. Nothing to be done...
-    if not sa.active:
-        st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-            'message': '[STATUS] Attempted to remove INACTIVE SA {0}'.format(str(sa.service_account))})
-        return
-    saads = ServiceAccountAuthorizedDatasets.objects.filter(service_account=sa)
 
-    st_logger.write_text_log_entry(SERVICE_ACCOUNT_LOG_NAME, "[STATUS] User {} is unregistering SA {}".format(
-        User.objects.get(id=user_id).email, sa_name))
+def _service_account_dict_from_dcf(user_id, sa_name):
+    """
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises DCFCommFailure:
+    :raises RefreshTokenExpired:
+    """
+    #
+    # DCF currently (8/2/18) requires us to provide the list of Google projects
+    # that we want service accounts for. If we are just given the SA ID, we need
+    # to query for all projects and then use those results to find the SA matching
+    # the ID (unless we go through funny business trying to parse the project out
+    # of the service account name):
+    #
+    user = User.objects.get(id=user_id)
+    gcp_list = GoogleProject.objects.filter(user=user, active=1)
+    logger.info('[INFO] length of gcp_list is {0}'.format(str(len(gcp_list))))
 
-    for saad in saads:
-        try:
-            directory_service, http_auth = get_directory_resource()
-            directory_service.members().delete(groupKey=saad.authorized_dataset.acl_google_group,
-                                               memberKey=saad.service_account.service_account).execute(
-                http=http_auth)
-            st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                'message': '[STATUS] Attempting to delete SA {} from Google Group {}.'.format(
-                    saad.service_account.service_account, saad.authorized_dataset.acl_google_group)})
-            logger.info("[STATUS] Attempting to delete SA {} from Google Group {}.".format(
-                            saad.service_account.service_account, saad.authorized_dataset.acl_google_group)
-                        )
-        except HttpError as e:
-            # We're not concerned with 'user doesn't exist' errors
-            if e.resp.status == 404 and e._get_reason() == 'Resource Not Found: memberKey':
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[STATUS] While removing SA {0} from Google Group {1}.'.format(
-                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[STATUS] {}.'.format(str(e))})
-                logger.info('[WARNING] While removing SA {0} from Google Group {1}: {2}'.format(
-                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
-            # ...but we are concerned with anything else
-            else:
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[ERROR] There was an error in removing SA {0} from Google Group {1}.'.format(
-                        str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group)})
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
-                    'message': '[ERROR] {}.'.format(str(e))})
-                logger.error('[ERROR] There was an error in removing SA {0} from Google Group {1}: {2}'.format(
-                    str(saad.service_account.service_account), saad.authorized_dataset.acl_google_group, e))
-                logger.exception(e)
+    #
+    # (10/1/18) Here is an issue that arises if the user is a member of a Google
+    # project that DCF does not have access to (or no previous record of?) If you
+    # provide a *list* of Google projects, if any *one* of the projects is
+    # something that DCF cannot deal with, the underlying call returns a 403
+    # for the whole query. So we need to do it project-by-project, where
+    # we can just have the call return an empty list.
+    #
+    # proj_list = [x.project_id for x in gcp_list] NO!
+    # sa_dict, messages = service_account_info_from_dcf(user_id, proj_list) NO!
 
-    for saad in saads:
-        saad.delete()
-    sa.active = False
-    sa.save()
+    all_messages = []
+    for proj in gcp_list:
+        logger.info('[INFO] sainfo {0}'.format(str(proj.project_id)))
+        sa_dict_list, messages = service_account_info_from_dcf_for_project(user_id, proj.project_id)
+        if messages:
+            all_messages.extend(messages)
+        logger.info('[INFO] sadict {0}'.format(sa_dict_list))
+        for sa_dict in sa_dict_list:
+            if sa_dict['sa_name'] == sa_name:
+                return sa_dict, all_messages
 
-def service_account_dict(sa_id):
-    service_account = ServiceAccount.objects.get(id=sa_id, active=1)
-    retval = {
-      'gcp_id': service_account.google_project.project_id,
-      'sa_datasets': service_account.get_auth_datasets(),
-      'sa_id': service_account.service_account
-    }
-    return retval
+    logger.info('[INFO] returning none')
+    return None, all_messages
 
-def auth_dataset_whitelists_for_user(use_user_id):
-    nih_user = NIH_User.objects.filter(user_id=use_user_id, active=True)
+
+def auth_dataset_whitelists_for_user(user_id):
+    nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
+    num_users = len(nih_users)
+    if num_users != 1:
+        if num_users > 1:
+            logger.warn("Multiple objects when retrieving nih_user with user_id {}.".format(str(user_id)))
+        else:
+            logger.warn("No objects when retrieving nih_user with user_id {}.".format(str(user_id)))
+        return None
+    nih_user = nih_users.first()
+    expired_time = nih_user.NIH_assertion_expiration
+    now_time = pytz.utc.localize(datetime.datetime.utcnow())
+    if now_time >= expired_time:
+        logger.info("[STATUS] Access for user {} has expired.".format(nih_user.user.email))
+        return None
+
     has_access = None
-    if len(nih_user) > 0:
-        user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
-        for dataset in user_auth_sets:
-            if not has_access:
-                has_access = []
-            has_access.append(dataset.authorized_dataset.whitelist_id)
+    user_auth_sets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
+    for dataset in user_auth_sets:
+        if not has_access:
+            has_access = []
+        has_access.append(dataset.authorized_dataset.whitelist_id)
 
     return has_access
-
-class ACLDeleteAction(object):
-    def __init__(self, acl_group_name, user_email):
-        self.acl_group_name = acl_group_name
-        self.user_email = user_email
-
-    def __str__(self):
-        return "ACLDeleteAction(acl_group_name: {}, user_email: {})".format(self.acl_group_name,self.user_email)
-
-    def __repr_(self):
-        return self.__str__()
-
-class UnlinkAccountsResult(object):
-    def __init__(self, unlinked_nih_users, acl_delete_actions):
-        self.unlinked_nih_users = unlinked_nih_users
-        self.acl_delete_actions = acl_delete_actions
-
-    def __str__(self):
-        return "UnlinkAccountsResult(unlinked_nih_users: {}, acl_delete_actions: {})".format(str(self.unlinked_nih_users), str(self.acl_delete_actions))
-
-    def __repr__(self):
-        return self.__str__()
-
-
-def do_nih_unlink(user_id):
-    unlink_accounts_result, message = unlink_accounts_and_get_acl_tasks(user_id)
-    if message:
-        return message
-    next_message = _process_actions(unlink_accounts_result)
-    if next_message:
-        return next_message
-    return None
-
-
-def _process_actions(unlink_accounts_result):
-    directory_service, http_auth = get_directory_resource()
-    for action in unlink_accounts_result.acl_delete_actions:
-        user_email = action.user_email
-        google_group_acl = action.acl_group_name
-
-        # If the user isn't actually in the ACL, we'll get an HttpError
-        try:
-            logger.info("[STATUS] Removing user {} from {}...".format(user_email, google_group_acl))
-            directory_service.members().delete(groupKey=google_group_acl,
-                                               memberKey=user_email).execute(http=http_auth)
-
-        except HttpError as e:
-            logger.info(
-                "[STATUS] {} could not be deleted from {}, probably because they were not a member".format(user_email,
-                                                                                                           google_group_acl))
-            logger.exception(e)
-        except Exception as e:
-            logger.error("[ERROR] When trying to remove from the Google Group:")
-            logger.exception(e)
-            return "Encountered an error when trying to unlink this account--please contact the administrator."
-
-    return None
-
-
-def unlink_accounts_and_get_acl_tasks(user_id):
-    try:
-        unlink_accounts_result = _unlink_accounts_and_get_acl_tasks_core(user_id)
-    except ObjectDoesNotExist as e:
-        user_email = User.objects.get(id=user_id).email
-        logger.error("[ERROR] NIH_User not found for user_id {}. Error: {}".format(user_id, e))
-        return None, "No linked NIH users were found for user {}.".format(user_email)
-    except Exception as e:
-        logger.error("[ERROR] When trying to get the unlink actions:")
-        logger.exception(e)
-        return None, "Encountered an error when trying to unlink this account--please contact the administrator."
-    return unlink_accounts_result, None
-
-
-def _unlink_accounts_and_get_acl_tasks_core(user_id):
-    """
-    This function modifies the 'NIH_User' objects!
-
-    1. Finds a NIH_User object with the given user_id that has the "linked" field set to True. The "linked"
-       field is then set to "False".
-       Exception case: If there are multiple NIH_User objects with the given user_id that also have "linked"
-       set to True
-
-    2. Creates a list of associated email addresses of NIH_user objects that have to be removed from
-       the controlled data ACL group.
-
-
-    Args:
-        user_id: ID of the User object associated with the NIH_User object.
-        acl_group_name: Name of the access control Google Group.
-
-    Returns: An UnlinkAccountsResult object.
-
-    Throws: ObjectDoesNotExist if no NIH_User object is found with the given user_id
-    """
-
-    unlinked_nih_user_list = []
-    ACLDeleteAction_list = []
-
-    user_email = User.objects.get(id=user_id).email
-
-    try:
-        nih_account_to_unlink = NIH_User.objects.get(user_id=user_id, linked=True)
-        nih_account_to_unlink.linked = False
-        nih_account_to_unlink.save()
-
-        removed_datasets = nih_account_to_unlink.delete_all_auth_datasets()
-
-        logger.info("[STATUS] Removed the following datasets from {}: {}".format(
-            user_email, "; ".join(removed_datasets.values_list('whitelist_id',flat=True)))
-        )
-
-        unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
-
-    except MultipleObjectsReturned as e:
-        logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
-        nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
-
-        for nih_account_to_unlink in nih_user_query_set:
-            nih_account_to_unlink.linked = False
-            nih_account_to_unlink.save()
-            nih_account_to_unlink.delete_all_auth_datasets()
-            unlinked_nih_user_list.append((user_id, nih_account_to_unlink.NIH_username))
-
-            logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
-
-    # Revoke them from all datasets, regardless of actual permission, to be safe
-    das = DatasetAccessSupportFactory.from_webapp_django_settings()
-    datasets_to_revoke = das.get_all_datasets_and_google_groups()
-
-    for dataset in datasets_to_revoke:
-        ACLDeleteAction_list.append(ACLDeleteAction(dataset.google_group_name, user_email))
-
-    logger.info("ACLDeleteAction_list for {}: {}".format(str(ACLDeleteAction_list), user_email))
-
-    return UnlinkAccountsResult(unlinked_nih_user_list, ACLDeleteAction_list)
-
-login_expiration_seconds = settings.LOGIN_EXPIRATION_MINUTES * 60
-COUNTDOWN_SECONDS = login_expiration_seconds + (60 * 15)
-
-LOGOUT_WORKER_TASKQUEUE = settings.LOGOUT_WORKER_TASKQUEUE
-CHECK_NIH_USER_LOGIN_TASK_URI = settings.CHECK_NIH_USER_LOGIN_TASK_URI
-CRON_MODULE = settings.CRON_MODULE
-
-PUBSUB_TOPIC_ERA_LOGIN = settings.PUBSUB_TOPIC_ERA_LOGIN
-LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
 
 
 class DemoLoginResults(object):
@@ -853,15 +771,10 @@ def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, resu
                 " with the eRA commons identity {}."
                     .format(user_email, existing_nih_user_name, NIH_username)))
 
-            if settings.DCF_TEST:
-                user_message = "User {} is already linked to the eRA commons identity {}. " \
-                               "You must now use the link below to first log out of the Data Commons. " \
-                               "Then, please have {} unlink from {} before trying this again." \
-                               .format(user_email, existing_nih_user_name, user_email, existing_nih_user_name)
-            else:
-                user_message = "User {} is already linked to the eRA commons identity {}. " \
-                               "Please unlink these before authenticating with the eRA commons " \
-                               "identity {}.".format(user_email, existing_nih_user_name, NIH_username)
+            user_message = "User {} is already linked to the eRA commons identity {}. " \
+                           "You must now use the link below to first log out of the Data Commons. " \
+                           "Then, please have {} unlink from {} before trying this again." \
+                           .format(user_email, existing_nih_user_name, user_email, existing_nih_user_name)
             results.messages.append(user_message)
             return True
 
@@ -891,127 +804,11 @@ def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, resu
                                            NIH_username,
                                            prelinked_user_emails + '.'
                                           ))
-        if settings.DCF_TEST:
-            user_message = "You tried to link your email address to NIH account {}, but it is already linked to {}. " \
-                           "Please log out of the Data Commons now using the link below, then try again."
-        else:
-            user_message = "You tried to link your email address to NIH account {}, but it is already linked to {}."
+        user_message = "You tried to link your email address to NIH account {}, but it is already linked to {}. " \
+                       "Please log out of the Data Commons now using the link below, then try again."
         results.messages.append(user_message.format(NIH_username, prelinked_user_emails))
         return True
     return False
-
-
-def demo_process_success(auth, user_id, saml_response):
-    retval = DemoLoginResults()
-    st_logger = StackDriverLogger.build_from_django_settings()
-    NIH_username = None
-    user_email = None
-
-    st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] received ?acs")
-    auth.process_response()
-    errors = auth.get_errors()
-    if errors:
-        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[ERROR] executed auth.get_errors(). errors are:")
-        logger.info('executed auth.get_errors(). errors are:')
-        logger.warn(errors)
-        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[ERROR] {}".format(repr(errors)))
-        logger.info('error is because')
-        auth_last_error = auth.get_last_error_reason()
-        logger.warn(auth_last_error)
-        st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                       "[ERROR] last error: {}".format(str(auth_last_error)))
-
-    not_auth_warn = not auth.is_authenticated()
-
-    st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] no errors in 'auth' object")
-
-    if not errors:
-        das = DatasetAccessSupportFactory.from_webapp_django_settings()
-        authorized_datasets = []
-        try:
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] processing 'acs' response")
-
-            retval.session_dict['samlUserdata'] = auth.get_attributes()
-            retval.session_dict['samlNameId'] = auth.get_nameid()
-            NIH_username = retval.session_dict['samlNameId']
-            retval.session_dict['samlSessionIndex'] = auth.get_session_index()
-
-            user_email = User.objects.get(id=user_id).email
-
-            if found_linking_problems(NIH_username, user_id, user_email, st_logger, retval):
-                return retval
-
-        except Exception as e:
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[ERROR] Exception while finding user email: {}".format(str(e)))
-            logger.exception(e)
-
-        # This stuff used to live sprinkled into the Django update code that is now in
-        # handle_user_db_entry. But it is not useful for us with DCF, so break it out, but
-        # handle exception as before:
-        no_exception = True
-        try:
-            authorized_datasets = das.get_datasets_for_era_login(NIH_username)
-            # add or remove user from ACL_GOOGLE_GROUP if they are or are not dbGaP authorized
-            directory_client, http_auth = get_directory_resource()
-
-        except Exception as e:
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[ERROR] Exception while finding user email: {}".format(str(e)))
-            logger.error("[ERROR] Exception while finding user email: ")
-            logger.exception(e)
-            warn_message = ""
-            no_exception = False
-
-        if no_exception:
-            #saml_response = None if 'SAMLResponse' not in req['post_data'] else req['post_data']['SAMLResponse']
-            saml_response = saml_response.replace('\r\n', '')
-            num_auth_datasets = len(authorized_datasets)
-            # AppEngine Flex appears to return a datetime.datetime.now() of the server's local timezone, and not
-            # UTC as on AppEngine Standard; use utcnow() to ensure UTC.
-            NIH_assertion_expiration = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
-                seconds=login_expiration_seconds))
-
-            nih_user, warn_message = handle_user_db_entry(user_id, NIH_username, user_email, saml_response,
-                                                          num_auth_datasets, NIH_assertion_expiration, st_logger)
-
-        all_datasets = das.get_all_datasets_and_google_groups()
-
-        for dataset in all_datasets:
-            handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, True,
-                                    directory_client, http_auth, st_logger)
-
-        # Add task in queue to deactivate NIH_User entry after NIH_assertion_expiration has passed.
-        try:
-            full_topic_name = get_full_topic_name(PUBSUB_TOPIC_ERA_LOGIN)
-            logger.info("Full topic name: {}".format(full_topic_name))
-            client = get_pubsub_service()
-            params = {
-                'event_type': 'era_login',
-                'user_id': user_id,
-                'deployment': CRON_MODULE
-            }
-            message = json_dumps(params)
-
-            body = {
-                'messages': [
-                    {
-                        'data': base64.b64encode(message.encode('utf-8'))
-                    }
-                ]
-            }
-            client.projects().topics().publish(topic=full_topic_name, body=body).execute()
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[STATUS] Notification sent to PubSub topic: {}".format(full_topic_name))
-
-        except Exception as e:
-            logger.error("[ERROR] Failed to publish to PubSub topic")
-            logger.exception(e)
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[ERROR] Failed to publish to PubSub topic: {}".format(str(e)))
-
-        retval.messages.append(warn_message)
-        return retval
 
 
 def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion_expiration, st_logger):
@@ -1152,54 +949,20 @@ def handle_user_db_entry(user_id, NIH_username, user_email, auth_response, num_a
     return nih_user, warn_message
 
 
-def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, handle_acls,
-                            directory_client, http_auth, st_logger):
+def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, st_logger):
     try:
-        ad = AuthorizedDataset.objects.get(whitelist_id=dataset.dataset_id,
-                                           acl_google_group=dataset.google_group_name)
+        ad = AuthorizedDataset.objects.get(whitelist_id=dataset)
     except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
         logger.error(("[ERROR] " + (
                          "More than one dataset " if type(e) is MultipleObjectsReturned else "No dataset ") +
-                         "found for this ID and Google Group Name in the database: %s, %s") % (
-                     dataset.dataset_id, dataset.google_group_name)
+                         "found for this ID in the database: %s") % (dataset)
                      )
         return
 
     uad = UserAuthorizedDatasets.objects.filter(nih_user=nih_user, authorized_dataset=ad)
-    dataset_in_auth_set = next((ds for ds in authorized_datasets if
-                                (ds.dataset_id == dataset.dataset_id and
-                                 ds.google_group_name == dataset.google_group_name)), None)
+    dataset_in_auth_set = dataset in authorized_datasets
 
     logger.debug("[STATUS] UserAuthorizedDatasets for {}: {}".format(nih_user.NIH_username, str(uad)))
-
-    user_on_acl = False
-    if handle_acls:
-        try:
-            result = directory_client.members().get(groupKey=dataset.google_group_name,
-                                                    memberKey=user_email).execute(http=http_auth)
-
-            user_on_acl = len(result) > 0
-            # If we found them in the ACL but they're not currently authorized for it, remove them from it. Note
-            # race condition: If they were just dropped by somebody else, the following call raises an error, which
-            # also gets caught below.
-            if user_on_acl and not dataset_in_auth_set:
-                directory_client.members().delete(groupKey=dataset.google_group_name,
-                                                  memberKey=user_email).execute(http=http_auth)
-                logger.warn(
-                    "User {} was deleted from group {} because they don't have dbGaP authorization.".format(
-                        user_email, dataset.google_group_name
-                    )
-                )
-                st_logger.write_text_log_entry(
-                    LOG_NAME_ERA_LOGIN_VIEW,
-                    "[WARN] User {} was deleted from group {} because they don't have dbGaP authorization.".format(
-                        user_email, dataset.google_group_name
-                    )
-                )
-        except HttpError:
-            # if the user_email doesn't exist in the google group an HttpError will be thrown... It means nothing
-            # should happen...
-            pass
 
     #
     # Either remove them from the table, or add them to the table.
@@ -1209,53 +972,11 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
         st_logger.write_text_log_entry(
             LOG_NAME_ERA_LOGIN_VIEW,
             "[WARN] User {} being deleted from UserAuthorizedDatasets table {} because they don't have dbGaP authorization.".format(
-                nih_user.NIH_username, dataset.dataset_id
+                nih_user.NIH_username, dataset
             )
         )
         uad.delete()
 
-    # Sometimes an account is in the Google Group but not the database - add them if they should
-    # have access. July 2018: No, that is a bad idea. Privilege must only flow in one direction.
-    # Database must be considered definitive.
-    # May 2018: If not handling ACL groups anymore, we skip this step (added handle_acls condition)
-    # elif not len(uad) and handle_acls and user_on_acl and dataset_in_auth_set:
-    #     logger.info(
-    #         "User {} was was found in group {} but not the database--adding them.".format(
-    #             user_email, dataset.google_group_name
-    #         )
-    #     )
-    #     st_logger.write_text_log_entry(
-    #         LOG_NAME_ERA_LOGIN_VIEW,
-    #         "[WARN] User {} was was found in group {} but not the database--adding them.".format(
-    #             user_email, dataset.google_group_name
-    #         )
-    #     )
-    #     uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
-    #                                                                    authorized_dataset=ad)
-    #     if not created:
-    #         logger.warn("[WARNING] Unable to create entry for user {} and dataset {}.".format(user_email,
-    #                                                                                           ad.whitelist_id))
-    #     else:
-    #         logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
-
-    if handle_acls:
-        # Check for their need to be in the ACL, and add them
-        if dataset_in_auth_set and not user_on_acl:
-            body = {
-                "email": user_email,
-                "role": "MEMBER"
-            }
-
-            result = directory_client.members().insert(
-                groupKey=dataset.google_group_name,
-                body=body
-            ).execute(http=http_auth)
-
-            logger.info(result)
-            logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-            st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-                                           "[STATUS] User {} added to {}.".format(user_email,
-                                                                              dataset.google_group_name))
     # Add them to the database as well
     if (len(uad) == 0) and dataset_in_auth_set:
         uad, created = UserAuthorizedDatasets.objects.update_or_create(nih_user=nih_user,
@@ -1266,45 +987,8 @@ def handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, 
         else:
             logger.info("[STATUS] Added user {} to dataset {}.".format(user_email, ad.whitelist_id))
 
-            # logger.info(result)
-            # logger.info("User {} added to {}.".format(user_email, dataset.google_group_name))
-            # st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW,
-            #                                "[STATUS] User {} added to {}.".format(user_email,
-            #                                                                       dataset.google_group_name))
 
-def deactivate_nih_add_to_open(user_id, user_email):
-    # 5/14/18 NO! active flag has nothing to do with user logout, but instead is set to zero when user expires off of ACL group
-    # after 24 hours:
-    # try:
-    #     nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
-    #     nih_user.active = False
-    #     nih_user.save()
-    #     logger.info("[STATUS] NIH user {} has been de-activated.".format(nih_user.NIH_username))
-    #
-    # except (ObjectDoesNotExist, MultipleObjectsReturned) as e:
-    #     if type(e) is MultipleObjectsReturned:
-    #         logger.error("[ERROR] More than one linked NIH User with user id {} - deactivating all of them!".format (str(e), user_id))
-    #         nih_users = NIH_User.objects.filter(user_id=user_id)
-    #         for nih_user in nih_users:
-    #             nih_user.active = False
-    #             nih_user.save()
-    #             nih_user.delete_all_auth_datasets()
-    #     else:
-    #         logger.info("[STATUS] No linked NIH user was found for user {} - no one set to inactive.".format(user_email))
-
-    if not settings.DCF_TEST:
-        directory_service, http_auth = get_directory_resource()
-        # add user to OPEN_ACL_GOOGLE_GROUP if they are not yet on it
-        try:
-            body = {"email": user_email, "role": "MEMBER"}
-            directory_service.members().insert(groupKey=OPEN_ACL_GOOGLE_GROUP, body=body).execute(http=http_auth)
-            logger.info("[STATUS] Attempting to insert user {} into group {}. "
-                        .format(str(user_email), OPEN_ACL_GOOGLE_GROUP))
-        except HttpError as e:
-            logger.info(e)
-
-
-class RefreshCode:
+class RefreshCode(object):
     NO_TOKEN = 1
     TOKEN_EXPIRED = 2
     INTERNAL_ERROR = 3
@@ -1399,135 +1083,126 @@ def get_nih_user_details(user_id, force_logout):
     """
     user_details = {}
 
-    if settings.DCF_TEST:
 
-        #
-        # If we have detected that the user has logged into DCF with a different NIH username than what we think,
-        # nothing else matters. We tell them to log out. Same if they have a bad Google ID.
-        #
+    #
+    # If we have detected that the user has logged into DCF with a different NIH username than what we think,
+    # nothing else matters. We tell them to log out. Same if they have a bad Google ID.
+    #
 
-        if force_logout:
-            user_details['error_state'] = None
-            user_details['dcf_comm_error'] = False
-            user_details['force_DCF_logout'] = True
-            return user_details
-
-        #
-        # Otherwise, ask the DCF for current user info,
-        #
-
-        user_details['force_DCF_logout'] = False
-        user_details['refresh_required'] = False
-        user_details['no_google_link'] = False
+    if force_logout:
         user_details['error_state'] = None
         user_details['dcf_comm_error'] = False
-        user_details['link_mismatch'] = False
-        user_details['data_sets_updated'] = False
-        user_details['legacy_linkage'] = False
+        user_details['force_DCF_logout'] = True
+        return user_details
 
-        nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
+    #
+    # Otherwise, ask the DCF for current user info,
+    #
 
-        nih_user = nih_users.first() if len(nih_users) == 1 else None
+    user_details['force_DCF_logout'] = False
+    user_details['refresh_required'] = False
+    user_details['no_google_link'] = False
+    user_details['error_state'] = None
+    user_details['dcf_comm_error'] = False
+    user_details['link_mismatch'] = False
+    user_details['data_sets_updated'] = False
+    user_details['legacy_linkage'] = False
 
-        match_state = _refresh_from_dcf(user_id, nih_user)
+    nih_users = NIH_User.objects.filter(user_id=user_id, linked=True)
 
-        # It is not essential, but helps the user if we can suggest they log out
-        # before trying to fix problems (we provide them with a logout link no
-        # matter what).
+    nih_user = nih_users.first() if len(nih_users) == 1 else None
 
-        try:
-            since_login_est = get_auth_elapsed_time(user_id)
-        except InternalTokenError:
-            user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
-            return user_details
+    match_state = _refresh_from_dcf(user_id, nih_user)
 
-        live_cookie_probable = since_login_est < (60 * 10)
+    # It is not essential, but helps the user if we can suggest they log out
+    # before trying to fix problems (we provide them with a logout link no
+    # matter what).
 
-        if match_state == RefreshCode.NO_TOKEN:
-            if nih_user:
-                user_details['legacy_linkage'] = True
-                user_details['NIH_username'] = nih_user.NIH_username
-            else:
-                user_details['NIH_username'] = None
-            return user_details
-        elif match_state == RefreshCode.TOKEN_EXPIRED:
-            user_details['refresh_required'] = True
-            return user_details
-        elif match_state == RefreshCode.INTERNAL_ERROR:
-            user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
-            return user_details
-        elif match_state == RefreshCode.DCF_COMMUNICATIONS_ERROR:
-            user_details['dcf_comm_error'] = True
-            return user_details
-        elif match_state == RefreshCode.NO_GOOGLE_LINK:
-            # If they have no Google link, and they have recently tried to link, just get them
-            # to log out. Otherwise, get them to log in again to fix it:
-            if live_cookie_probable:
-                user_details['force_DCF_logout'] = True
-            else:
-                user_details['no_google_link'] = True
-            return user_details
-        elif match_state == RefreshCode.GOOGLE_LINK_MISMATCH:
-            # If they have a mismatched Google link, and they have recently tried to link, just get them
-            # to log out. Otherwise, get them to log in again to fix it:
-            if live_cookie_probable:
-                user_details['force_DCF_logout'] = True
-            else:
-                user_details['link_mismatch'] = True
-            return user_details
-        elif match_state == RefreshCode.UNEXPECTED_UNLINKED_NIH_USER:
-            # Should not happen. Force a complete logout
-            user_details['force_DCF_logout'] = True
-            return user_details
-        elif match_state == RefreshCode.PROJECT_SET_UPDATED:
-            user_details['data_sets_updated'] = True
-        elif match_state == RefreshCode.ALL_MATCHES:
-            pass
+    try:
+        since_login_est = get_auth_elapsed_time(user_id)
+    except InternalTokenError:
+        user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
+        return user_details
+
+    live_cookie_probable = since_login_est < (60 * 10)
+
+    if match_state == RefreshCode.NO_TOKEN:
+        if nih_user:
+            user_details['legacy_linkage'] = True
+            user_details['NIH_username'] = nih_user.NIH_username
         else:
-            user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
-            return user_details
-
-        #
-        # Now with DCF, we can have a user logged in as an NIH user, but not be linked (which means DCF does not
-        # have an association between NIH ID and Google ID). But if the user has not made that link at DCF,
-        # we treat them as unlinked. We are still only interested in fully linked NIH users!
-        #
-
-        if not nih_user: # Extracted above
             user_details['NIH_username'] = None
-            return user_details
+        return user_details
+    elif match_state == RefreshCode.TOKEN_EXPIRED:
+        user_details['refresh_required'] = True
+        return user_details
+    elif match_state == RefreshCode.INTERNAL_ERROR:
+        user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
+        return user_details
+    elif match_state == RefreshCode.DCF_COMMUNICATIONS_ERROR:
+        user_details['dcf_comm_error'] = True
+        return user_details
+    elif match_state == RefreshCode.NO_GOOGLE_LINK:
+        # If they have no Google link, and they have recently tried to link, just get them
+        # to log out. Otherwise, get them to log in again to fix it:
+        if live_cookie_probable:
+            user_details['force_DCF_logout'] = True
+        else:
+            user_details['no_google_link'] = True
+        return user_details
+    elif match_state == RefreshCode.GOOGLE_LINK_MISMATCH:
+        # If they have a mismatched Google link, and they have recently tried to link, just get them
+        # to log out. Otherwise, get them to log in again to fix it:
+        if live_cookie_probable:
+            user_details['force_DCF_logout'] = True
+        else:
+            user_details['link_mismatch'] = True
+        return user_details
+    elif match_state == RefreshCode.UNEXPECTED_UNLINKED_NIH_USER:
+        # Should not happen. Force a complete logout
+        user_details['force_DCF_logout'] = True
+        return user_details
+    elif match_state == RefreshCode.PROJECT_SET_UPDATED:
+        user_details['data_sets_updated'] = True
+    elif match_state == RefreshCode.ALL_MATCHES:
+        pass
+    else:
+        user_details['error_state'] = 'Internal error encountered syncing with Data Commons'
+        return user_details
 
-        #
-        # With the user_details page, we now need to check with DCF about current status before we display information
-        # to the user, as our database view could be stale.
-        #
-        # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
-        # flag. This is the *minimun* we chould be doing, no matter what. Note that in DCF-based Brave New World, we no
-        # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
-        # need to give the user an accurate picture of the state when they hit this page.
-        #
+    #
+    # Now with DCF, we can have a user logged in as an NIH user, but not be linked (which means DCF does not
+    # have an association between NIH ID and Google ID). But if the user has not made that link at DCF,
+    # we treat them as unlinked. We are still only interested in fully linked NIH users!
+    #
 
-        if nih_user.active:
-            expired_time = nih_user.NIH_assertion_expiration
-            # If we need to have the access expire in just a few minutes for testing, this is one way to fake it:
-            # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
-            # expired_time = expired_time + testing_expire_hack
-            now_time = pytz.utc.localize(datetime.datetime.utcnow())
-            if now_time >= expired_time:
-                logger.info("[INFO] Expired user hit user info page and was deactivated {}.".format(expired_time, now_time))
-                nih_user.active = False
-                nih_user.NIH_assertion_expiration = now_time
-                nih_user.save()
+    if not nih_user: # Extracted above
+        user_details['NIH_username'] = None
+        return user_details
 
-    else: # Old non-DCF code:
-        try:
-            nih_user = NIH_User.objects.get(user_id=user_id, linked=True)
-        except MultipleObjectsReturned as e:
-            logger.warn("Multiple objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
-            return user_details
-        except ObjectDoesNotExist as e:
-            logger.warn("No objects when retrieving nih_user with user_id {}. {}".format(str(user_id), str(e)))
-            return user_details
+    #
+    # With the user_details page, we now need to check with DCF about current status before we display information
+    # to the user, as our database view could be stale.
+    #
+    # Step 1: If the expiration time has passed for the user and they are still tagged as active, we clear that
+    # flag. This is the *minimun* we should be doing, no matter what. Note that in DCF-based Brave New World, we no
+    # longer need to have a cron job doing this, as we don't actually need to do anything at 24 hours. We just
+    # need to give the user an accurate picture of the state when they hit this page. NO!! ACTUALLY (9/18/18),
+    # the active flag is still used by the File Browser page to determine if a user is allowed to click on a file.
+    # We are using the cron sweeper to remove the active status.
+    #
+
+    if nih_user.active:
+        expired_time = nih_user.NIH_assertion_expiration
+        # If we need to have the access expire in just a few minutes for testing, this is one way to fake it:
+        # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
+        # expired_time = expired_time + testing_expire_hack
+        now_time = pytz.utc.localize(datetime.datetime.utcnow())
+        if now_time >= expired_time:
+            logger.info("[INFO] Expired user hit user info page and was deactivated {}.".format(expired_time, now_time))
+            nih_user.active = False
+            nih_user.NIH_assertion_expiration = now_time
+            nih_user.save()
 
     user_auth_datasets = UserAuthorizedDatasets.objects.filter(nih_user=nih_user)
     user_details['NIH_username'] = nih_user.NIH_username
@@ -1602,15 +1277,16 @@ def refresh_user_projects(nih_user, user_email, project_keys, st_logger):
 
     authorized_datasets = []
     for project in project_keys:
+        # Note that if user is authorized for a dataset that we do not support, this
+        # makes sure we ignore it:
         adqs = AuthorizedDataset.objects.filter(whitelist_id=project)
         if len(adqs) == 1:
-            authorized_datasets.append(DatasetGoogleGroupPair(project, adqs.first().acl_google_group))
+            authorized_datasets.append(project)
 
-    das = DatasetAccessSupportFactory.from_webapp_django_settings()
-    all_datasets = das.get_all_datasets_and_google_groups()
+    controlled_datasets = AuthorizedDataset.objects.filter(public=False).values_list('whitelist_id', flat=True)
 
-    for dataset in all_datasets:
-        handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, False, None, None, st_logger)
+    for dataset in controlled_datasets:
+        handle_user_for_dataset(dataset, nih_user, user_email, authorized_datasets, st_logger)
 
     return
 

@@ -20,6 +20,7 @@ This sample is used on this page:
 For more information, see the README.md under /bigquery.
 """
 
+from builtins import str
 import argparse
 import logging
 import json
@@ -102,7 +103,6 @@ def poll_job(bigquery, job):
         if result['status']['state'] == 'DONE':
             if 'errorResult' in result['status']:
                 raise RuntimeError(result['status']['errorResult'])
-            print >> sys.stdout, 'Job complete.'
             logger.info('poll_job complete.')
             return
 

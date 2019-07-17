@@ -13,20 +13,30 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
 from __future__ import absolute_import
 
-from oauth2client.client import GoogleCredentials
+import logging
+import re
+from time import sleep
+from uuid import uuid4
+import copy
 from django.conf import settings
-from .utils import build_with_retries
+from .abstract import SheetsABC
+from .sheets_service import get_sheet_service
 
-STORAGE_SCOPES = [
-    'https://www.googleapis.com/auth/devstorage.read_only',
-    'https://www.googleapis.com/auth/devstorage.read_write',
-    'https://www.googleapis.com/auth/devstorage.full_control'
-]
+logger = logging.getLogger('main_logger')
 
 
-def get_storage_resource():
-    credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(STORAGE_SCOPES)
-    service = build_with_retries('storage', 'v1', credentials, 2)
-    return service
+class SheetsSupport(SheetsABC):
+    def __init__(self, project_id, executing_project=None):
+        # Project which will execute any jobs run by this class
+        self.executing_project = executing_project or settings.BIGQUERY_PROJECT_ID
+        # Destination project
+        self.project_id = project_id
+
+        self.sheet_service = get_sheet_service()
+
+
+
+

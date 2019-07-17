@@ -1,19 +1,25 @@
-"""
-Copyright 2017-2018, Institute for Systems Biology
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+from __future__ import absolute_import
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
+from builtins import map
+from builtins import next
+from builtins import str
+from past.builtins import basestring
+from builtins import object
 import collections
 import csv
 import json
@@ -44,10 +50,10 @@ from django.utils.html import escape
 from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
 from accounts.models import GoogleProject
-from metadata_helpers import *
-from metadata_counting import *
-from file_helpers import *
-from models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
+from .metadata_helpers import *
+from .metadata_counting import *
+from .file_helpers import *
+from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 
@@ -70,9 +76,9 @@ def convert(data):
     if isinstance(data, basestring):
         return str(data)
     elif isinstance(data, collections.Mapping):
-        return dict(map(convert, data.iteritems()))
+        return dict(list(map(convert, iter(list(data.items())))))
     elif isinstance(data, collections.Iterable):
-        return type(data)(map(convert, data))
+        return type(data)(list(map(convert, data)))
     else:
         return data
 
@@ -88,6 +94,10 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
         raise Exception("Filters were supplied, but no program was indicated - you cannot filter samples without knowing the program!")
 
     samples_and_cases = {'items': [], 'cases': [], 'count': 0}
+
+    user_id = 0
+    if user:
+        user_id = user.id
 
     sample_ids = {}
     sample_tables = {}
@@ -149,7 +159,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                         for tables in User_Data_Tables.objects.filter(project_id=project.id):
                             if 'user_' not in tables.metadata_samples_table:
                                 logger.warn('[WARNING] User project metadata_samples table may have a malformed name: '
-                                    + (tables.metadata_samples_table.__str__() if tables.metadata_samples_table is not None else 'None')
+                                    + (str(tables.metadata_samples_table) if tables.metadata_samples_table is not None else 'None')
                                     + ' for project ' + str(project.id) + '; skipping')
                             else:
                                 project_ms_table = tables.metadata_samples_table
@@ -298,7 +308,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 sample_barcode_col = bq_table_info['sample_barcode_col']
                 bq_dataset = bq_table_info['dataset']
                 bq_table = bq_table_info['table']
-                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_NAME
+                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_ID
 
                 # Build the query for any filter which *isn't* a not-any query.
                 query_template = \
@@ -385,7 +395,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 # Put in one 'not found' entry to zero out the rest of the queries
                 barcodes = ['NONE_FOUND', ]
 
-            tmp_mut_table = 'bq_res_table_' + str(user.id) + "_" + make_id(6)
+            tmp_mut_table = 'bq_res_table_' + str(user_id) + "_" + make_id(6)
 
             make_tmp_mut_table_str = """
                 CREATE TEMPORARY TABLE %s (
@@ -425,7 +435,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
 
         # If there are filters, create a temporary table filtered off the base table
         if len(filters) > 0:
-            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
             filter_table = tmp_filter_table
 
             if data_type_subquery and data_type_filters:
@@ -464,7 +474,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
             db.commit()
 
         elif tmp_mut_table:
-            tmp_filter_table = "filtered_samples_tmp_" + user.id.__str__() + "_" + make_id(6)
+            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
             filter_table = tmp_filter_table
             make_tmp_table_str = """
                 CREATE TEMPORARY TABLE %s
@@ -621,8 +631,6 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
             if item.shared_with_users and item.owner.id == request.user.id:
                 shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
-        # print local_zone.localize(item.last_date_saved)
-
     # Used for autocomplete listing
     cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
     cohort_listing = []
@@ -682,7 +690,9 @@ def validate_barcodes(request):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        barcodes = json.loads(request.body)['barcodes']
+        body_unicode = request.body.decode('utf-8')
+        body = json.loads(body_unicode)
+        barcodes = body['barcodes']
 
         status = 500
 
@@ -877,10 +887,10 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
         if request.POST:
             name = request.POST.get('name')
             blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
-            match = blacklist.search(unicode(name))
+            match = blacklist.search(str(name))
             if match:
                 # XSS risk, log and fail this cohort save
-                match = blacklist.findall(unicode(name))
+                match = blacklist.findall(str(name))
                 logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+str(match))
                 messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
                 return redirect(redirect_url)
@@ -989,8 +999,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
-
+                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -1030,10 +1039,10 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                         ).save()
 
                 # Store cohort to BigQuery
-                bq_project_id = settings.BQ_PROJECT_ID
+                bq_project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in results.keys()] for item in sublist])
+                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
 
                 # If BQ insertion fails, we immediately de-activate the cohort and warn the user
                 if 'insertErrors' in bq_result:
@@ -1076,7 +1085,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 @login_required
 @csrf_protect
 def delete_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = 'cohort_list'
     cohort_ids = request.POST.getlist('id')
     Cohort.objects.filter(id__in=cohort_ids).update(active=False)
@@ -1154,13 +1163,13 @@ def share_cohort(request, cohort_id=0):
             success_msg = ""
             note = ""
 
-            if len(newly_shared.keys()):
+            if len(list(newly_shared.keys())):
                 user_set = set([y for x in newly_shared for y in newly_shared[x]])
-                success_msg = ('Cohort ID {} has'.format(str(newly_shared.keys()[0])) if len(newly_shared.keys()) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in newly_shared.keys()]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
+                success_msg = ('Cohort ID {} has'.format(str(list(newly_shared.keys())[0])) if len(list(newly_shared.keys())) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in list(newly_shared.keys())]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
 
             if len(already_shared):
                 user_set = set([y for x in already_shared for y in already_shared[x]])
-                note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in already_shared.keys()])) if len(already_shared.keys()) > 1 else "Cohort ID {} was".format(str(already_shared.keys()[0]))), "; ".join(user_set))
+                note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in list(already_shared.keys())])) if len(list(already_shared.keys())) > 1 else "Cohort ID {} was".format(str(list(already_shared.keys())[0]))), "; ".join(user_set))
 
             if len(owner_cohort_names):
                 note = "NOTE: User {} is the owner of cohort(s) [{}] and does not need to be added to the share email list to view.".format(req_user.email, ", ".join(owner_cohort_names))
@@ -1215,7 +1224,7 @@ def clone_cohort(request, cohort_id):
         bulk_start = time.time()
         Samples.objects.bulk_create(sample_list)
         bulk_stop = time.time()
-        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+        logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
         # Clone the filters
         filters = Filters.objects.filter(resulting_cohort=parent_cohort)
@@ -1241,7 +1250,7 @@ def clone_cohort(request, cohort_id):
         samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
 
         # Store cohort to BigQuery
-        bq_project_id = settings.BQ_PROJECT_ID
+        bq_project_id = settings.BIGQUERY_PROJECT_ID
         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
@@ -1259,7 +1268,7 @@ def clone_cohort(request, cohort_id):
 @login_required
 @csrf_protect
 def set_operation(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     db = None
@@ -1297,7 +1306,7 @@ def set_operation(request):
                 samples = [{'id': x[0], 'case': x[1], 'project': x[2]} for x in union_samples]
 
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to build union sample set: ' + (stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to build union sample set: ' + str(stop - start))
 
             elif op == 'intersect':
 
@@ -1390,7 +1399,7 @@ def set_operation(request):
 
                     stop = time.time()
 
-                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + (stop - start).__str__())
+                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + str(stop - start))
 
             elif op == 'complement':
                 base_id = request.POST.get('base-id')
@@ -1447,13 +1456,13 @@ def set_operation(request):
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
                 # get the full resulting sample and case ID set
                 samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
 
                 # Store cohort to BigQuery
-                project_id = settings.BQ_PROJECT_ID
+                project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
                 bcs.add_cohort_to_bq(new_cohort.id, samples_and_cases['items'])
@@ -1471,7 +1480,7 @@ def set_operation(request):
                         source.save()
 
                 stop = time.time()
-                logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+(stop - start).__str__())
+                logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+str(stop - start))
                 messages.info(request, 'Cohort "%s" created successfully.' % escape(new_cohort.name))
             else:
                 message = 'Operation resulted in empty set of samples. Cohort not created.'
@@ -1494,7 +1503,7 @@ def set_operation(request):
 @login_required
 @csrf_protect
 def union_cohort(request):
-    if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = '/cohorts/'
 
     return redirect(redirect_url)
@@ -1544,10 +1553,10 @@ def save_cohort_from_plot(request):
     if cohort_name:
 
         blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
-        match = blacklist.search(unicode(cohort_name))
+        match = blacklist.search(str(cohort_name))
         if match:
             # XSS risk, log and fail this cohort save
-            match = blacklist.findall(unicode(cohort_name))
+            match = blacklist.findall(str(cohort_name))
             logger.error('[ERROR] While saving a cohort, saw a malformed name: '+cohort_name+', characters: '+str(match))
             result['error'] = "Your cohort's name contains invalid characters; please choose another name."
             return HttpResponse(json.dumps(result), status=200)
@@ -1580,12 +1589,12 @@ def save_cohort_from_plot(request):
         bulk_start = time.time()
         Samples.objects.bulk_create(sample_list)
         bulk_stop = time.time()
-        logger.debug('[BENCHMARKING] Time to builk create: ' + (bulk_stop - bulk_start).__str__())
+        logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
 
         samples_and_cases = get_sample_case_list(request.user,None,cohort.id)
 
         # Store cohort to BigQuery
-        bq_project_id = settings.BQ_PROJECT_ID
+        bq_project_id = settings.BIGQUERY_PROJECT_ID
         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
@@ -1849,9 +1858,12 @@ def streaming_csv_view(request, cohort_id=0):
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
             rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
-            rows += (["Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type", "Data Format", "Cloud Storage Location", "Access Type"],)
+            rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
+                      "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
-                rows += ([file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'], file['datatype'], file['dataformat'], file['cloudstorage_location'], file['access'].replace("-", " ")],)
+                rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
+                          file['datatype'], file['dataformat'], file['file_gdc_id'], file['cloudstorage_location'], file['index_file_gdc_id'], file['index_name'],
+                          file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
@@ -1973,86 +1985,94 @@ def get_metadata(request):
 
 @login_required
 def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
-    # Check program ID against public programs
-    public_program = Program.objects.filter(id=program_id).first()
-    user = request.user
 
-    if public_program:
-        # Public Program
-        template = 'cohorts/isb-cgc-data.html'
+    template = 'cohorts/isb-cgc-data.html'
+    template_values = {}
+    # TODO: Need error template
 
-        filters = None
+    try:
+        # Check program ID against public programs
+        public_program = Program.objects.filter(id=program_id).first()
+        user = request.user
 
-        # If we want to automatically select some filters for a new cohort, do it here
-        if not cohort_id:
-            # Currently we do not select anything by default
+        if public_program:
+            # Public Program
             filters = None
 
-        clin_attr = fetch_program_attr(program_id)
+            # If we want to automatically select some filters for a new cohort, do it here
+            if not cohort_id:
+                # Currently we do not select anything by default
+                filters = None
 
-        molecular_attr = {}
-        molecular_attr_builds = None
+            clin_attr = fetch_program_attr(program_id)
 
-        if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
-            molecular_attr = {
-                'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
-                'attrs': MOLECULAR_ATTR
+            molecular_attr = {}
+            molecular_attr_builds = None
+
+            if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
+                molecular_attr = {
+                    'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
+                    'attrs': MOLECULAR_ATTR
+                }
+
+                molecular_attr_builds = [
+                    {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in list(BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys()) if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
+                ]
+
+                # Note which attributes are in which categories
+                for cat in molecular_attr['categories']:
+                    for attr in cat['attrs']:
+                        ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
+                        if ma:
+                            ma['category'] = cat['value']
+
+            data_types = fetch_program_data_types(program_id)
+
+            results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
+
+            template_values = {
+                'request': request,
+                'attr_counts': results['count'] if 'count' in results else [],
+                'data_type_counts': results['data_counts'] if 'data_counts' in results else [],
+                'total_samples': int(results['total']),
+                'clin_attr': clin_attr,
+                'molecular_attr': molecular_attr,
+                'molecular_attr_builds': molecular_attr_builds,
+                'data_types': data_types,
+                'metadata_filters': filters or {},
+                'program': public_program,
+                'metadata_counts': results
             }
 
-            molecular_attr_builds = [
-                {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys() if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
-            ]
+            if cohort_id:
+                template_values['cohort'] = Cohort.objects.get(id=cohort_id)
 
-            # Note which attributes are in which categories
-            for cat in molecular_attr['categories']:
-                for attr in cat['attrs']:
-                    ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
-                    if ma:
-                        ma['category'] = cat['value']
+        else:
+            # Requesting User Data filter panel
+            template = 'cohorts/user-data.html'
 
-        data_types = fetch_program_data_types(program_id)
-
-        results = public_metadata_counts(filters, (cohort_id if cohort_id > 0 else None), user, program_id)
-
-        template_values = {
-            'request': request,
-            'attr_counts': results['count'] if 'count' in results else [],
-            'data_type_counts': results['data_counts'] if 'data_counts' in results else [],
-            'total_samples': int(results['total']),
-            'clin_attr': clin_attr,
-            'molecular_attr': molecular_attr,
-            'molecular_attr_builds': molecular_attr_builds,
-            'data_types': data_types,
-            'metadata_filters': filters or {},
-            'program': public_program,
-            'metadata_counts': results
-        }
-
-        if cohort_id:
-            template_values['cohort'] = Cohort.objects.get(id=cohort_id)
-
-    else:
-        # Requesting User Data filter panel
-        template = 'cohorts/user-data.html'
-
-        filters = None
-
-        # If we want to automatically select some filters for a new cohort, do it here
-        if not cohort_id:
-            # Currently we do not select anything by default
             filters = None
 
-        results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
+            # If we want to automatically select some filters for a new cohort, do it here
+            if not cohort_id:
+                # Currently we do not select anything by default
+                filters = None
 
-        template_values = {
-            'request': request,
-            'attr_counts': results['count'],
-            'total_samples': int(results['total']),
-            'total_cases': int(results['cases']),
-            'metadata_filters': filters or {},
-            'metadata_counts': results,
-            'program': 0
-        }
+            results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
+
+            template_values = {
+                'request': request,
+                'attr_counts': results['count'],
+                'total_samples': int(results['total']),
+                'total_cases': int(results['cases']),
+                'metadata_filters': filters or {},
+                'metadata_counts': results,
+                'program': 0
+            }
+
+    except Exception as e:
+        logger.error("[ERROR] While building the filter panel:")
+        logger.exception(e)
 
     return render(request, template, template_values)
 
@@ -2128,8 +2148,8 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     # Check the user-provided table name against the whitelist for Google BQ table names
                     # truncate at max length regardless of what we received
                     table = request.POST.get('new-table-name', '')[0:1024]
-                    tbl_whitelist = re.compile(ur'([^A-Za-z0-9_])',re.UNICODE)
-                    match = tbl_whitelist.search(unicode(table))
+                    tbl_whitelist = re.compile(r'([^A-Za-z0-9_])',re.UNICODE)
+                    match = tbl_whitelist.search(str(table))
                     if match:
                         messages.error(request,"There are invalid characters in your table name; only numbers, "
                            + "letters, and underscores are permitted.")
@@ -2138,12 +2158,12 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     table = request.POST.get('table-name', None)
 
         elif export_dest == 'gcs':
-            bq_proj_id = settings.PROJECT_NAME
+            bq_proj_id = settings.GCLOUD_PROJECT_ID
             file_name = request.POST.get('file-name', None)
             if file_name:
                 file_name = request.POST.get('file-name', '')[0:1024]
-                file_whitelist = re.compile(ur'([^A-Za-z0-9_\-\./])', re.UNICODE)
-                match = file_whitelist.search(unicode(file_name))
+                file_whitelist = re.compile(r'([^A-Za-z0-9_\-\./])', re.UNICODE)
+                match = file_whitelist.search(str(file_name))
                 if match:
                     messages.error(request, "There are invalid characters in your file name; only numbers, letters, "
                         + " periods (.), slashes, dashes, and underscores are permitted.")
@@ -2185,12 +2205,14 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         # Some files only have case barcodes, but some have sample barcodes. We have to make sure
         # to export any files linked to a case if any sample from that case is in the cohort, but
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
+
         if export_type == 'file_manifest':
             query_string_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location,
+                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                   md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                   md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                  {cohort_id} as cohort_id, "{build}" as build,
+                  {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                  md.index_file_id as index_file_gdc_uuid,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                  FROM `{metadata_table}` md
                  JOIN (SELECT case_barcode, sample_barcode
@@ -2200,9 +2222,10 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                  ) cs
                  ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
                  WHERE TRUE {filter_conditions}
-                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location,
+                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                   md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added
+                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                  md.index_file_name_key, md.index_file_id
                  ORDER BY md.sample_barcode
             """
 
@@ -2218,15 +2241,15 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper()).first()
 
                 metadata_table = "{}.{}.{}".format(
-                    settings.BIGQUERY_DATA_PROJECT_NAME, program_bq_tables.bq_dataset,
+                    settings.BIGQUERY_DATA_PROJECT_ID, program_bq_tables.bq_dataset,
                     program_bq_tables.data_table.lower(),
                 )
 
                 union_queries.append(
                     query_string_base.format(
                         metadata_table=metadata_table,
-                        deployment_project=settings.BIGQUERY_PROJECT_NAME,
-                        deployment_dataset=settings.COHORT_DATASET_ID,
+                        deployment_project=settings.BIGQUERY_PROJECT_ID,
+                        deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
@@ -2276,18 +2299,18 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                 biospec_clause = ""
                 if program_bq_tables.biospec_bq_table:
                     biospec_clause = biospec_clause_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         biospec_table=program_bq_tables.biospec_bq_table
                     )
 
                 union_queries.append(
                     query_string_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_NAME,
+                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
                         metadata_dataset=program_bq_tables.bq_dataset,
                         clin_table=program_bq_tables.clin_bq_table,
-                        deployment_project=settings.BIGQUERY_PROJECT_NAME,
-                        deployment_dataset=settings.COHORT_DATASET_ID,
+                        deployment_project=settings.BIGQUERY_PROJECT_ID,
+                        deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
@@ -2324,13 +2347,21 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         "'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""
                     ))
         else:
-            result['message'] = "Cohort {} was successfully exported to {}.".format(
-                str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
-                "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
-                if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
-                    gcs_bucket, file_name, result['message']
+            # If the export is taking a while, inform the user
+            if result['status'] == 'long_running':
+                result['message'] = "The export of cohort {} to {} ".format(
+                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                    "table {}:{}.{}".format(bq_proj_id, dataset, table)
+                    if export_dest == 'table' else "GCS file gs://{}/{}".format(gcs_bucket, file_name)
+                ) + "is underway; check your {} in 1-2 minutes for the results.".format("BQ dataset" if export_dest == 'table' else "GCS bucket")
+            else:
+                result['message'] = "Cohort {} was successfully exported to {}.".format(
+                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                    if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
+                        gcs_bucket, file_name, result['message']
+                    )
                 )
-            )
 
     except Exception as e:
         logger.error("[ERROR] While trying to export Cohort {}:".format(

@@ -1,21 +1,21 @@
-"""
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+from __future__ import absolute_import
 
-Copyright 2018, Institute for Systems Biology
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0how to c
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-
-"""
-
+from builtins import str
 import logging
 import time
 import MySQLdb
@@ -23,8 +23,8 @@ import MySQLdb
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 
-from metadata_counting import count_public_data_type
-from metadata_helpers import get_sql_connection, build_where_clause
+from .metadata_counting import count_public_data_type
+from .metadata_helpers import get_sql_connection, build_where_clause
 
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from cohorts.models import Cohort, Cohort_Perms
@@ -33,6 +33,11 @@ from google_helpers.bigquery.cohort_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
+FILTER_DATA_FORMAT = {
+    'igv': 'BAM',
+    'camic': 'SVS',
+    'pdf': 'PDF'
+}
 
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, type=None, do_filter_count=True):
 
@@ -62,9 +67,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             offset_clause = ""
 
             bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-            bq_cohort_dataset = settings.COHORT_DATASET_ID
-            bq_cohort_project_id = settings.BIGQUERY_PROJECT_NAME
-            data_project = settings.BIGQUERY_DATA_PROJECT_NAME
+            bq_cohort_dataset = settings.BIGQUERY_COHORT_DATASET_ID
+            bq_cohort_project_id = settings.BIGQUERY_PROJECT_ID
+            data_project = settings.BIGQUERY_DATA_PROJECT_ID
 
             built_clause = None
 
@@ -123,7 +128,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-diseasecode': 'bc.disease_code',
                 'col-projectname': 'bc.project_short_name',
                 'col-studydesc': 'ds.StudyDescription',
-                'col-studyuid': 'ds.StudyInstanceUID'
+                'col-studyuid': 'ds.StudyInstanceUID',
+                'col-filesize': 'ds.StudyInstanceUID'
             }
 
             if limit > 0:
@@ -182,8 +188,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             select_clause_base = """
                  SELECT md.sample_barcode, md.case_barcode, md.disease_code, substring_index(md.file_name_key, '/', -1) as file_name, md.file_name_key,
-                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category,
-                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name
+                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category, md.index_file_id,
+                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name, md.file_size
                  FROM {metadata_table} md
                  JOIN (
                      SELECT DISTINCT case_barcode
@@ -209,17 +215,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-platform': 'platform',
                 'col-datacat': 'data_category',
                 'col-datatype': 'data_type',
-                'col-dataformat': 'data_format'
+                'col-dataformat': 'data_format',
+                'col-filesize': 'file_size'
             }
 
-            if type == 'igv':
+            if type in ('igv', 'camic', 'pdf'):
                 if 'data_format' not in inc_filters:
                     inc_filters['data_format'] = []
-                inc_filters['data_format'].append('BAM')
-            elif type == 'camic':
-                if 'data_format' not in inc_filters:
-                    inc_filters['data_format'] = []
-                inc_filters['data_format'].append('SVS')
+                inc_filters['data_format'].append(FILTER_DATA_FORMAT[type])
 
             db = get_sql_connection()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
@@ -291,7 +294,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         whitelist_found = False
                         # If this is a controlled-access entry, check for the user's access to it
                         if item['access'] == 'controlled' and access:
-                            whitelists = item['acl'].split(',')
+                            whitelists = item['acl'].split(';')
                             for whitelist in whitelists:
                                 if whitelist in access:
                                     whitelist_found = True
@@ -306,6 +309,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                             'access': (item['access'] or 'N/A'),
                             'user_access': str(item['access'] != 'controlled' or whitelist_found),
                             'filename': item['file_name'] or 'N/A',
+                            'filesize': item['file_size'] or 'N/A',
                             'exp_strat': item['experimental_strategy'] or 'N/A',
                             'platform': item['platform'] or 'N/A',
                             'datacat': item['data_category'] or 'N/A',
@@ -314,6 +318,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                             'program': item['project_short_name'].split("-")[0],
                             'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
                             'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
+                            'index_file_gdc_id': (item['index_file_id'] or 'N/A'),
                             'project_short_name': (item['project_short_name'] or 'N/A'),
                             'cohort_id': cohort_id
                         })

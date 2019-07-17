@@ -1,19 +1,20 @@
-"""
-Copyright 2017, Institute for Systems Biology
+#
+# Copyright 2015-2019, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-   http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-"""
-
+from builtins import str
 from copy import deepcopy
 import re
 import sys
@@ -67,7 +68,7 @@ def program_list(request, is_public=False):
 
 @login_required
 def program_detail(request, program_id=0):
-    # """ if debug: print >> sys.stderr,'Called '+sys._getframe().f_code.co_name """
+    # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     template = 'projects/program_detail.html'
 
     ownedPrograms = request.user.program_set.filter(active=True)
@@ -189,21 +190,21 @@ def upload_files(request):
         if request.POST['program-type'] == 'new':
             program_name = request.POST['program-name']
             program_desc = request.POST['program-description']
-            match_name = blacklist.search(unicode(program_name))
-            match_desc = blacklist.search(unicode(program_desc))
+            match_name = blacklist.search(str(program_name))
+            match_desc = blacklist.search(str(program_desc))
 
             if match_name or match_desc:
                 # XSS risk, log and fail this cohort save
                 matches = ""
                 fields = ""
                 if match_name:
-                    match_name = blacklist.findall(unicode(program_name))
+                    match_name = blacklist.findall(str(program_name))
                     logger.error(
                         '[ERROR] While saving a user program, saw a malformed name: ' + program_name + ', characters: ' + match_name.__str__())
                     matches = "name contains"
                     fields = "name"
                 if match_desc:
-                    match_desc = blacklist.findall(unicode(program_desc))
+                    match_desc = blacklist.findall(str(program_desc))
                     logger.error(
                         '[ERROR] While saving a user program, saw a malformed description: ' + program_desc + ', characters: ' + match_desc.__str__())
                     matches = "name and description contain" if match_name else "description contains"
@@ -230,21 +231,21 @@ def upload_files(request):
         else:
             project_name = request.POST['project-name']
             project_desc = request.POST['project-description']
-            match_name = blacklist.search(unicode(project_name))
-            match_desc = blacklist.search(unicode(project_desc))
+            match_name = blacklist.search(str(project_name))
+            match_desc = blacklist.search(str(project_desc))
 
             if match_name or match_desc:
                 # XSS risk, log and fail this cohort save
                 matches = ""
                 fields = ""
                 if match_name:
-                    match_name = blacklist.findall(unicode(project_name))
+                    match_name = blacklist.findall(str(project_name))
                     logger.error(
                         '[ERROR] While saving a user project, saw a malformed name: ' + project_name + ', characters: ' + match_name.__str__())
                     matches = "name contains"
                     fields = "name"
                 if match_desc:
-                    match_desc = blacklist.findall(unicode(project_desc))
+                    match_desc = blacklist.findall(str(project_desc))
                     logger.error(
                         '[ERROR] While saving a user project, saw a malformed description: ' + project_desc + ', characters: ' + match_desc.__str__())
                     matches = "name and description contain" if match_name else "description contains"
@@ -324,7 +325,6 @@ def upload_files(request):
 
                 if datatype == "user_gen":
                     for column in descriptor['columns']:
-                        print column
                         if column['ignored']:
                             continue
 
@@ -390,7 +390,6 @@ def upload_files(request):
                 bq_table_items.append(Project_BQ_Tables(user_data_table=dataset, bq_table_name=bq_table))
             Project_BQ_Tables.objects.bulk_create(bq_table_items)
 
-            # print settings.PROCESSING_ENABLED
             if settings.PROCESSING_ENABLED:
                 files = {'config.json': ('config.json', json.dumps(config))}
                 post_args = {
@@ -425,7 +424,8 @@ def upload_files(request):
                     upload.status = 'No Server Response'
                     status = 'error'
                     message = 'Could not connect to data upload server'
-                    print >> sys.stdout, "[ERROR] No UDU Server response: {0}".format(e)
+                    logger.error("[ERROR] No UDU Server response: {0}".format(e))
+                    logger.exception(e)
                 else:
                     if r.status_code < 400:
                         upload.status = 'Processing'
@@ -444,7 +444,7 @@ def upload_files(request):
             resp['redirect_url'] = '/programs/' + str(program.id) + '/'
 
     except ObjectDoesNotExist as e:
-        print >> sys.stdout, "[ERROR] ObjectDoesNotExist exception in upload_files:"
+        logger.error("[ERROR] ObjectDoesNotExist exception in upload_files:")
         logger.exception(e)
 
         resp = {
@@ -459,7 +459,7 @@ def upload_files(request):
         if request.POST['program-type'] == 'new':
             program.delete()
 
-        print >> sys.stdout, e
+        logger.exception(e)
         if e.resp.status == 403:
             resp = {
                 'status': "error",
@@ -763,7 +763,6 @@ def system_data_dict(request):
         attr_list_all[prog['name']] = attr_list
 
         for attr in results:
-            # print attr
             name = attr[0]
             type = attr[1]
             if name not in exclusion_list and not name.startswith('has_'):
@@ -784,7 +783,7 @@ def system_data_dict(request):
 
     # There has GOT to be a better way to insure consistent presentation of programs on target page??
     sorted_attr_list_all = OrderedDict()
-    for key in sorted(attr_list_all.iterkeys()):
+    for key in sorted(attr_list_all.keys()):
         sorted_attr_list_all[key] = attr_list_all[key]
 
     return render(request, 'projects/system_data_dict.html', {'attr_list_all': sorted_attr_list_all})

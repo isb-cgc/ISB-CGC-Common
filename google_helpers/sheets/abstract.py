@@ -13,20 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-from __future__ import absolute_import
 
-from oauth2client.client import GoogleCredentials
-from django.conf import settings
-from .utils import build_with_retries
-
-STORAGE_SCOPES = [
-    'https://www.googleapis.com/auth/devstorage.read_only',
-    'https://www.googleapis.com/auth/devstorage.read_write',
-    'https://www.googleapis.com/auth/devstorage.full_control'
-]
+from builtins import object
+from abc import ABCMeta, abstractmethod
+from future.utils import with_metaclass
 
 
-def get_storage_resource():
-    credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(STORAGE_SCOPES)
-    service = build_with_retries('storage', 'v1', credentials, 2)
-    return service
+# Base Abstract class which defines the shared methods and properties for interaction with BigQuery
+class SheetsABC(with_metaclass(ABCMeta, object)):
+    @abstractmethod
+    def __init__(self):
+        pass
+
+
+

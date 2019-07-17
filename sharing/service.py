@@ -1,3 +1,5 @@
+from future import standard_library
+standard_library.install_aliases()
 import logging
 import requests
 from django.core.validators import validate_email
@@ -7,7 +9,7 @@ from django.conf import settings
 from django.core.urlresolvers import reverse
 from django.core.exceptions import ObjectDoesNotExist
 
-from urllib import urlencode
+from urllib.parse import urlencode
 
 EMAIL_SERVICE_API_URL = settings.EMAIL_SERVICE_API_URL
 EMAIL_SERVICE_API_KEY = settings.EMAIL_SERVICE_API_KEY

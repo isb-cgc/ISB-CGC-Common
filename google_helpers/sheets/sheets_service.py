@@ -13,20 +13,22 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-from __future__ import absolute_import
 
 from oauth2client.client import GoogleCredentials
 from django.conf import settings
+import httplib2
 from .utils import build_with_retries
 
-STORAGE_SCOPES = [
-    'https://www.googleapis.com/auth/devstorage.read_only',
-    'https://www.googleapis.com/auth/devstorage.read_write',
-    'https://www.googleapis.com/auth/devstorage.full_control'
-]
 
+def get_sheet_service():
 
-def get_storage_resource():
-    credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(STORAGE_SCOPES)
-    service = build_with_retries('storage', 'v1', credentials, 2)
+    SHEETS_SCOPES = [
+        'https://www.googleapis.com/auth/spreadsheets'
+    ]
+
+    credentials = GoogleCredentials.from_stream(
+        settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(SHEETS_SCOPES)
+    http = httplib2.Http()
+    http = credentials.authorize(http)
+    service = build_with_retries('sheets', 'v4', None, 2, http=http)
     return service
