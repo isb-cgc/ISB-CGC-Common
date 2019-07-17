@@ -194,6 +194,7 @@ BQ_MOLECULAR_ATTR_TABLES = {
     'TARGET': None,
 }
 
+
 # Get a set of random characters of 'length'
 def make_id(length):
     return ''.join(random.sample(string.ascii_lowercase, length))
