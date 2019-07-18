@@ -296,3 +296,24 @@ def unreg_gcp(user, gcp_id):
         status=500
 
     return response, status
+
+
+def get_user_gcps(user, gcp_id=None):
+    gcps = []
+    gcp_list = None
+
+    try:
+        if gcp_id:
+            gcp_list = GoogleProject.objects.filter(user=user, active=1)
+        else:
+            gcp_list = GoogleProject.objects.filter(user=user, active=1, project_id=gcp_id)
+
+        for gcp in gcp_list:
+            gcps.append({'gcp_id': gcp.project_id, 'gcp_name': gcp.project_name, 'users': [x.email for x in gcp.users_set.all()]})
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching the GCP project list for user {}:")
+        logger.exception(e)
+
+    return gcps
+
