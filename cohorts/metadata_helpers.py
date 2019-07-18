@@ -1385,8 +1385,6 @@ def get_full_sample_metadata(barcodes):
     result = {
         'total_found': 0
     }
-    db = None
-    cursor = None
 
     try:
         barcodes_by_program = {}
@@ -1484,10 +1482,6 @@ def get_full_sample_metadata(barcodes):
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
-    finally:
-        logger.info("[STATUS] Closing connection in sample metadata.")
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def get_full_case_metadata(barcodes):
@@ -1495,8 +1489,6 @@ def get_full_case_metadata(barcodes):
     result = {
         'total_found': 0
     }
-    db = None
-    cursor = None
 
     try:
         barcodes_by_program = {}
@@ -1604,10 +1596,6 @@ def get_full_case_metadata(barcodes):
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
-    finally:
-        logger.info("[STATUS] Closing connection in case metadata.")
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def get_sample_metadata(barcode):
@@ -1751,7 +1739,15 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                         if key_field_type not in field_types:
                             invalid_keys.append(key_split)
                         else:
-                            filters[field_types[key_field_type]['type']][key_field] = inc_filters[prog][key_split]
+                            # Check to make sure any string values aren't empty strings - if they are, it's invalid.
+                            vals = inc_filters[prog][key_split]
+                            if not isinstance(vals, list):
+                                vals = [inc_filters[prog][key_split]]
+                            for val in vals:
+                                if isinstance(val, str) and not len(val):
+                                    invalid_keys.append(key_split)
+                                else:
+                                    filters[field_types[key_field_type]['type']][key_field] = inc_filters[prog][key_split]
 
             if len(invalid_keys) > 0:
                 raise Exception("Improper filter(s) supplied for program {}: '{}'".format(prog, ("', '".join(invalid_keys))))
