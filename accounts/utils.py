@@ -309,7 +309,7 @@ def get_user_gcps(user, gcp_id=None):
             gcp_list = GoogleProject.objects.filter(user=user, active=1)
 
         for gcp in gcp_list:
-            gcps.append({'gcp_id': gcp.project_id, 'gcp_name': gcp.project_name, 'users': [x.email for x in gcp.user_set.all()]})
+            gcps.append({'gcp_id': gcp.project_id, 'gcp_name': gcp.project_name, 'users': [x.email for x in gcp.user.all()]})
 
     except Exception as e:
         logger.error("[ERROR] While fetching the GCP project list for user {}:")
