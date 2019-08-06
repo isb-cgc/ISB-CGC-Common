@@ -299,8 +299,7 @@ def unreg_gcp(user, gcp_id):
 
 
 def get_user_gcps(user, gcp_id=None):
-    gcps = []
-    gcp_list = None
+    gcps = None
 
     try:
         if gcp_id:
@@ -308,6 +307,7 @@ def get_user_gcps(user, gcp_id=None):
         else:
             gcp_list = GoogleProject.objects.filter(user=user, active=1)
 
+        gcps = []
         for gcp in gcp_list:
             gcps.append({'gcp_id': gcp.project_id, 'gcp_name': gcp.project_name, 'users': [x.email for x in gcp.user.all()]})
 
