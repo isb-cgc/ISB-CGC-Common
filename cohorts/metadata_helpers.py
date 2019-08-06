@@ -1549,7 +1549,7 @@ def get_full_case_metadata(barcodes):
                             #standardSQL
                             SELECT md.case_barcode as cb, md.*
                             FROM `{}` md
-                            WHERE {} AND (md.sample_barcode = '' OR md.sample_barcode IS NULL)                     
+                            WHERE {} AND (md.sample_barcode = '' OR md.sample_barcode IS NULL OR md.sample_barcode = 'NA')                     
                         """.format(
                             "{}.{}.{}".format(
                                 settings.BIGQUERY_DATA_PROJECT_ID, build_table.bq_dataset, build_table.data_table.lower()),
