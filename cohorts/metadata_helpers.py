@@ -1405,9 +1405,6 @@ def get_full_sample_metadata(barcodes):
 
         items = {}
 
-        db = get_sql_connection()
-        cursor = db.cursor()
-
         for program in programs:
             program_tables = program.get_metadata_tables()
             program_data_tables = program.get_data_tables()
@@ -1468,14 +1465,30 @@ def get_full_sample_metadata(barcodes):
                         logger.warn("{}".format(bq_result['query']))
                         continue
                     for row in bq_results:
+                        # A result in the file tables which wasn't in the biospecimen table isn't unheard of
+                        # (eg. pathology slides)
+                        if row['f'][0]['v'] not in items:
+                            items[row['f'][0]['v']] = {
+                                'sample_barcode': row['f'][0]['v'],
+                                'case_barcode': row['f'][1]['v'],
+                                'data_details': {
+                                    x.build: [] for x in program_data_tables
+                                },
+                            }
+
                         items[row['f'][0]['v']]['data_details'][bq_result['build']].append({
                             result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip
                         })
 
                 # TODO: Once we have aliquots in the database again, add those here
 
-                result['total_found'] += 1
                 result['samples'] = [item for item in list(items.values())]
+                result['total_found'] += len(result['samples'])
+
+            not_found = [x for x in barcodes if x not in items]
+
+            if len(not_found):
+                result['barcodes_not_found'] = not_found
 
         return result
 
