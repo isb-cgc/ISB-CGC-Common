@@ -400,7 +400,12 @@ def fetch_isbcgc_project_set():
 
         if not ISB_CGC_PROJECTS['list'] or len(ISB_CGC_PROJECTS['list']) <= 0:
             cursor = db.cursor()
-            cursor.execute("SELECT COUNT(SPECIFIC_NAME) FROM INFORMATION_SCHEMA.ROUTINES WHERE SPECIFIC_NAME = 'get_isbcgc_project_set';")
+            cursor.execute("""
+                SELECT COUNT(SPECIFIC_NAME) 
+                FROM INFORMATION_SCHEMA.ROUTINES 
+                WHERE SPECIFIC_NAME = 'get_isbcgc_project_set'
+                    AND ROUTINE_SCHEMA = %s
+                ;""", (settings.DATABASES['default']['NAME']))
             # Only try to fetch the project set if the sproc exists
             if cursor.fetchall()[0][0] > 0:
                 cursor.execute("CALL get_isbcgc_project_set();")
