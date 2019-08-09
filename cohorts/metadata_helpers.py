@@ -212,6 +212,8 @@ def get_sql_connection():
             'passwd': database['PASSWORD'],
         }
 
+        print("Database settings: {}@{}.{}".format(database['USER'],database['HOST'],database['NAME']))
+
         # Only use the socket if it's there to be used and we're not in a dev environment
         if not settings.IS_DEV and settings.DB_SOCKET:
             connect_options['host'] = 'localhost'
