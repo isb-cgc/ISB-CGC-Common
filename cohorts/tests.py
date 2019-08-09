@@ -30,4 +30,4 @@ class ModelTest(TestCase):
 
     def test_make_cohort(self):
         print("A test to make a cohort!")
-        self.assertIsEqual(self.test_cohort_owner.username, 'test_user')
+        self.assertEqual(self.test_cohort_owner.username, 'test_user')
