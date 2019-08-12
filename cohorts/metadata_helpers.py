@@ -1490,10 +1490,10 @@ def get_full_sample_metadata(barcodes):
                 result['samples'] = [item for item in list(items.values())]
                 result['total_found'] += len(result['samples'])
 
-            not_found = [x for x in barcodes if x not in items]
+        not_found = [x for x in barcodes if x not in items]
 
-            if len(not_found):
-                result['barcodes_not_found'] = not_found
+        if len(not_found):
+            result['barcodes_not_found'] = not_found
 
         return result
 
@@ -1608,6 +1608,11 @@ def get_full_case_metadata(barcodes):
 
                 result['total_found'] += 1
                 result['cases'] = [item for item in list(items.values())]
+
+        not_found = [x for x in barcodes if x not in items]
+
+        if len(not_found):
+            result['barcodes_not_found'] = not_found
 
         return result
 
