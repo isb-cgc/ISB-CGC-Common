@@ -317,3 +317,16 @@ def get_user_gcps(user, gcp_id=None):
 
     return gcps
 
+def api_gcp_delete(user, gcp_id):
+    response = {}
+    status = 200
+
+    try:
+        gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+        response, status = unreg_gcp(user, gcp.id)
+    except ObjectDoesNotExist:
+        response['message'] = "An active Google Cloud Platform project with ID {} was not found.".format(gcp_id)
+        status = 404
+
+    return response, status
+
