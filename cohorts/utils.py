@@ -56,12 +56,12 @@ def create_cohort(user, filters=None, name=None, source_id=None):
     barcodes = None
 
     if filters:
-        barcodes = get_sample_case_list_bq(source_id, filters)
+        barcodes = get_sample_case_list_bq(source_id, filters, long_form=True)
 
         if source_progs:
             for prog in source_progs:
                 if prog.name not in list(barcodes.keys()):
-                    barcodes[prog.name] = get_sample_case_list_bq(source_id)
+                    barcodes[prog.name] = get_sample_case_list_bq(source_id, long_form=True)
 
         # Need at least 1 case in 1 program for this to be a valid cohort
         cases_found = False
