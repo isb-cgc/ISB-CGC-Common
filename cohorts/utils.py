@@ -31,9 +31,9 @@ from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 
 
-def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
+def create_cohort(user, filters=None, name=None, source_id=None):
 
-    if not filters and not name and not desc:
+    if not filters and not name:
         # Can't save/edit a cohort when nothing is being changed!
         return None
 
@@ -45,8 +45,10 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
         source_progs = source.get_programs()
 
     if source and not filters or (len(filters) <= 0):
-        # If we're only changing the name and/or desc, just edit the cohort and update it
-        source.update(name=name, description=desc)
+        # If we're only changing the name, just edit the cohort and return
+        if name:
+            source.name = name
+        source.save()
         return { 'cohort_id': source.id }
 
     # Make and save cohort
@@ -54,12 +56,12 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
     barcodes = None
 
     if filters:
-        barcodes = get_sample_case_list_bq(source_id, filters)
+        barcodes = get_sample_case_list_bq(source_id, filters, long_form=True)
 
         if source_progs:
             for prog in source_progs:
                 if prog.name not in list(barcodes.keys()):
-                    barcodes[prog.name] = get_sample_case_list_bq(source_id)
+                    barcodes[prog.name] = get_sample_case_list_bq(source_id, long_form=True)
 
         # Need at least 1 case in 1 program for this to be a valid cohort
         cases_found = False
@@ -75,7 +77,7 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None):
             }
 
     # Create new cohort
-    cohort = Cohort.objects.create(name=name, description=desc)
+    cohort = Cohort.objects.create(name=name)
     cohort.save()
 
     # Set permission for user to be owner

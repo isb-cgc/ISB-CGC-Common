@@ -400,7 +400,12 @@ def fetch_isbcgc_project_set():
 
         if not ISB_CGC_PROJECTS['list'] or len(ISB_CGC_PROJECTS['list']) <= 0:
             cursor = db.cursor()
-            cursor.execute("SELECT COUNT(SPECIFIC_NAME) FROM INFORMATION_SCHEMA.ROUTINES WHERE SPECIFIC_NAME = 'get_isbcgc_project_set';")
+            cursor.execute("""
+                SELECT COUNT(SPECIFIC_NAME) 
+                FROM INFORMATION_SCHEMA.ROUTINES 
+                WHERE SPECIFIC_NAME = 'get_isbcgc_project_set'
+                    AND ROUTINE_SCHEMA = %s
+                ;""", (settings.DATABASES['default']['NAME'],))
             # Only try to fetch the project set if the sproc exists
             if cursor.fetchall()[0][0] > 0:
                 cursor.execute("CALL get_isbcgc_project_set();")
@@ -1385,8 +1390,6 @@ def get_full_sample_metadata(barcodes):
     result = {
         'total_found': 0
     }
-    db = None
-    cursor = None
 
     try:
         barcodes_by_program = {}
@@ -1406,9 +1409,6 @@ def get_full_sample_metadata(barcodes):
         programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
 
         items = {}
-
-        db = get_sql_connection()
-        cursor = db.cursor()
 
         for program in programs:
             program_tables = program.get_metadata_tables()
@@ -1470,24 +1470,36 @@ def get_full_sample_metadata(barcodes):
                         logger.warn("{}".format(bq_result['query']))
                         continue
                     for row in bq_results:
+                        # A result in the file tables which wasn't in the biospecimen table isn't unheard of
+                        # (eg. pathology slides)
+                        if row['f'][0]['v'] not in items:
+                            items[row['f'][0]['v']] = {
+                                'sample_barcode': row['f'][0]['v'],
+                                'case_barcode': row['f'][1]['v'],
+                                'data_details': {
+                                    x.build: [] for x in program_data_tables
+                                },
+                            }
+
                         items[row['f'][0]['v']]['data_details'][bq_result['build']].append({
                             result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip
                         })
 
                 # TODO: Once we have aliquots in the database again, add those here
 
-                result['total_found'] += 1
                 result['samples'] = [item for item in list(items.values())]
+                result['total_found'] += len(result['samples'])
+
+        not_found = [x for x in barcodes if x not in items]
+
+        if len(not_found):
+            result['barcodes_not_found'] = not_found
 
         return result
 
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
-    finally:
-        logger.info("[STATUS] Closing connection in sample metadata.")
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def get_full_case_metadata(barcodes):
@@ -1495,8 +1507,6 @@ def get_full_case_metadata(barcodes):
     result = {
         'total_found': 0
     }
-    db = None
-    cursor = None
 
     try:
         barcodes_by_program = {}
@@ -1557,7 +1567,7 @@ def get_full_case_metadata(barcodes):
                             #standardSQL
                             SELECT md.case_barcode as cb, md.*
                             FROM `{}` md
-                            WHERE {} AND (md.sample_barcode = '' OR md.sample_barcode IS NULL)                     
+                            WHERE {} AND (md.sample_barcode = '' OR md.sample_barcode IS NULL OR md.sample_barcode = 'NA')                     
                         """.format(
                             "{}.{}.{}".format(
                                 settings.BIGQUERY_DATA_PROJECT_ID, build_table.bq_dataset, build_table.data_table.lower()),
@@ -1599,15 +1609,16 @@ def get_full_case_metadata(barcodes):
                 result['total_found'] += 1
                 result['cases'] = [item for item in list(items.values())]
 
+        not_found = [x for x in barcodes if x not in items]
+
+        if len(not_found):
+            result['barcodes_not_found'] = not_found
+
         return result
 
     except Exception as e:
         logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
         logger.exception(e)
-    finally:
-        logger.info("[STATUS] Closing connection in case metadata.")
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def get_sample_metadata(barcode):
@@ -1751,7 +1762,15 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                         if key_field_type not in field_types:
                             invalid_keys.append(key_split)
                         else:
-                            filters[field_types[key_field_type]['type']][key_field] = inc_filters[prog][key_split]
+                            # Check to make sure any string values aren't empty strings - if they are, it's invalid.
+                            vals = inc_filters[prog][key_split]
+                            if not isinstance(vals, list):
+                                vals = [inc_filters[prog][key_split]]
+                            for val in vals:
+                                if isinstance(val, str) and not len(val):
+                                    invalid_keys.append(key_split)
+                                else:
+                                    filters[field_types[key_field_type]['type']][key_field] = inc_filters[prog][key_split]
 
             if len(invalid_keys) > 0:
                 raise Exception("Improper filter(s) supplied for program {}: '{}'".format(prog, ("', '".join(invalid_keys))))
