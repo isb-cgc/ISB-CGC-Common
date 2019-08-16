@@ -34,7 +34,7 @@ from django.conf import settings
 def create_cohort(user, filters=None, name=None, source_id=None):
 
     if not filters and not name:
-        # Can't save/edit a cohort when nothing is being changed!
+        # Can't save/edit a cohort when nothing is being changed!   
         return None
 
     source = None
