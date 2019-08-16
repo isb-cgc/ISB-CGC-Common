@@ -1493,7 +1493,7 @@ def get_full_sample_metadata(barcodes):
         not_found = [x for x in barcodes if x not in items]
 
         if len(not_found):
-            result['barcodes_not_found'] = not_found
+            result['not_found'] = not_found
 
         return result
 
@@ -1612,7 +1612,7 @@ def get_full_case_metadata(barcodes):
         not_found = [x for x in barcodes if x not in items]
 
         if len(not_found):
-            result['barcodes_not_found'] = not_found
+            result['not_found'] = not_found
 
         return result
 
@@ -2566,7 +2566,7 @@ def get_paths_by_uuid(uuids):
     )
 
     results = BigQuerySupport.execute_query_and_fetch_results(query, where_clause['parameters'])
-
+    
     if results:
         for row in results:
             item = {
@@ -2575,6 +2575,9 @@ def get_paths_by_uuid(uuids):
             }
             if row['f'][2]['v'] is not None and not row['f'][2]['v'] == '':
                 item['index_file_path'] = row['f'][2]['v']
+            
             paths.append(item)
+            
+    not_found = [x for x in uuids if x not in [x['gdc_file_uuid'] for x in paths]]
 
-    return paths
+    return paths, not_found
