@@ -1939,7 +1939,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                 joins += (' JOIN ({}) cs ON cs.sample_barcode = biospec.sample_barcode'.format(
                     cohort_query.format(
                         deployment_project=settings.BIGQUERY_PROJECT_ID,
-                        cohort_dataset=settings.COHORT_DATASET_ID,
+                        cohort_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         cohort_table=settings.BIGQUERY_COHORT_TABLE_ID
                     )
                 ))
