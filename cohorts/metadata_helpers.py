@@ -33,7 +33,6 @@ import time
 from time import sleep
 import re
 from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables
-from .models import Cohort
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
 from uuid import uuid4
