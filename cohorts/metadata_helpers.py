@@ -2046,11 +2046,9 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
         logger.error("[ERROR] While queueing up program case/sample list jobs: ")
         logger.exception(e)
         results = {
-            'msg': str(e)
+            'message': str(e)
         }
 
-    if results:
-        logger.info("[STATUS] Results in get_sample_case_list_bq: {}".format(str(results)))
     return results
 
 

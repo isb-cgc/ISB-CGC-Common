@@ -66,6 +66,8 @@ def create_cohort(user, filters=None, name=None, source_id=None):
         # Need at least 1 case in 1 program for this to be a valid cohort
         cases_found = False
 
+        print("[STATUS] In create cohort, 'barcodes': {}".format(str(barcodes)))
+
         for prog in barcodes:
             if barcodes[prog]['case_count'] > 0:
                 cases_found = True
