@@ -2048,6 +2048,9 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
         results = {
             'msg': str(e)
         }
+
+    if results:
+        logger.info("[STATUS] Results in get_sample_case_list_bq: {}".format(str(results)))
     return results
 
 
