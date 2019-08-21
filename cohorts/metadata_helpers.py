@@ -34,10 +34,12 @@ import time
 from time import sleep
 import re
 from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables
+from .models import Cohort
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
 from uuid import uuid4
 from django.conf import settings
+from django.core.exceptions import ObjectDoesNotExist
 
 debug = settings.DEBUG # RO global for this file
 
@@ -1697,7 +1699,8 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
             # ...unless this is long form, in which case we need to get the project_short_name, which is only
             # accessible via the Clinical table.
             if long_form:
-                inc_filters = {x.name: {} for x in Program.objects.filter(active=True, is_public=True)}
+                cohort = Cohort.objects.get(id=cohort_id)
+                inc_filters = {x: {} for x in cohort.get_program_names()}
             else:
                 inc_filters = {}
                 # If all we need are the barcodes, the cohort table itself can provide that
@@ -2042,6 +2045,11 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                 results[prog]['case_count'] = len(results[prog]['cases'])
                 results[prog]['sample_count'] = len(results[prog]['samples'])
 
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Cohort ID {} wasn't found!".format(str(cohort_id)))
+        results = {
+            'message': "Couldn't find cohort with ID {}".format(str(cohort_id))
+        }
     except Exception as e:
         logger.error("[ERROR] While queueing up program case/sample list jobs: ")
         logger.exception(e)
