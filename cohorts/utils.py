@@ -61,8 +61,11 @@ def create_cohort(user, filters=None, name=None, source_id=None):
     if filters:
         barcodes = get_sample_case_list_bq(source_id, filters, long_form=True)
 
+        print("barcodes.keys(): {}".format(str(barcodes.keys())))
+
         if source_progs:
             source_prog_filters = {x.name: {} for x in source_progs if x.name not in list(barcodes.keys())}
+            print("source_prog_filters: {}".format(str(source_prog_filters)))
             if len(source_prog_filters):
                 source_prog_barcodes = get_sample_case_list_bq(source_id, source_prog_filters, long_form=True)
                 for prog in source_prog_barcodes:
