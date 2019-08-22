@@ -542,7 +542,7 @@ def register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         raise e
     except Exception as e:
-        logger.error("[ERROR] Exception while registering ServiceAccount")
+        logger.error("[ERROR] Exception while registering ServiceAccount {} for project {}:".format(user_sa,gcp_id))
         logger.exception(e)
         raise e
 
@@ -624,7 +624,7 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
             #
 
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
-        logger.error("[ERROR] Exception while registering ServiceAccount")
+        logger.error("[ERROR] Exception while registering ServiceAccount {} for project {}:".format(user_sa,gcp_id))
         logger.exception(e)
         raise e
 
