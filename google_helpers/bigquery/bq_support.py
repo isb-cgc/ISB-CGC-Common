@@ -505,7 +505,7 @@ class BigQuerySupport(BigQueryABC):
     #
     # TODO: add support for DATES
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None, case_insens=True):
         result = {
             'filter_string': '',
             'parameters': []
@@ -609,7 +609,7 @@ class BigQuerySupport(BigQueryABC):
                     # Scalar param
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
-                        if '%' in values[0]:
+                        if '%' in values[0] or case_insens:
                             filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
                         else:
                             filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
