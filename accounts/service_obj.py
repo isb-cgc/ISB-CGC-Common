@@ -225,7 +225,7 @@ class ServiceAccountBlacklist(ServiceObjectBase):
         try:
             from django.conf import settings
             values.append(settings.CLIENT_EMAIL)
-            values.append(settings.WEB_CLIENT_ID)
+            values.append(settings.GOOGLE_CLIENT_ID)
         except Exception as e:
             logger.error("Could not read Service Account settings from Django configuration.")
             logger.exception(e)
