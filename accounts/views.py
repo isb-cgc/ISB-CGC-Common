@@ -65,7 +65,7 @@ def extended_logout_view(request):
     except Exception as e:
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
+        messages.error(request,"There was an error while attempting to log out - please contact feedback@idccancerdev.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
     return response
 

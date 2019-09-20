@@ -31,11 +31,9 @@ from django.db import connection
 from django.core.urlresolvers import reverse
 from collections import OrderedDict
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project, Project_BQ_Tables, Public_Metadata_Tables
+from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project
 from sharing.service import create_share
-from accounts.models import GoogleProject, Bucket, BqDataset
 from googleapiclient.errors import HttpError
-from accounts.sa_utils import verify_user_is_in_gcp
 
 import json
 import requests

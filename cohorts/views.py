@@ -53,7 +53,7 @@ from accounts.models import GoogleProject
 from .metadata_helpers import *
 from .metadata_counting import *
 from .file_helpers import *
-from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
+from .models import Cohort, Cohort_Perms, Source, Filters, Cohort_Comments
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 

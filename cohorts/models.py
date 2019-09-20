@@ -62,19 +62,13 @@ class Cohort(models.Model):
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
 
-    def sample_size(self):
-        return self.samples_set.all().count()
-
-    def case_size(self):
-        return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
-
     def get_programs(self):
-        projects = self.samples_set.values_list('project_id', flat=True).distinct()
-        return Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct()
+        program_filters = self.filters_set.values_list('program_id', flat=True).distinct()
+        return Program.objects.filter(active=True, id__in=program_filters).distinct()
 
     def get_program_names(self):
-        projects = self.samples_set.values_list('project_id', flat=True).distinct()
-        names = Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct().values_list('name',flat=True)
+        programs = self.get_programs()
+        names = programs.distinct().values_list('name', flat=True)
         return [str(x) for x in names]
 
     def only_user_data(self):
@@ -387,13 +381,6 @@ class Cohort(models.Model):
 
     class Meta(object):
         verbose_name_plural = "Saved Cohorts"
-
-
-class Samples(models.Model):
-    cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    sample_barcode = models.CharField(max_length=45, null=False, db_index=True)
-    case_barcode = models.CharField(max_length=45, null=True, blank=False, default=None)
-    project = models.ForeignKey(Project, null=True, blank=True)
 
 
 class Source(models.Model):
