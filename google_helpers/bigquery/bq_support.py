@@ -654,9 +654,9 @@ class BigQuerySupport(BigQueryABC):
                     query_param['parameterType']['arrayType'] = {
                         'type': parameter_type
                     }
-                    query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
+                    query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values]}
 
-                    filter_string += "{}{} IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
+                    filter_string += "LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
                 filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
