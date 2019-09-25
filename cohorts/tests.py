@@ -14,41 +14,20 @@
 # limitations under the License.
 #
 
-
-# This file demonstrates writing tests using the unittest module. These will pass
-# when you run "manage.py test".
-#
-# Replace this with more appropriate tests for your application.
-
-from __future__ import absolute_import
-from django import http
 from django.test import TestCase
-from django.test.client import Client
+from django.contrib.auth.models import AnonymousUser, User
 
-from .models import *
+from cohorts.models import Cohort
 
-# class ModelTest(TestCase):
-#     def setUp(self):
-#         cohort1 = Cohort.objects.create(name='cohort 1')
-#         cohort2 = Cohort.objects.create(name='cohort 2')
-#         cohort3 = Cohort.objects.create(name='cohort 3')
-#         cohort1.save()
-#         cohort2.save()
-#         cohort3.save()
-#         source1 = Source.objects.create(parent=cohort3, cohort=cohort2, type=Source.FILTERS)
-#         source2 = Source.objects.create(parent=cohort2, cohort=cohort1, type=Source.FILTERS)
-#         source1.save()
-#         source2.save()
-#         filter1 = Filters.objects.create(resulting_cohort=cohort2, name='gender', value='male')
-#         filter2 = Filters.objects.create(resulting_cohort=cohort1, name='age', value='30')
-#         filter1.save()
-#         filter2.save()
-#
-#     def test_cohort_filter_set(self):
-#         cohort = Cohort.objects.all()[0]
-#         self.assertEqual(len(cohort.get_filters()), 2)
-#
-#     def test_cohort_revision_history(self):
-#         cohort = Cohort.objects.all()[0]
-#         self.assertEqual(len(cohort.get_revision_history()), 2)
+class ModelTest(TestCase):
+    def setUp(self):
+        # We need 2 users to test permissions
+        self.test_cohort_owner = User.objects.create_user(username='test_user', email='test_user_email@isb-cgc.org',
+                                                      password='itsasecrettoeveryone')
 
+        self.test_other_user = User.objects.create_user(username='test_user_2', email='test_user_2_email@isb-cgc.org',
+                                                      password='itsasecrettoeveryone')
+
+    def test_make_cohort(self):
+        print("A test to make a cohort!")
+        self.assertEqual(self.test_cohort_owner.username, 'test_user')
