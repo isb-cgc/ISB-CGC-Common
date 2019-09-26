@@ -34,7 +34,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 
 
-def create_cohort(user, filters=None, name=None, source_id=None):
+def create_cohort(user, filters=None, name=None, source_id=None, case_insens=True):
 
     if not filters and not name:
         # Can't save/edit a cohort when nothing is being changed!
@@ -64,7 +64,7 @@ def create_cohort(user, filters=None, name=None, source_id=None):
         if source_progs:
             source_prog_filters = {x: {} for x in source_progs if x not in list(barcodes.keys())}
             if len(source_prog_filters):
-                source_prog_barcodes = get_sample_case_list_bq(source_id, source_prog_filters, long_form=True)
+                source_prog_barcodes = get_sample_case_list_bq(source_id, source_prog_filters, long_form=True, case_insens=True)
                 for prog in source_prog_barcodes:
                     barcodes[prog] = source_prog_barcodes[prog]
 
