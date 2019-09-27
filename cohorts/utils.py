@@ -34,7 +34,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 
 
-def create_cohort(user, filters=None, name=None, source_id=None):
+def create_cohort(user, filters=None, name=None, source_id=None, case_insens=True):
 
     if not filters and not name:
         # Can't save/edit a cohort when nothing is being changed!
@@ -64,7 +64,7 @@ def create_cohort(user, filters=None, name=None, source_id=None):
         if source_progs:
             source_prog_filters = {x: {} for x in source_progs if x not in list(barcodes.keys())}
             if len(source_prog_filters):
-                source_prog_barcodes = get_sample_case_list_bq(source_id, source_prog_filters, long_form=True)
+                source_prog_barcodes = get_sample_case_list_bq(source_id, source_prog_filters, long_form=True, case_insens=True)
                 for prog in source_prog_barcodes:
                     barcodes[prog] = source_prog_barcodes[prog]
 
@@ -166,7 +166,7 @@ def create_cohort(user, filters=None, name=None, source_id=None):
 
 
 # Get samples and cases by querying BQ tables
-def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='OR', long_form=False):
+def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='OR', long_form=False, case_insens=True):
 
     comb_mut_filters = comb_mut_filters.upper()
 
@@ -292,7 +292,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
             joins = ""
 
             if len(data_type_filters) > 0:
-                data_type_where_clause = BigQuerySupport.build_bq_filter_and_params(data_type_filters)
+                data_type_where_clause = BigQuerySupport.build_bq_filter_and_params(data_type_filters, case_insens=case_insens)
                 data_avail_sample_subquery = (data_avail_sample_query % data_avail_table) + ' WHERE ' + \
                                              data_type_where_clause['filter_string']
                 parameters += data_type_where_clause['parameters']
@@ -304,9 +304,9 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                     # Send in a type schema for Biospecimen, because sample_type is an integer encoded as a string,
                     # so detection will not work properly
                     type_schema = {x['name']: x['type'] for x in biospec_fields}
-                    where_clause['biospec'] = BigQuerySupport.build_bq_filter_and_params(filters['biospec'], field_prefix='bs.', type_schema=type_schema)
+                    where_clause['biospec'] = BigQuerySupport.build_bq_filter_and_params(filters['biospec'], field_prefix='bs.', type_schema=type_schema, case_insens=case_insens)
                 if len(list(filters['clin'].keys())):
-                    where_clause['clin'] = BigQuerySupport.build_bq_filter_and_params(filters['clin'], field_prefix='cl.')
+                    where_clause['clin'] = BigQuerySupport.build_bq_filter_and_params(filters['clin'], field_prefix='cl.', case_insens=case_insens)
 
             mut_query_job = None
 
@@ -344,12 +344,12 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                                 this_filter = {}
                                 this_filter[filter] = build_queries[build]['raw_filters'][filter]
                                 build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
-                                    this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
+                                    this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num)), case_insens=case_insens
                                 ))
                                 filter_num += 1
                         elif comb_mut_filters == 'OR':
                             build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
-                                build_queries[build]['raw_filters'], comb_mut_filters, build
+                                build_queries[build]['raw_filters'], comb_mut_filters, build, case_insens=case_insens
                             ))
 
                     # Create the queries and their parameters
@@ -391,7 +391,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                                 any_filter = {}
                                 any_filter[filter] = build_queries[build]['not_any'][not_any]
                                 filter_str_param = BigQuerySupport.build_bq_filter_and_params(
-                                    any_filter,param_suffix=build+'_any_{}'.format(any_count)
+                                    any_filter,param_suffix=build+'_any_{}'.format(any_count), case_insens=case_insens
                                 )
 
                                 build_queries[build]['filter_str_params'].append(filter_str_param)

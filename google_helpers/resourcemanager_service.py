@@ -36,6 +36,6 @@ def get_special_crm_resource():
         has the Browser (or Viewer, Editor, Owner) role on the other project.
     """
     credentials = GoogleCredentials.from_stream(
-        settings.USER_GCP_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
+        settings.MONITORING_SA_ACCESS_CREDENTIALS).create_scoped(CRM_SCOPES)
     service = build_with_retries('cloudresourcemanager', 'v1beta1', credentials, 2)
     return service
