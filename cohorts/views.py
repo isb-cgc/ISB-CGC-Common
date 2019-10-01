@@ -27,6 +27,7 @@ import traceback
 import re
 import datetime
 import time
+import logging
 
 import django
 from google_helpers.bigquery.cohort_support import BigQuerySupport
@@ -47,19 +48,11 @@ from django.shortcuts import render, redirect
 from django.utils import formats
 from django.views.decorators.csrf import csrf_protect
 from django.utils.html import escape
-from workbooks.models import Workbook, Worksheet, Worksheet_plot
 
-from accounts.models import GoogleProject
-from .metadata_helpers import *
-from .metadata_counting import *
-from .file_helpers import *
 from .models import Cohort, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
-from accounts.sa_utils import auth_dataset_whitelists_for_user
+from projects.models import Program, Project
 
 BQ_ATTEMPT_MAX = 10
-
-TCGA_PROJECT_SET = fetch_isbcgc_project_set()
 
 debug = settings.DEBUG # RO global for this file
 
