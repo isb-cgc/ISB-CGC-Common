@@ -171,7 +171,7 @@ class Cohort(models.Model):
     '''
     Returns the current filters which are active (i.e. strips anything which is mututally exclusive)
     '''
-    def get_current_filters(self):
+    def get_current_filters(self, unformatted=False):
         filters = {}
         cohort = self
         # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
@@ -209,8 +209,9 @@ class Cohort(models.Model):
                         'value': str(value),
                         'program': prog
                     })
-            
-            Cohort.format_filters_for_display(current_filters[prog])
+
+            if not unformatted:
+                Cohort.format_filters_for_display(current_filters[prog])
 
         return current_filters
 
