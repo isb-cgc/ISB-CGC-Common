@@ -89,7 +89,8 @@ def build_solr_facets(attr_set, filters=None, include_nulls=True):
         if not filters or attr not in filters:
             facets[attr] = {
                 'type': 'terms',
-                'field': attr
+                'field': attr,
+                'limit': -1
             }
             if include_nulls:
                 facets[attr]['missing'] = True
