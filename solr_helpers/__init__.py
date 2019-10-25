@@ -10,6 +10,8 @@ from projects.models import Program
 logger = logging.getLogger('main_logger')
 
 SOLR_URI = settings.SOLR_URI
+SOLR_URI = settings.SOLR_USER
+SOLR_URI = settings.SOLR_PASSWORD
 
 
 # Combined query and result formatter method
@@ -69,7 +71,7 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
     query_result = {}
 
     try:
-        query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'})
+        query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_USER, SOLR_PASSWORD))
         if query_response.status_code != 200:
             raise Exception("Saw response code {} when querying solr collection {} with string {}".format(str(query_response.status_code), collection, query_string))
         query_result = query_response.json()
