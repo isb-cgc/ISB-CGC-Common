@@ -133,7 +133,6 @@ class Project(models.Model):
         depth = 1
         ancestor = self.extends.id if self.extends is not None else None
 
-
         while ancestor is not None:
             ancProject = Project.objects.get(id=ancestor)
             ancestor = ancProject.extends.id if ancProject.extends is not None else None
@@ -179,16 +178,16 @@ class Project_Last_View(models.Model):
     project = models.ForeignKey(Project, blank=False)
     user = models.ForeignKey(User, null=False, blank=False)
     last_view = models.DateTimeField(auto_now=True)
-
-
+    
+    
 class User_Feature_Definitions(models.Model):
     project = models.ForeignKey(Project, null=False)
     feature_name = models.CharField(max_length=200)
     bq_map_id = models.CharField(max_length=200)
     is_numeric = models.BooleanField(default=False)
     shared_map_id = models.CharField(max_length=128, null=True, blank=True)
-
-
+    
+    
 class User_Feature_Counts(models.Model):
     feature = models.ForeignKey(User_Feature_Definitions, null=False)
     value = models.TextField()
