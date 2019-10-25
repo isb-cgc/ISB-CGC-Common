@@ -43,6 +43,7 @@ MOLECULAR_CATEGORIES = {
     }
 }
 
+
 # TODO: Convert to slider
 def normalize_bmi(bmis):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
@@ -63,6 +64,7 @@ def normalize_bmi(bmis):
                 bmi_list['None'] += int(count)
 
     return bmi_list
+
 
 # TODO: Convert to slider
 def normalize_ages(ages,bin_by_five=False):
@@ -244,6 +246,7 @@ def normalize_by_200(values):
                 new_value_list['None'] += int(count)
 
     return new_value_list
+
 
 def sql_simple_number_by_200(value, field):
     if debug: logger.debug('[DEBUG] Called ' + sys._getframe().f_code.co_name)
@@ -451,7 +454,6 @@ def sql_age_by_ranges(value, bin_by_five=False):
                 elif str(val).lower() == 'over 40':
                     result += ' (age_at_diagnosis >= 40)'
 
-
     return result
 
 
@@ -493,4 +495,3 @@ def gql_age_by_ranges(q, key, value):
         elif str(value).lower() == 'over80':
             result += ' (%s >= 80)' % key
     return result
-
