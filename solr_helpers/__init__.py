@@ -27,18 +27,19 @@ def query_solr_and_format_result(query_settings, normalize_facets=True):
             formatted_query_result['docs'] = result['response']['docs']
 
         if 'facets' in result:
-            formatted_query_result['facets'] = result['facets']
-        elif 'facet_counts' in result:
             if normalize_facets:
                 formatted_query_result['facets'] = {}
                 for facet in result['facets']:
                     if facet != 'count':
+                        formatted_query_result['facets'][facet] = {}
                         facet_counts = result['facets'][facet]
                         if 'missing' in facet_counts:
                             formatted_query_result['facets'][facet]['None'] = facet_counts['missing']['count']
                         for bucket in facet_counts['buckets']:
                             formatted_query_result['facets'][facet][bucket['val']] = bucket['count']
             else:
+                formatted_query_result['facets'] = result['facets']
+        elif 'facet_counts' in result:
                 formatted_query_result['facets'] = result['facet_counts']['facet_fields']
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
