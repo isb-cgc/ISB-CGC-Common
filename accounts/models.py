@@ -105,6 +105,10 @@ class AuthorizedDataset(models.Model):
     public = models.BooleanField(default=False)
     duca_id = models.CharField(max_length=256, null=True)
 
+
+    def get_private_datasets(self):
+        return self.objects.filter(public=0)
+
     def __str__(self):
         return self.name
 
