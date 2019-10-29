@@ -18,6 +18,7 @@ from builtins import str
 from builtins import object
 from django.db import models
 from django.contrib.auth.models import User
+from django.db.models import Q
 import logging
 import datetime
 import pytz
@@ -105,11 +106,27 @@ class AuthorizedDataset(models.Model):
     public = models.BooleanField(default=False)
     duca_id = models.CharField(max_length=256, null=True)
 
-    def get_private_datasets(self):
-        return self.objects.filter(public=0)
 
-    def get_public_datasets(self):
-        return self.objects.filter(public=1)
+    @classmethod
+    def get_datasets(cls, name=None, whitelist_id=None, public=True):
+        params = {}
+        if public is not None:
+            params['public'] = public
+        if name is not None:
+            params['name__contains'] = name
+        if whitelist_id is not None:
+            params['whitelist_id'] = whitelist_id
+
+        results = cls.objects.filter(**params)
+        return results
+
+    @classmethod
+    def get_private_datasets(cls, name=None, whitelist_id=None):
+        return cls.get_datasets(name, whitelist_id, False)
+
+    @classmethod
+    def get_public_datasets(cls, name=None, whitelist_id=None):
+        return cls.get_datasets(name, whitelist_id, True)
 
     def __str__(self):
         return self.name
