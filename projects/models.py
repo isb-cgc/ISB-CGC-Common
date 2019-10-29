@@ -74,10 +74,28 @@ class Program(models.Model):
         programs = programs.distinct()
 
         return programs
-    
+
     @classmethod
-    def get_public_programs(cls):
-        return cls.objects.filter(is_public=True, active=True)
+    def get_programs(cls, name=None, desc=None, public=True):
+        params = {}
+        if public is not None:
+            params['is_public'] = public
+        if name is not None:
+            params['name__contains'] = name
+        if desc is not None:
+            params['desc__contains'] = desc
+
+        results = cls.objects.filter(**params)
+
+        return results
+
+    @classmethod
+    def get_public_programs(cls, name=None, desc=None):
+        return cls.get_programs(name, desc, 1)
+
+    @classmethod
+    def get_private_programs(cls, name=None, desc=None):
+        return cls.get_programs(name, desc, 0)
 
     def __str__(self):
         return self.name
