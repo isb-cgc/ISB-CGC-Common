@@ -113,7 +113,7 @@ class AuthorizedDataset(models.Model):
         if public is not None:
             params['public'] = public
         if name is not None:
-            params['name__contains'] = name
+            params['name__icontains'] = name
         if whitelist_id is not None:
             params['whitelist_id'] = whitelist_id
 

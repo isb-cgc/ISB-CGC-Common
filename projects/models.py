@@ -81,9 +81,9 @@ class Program(models.Model):
         if public is not None:
             params['is_public'] = public
         if name is not None:
-            params['name__contains'] = name
+            params['name__icontains'] = name
         if desc is not None:
-            params['desc__contains'] = desc
+            params['desc__icontains'] = desc
 
         results = cls.objects.filter(**params)
 
