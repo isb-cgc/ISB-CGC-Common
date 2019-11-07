@@ -65,6 +65,11 @@ class Cohort(models.Model):
     def sample_size(self):
         return self.samples_set.all().count()
 
+    def get_cohort_cases(self):
+        samples = self.samples_set.all()
+        cases = samples.values('case_barcode').distinct().values_list('case_barcode', flat=True)
+        return list(cases)
+
     def case_size(self):
         return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
 
