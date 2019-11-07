@@ -106,7 +106,6 @@ class AuthorizedDataset(models.Model):
     public = models.BooleanField(default=False)
     duca_id = models.CharField(max_length=256, null=True)
 
-
     @classmethod
     def get_datasets(cls, name=None, whitelist_id=None, public=True):
         params = {}
@@ -127,6 +126,15 @@ class AuthorizedDataset(models.Model):
     @classmethod
     def get_public_datasets(cls, name=None, whitelist_id=None):
         return cls.get_datasets(name, whitelist_id, True)
+
+    @classmethod
+    def get_phs_map(cls, public=False):
+        phs_map = {}
+        datasets = AuthorizedDataset.objects.filter(public=public)
+        for dataset in datasets:
+            phs_map[dataset.whitelist_id] = dataset.name
+
+        return phs_map
 
     def __str__(self):
         return self.name
