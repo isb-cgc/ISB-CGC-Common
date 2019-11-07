@@ -16,13 +16,24 @@ SOLR_PASSWORD = settings.SOLR_PASSWORD
 
 # Combined query and result formatter method
 # optionally will normalize facet counting so the response structure is the same for facets+docs and just facets
-def query_solr_and_format_result(query_settings, normalize_facets=True):
+def query_solr_and_format_result(query_settings, normalize_facets=True, normalize_groups=True):
     formatted_query_result = {}
 
     try:
         result = query_solr(**query_settings)
 
         formatted_query_result['numFound'] = result['response']['numFound']
+
+        if 'grouped' in result:
+            if normalize_groups:
+                formatted_query_result['groups'] = []
+                for group in result['grouped']:
+                    for val in result['grouped'][group]['groups']:
+                        for doc in val['doclist']['docs']:
+                            doc[group] = val['groupValue']
+                            formatted_query_result['groups'].append(doc)
+            else:
+                formatted_query_result['groups'] = result['grouped']
 
         if 'docs' in result['response'] and len(result['response']['docs']):
             formatted_query_result['docs'] = result['response']['docs']
@@ -42,6 +53,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True):
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
                 formatted_query_result['facets'] = result['facet_counts']['facet_fields']
+
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
