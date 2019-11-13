@@ -4,24 +4,36 @@ import requests
 import logging
 import json
 
-
 from metadata.query_helpers import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
 from projects.models import Program
 
 logger = logging.getLogger('main_logger')
 
 SOLR_URI = settings.SOLR_URI
+SOLR_LOGIN = settings.SOLR_LOGIN
+SOLR_PASSWORD = settings.SOLR_PASSWORD
 
 
 # Combined query and result formatter method
 # optionally will normalize facet counting so the response structure is the same for facets+docs and just facets
-def query_solr_and_format_result(query_settings, normalize_facets=True):
+def query_solr_and_format_result(query_settings, normalize_facets=True, normalize_groups=True):
     formatted_query_result = {}
 
     try:
         result = query_solr(**query_settings)
 
         formatted_query_result['numFound'] = result['response']['numFound']
+
+        if 'grouped' in result:
+            if normalize_groups:
+                formatted_query_result['groups'] = []
+                for group in result['grouped']:
+                    for val in result['grouped'][group]['groups']:
+                        for doc in val['doclist']['docs']:
+                            doc[group] = val['groupValue']
+                            formatted_query_result['groups'].append(doc)
+            else:
+                formatted_query_result['groups'] = result['grouped']
 
         if 'docs' in result['response'] and len(result['response']['docs']):
             formatted_query_result['docs'] = result['response']['docs']
@@ -41,6 +53,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True):
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
                 formatted_query_result['facets'] = result['facet_counts']['facet_fields']
+
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
@@ -70,7 +83,7 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
     query_result = {}
 
     try:
-        query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'})
+        query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD))
         if query_response.status_code != 200:
             raise Exception("Saw response code {} when querying solr collection {} with string {}".format(str(query_response.status_code), collection, query_string))
         query_result = query_response.json()
