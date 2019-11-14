@@ -70,7 +70,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fq_string=None, facets=None, sort=None, counts_only=True, offset=0, limit=1000):
+def query_solr(collection=None, fields=None, query_string=None, fq_string=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -87,6 +87,10 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
         payload['fields'] = fields
     if sort:
         payload['sort'] = sort
+    if collapse_on:
+        if not fq_string:
+            fq_string = ''
+        fq_string += '{!collapse field=collapse_on}'
 
     query_result = {}
 
