@@ -4,8 +4,7 @@ import requests
 import logging
 import json
 
-from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
-from projects.models import Program
+from metadata_utils import MOLECULAR_CATEGORIES
 
 logger = logging.getLogger('main_logger')
 
@@ -14,15 +13,35 @@ SOLR_LOGIN = settings.SOLR_LOGIN
 SOLR_PASSWORD = settings.SOLR_PASSWORD
 
 
+RANGE_FIELDS = ['wbc_at_diagnosis', 'event_free_survival', 'days_to_death', 'days_to_last_known_alive', 'days_to_last_followup', 'age_at_diagnosis', 'year_of_diagnosis']
+
+BMI_MAPPING = {
+    'underweight': '[* TO 18.5}',
+    'normal weight': '[18.5 TO 25}',
+    'overweight': '[25 TO 30)',
+    'obese': '[30 TO *]'
+}
+
 # Combined query and result formatter method
 # optionally will normalize facet counting so the response structure is the same for facets+docs and just facets
-def query_solr_and_format_result(query_settings, normalize_facets=True):
+def query_solr_and_format_result(query_settings, normalize_facets=True, normalize_groups=True):
     formatted_query_result = {}
 
     try:
         result = query_solr(**query_settings)
 
         formatted_query_result['numFound'] = result['response']['numFound']
+
+        if 'grouped' in result:
+            if normalize_groups:
+                formatted_query_result['groups'] = []
+                for group in result['grouped']:
+                    for val in result['grouped'][group]['groups']:
+                        for doc in val['doclist']['docs']:
+                            doc[group] = val['groupValue']
+                            formatted_query_result['groups'].append(doc)
+            else:
+                formatted_query_result['groups'] = result['grouped']
 
         if 'docs' in result['response'] and len(result['response']['docs']):
             formatted_query_result['docs'] = result['response']['docs']
@@ -42,6 +61,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True):
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
                 formatted_query_result['facets'] = result['facet_counts']['facet_fields']
+
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
@@ -50,7 +70,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True):
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fq_string=None, facets=None, sort=None, counts_only=True, offset=0, limit=1000):
+def query_solr(collection=None, fields=None, query_string=None, fq_string=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -67,6 +87,10 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
         payload['fields'] = fields
     if sort:
         payload['sort'] = sort
+    if collapse_on:
+        if not fq_string:
+            fq_string = ''
+        fq_string += '{!collapse field=collapse_on}'
 
     query_result = {}
 
@@ -100,7 +124,7 @@ def build_solr_facets(attr_set, filters=None, include_nulls=True):
 
 
 # Build a query string for Solr
-def build_solr_query(filters, program=None, for_files=False, comb_with='OR'):
+def build_solr_query(filters, comb_with='OR'):
 
     first = True
     query_str = ''
@@ -116,9 +140,6 @@ def build_solr_query(filters, program=None, for_files=False, comb_with='OR'):
 
         if isinstance(value, list) and len(value) == 1:
             value = value[0]
-
-        if key == 'data_type' and not for_files:
-            key = 'metadata_data_type_availability_id'
 
         # Multitable where's will come in with : in the name. Only grab the column piece for now
         # TODO: Shouldn't throw away the entire key
@@ -167,16 +188,18 @@ def build_solr_query(filters, program=None, for_files=False, comb_with='OR'):
             if value == 'None' or (isinstance(value, list) and len(value) == 1 and value[0] == 'None'):
                 query_str += ' (-%s:{* TO *})' % key
             # If it's a ranged value, calculate the bins
-            elif key == 'age_at_diagnosis':
-                query_str += ' +(' + sql_age_by_ranges(value,(program and Program.objects.get(id=program).name == 'TARGET')) + ') '
             elif key == 'bmi':
-                query_str += ' +(' + sql_bmi_by_ranges(value) + ') '
-            elif key == 'year_of_diagnosis':
-                query_str += ' +(' + sql_year_by_ranges(value) + ') '
-            elif key == 'event_free_survival' or key == 'days_to_death' or key == 'days_to_last_known_alive' or key == 'days_to_last_followup':
-                query_str += ' +(' + sql_simple_days_by_ranges(value, key) + ') '
-            elif key == 'wbc_at_diagnosis':
-                query_str += ' +(' + sql_simple_number_by_200(value, key) + ') '
+                if 'None' in value:
+                    value.remove('None')
+                    query_str += ' -(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]), key)
+                else:
+                    query_str += " +({})".format(" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]))
+            elif key in RANGE_FIELDS:
+                if 'None' in value:
+                    value.remove('None')
+                    query_str += ' -(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]), key)
+                else:
+                    query_str += " +({})".format(" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]))
             elif isinstance(value, list):
                 if 'None' in value:
                     value.remove('None')
