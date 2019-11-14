@@ -30,6 +30,9 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     try:
         result = query_solr(**query_settings)
 
+        print("Solr result:")
+        print(str(result))
+
         formatted_query_result['numFound'] = result['response']['numFound']
 
         if 'grouped' in result:
@@ -90,7 +93,7 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
     if collapse_on:
         if not fq_string:
             fq_string = ''
-        fq_string += '{!collapse field=collapse_on}'
+        fq_string += '{!collapse field=%s}' % collapse_on
 
     query_result = {}
 
