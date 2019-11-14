@@ -120,7 +120,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 "sort": sort,
                 "offset": offset,
                 "limit": limit,
-                "counts_only": False
+                "counts_only": False,
+                "collapse_on": 'StudyInstanceUID'
             }
 
             file_query_result = query_solr_and_format_result(query_params)
