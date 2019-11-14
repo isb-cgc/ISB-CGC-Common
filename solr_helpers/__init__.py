@@ -30,6 +30,9 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     try:
         result = query_solr(**query_settings)
 
+        print("Solr result:")
+        print(str(result))
+
         formatted_query_result['numFound'] = result['response']['numFound']
 
         if 'grouped' in result:
