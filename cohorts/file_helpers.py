@@ -41,6 +41,7 @@ FILTER_DATA_FORMAT = {
     'pdf': 'PDF'
 }
 
+
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, type=None, do_filter_count=True):
 
     if not user:
@@ -74,7 +75,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 fq_query_string = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
 
             if inc_filters:
-                filtered_query_string = build_solr_query(inc_filters, "TCGA", True)
+                filtered_query_string = build_solr_query(inc_filters, "TCGA")
 
             fiiltered_facets = build_solr_facets({"disease_code": []}, inc_filters)
 
@@ -92,7 +93,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         unfiltered = None
                         unfiltered_queries[filter]['query'] = "*:*"
                     else:
-                        unfiltered_queries[filter]['query'] = build_solr_query(unfiltered, "TCGA", True)
+                        unfiltered_queries[filter]['query'] = build_solr_query(unfiltered, "TCGA")
                     unfiltered_queries[filter]['facets'] = build_solr_facets(count_facets, unfiltered)
 
             # col_map: used in the sql ORDER BY clause
