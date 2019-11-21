@@ -13,6 +13,14 @@ SOLR_URI = settings.SOLR_URI
 SOLR_LOGIN = settings.SOLR_LOGIN
 SOLR_PASSWORD = settings.SOLR_PASSWORD
 
+RANGE_FIELDS = ['wbc_at_diagnosis', 'event_free_survival', 'days_to_death', 'days_to_last_known_alive', 'days_to_last_followup', 'age_at_diagnosis', 'year_of_diagnosis']
+
+BMI_MAPPING = {
+    'underweight': '[* TO 18.5}',
+    'normal weight': '[18.5 TO 25}',
+    'overweight': '[25 TO 30)',
+    'obese': '[30 TO *]'
+}
 
 # Combined query and result formatter method
 # optionally will normalize facet counting so the response structure is the same for facets+docs and just facets
@@ -112,7 +120,7 @@ def build_solr_facets(attr_set, filters=None, include_nulls=True):
 
 
 # Build a query string for Solr
-def build_solr_query(filters, program=None, for_files=False, comb_with='OR'):
+def build_solr_query(filters, comb_with='OR'):
 
     first = True
     query_str = ''
@@ -128,9 +136,6 @@ def build_solr_query(filters, program=None, for_files=False, comb_with='OR'):
 
         if isinstance(value, list) and len(value) == 1:
             value = value[0]
-
-        if key == 'data_type' and not for_files:
-            key = 'metadata_data_type_availability_id'
 
         # Multitable where's will come in with : in the name. Only grab the column piece for now
         # TODO: Shouldn't throw away the entire key
@@ -179,16 +184,18 @@ def build_solr_query(filters, program=None, for_files=False, comb_with='OR'):
             if value == 'None' or (isinstance(value, list) and len(value) == 1 and value[0] == 'None'):
                 query_str += ' (-%s:{* TO *})' % key
             # If it's a ranged value, calculate the bins
-            elif key == 'age_at_diagnosis':
-                query_str += ' +(' + sql_age_by_ranges(value,(program and Program.objects.get(id=program).name == 'TARGET')) + ') '
             elif key == 'bmi':
-                query_str += ' +(' + sql_bmi_by_ranges(value) + ') '
-            elif key == 'year_of_diagnosis':
-                query_str += ' +(' + sql_year_by_ranges(value) + ') '
-            elif key == 'event_free_survival' or key == 'days_to_death' or key == 'days_to_last_known_alive' or key == 'days_to_last_followup':
-                query_str += ' +(' + sql_simple_days_by_ranges(value, key) + ') '
-            elif key == 'wbc_at_diagnosis':
-                query_str += ' +(' + sql_simple_number_by_200(value, key) + ') '
+                if 'None' in value:
+                    value.remove('None')
+                    query_str += ' -(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]), key)
+                else:
+                    query_str += " +({})".format(" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]))
+            elif key in RANGE_FIELDS:
+                if 'None' in value:
+                    value.remove('None')
+                    query_str += ' -(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]), key)
+                else:
+                    query_str += " +({})".format(" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]))
             elif isinstance(value, list):
                 if 'None' in value:
                     value.remove('None')
