@@ -134,11 +134,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                     file_list.append({
                         'case': entry['case_barcode'],
                         'study_uid': entry['StudyInstanceUID'],
-                        'study_desc': entry['StudyDescription'] or 'N/A',
+                        'study_desc': entry.get('StudyDescription','N/A'),
                         'disease_code': entry['disease_code'],
                         'project_short_name': entry['project_short_name'],
                         'program': "TCGA",
-                        'file_path': entry['file_path']
+                        'file_path': entry.get('file_path', 'N/A')
                     })
 
             if 'facets' in file_query_result:
