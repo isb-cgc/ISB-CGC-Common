@@ -21,7 +21,7 @@ from time import sleep
 from uuid import uuid4
 import copy
 from django.conf import settings
-from google_helpers.bigquery.service import get_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service, get_user_bigquery_service
 from google_helpers.bigquery.abstract import BigQueryABC
 
 logger = logging.getLogger('main_logger')
@@ -59,7 +59,7 @@ MOLECULAR_CATEGORIES = {
 
 class BigQuerySupport(BigQueryABC):
 
-    def __init__(self, project_id, dataset_id, table_id, executing_project=None, table_schema=None):
+    def __init__(self, project_id, dataset_id, table_id, executing_project=None, table_schema=None, user_project=False):
         # Project which will execute any jobs run by this class
         self.executing_project = executing_project or settings.BIGQUERY_PROJECT_ID
         # Destination project
@@ -68,7 +68,7 @@ class BigQuerySupport(BigQueryABC):
         self.dataset_id = dataset_id
         # Destination table
         self.table_id = table_id
-        self.bq_service = get_bigquery_service()
+        self.bq_service = get_bigquery_service() if not user_project else get_user_bigquery_service()
         self.table_schema = table_schema
 
     def _build_request_body_from_rows(self, rows):
