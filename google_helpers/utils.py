@@ -19,19 +19,15 @@ standard_library.install_aliases()
 from builtins import str
 from googleapiclient import discovery
 from googleapiclient.errors import HttpError
-from google.appengine.runtime.apiproxy_errors import DeadlineExceededError as APIDeadlineExceededError
-from google.appengine.api.urlfetch_errors import DeadlineExceededError as FetchDeadlineExceededError
-from google.appengine.api.remote_socket._remote_socket_error import error as GoogleSocketError
 from http.client import HTTPException
 import logging
 
 logger = logging.getLogger('main_logger')
 
+
 #
 # Use this in place of build() to catch all the bogus Google errors!
 #
-
-
 def build_with_retries(service_tag, version_tag, creds, num_retries, http=None):
     service = None
     retries = num_retries
@@ -42,7 +38,7 @@ def build_with_retries(service_tag, version_tag, creds, num_retries, http=None):
                 service = discovery.build(service_tag, version_tag, http=http, cache_discovery=False)
             else:
                 service = discovery.build(service_tag, version_tag, credentials=creds, cache_discovery=False)
-        except (APIDeadlineExceededError, FetchDeadlineExceededError, HTTPException, GoogleSocketError) as e:
+        except HTTPException as e:
             if num_retries > 0:
                 logger.info('{0} Exception: {1} : {2} : trying {3}'.format(service_tag, str(type(e)), str(e), num_retries))
             else:
@@ -67,11 +63,10 @@ def build_with_retries(service_tag, version_tag, creds, num_retries, http=None):
 
     return service
 
+
 #
 # Use this in place of execute() to catch all the bogus Google errors!
 #
-
-
 def execute_with_retries(req, task, retries, http=None):
     num_retries = retries
     resp = None
@@ -83,7 +78,7 @@ def execute_with_retries(req, task, retries, http=None):
                 resp = req.execute(http=http)
             else:
                 resp = req.execute()
-        except (APIDeadlineExceededError, FetchDeadlineExceededError, HTTPException, GoogleSocketError) as e:
+        except HTTPException as e:
             if num_retries > 0:
                 logger.info('{0} Exception: {1} : {2} : trying {3}'.format(task, str(type(e)), str(e), num_retries))
             else:
@@ -107,4 +102,3 @@ def execute_with_retries(req, task, retries, http=None):
             raise e
 
     return resp
-
