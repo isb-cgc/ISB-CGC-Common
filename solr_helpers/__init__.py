@@ -81,16 +81,17 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
 
     if facets:
         payload['facet'] = facets
-    if fq_string:
-        payload['filter'] = fq_string
     if fields:
         payload['fields'] = fields
     if sort:
         payload['sort'] = sort
-    if collapse_on:
-        if not fq_string:
-            fq_string = ''
-        fq_string += '{!collapse field=collapse_on}'
+        
+    if (not fq_string and collapse_on) or (not collapse_on and fq_string):
+        payload['filter'] = fq_string or '{!collapse field=%s}' % collapse_on
+    else:
+        payload['params'] = {
+            'fq': [fq_string, '{!collapse field=%s}' % collapse_on]
+        }
 
     query_result = {}
 
