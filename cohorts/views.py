@@ -1635,13 +1635,28 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
             inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
                 request.POST.get('filters', '{}'))
             if request.GET.get('case_barcode', None):
-                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')),]
+                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'),]
+
             items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
 
             for attr in items['metadata_data_counts']:
-                for val in items['metadata_data_counts'][attr]:
-                    metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
-                metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in metadata_data_attr[attr]['values']]
+                if attr in metadata_data_attr:
+                    for val in items['metadata_data_counts'][attr]:
+                        if val not in metadata_data_attr[attr]['values']:
+                            metadata_data_attr[attr]['values'][val] = {
+                                'displ_value': val,
+                                'value': val,
+                                'name': val,
+                                'count': 0
+                            }
+                        metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
+                    metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in metadata_data_attr[attr]['values']]
+
+            # Any value which didn't come back in the main results still needs to have a count of zero.
+            for attr in metadata_data_attr:
+                for val in metadata_data_attr[attr]['values']:
+                    if 'count' not in val or not val['count']:
+                        val['count'] = 0
 
         for attr_build in metadata_data_attr_builds:
             if attr_build != build:
@@ -1679,9 +1694,6 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                             'has_user_data': bool(cohort_sample_list.count() > 0),
                                             'build': build,
                                             'programs_this_cohort': cohort.get_program_names()})
-
-        logger.debug("[STATUS] Returning response from cohort_filelist, with exception")
-
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
@@ -1691,8 +1703,8 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
 
 @login_required
 def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
-    status=200
 
+    status = 200
     try:
         if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
         if cohort_id == 0:
@@ -1736,10 +1748,11 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
-            inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')), ]
+            inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'), ]
+
         result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
-        # If nothing was found, our total file count will reflect that
+        # If nothing was found, our  total file count will reflect that
         if do_filter_count:
             metadata_data_attr = fetch_build_data_attr(build)
             if len(result['metadata_data_counts']):
@@ -1749,6 +1762,12 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
             else:
                 for attr in metadata_data_attr:
                     for val in metadata_data_attr[attr]['values']:
+                        metadata_data_attr[attr]['values'][val]['count'] = 0
+
+            # Any value which didn't come back in the main results still needs to have a count of zero.
+            for attr in metadata_data_attr:
+                for val in metadata_data_attr[attr]['values']:
+                    if 'count' not in metadata_data_attr[attr]['values'][val] or not metadata_data_attr[attr]['values'][val]['count']:
                         metadata_data_attr[attr]['values'][val]['count'] = 0
 
             for attr in metadata_data_attr:
