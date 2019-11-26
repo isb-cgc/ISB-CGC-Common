@@ -700,7 +700,9 @@ def register_bqdataset(request, user_id, gcp_id):
             bq_service = get_bigquery_service()
             datasets = bq_service.datasets().list(projectId=gcp.project_id).execute()
 
-            if 'datasets' in list(datasets.keys()):
+            print("Datasets for project {}: {}".format(gcp.project_id, datasets))
+
+            if 'datasets' in datasets:
                 dataset_list = datasets['datasets']
 
                 for dataset in dataset_list:
