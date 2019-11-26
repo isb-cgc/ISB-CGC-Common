@@ -19,9 +19,6 @@ standard_library.install_aliases()
 from builtins import str
 from googleapiclient import discovery
 from googleapiclient.errors import HttpError
-from google.appengine.runtime.apiproxy_errors import DeadlineExceededError as APIDeadlineExceededError
-from google.appengine.api.urlfetch_errors import DeadlineExceededError as FetchDeadlineExceededError
-from google.appengine.api.remote_socket._remote_socket_error import error as GoogleSocketError
 from http.client import HTTPException
 import logging
 
@@ -42,7 +39,7 @@ def build_with_retries(service_tag, version_tag, creds, num_retries, http=None):
                 service = discovery.build(service_tag, version_tag, http=http, cache_discovery=False)
             else:
                 service = discovery.build(service_tag, version_tag, credentials=creds, cache_discovery=False)
-        except (APIDeadlineExceededError, FetchDeadlineExceededError, HTTPException, GoogleSocketError) as e:
+        except HTTPException as e:
             if num_retries > 0:
                 logger.info('{0} Exception: {1} : {2} : trying {3}'.format(service_tag, str(type(e)), str(e), num_retries))
             else:
