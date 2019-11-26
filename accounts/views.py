@@ -700,20 +700,21 @@ def register_bqdataset(request, user_id, gcp_id):
             bq_service = get_bigquery_service()
             datasets = bq_service.datasets().list(projectId=gcp.project_id).execute()
 
-            print("Datasets for project {}: {}".format(gcp.project_id, datasets))
-
             if 'datasets' in datasets:
                 dataset_list = datasets['datasets']
 
                 for dataset in dataset_list:
                     if dataset['datasetReference']['datasetId'] == bqdataset_name:
                         found_dataset = True
+            else:
+                logger.warning("[WARNING] Dataset list not received!")
+                logger.warning("[WARNING] Response to datasets().list(): {}".format(str(datasets)))
 
             if found_dataset:
                 bqdataset = BqDataset(google_project=gcp, dataset_name=bqdataset_name)
                 bqdataset.save()
             else:
-                messages.error(request, 'The dataset, {0}, was not found in the Google Cloud Project, {1}.'.format(
+                messages.error(request, 'The dataset "{0}" was not found in the Google Cloud Project "{1}".'.format(
                     bqdataset_name, gcp.project_id))
 
         except HttpError as e:
