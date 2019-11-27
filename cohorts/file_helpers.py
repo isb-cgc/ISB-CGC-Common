@@ -19,6 +19,7 @@ from builtins import str
 import logging
 import time
 import MySQLdb
+import copy
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
@@ -29,6 +30,7 @@ from .metadata_helpers import get_sql_connection, build_where_clause
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from cohorts.models import Cohort, Cohort_Perms
 
+from solr_helpers import *
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
@@ -38,6 +40,7 @@ FILTER_DATA_FORMAT = {
     'camic': 'SVS',
     'pdf': 'PDF'
 }
+
 
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, type=None, do_filter_count=True):
 
@@ -131,6 +134,93 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-studyuid': 'ds.StudyInstanceUID',
                 'col-filesize': 'ds.StudyInstanceUID'
             }
+
+            # filtered_query_string = "*:*"
+            # fq_query_string = None
+            #
+            # if cohort_id:
+            #     cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+            #     fq_query_string = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
+            #
+            # if inc_filters:
+            #     filtered_query_string = build_solr_query(inc_filters, "TCGA")
+            #
+            # fiiltered_facets = build_solr_facets({"disease_code": []}, inc_filters)
+            #
+            # unfiltered_queries = {}
+            #
+            # fields = ["file_path", "case_barcode", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "disease_code", "project_short_name"]
+            # count_facets = {"disease_code": []}
+            #
+            # for filter in inc_filters:
+            #     if filter in count_facets:
+            #         unfiltered = copy.deepcopy(inc_filters)
+            #         del unfiltered[filter]
+            #         unfiltered_queries[filter] = {}
+            #         if len(unfiltered) <= 0:
+            #             unfiltered = None
+            #             unfiltered_queries[filter]['query'] = "*:*"
+            #         else:
+            #             unfiltered_queries[filter]['query'] = build_solr_query(unfiltered, "TCGA")
+            #         unfiltered_queries[filter]['facets'] = build_solr_facets(count_facets, unfiltered)
+            #
+            # # col_map: used in the sql ORDER BY clause
+            # # key: html column attribute 'columnId'
+            # # value: db table column name
+            # col_map = {
+            #     'col-program': 'project_short_name',
+            #     'col-barcode': 'case_barcode',
+            #     'col-diseasecode': 'disease_code',
+            #     'col-projectname': 'project_short_name',
+            #     'col-studydesc': 'StudyDescription',
+            #     'col-studyuid': 'StudyInstanceUID',
+            # }
+            #
+            # filter_counts = {}
+            #
+            # sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
+            #
+            # query_params = {
+            #     "collection": "tcia_images",
+            #     "fields": fields,
+            #     "query_string": filtered_query_string,
+            #     "fq_string": fq_query_string,
+            #     "facets": fiiltered_facets,
+            #     "sort": sort,
+            #     "offset": offset,
+            #     "limit": limit,
+            #     "counts_only": False,
+            #     "collapse_on": 'StudyInstanceUID'
+            # }
+            #
+            # file_query_result = query_solr_and_format_result(query_params)
+            #
+            # total_file_count = file_query_result['numFound']
+            #
+            # if 'docs' in file_query_result and len(file_query_result['docs']):
+            #     for entry in file_query_result['docs']:
+            #         file_list.append({
+            #             'case': entry['case_barcode'],
+            #             'study_uid': entry['StudyInstanceUID'],
+            #             'study_desc': entry.get('StudyDescription','N/A'),
+            #             'disease_code': entry['disease_code'],
+            #             'project_short_name': entry['project_short_name'],
+            #             'program': "TCGA",
+            #             'file_path': entry.get('file_path', 'N/A')
+            #         })
+            #
+            # if 'facets' in file_query_result:
+            #     filter_counts = file_query_result['facets']
+            #
+            # if do_filter_count:
+            #     for filter in unfiltered_queries:
+            #         query_params['query_string'] = unfiltered_queries[filter]['query']
+            #         query_params['counts_only'] = True
+            #         query_params['facets'] = unfiltered_queries[filter]['facets']
+            #         query_params['limit'] = 0
+            #         unfiltered_result = query_solr_and_format_result(query_params)
+            #         if 'facets' in unfiltered_result:
+            #             filter_counts = unfiltered_result['facets']
 
             if limit > 0:
                 limit_clause = ' LIMIT {}'.format(str(limit))

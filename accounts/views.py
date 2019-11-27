@@ -29,7 +29,7 @@ from django.shortcuts import render, redirect
 from django.core.urlresolvers import reverse
 from django.views.decorators.csrf import csrf_protect
 from google_helpers.stackdriver import StackDriverLogger
-from google_helpers.bigquery.service import get_bigquery_service
+from google_helpers.bigquery.service import get_user_bigquery_service
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -697,21 +697,24 @@ def register_bqdataset(request, user_id, gcp_id):
 
         # Check that bqdataset is in project
         try:
-            bq_service = get_bigquery_service()
+            bq_service = get_user_bigquery_service()
             datasets = bq_service.datasets().list(projectId=gcp.project_id).execute()
 
-            if 'datasets' in list(datasets.keys()):
+            if 'datasets' in datasets:
                 dataset_list = datasets['datasets']
 
                 for dataset in dataset_list:
                     if dataset['datasetReference']['datasetId'] == bqdataset_name:
                         found_dataset = True
+            else:
+                logger.warning("[WARNING] Dataset list not received!")
+                logger.warning("[WARNING] Response to datasets().list(): {}".format(str(datasets)))
 
             if found_dataset:
                 bqdataset = BqDataset(google_project=gcp, dataset_name=bqdataset_name)
                 bqdataset.save()
             else:
-                messages.error(request, 'The dataset, {0}, was not found in the Google Cloud Project, {1}.'.format(
+                messages.error(request, 'The dataset "{0}" was not found in the Google Cloud Project "{1}".'.format(
                     bqdataset_name, gcp.project_id))
 
         except HttpError as e:
@@ -842,7 +845,7 @@ def get_user_datasets(request,user_id):
                     'datasets': {},
                     'name': gcp.project_id
                 }
-                bqs = BigQuerySupport(gcp.project_id, None, None)
+                bqs = BigQuerySupport(gcp.project_id, None, None, user_project=True)
                 bq_tables = bqs.get_tables()
                 for table in bq_tables:
                     if table['dataset'] in bqds:
