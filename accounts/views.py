@@ -31,7 +31,7 @@ from django.views.decorators.csrf import csrf_protect
 from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery.service import get_user_bigquery_service
 from google_helpers.resourcemanager_service import get_special_crm_resource
-from google_helpers.storage_service import get_storage_resource
+from google_helpers.storage_service import get_user_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from googleapiclient.errors import HttpError
 from django.contrib.auth.models import User
@@ -614,7 +614,7 @@ def register_bucket(request, user_id, gcp_id):
 
         # Check that bucket is in project
         try:
-            storage_service = get_storage_resource()
+            storage_service = get_user_storage_resource()
             buckets = storage_service.buckets().list(project=gcp.project_id).execute()
 
             if 'items' in list(buckets.keys()):
