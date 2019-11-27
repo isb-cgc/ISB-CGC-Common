@@ -44,7 +44,7 @@ def get_bigquery_service():
 # This method uses the GCP Monitoring Service Account to access a user's registered project and its BQ resources
 def get_user_bigquery_service():
 
-    credentials = GoogleCredentials.from_stream(settings.MONITORING_SA_CREDENTIALS).create_scoped(BIGQUERY_SCOPES)
+    credentials = GoogleCredentials.from_stream(settings.MONITORING_SA_ACCESS_CREDENTIALS).create_scoped(BIGQUERY_SCOPES)
     http = httplib2.Http()
     http = credentials.authorize(http)
     service = discovery.build('bigquery', 'v2', http=http, cache_discovery=False)
