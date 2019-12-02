@@ -4,14 +4,14 @@ import requests
 import logging
 import json
 
-from metadata.query_helpers import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
-from projects.models import Program
+from metadata_utils import MOLECULAR_CATEGORIES
 
 logger = logging.getLogger('main_logger')
 
 SOLR_URI = settings.SOLR_URI
 SOLR_LOGIN = settings.SOLR_LOGIN
 SOLR_PASSWORD = settings.SOLR_PASSWORD
+
 
 RANGE_FIELDS = ['wbc_at_diagnosis', 'event_free_survival', 'days_to_death', 'days_to_last_known_alive', 'days_to_last_followup', 'age_at_diagnosis', 'year_of_diagnosis']
 
@@ -70,7 +70,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fq_string=None, facets=None, sort=None, counts_only=True, offset=0, limit=1000):
+def query_solr(collection=None, fields=None, query_string=None, fq_string=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -81,12 +81,17 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
 
     if facets:
         payload['facet'] = facets
-    if fq_string:
-        payload['filter'] = fq_string
     if fields:
         payload['fields'] = fields
     if sort:
         payload['sort'] = sort
+
+    if (not fq_string and collapse_on) or (not collapse_on and fq_string):
+        payload['filter'] = fq_string or '{!collapse field=%s}' % collapse_on
+    else:
+        payload['params'] = {
+            'fq': [fq_string, '{!collapse field=%s}' % collapse_on]
+        }
 
     query_result = {}
 
