@@ -30,3 +30,9 @@ def get_storage_resource():
     credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(STORAGE_SCOPES)
     service = build_with_retries('storage', 'v1', credentials, 2)
     return service
+
+
+def get_user_storage_resource():
+    credentials = GoogleCredentials.from_stream(settings.MONITORING_SA_ACCESS_CREDENTIALS).create_scoped(STORAGE_SCOPES)
+    service = build_with_retries('storage', 'v1', credentials, 2)
+    return service
