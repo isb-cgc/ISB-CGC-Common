@@ -21,7 +21,7 @@ import datetime
 from time import sleep
 from django.conf import settings
 from uuid import uuid4
-from google_helpers.bigquery.service import get_user_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.abstract import BigQueryExportABC
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -144,7 +144,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         }
 
     def _streaming_insert(self, rows):
-        bigquery_service = get_user_bigquery_service()
+        bigquery_service = get_bigquery_service(True)
         table_data = bigquery_service.tabledata()
 
         index = 0
@@ -171,7 +171,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
     def _table_to_gcs(self, file_format, dataset_and_table, export_type, table_job_id=None):
 
-        bq_service = get_user_bigquery_service()
+        bq_service = get_bigquery_service(True)
 
         result = {
             'status': None,
@@ -284,7 +284,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         return result
 
     def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False):
-        bq_service = get_user_bigquery_service()
+        bq_service = get_bigquery_service(True)
         job_id = str(uuid4())
 
         query_data = {
