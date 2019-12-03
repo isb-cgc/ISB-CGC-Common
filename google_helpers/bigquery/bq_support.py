@@ -21,7 +21,7 @@ from time import sleep
 from uuid import uuid4
 import copy
 from django.conf import settings
-from google_helpers.bigquery.service import get_bigquery_service, get_user_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.bigquery.abstract import BigQueryABC
 
 logger = logging.getLogger('main_logger')
@@ -68,7 +68,7 @@ class BigQuerySupport(BigQueryABC):
         self.dataset_id = dataset_id
         # Destination table
         self.table_id = table_id
-        self.bq_service = get_bigquery_service() if not user_project else get_user_bigquery_service()
+        self.bq_service = get_bigquery_service(user_project)
         self.table_schema = table_schema
 
     def _build_request_body_from_rows(self, rows):
