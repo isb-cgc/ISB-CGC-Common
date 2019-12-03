@@ -21,7 +21,7 @@ import datetime
 from time import sleep
 from django.conf import settings
 from uuid import uuid4
-from google_helpers.bigquery.service import get_user_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.abstract import BigQueryExportABC
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -127,8 +127,8 @@ COHORT_EXPORT_SCHEMA = {
 
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema):
-        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema)
+    def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema, user_project=False):
+        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema, user_project=user_project)
         self.bucket_path = bucket_path
         self.file_name = file_name
 
@@ -144,7 +144,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         }
 
     def _streaming_insert(self, rows):
-        bigquery_service = get_user_bigquery_service()
+        bigquery_service = get_bigquery_service(True)
         table_data = bigquery_service.tabledata()
 
         index = 0
@@ -171,7 +171,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
     def _table_to_gcs(self, file_format, dataset_and_table, export_type, table_job_id=None):
 
-        bq_service = get_user_bigquery_service()
+        bq_service = get_bigquery_service(True)
 
         result = {
             'status': None,
@@ -284,7 +284,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         return result
 
     def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False):
-        bq_service = get_user_bigquery_service()
+        bq_service = get_bigquery_service(True)
         job_id = str(uuid4())
 
         query_data = {
@@ -433,8 +433,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
 class BigQueryExportFileList(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None):
-        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA)
+    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None, user_project=False):
+        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA, user_project)
 
     def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -503,9 +503,9 @@ class BigQueryExportFileList(BigQueryExport):
 
 class BigQueryExportCohort(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None):
+    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None, user_project=False):
         self._uuids = uuids
-        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA)
+        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA, user_project)
 
     def _build_row(self, sample):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
