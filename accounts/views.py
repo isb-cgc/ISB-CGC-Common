@@ -78,7 +78,7 @@ Returns page that has user Google Cloud Projects
 @login_required
 def user_gcp_list(request, user_id):
     context = {}
-    template = 'GenespotRE/user_gcp_list.html'
+    template = 'isb_cgc/user_gcp_list.html'
 
     try:
         if int(request.user.id) == int(user_id):
@@ -269,7 +269,7 @@ def register_gcp(request, user_id):
 
             return redirect(reverse(redirect_view, kwargs=args))
 
-        return render(request, 'GenespotRE/register_gcp.html', {})
+        return render(request, 'isb_cgc/register_gcp.html', {})
 
     except Exception as e:
         logger.error("[ERROR] While {} a Google Cloud Project:".format("refreshing" if is_refresh else "registering"))
@@ -300,7 +300,7 @@ def gcp_detail(request, user_id, gcp_id):
                     for message in sa_messages:
                         logger.error("[ERROR] {}:".format(message))
                         messages.error(request, message)
-                    return render(request, 'GenespotRE/gcp_detail.html', context)
+                    return render(request, 'isb_cgc/gcp_detail.html', context)
 
                 for sa_dict in sa_info:
                     _sa_dict_to_data(context['sa_list'], gcp_id, sa_dict)
@@ -347,7 +347,7 @@ def gcp_detail(request, user_id, gcp_id):
         messages.error(request,
                        "Encountered an error while trying to detail this Google Cloud Project - please contact feedback@isb-cgc.org.")
 
-    return render(request, 'GenespotRE/gcp_detail.html', context)
+    return render(request, 'isb_cgc/gcp_detail.html', context)
 
 
 @login_required
@@ -469,13 +469,13 @@ def register_sa(request, user_id):
     try:
         # This is a Service Account dataset adjustment or an initial load of the service account registration page
         if request.GET.get('sa_name') or request.GET.get('gcp_id'):
-            template = 'GenespotRE/register_sa.html'
+            template = 'isb_cgc/register_sa.html'
             context = {
                 'authorized_datasets': controlled_auth_datasets()
             }
 
             if request.GET.get('sa_name'):
-                template = 'GenespotRE/adjust_sa.html'
+                template = 'isb_cgc/adjust_sa.html'
                 sa_dict, sa_msgs = service_account_dict(user_id, request.GET.get('sa_name'))
                 # If there is an error message coming from DCF, which is distinct from exceptions (handled below),
                 # the traditional approach if to pop to user_gcp_list page.
