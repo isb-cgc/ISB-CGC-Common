@@ -2286,7 +2286,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
-                bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+                bcs = BigQueryExportFileList(bq_proj_id, dataset, table, user_project=True)
                 result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
@@ -2348,11 +2348,11 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
 
             # Export the data
             if export_dest == 'table':
-                bcs = BigQueryExportCohort(bq_proj_id, dataset, table)
+                bcs = BigQueryExportCohort(bq_proj_id, dataset, table, user_project=True)
                 result = bcs.export_cohort_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
-                bcs = BigQueryExportCohort(bq_proj_id, None, None, None, gcs_bucket, file_name)
+                bcs = BigQueryExportCohort(bq_proj_id, None, None, None, gcs_bucket, file_name, user_project=True)
                 result = bcs.export_cohort_to_gcs(file_format, query_string, filter_params)
             else:
                 raise Exception("Cohort export destination not recognized.")
