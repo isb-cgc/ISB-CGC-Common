@@ -45,14 +45,13 @@ class Program(models.Model):
     name = models.CharField(max_length=255, null=True)
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now_add=True)
     objects = ProgramManager()
     owner = models.ForeignKey(User)
     is_public = models.BooleanField(default=False)
     shared = models.ManyToManyField(Shared_Resource)
     
-    def get_all_projects(self):
-        return self.project_set.filter(active=1)
+    def get_all_collections(self):
+        return self.idc_collections_set.filter(active=1)
 
     @classmethod
     def get_user_programs(cls, user, includeShared=True, includePublic=False):
@@ -83,12 +82,11 @@ class Collection(models.Model):
     name = models.CharField(max_length=255, null=True)
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now_add=True)
     is_public = models.BooleanField(default=False)
     objects = ProgramManager()
     owner = models.ForeignKey(User)
     # We make this many to many in case a collection is part of one program, though it may not be
-    programs = models.ManyToManyField(Program)
+    program = models.ManyToManyField(Program)
 
     def get_programs(self):
         return self.program.all()

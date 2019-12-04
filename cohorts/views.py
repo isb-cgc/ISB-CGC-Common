@@ -50,7 +50,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.utils.html import escape
 
 from .models import Cohort, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project
+from idc_collections.models import Program, Collection
 
 BQ_ATTEMPT_MAX = 10
 
@@ -146,7 +146,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                             filtered_projects = {}
                             filtered_projects[project_id] = 1
 
-                for project in Project.get_user_projects(user):
+                for project in Collection.get_user_projects(user):
                     if (filtered_programs is None or project.program.id in filtered_programs) and (filtered_projects is None or project.id in filtered_projects):
                         project_ms_table = None
                         for tables in User_Data_Tables.objects.filter(project_id=project.id):
@@ -597,8 +597,8 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     # check to see if user has read access to 'All TCGA Data' cohort
-    isb_superuser = User.objects.get(username='isb')
-    superuser_perm = Cohort_Perms.objects.get(user=isb_superuser)
+    idc_superuser = User.objects.get(username='idc')
+    superuser_perm = Cohort_Perms.objects.get(user=idc_superuser)
     user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
     if not user_all_data_perm:
         Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
@@ -607,7 +607,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
 
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved')
+    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
 
     cohorts.has_private_cohorts = False
     shared_users = {}
@@ -772,7 +772,7 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
             cohort.mark_viewed(request)
 
-            cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
+            cohort_progs = Program.objects.filter(id__in=Collection.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
 
             cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
@@ -1957,14 +1957,14 @@ def get_metadata(request):
         if cohort:
             results['cohort-total'] = results['total']
             results['cohort-cases'] = results['cases']
-            cohort_pub_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct(), is_public=True)
+            cohort_pub_progs = Program.objects.filter(id__in=Collection.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct(), is_public=True)
             for prog in cohort_pub_progs:
                 if prog.id != program_id:
                     prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
                     results['cohort-total'] += prog_res['total']
                     results['cohort-cases'] += prog_res['cases']
 
-            cohort_user_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id', flat=True).distinct(), is_public=False)
+            cohort_user_progs = Program.objects.filter(id__in=Collection.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id', flat=True).distinct(), is_public=False)
             for prog in cohort_user_progs:
                 user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
                 results['cohort-total'] += user_prog_res['total']

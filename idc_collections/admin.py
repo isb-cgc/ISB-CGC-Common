@@ -16,31 +16,31 @@
 
 from django.contrib import admin
 
-from projects.models import Project, Program
+from idc_collections.models import Collection, Program
 
 
 class Program_Admin(admin.ModelAdmin):
     list_display = (
         'name',
+        'short_name',
+        'description',
         'active',
-        'last_date_saved',
         'owner',
         'is_public'
     )
     exclude = ('shared',)
 
 
-class Project_Admin(admin.ModelAdmin):
+class Collection_Admin(admin.ModelAdmin):
     list_display = (
         'name',
+        'short_name',
+        'description',
         'active',
-        'last_date_saved',
         'owner',
-        'program',
-        'extends'
     )
 
 
 
 admin.site.register(Program, Program_Admin)
-admin.site.register(Project, Project_Admin)
+admin.site.register(Collection, Collection_Admin)
