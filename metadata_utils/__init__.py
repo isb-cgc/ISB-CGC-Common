@@ -19,6 +19,7 @@ Helper methods for fetching, curating, and managing cohort metadata
 """
 from __future__ import division
 from django.conf import settings
+from past.builtins import basestring
 import logging
 import sys
 
