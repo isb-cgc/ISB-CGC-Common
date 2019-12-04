@@ -597,8 +597,8 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     # check to see if user has read access to 'All TCGA Data' cohort
-    isb_superuser = User.objects.get(username='isb')
-    superuser_perm = Cohort_Perms.objects.get(user=isb_superuser)
+    idc_superuser = User.objects.get(username='idc')
+    superuser_perm = Cohort_Perms.objects.get(user=idc_superuser)
     user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
     if not user_all_data_perm:
         Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
@@ -607,7 +607,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
 
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved')
+    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
 
     cohorts.has_private_cohorts = False
     shared_users = {}
