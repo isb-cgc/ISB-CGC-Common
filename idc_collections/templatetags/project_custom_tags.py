@@ -1,5 +1,5 @@
 from django.template.defaulttags import register
-from projects.models import Program
+from idc_collections.models import Program
 import string
 
 @register.simple_tag

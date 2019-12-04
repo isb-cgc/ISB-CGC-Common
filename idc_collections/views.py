@@ -31,7 +31,7 @@ from django.db import connection
 from django.core.urlresolvers import reverse
 from collections import OrderedDict
 from data_upload.models import UserUpload, UserUploadedFile
-from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project
+from idc_collections.models import User_Feature_Definitions, User_Feature_Counts, Program, Collection
 from sharing.service import create_share
 from googleapiclient.errors import HttpError
 
@@ -49,7 +49,7 @@ def public_program_list(request):
 
 @login_required
 def program_list(request, is_public=False):
-    template = 'projects/program_list.html'
+    template = 'idc_collections/program_list.html'
 
     ownedPrograms = request.user.program_set.filter(active=True)
     sharedPrograms = Program.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
@@ -67,7 +67,7 @@ def program_list(request, is_public=False):
 @login_required
 def program_detail(request, program_id=0):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
-    template = 'projects/program_detail.html'
+    template = 'idc_collections/program_detail.html'
 
     ownedPrograms = request.user.program_set.filter(active=True)
     sharedPrograms = Program.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)
@@ -85,7 +85,7 @@ def program_detail(request, program_id=0):
     program.mark_viewed(request)
     context = {
         'program': program,
-        'projects': program.project_set.filter(active=True),
+        'collections': program.idc_collections_set.filter(active=True),
         'shared': shared
     }
     return render(request, template, context)
@@ -101,9 +101,9 @@ def program_upload(request, existing_proj=False):
     google_projects = GoogleProject.objects.filter(user=request.user, active=1)
 
     if len(google_projects) == 0:
-        template = 'GenespotRE/register_gcp.html'
+        template = 'idc/register_gcp.html'
     else:
-        template = 'projects/program_upload.html'
+        template = 'idc_collections/program_upload.html'
 
     have_a_bucket = False
     for google_project in google_projects:
@@ -518,10 +518,10 @@ def program_delete(request, program_id=0):
         program.active = False
 
         # Find all associated project and deactivate those too
-        projects = Project.objects.filter(program=program)
-        for project in projects:
-            project.active = False
-            project.save()
+        collex = Collection.objects.filter(program=program)
+        for collection in collex:
+            collection.active = False
+            collection.save()
         program.save()
 
     return JsonResponse({
@@ -784,4 +784,4 @@ def system_data_dict(request):
     for key in sorted(attr_list_all.keys()):
         sorted_attr_list_all[key] = attr_list_all[key]
 
-    return render(request, 'projects/system_data_dict.html', {'attr_list_all': sorted_attr_list_all})
+    return render(request, 'idc_collections/system_data_dict.html', {'attr_list_all': sorted_attr_list_all})

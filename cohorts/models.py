@@ -26,7 +26,7 @@ from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from projects.models import Collection, Attribute, User_Feature_Definitions
+from idc_collections.models import Collection, Attribute, User_Feature_Definitions
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
@@ -57,7 +57,6 @@ class Cohort(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.TextField(null=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now=True)
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
 
