@@ -46,20 +46,6 @@ urlpatterns = [
     url(r'^download_filelist/(?P<cohort_id>\d+)/',  views.streaming_csv_view, name='download_filelist'),
     url(r'^download_ids/(?P<cohort_id>\d+)/',       views.cohort_samples_cases, name='download_ids'),
 
-
-    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)$',                 views.cohort_select_for_existing_workbook,  name="cohort_select_for_existing_workbook"),
-    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/create$',          views.cohort_create_for_existing_workbook,  name="cohort_create_for_existing_workbook"),
-    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/create/barcodes$', views.cohort_create_for_existing_workbook,  name="cohort_create_for_existing_workbook_barcodes"),
-    url(r'^workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/add$',             views.add_cohorts_to_worksheet,             name="add_cohorts_to_worksheet"),
-    url(r'^(?P<cohort_id>\d+)/workbook/(?P<workbook_id>\d+)/worksheet/(?P<worksheet_id>\d+)/remove$',
-                                                                                            views.remove_cohort_from_worksheet,         name="remove_cohort_from_worksheet"),
-
-    url(r'^select_cohort_and_create_workbook/$',                                   views.cohort_select_for_new_workbook,       name="cohort_select_for_new_workbook"),
-    url(r'^create_cohort_and_create_workbook/$',                                   views.cohort_create_for_new_workbook,       name="cohort_create_for_new_workbook"),
-    url(r'^create_cohort_and_create_workbook/barcodes/$',                          views.cohort_create_for_new_workbook,       name="cohort_create_for_new_workbook_barcodes"),
-    url(r'^save_cohort_for_workbook/$',                                            views.save_cohort_for_existing_workbook,    name="save_cohort_for_existing_workbook"),
-    url(r'^save_cohort_and_workbook/$',                                            views.save_cohort_for_new_workbook,         name="save_cohort_for_new_workbook"),
-
     url(r'^get_metadata_ajax/$',                                        views.get_metadata, name='metadata_count_ajax'),
     url(r'^filter_panel/(?P<program_id>\d+)/$',                         views.get_cohort_filter_panel, name='cohort_filter_panel'),
     url(r'^(?P<cohort_id>\d+)/filter_panel/(?P<program_id>\d+)/$',      views.get_cohort_filter_panel, name='cohort_filter_panel')
