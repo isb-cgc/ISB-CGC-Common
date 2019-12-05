@@ -1681,6 +1681,8 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                 "This functionality is currently being worked on and will become available in a future release."
             )
 
+        logger.debug("[STATUS] Returning response from cohort_filelist")
+
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
