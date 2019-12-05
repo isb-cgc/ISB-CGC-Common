@@ -475,7 +475,7 @@ def register_sa(request, user_id):
             }
 
             if request.GET.get('sa_name'):
-                template = 'GenespotRE/adjust_sa.html'
+                template = 'isb_cgc/adjust_sa.html'
                 sa_dict, sa_msgs = service_account_dict(user_id, request.GET.get('sa_name'))
                 # If there is an error message coming from DCF, which is distinct from exceptions (handled below),
                 # the traditional approach if to pop to user_gcp_list page.
