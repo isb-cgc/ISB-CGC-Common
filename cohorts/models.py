@@ -55,7 +55,9 @@ class CohortManager(models.Manager):
 
 class Cohort(models.Model):
     id = models.AutoField(primary_key=True)
-    name = models.TextField(null=True)
+    name = models.CharField(max_length=255, null=False, blank=True)
+    description = models.TextField(null=True, blank=True)
+    data_version = models.IntegerField(blank=False, null=False, default=1)
     active = models.BooleanField(default=True)
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
