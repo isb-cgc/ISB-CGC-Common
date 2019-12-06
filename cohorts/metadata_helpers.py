@@ -278,20 +278,30 @@ def fetch_build_data_attr(build, type=None):
                                     }
 
                         else:
-                            query = """
-                                SELECT DISTINCT {attr}
-                                FROM {data_table};
-                            """.format(attr=attr,data_table=data_table)
+                            if attr == 'disease_code':
+                                query = """
+                                    SELECT DISTINCT md.{attr}, mp.name
+                                    FROM {data_table} AS md, {program}_metadata_project mp
+                                    WHERE md.project_short_name = mp.project_short_name
+                                    ;
+                                """.format(attr=attr,data_table=data_table, program=program)
+                            else:
+                                query = """
+                                    SELECT DISTINCT {attr}
+                                    FROM {data_table};
+                                """.format(attr=attr, data_table=data_table)
 
                             cursor.execute(query)
 
                             for row in cursor.fetchall():
                                 val = "None" if not row[0] else row[0]
+                                tooltip = row[1].strip() if len(row) > 1 else ""
                                 if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                     METADATA_DATA_ATTR[build][attr]['values'][val] = {
                                         'displ_value': val,
                                         'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                        'name': val
+                                        'name': val,
+                                        'tooltip': tooltip
                                     }
 
                         if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
