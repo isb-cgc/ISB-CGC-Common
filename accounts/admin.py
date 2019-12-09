@@ -24,7 +24,6 @@ from allauth.socialaccount.models import SocialToken, SocialApp
 from allauth.socialaccount.admin import SocialTokenAdmin, SocialAppAdmin
 
 
-
 class NIH_UserAdmin(admin.ModelAdmin):
     list_display = (
         'user',
@@ -49,11 +48,13 @@ class BucketAdmin(admin.ModelAdmin):
         'bucket_permissions'
     )
 
+
 class GoogleProjectAdmin(admin.ModelAdmin):
     list_display = (
         'project_name',
         'project_id'
     )
+
 
 @admin.register(ServiceAccount)
 class ServiceAccountAdmin(admin.ModelAdmin):
@@ -64,6 +65,7 @@ class ServiceAccountAdmin(admin.ModelAdmin):
         'active'
     )
 
+
 @admin.register(ServiceAccountAuthorizedDatasets)
 class ServiceAccountAuthorizedDatasetsAdmin(admin.ModelAdmin):
     list_display = (
@@ -71,6 +73,7 @@ class ServiceAccountAuthorizedDatasetsAdmin(admin.ModelAdmin):
         'authorized_date',
         'authorized_dataset'
     )
+
 
 @admin.register(AuthorizedDataset)
 class AuthorizedDatasetAdmin(admin.ModelAdmin):
@@ -80,6 +83,7 @@ class AuthorizedDatasetAdmin(admin.ModelAdmin):
         'acl_google_group',
         'public'
     )
+
 
 admin.site.register(NIH_User, NIH_UserAdmin)
 admin.site.register(Bucket, BucketAdmin)

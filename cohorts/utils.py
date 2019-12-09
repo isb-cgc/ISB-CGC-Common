@@ -18,7 +18,6 @@ from __future__ import absolute_import
 from builtins import map
 from builtins import next
 from builtins import str
-from past.builtins import basestring
 from past.utils import old_div
 from builtins import object
 

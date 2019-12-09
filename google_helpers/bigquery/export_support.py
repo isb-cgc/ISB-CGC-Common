@@ -248,7 +248,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     export_type, self.bucket)
             else:
                 # Check the file
-                exported_file = get_storage_resource().objects().get(bucket=self.bucket_path, object=self.file_name).execute()
+                exported_file = get_storage_resource(True).objects().get(bucket=self.bucket_path, object=self.file_name).execute()
                 if not exported_file:
                     msg = "Export file {}/{} not found".format(self.bucket_path, self.file_name)
                     logger.error("[ERROR] ".format({msg}))
