@@ -13,6 +13,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+
 from __future__ import absolute_import
 
 from builtins import str
@@ -1324,6 +1325,8 @@ def decode_token_chunk(token, index):
     i64 = tokens_b64[index]
     padded = i64 + '=' * (-len(i64) % 4)  # Pad with =; Weird Python % with -length
     token_decoded = urlsafe_b64decode(padded.encode("ascii"))
+    if type(token_decoded) is bytes:
+        token_decoded = token_decoded.decode('utf-8')
     token_dict = json_loads(token_decoded)
     return token_decoded, token_dict
 
@@ -1484,6 +1487,8 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
     i64 = refresh_tokens_b64[1]
     padded = i64 + '=' * (-len(i64) % 4)  # Pad with =; Weird Python % with -length
     refresh_token_decoded = urlsafe_b64decode(padded.encode("ascii"))
+    if type(refresh_token_decoded) is bytes:
+        refresh_token_decoded = refresh_token_decoded.decode('utf-8')
     refresh_token_dict = json_loads(refresh_token_decoded)
 
     # A refresh key:
