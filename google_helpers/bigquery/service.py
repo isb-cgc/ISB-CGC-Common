@@ -30,9 +30,12 @@ BIGQUERY_SCOPES = ['https://www.googleapis.com/auth/bigquery',
                    'https://www.googleapis.com/auth/bigquery.insertdata']
 
 
-def get_bigquery_service():
+# This method uses the WebApp runtime Service Account to run queries against the WebApp's project
+def get_bigquery_service(for_user_project=False):
 
-    credentials = GoogleCredentials.from_stream(settings.GOOGLE_APPLICATION_CREDENTIALS).create_scoped(BIGQUERY_SCOPES)
+    creds_file = settings.GOOGLE_APPLICATION_CREDENTIALS if not for_user_project else settings.MONITORING_SA_ACCESS_CREDENTIALS
+
+    credentials = GoogleCredentials.from_stream(creds_file).create_scoped(BIGQUERY_SCOPES)
     http = httplib2.Http()
     http = credentials.authorize(http)
     service = discovery.build('bigquery', 'v2', http=http, cache_discovery=False)
