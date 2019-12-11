@@ -254,45 +254,21 @@ def fetch_build_data_attr(build, type=None):
                                 'values': {}
                             }
 
-                        if type == 'dicom':
-                            if type == 'dicom':
-                                attr_facet = {}
-                                attr_facet[attr] = ""
-                                facets = build_solr_facets(attr_facet)
+                        query = """
+                            SELECT DISTINCT {attr}
+                            FROM {data_table};
+                        """.format(attr=attr,data_table=data_table)
 
-                                # We fetch the DICOM range from Solr
-                                result = query_solr_and_format_result({
-                                    "collection": "tcia_images",
-                                    "query_string": "*:*",
-                                    "facets": facets,
-                                    "limit": 0,
-                                    "counts_only": True
-                                })
+                        cursor.execute(query)
 
-                            for val in result['facets'][attr]:
-                                if val not in METADATA_DATA_ATTR[build][attr]['values']:
-                                    METADATA_DATA_ATTR[build][attr]['values'][val] = {
-                                        'displ_value': val,
-                                        'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                        'name': val
-                                    }
-
-                        else:
-                            query = """
-                                SELECT DISTINCT {attr}
-                                FROM {data_table};
-                            """.format(attr=attr,data_table=data_table)
-
-                            cursor.execute(query)
-
-                            for row in cursor.fetchall():
-                                val = "None" if not row[0] else row[0]
-                                if val not in METADATA_DATA_ATTR[build][attr]['values']:
-                                    METADATA_DATA_ATTR[build][attr]['values'][val] = {
-                                        'displ_value': val,
-                                        'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                        'name': val
-                                    }
+                        for row in cursor.fetchall():
+                            val = "None" if not row[0] else row[0]
+                            if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                                METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                                    'displ_value': val,
+                                    'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
+                                    'name': val
+                                }
 
                         if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
                             METADATA_DATA_ATTR[build][attr]['values']['None'] = {
