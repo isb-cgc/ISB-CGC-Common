@@ -237,7 +237,11 @@ def fetch_build_data_attr(build, type=None):
             cursor = db.cursor()
 
             for program in Program.objects.filter(is_public=True,active=True):
+                program_metadata = fetch_metadata_value_set(program.id)
+                disease_code_dict = None
 
+                if program_metadata and 'disease_code' in program_metadata and 'values' in program_metadata['disease_code']:
+                    disease_code_dict =  program_metadata['disease_code']['values']
                 # MySQL text searches are case-insensitive, so even if our database has 'hg' and not 'HG' this will
                 # return the right tables, should they exist
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
@@ -254,48 +258,43 @@ def fetch_build_data_attr(build, type=None):
                                 'values': {}
                             }
 
-                        if type == 'dicom':
-                            if type == 'dicom':
-                                attr_facet = {}
-                                attr_facet[attr] = ""
-                                facets = build_solr_facets(attr_facet)
-
-                                # We fetch the DICOM range from Solr
-                                result = query_solr_and_format_result({
-                                    "collection": "tcia_images",
-                                    "query_string": "*:*",
-                                    "facets": facets,
-                                    "limit": 0,
-                                    "counts_only": True
+                        if type == 'dicom' and program.name == 'TCGA':
+                            attr_facet = {}
+                            attr_facet[attr] = ""
+                            facets = build_solr_facets(attr_facet)
+                            # We fetch the DICOM range from Solr
+                            result = query_solr_and_format_result({
+                                "collection": "tcia_images",
+                                "query_string": "*:*",
+                                "facets": facets,
+                                "limit": 0,
+                                "counts_only": True
                                 })
-
                             for val in result['facets'][attr]:
                                 if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                                    tooltip = ''
+                                    if attr == 'disease_code':
+                                        if val in disease_code_dict:
+                                            tooltip = disease_code_dict[val]['tooltip']
+
                                     METADATA_DATA_ATTR[build][attr]['values'][val] = {
                                         'displ_value': val,
                                         'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                        'name': val
+                                        'name': val,
+                                        'tooltip': tooltip
                                     }
 
                         else:
-                            if attr == 'disease_code':
-                                query = """
-                                    SELECT DISTINCT md.{attr}, mp.name
-                                    FROM {data_table} AS md, {program}_metadata_project mp
-                                    WHERE md.project_short_name = mp.project_short_name
-                                    ;
-                                """.format(attr=attr,data_table=data_table, program=program)
-                            else:
-                                query = """
+                            query = """
                                     SELECT DISTINCT {attr}
                                     FROM {data_table};
                                 """.format(attr=attr, data_table=data_table)
-
                             cursor.execute(query)
-
                             for row in cursor.fetchall():
                                 val = "None" if not row[0] else row[0]
-                                tooltip = row[1].strip() if len(row) > 1 else ""
+                                tooltip = ''
+                                if attr == 'disease_code' and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
+                                    tooltip = disease_code_dict[val]['tooltip']
                                 if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                     METADATA_DATA_ATTR[build][attr]['values'][val] = {
                                         'displ_value': val,
@@ -308,9 +307,9 @@ def fetch_build_data_attr(build, type=None):
                             METADATA_DATA_ATTR[build][attr]['values']['None'] = {
                                 'displ_value': 'None',
                                 'value': 'None',
-                                'name': 'None'
+                                'name': 'None',
+                                'tooltip': ''
                             }
-
         return copy.deepcopy(METADATA_DATA_ATTR[build])
 
     except Exception as e:
