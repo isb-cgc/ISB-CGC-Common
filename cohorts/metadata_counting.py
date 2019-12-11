@@ -24,6 +24,7 @@ from time import sleep
 import django
 import re
 from .metadata_helpers import *
+from metadata_utils import *
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
 from google_helpers.bigquery.service import authorize_credentials_with_Google
 from google_helpers.bigquery.cohort_support import BigQuerySupport
