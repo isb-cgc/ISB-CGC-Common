@@ -1650,13 +1650,16 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                 'count': 0
                             }
                         metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
-                    metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in metadata_data_attr[attr]['values']]
 
             # Any value which didn't come back in the main results still needs to have a count of zero.
             for attr in metadata_data_attr:
+                attr_values = []
                 for val in metadata_data_attr[attr]['values']:
-                    if 'count' not in val or not val['count']:
-                        val['count'] = 0
+                    attr_val = metadata_data_attr[attr]['values'][val]
+                    if 'count' not in attr_val or not attr_val['count']:
+                        attr_val['count'] = 0
+                    attr_values.append(attr_val)
+                metadata_data_attr[attr]['values'] = attr_values
 
         for attr_build in metadata_data_attr_builds:
             if attr_build != build:
