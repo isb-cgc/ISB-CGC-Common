@@ -269,7 +269,7 @@ def fetch_build_data_attr(build, type=None):
                                 "facets": facets,
                                 "limit": 0,
                                 "counts_only": True
-                                })
+                            })
                             for val in result['facets'][attr]:
                                 if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                     tooltip = ''
@@ -279,10 +279,11 @@ def fetch_build_data_attr(build, type=None):
 
                                     METADATA_DATA_ATTR[build][attr]['values'][val] = {
                                         'displ_value': val,
-                                        'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
+                                        'value': re.sub(r"[^A-Za-z0-9_\-]", "", re.sub(r"\s+", "-", val)),
                                         'name': val,
                                         'tooltip': tooltip
                                     }
+
 
                         else:
                             query = """
