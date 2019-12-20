@@ -46,7 +46,7 @@ class Program(models.Model):
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
     objects = ProgramManager()
-    owner = models.ForeignKey(User)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
     is_public = models.BooleanField(default=False)
     shared = models.ManyToManyField(Shared_Resource)
     
@@ -84,7 +84,7 @@ class Collection(models.Model):
     active = models.BooleanField(default=True)
     is_public = models.BooleanField(default=False)
     objects = ProgramManager()
-    owner = models.ForeignKey(User)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
     # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ManyToManyField(Program)
 
@@ -123,7 +123,7 @@ class Attribute(models.Model):
 
 class Atrribute_Display_Values(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
-    attribute = models.ForeignKey(Attribute, null=False, blank=False)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     raw_value = models.CharField(max_length=256, null=False, blank=False)
     display_value = models.CharField(max_length=256, null=False, blank=False)
 
@@ -132,7 +132,7 @@ class Atrribute_Display_Values(models.Model):
 
 
 class User_Feature_Definitions(models.Model):
-    collection = models.ForeignKey(Collection, null=False)
+    collection = models.ForeignKey(Collection, null=False, on_delete=models.CASCADE)
     feature_name = models.CharField(max_length=200)
     bq_map_id = models.CharField(max_length=200)
     is_numeric = models.BooleanField(default=False)
@@ -140,7 +140,7 @@ class User_Feature_Definitions(models.Model):
     
 
 class User_Feature_Counts(models.Model):
-    feature = models.ForeignKey(User_Feature_Definitions, null=False)
+    feature = models.ForeignKey(User_Feature_Definitions, null=False, on_delete=models.CASCADE)
     value = models.TextField()
     count = models.IntegerField()
 

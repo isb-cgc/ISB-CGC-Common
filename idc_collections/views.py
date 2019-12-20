@@ -28,7 +28,7 @@ from django.db.models import Q
 from django.http import JsonResponse, HttpResponseNotFound
 from django.conf import settings
 from django.db import connection
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from collections import OrderedDict
 from data_upload.models import UserUpload, UserUploadedFile
 from idc_collections.models import User_Feature_Definitions, User_Feature_Counts, Program, Collection

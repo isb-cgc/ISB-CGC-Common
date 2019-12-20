@@ -40,7 +40,7 @@ from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.db.models import Count
 from django.http import HttpResponse, JsonResponse
 from django.http import StreamingHttpResponse
@@ -177,15 +177,8 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
             'value': int(cohort['id']),
             'label': escape(cohort['name']).encode('utf8')
         })
-    workbook = None
-    worksheet = None
+        
     previously_selected_cohort_ids = []
-    if workbook_id != 0:
-        workbook = Workbook.objects.get(owner=request.user, id=workbook_id)
-        worksheet = workbook.worksheet_set.get(id=worksheet_id)
-        worksheet_cohorts = worksheet.worksheet_cohort_set.all()
-        for wc in worksheet_cohorts :
-            previously_selected_cohort_ids.append(wc.cohort_id)
 
     return render(request, 'cohorts/cohort_list.html', {'request': request,
                                                         'cohorts': cohorts,
@@ -195,11 +188,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
                                                         'base_url': settings.BASE_URL,
                                                         'base_api_url': settings.BASE_API_URL,
                                                         'is_public': is_public,
-                                                        'workbook': workbook,
-                                                        'worksheet': worksheet,
-                                                        'previously_selected_cohort_ids' : previously_selected_cohort_ids,
-                                                        'create_workbook': create_workbook,
-                                                        'from_workbook': bool(workbook),
+                                                        'previously_selected_cohort_ids' : previously_selected_cohort_ids
                                                         })
 
 
