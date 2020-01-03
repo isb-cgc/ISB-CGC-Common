@@ -417,7 +417,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 if source:
                     redirect_url = reverse('cohort_details', args=[source])
                 else:
-                    redirect_url = reverse('cohort')
+                    redirect_url = reverse('explore_data')
             else:
                 if deactivate_sources:
                     parent.active = False
