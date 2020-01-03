@@ -315,13 +315,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
     return render(request, template, template_values)
 
 
-'''
-Saves a cohort, adds the new cohort to an existing worksheet, then redirected back to the worksheet display
-'''
-@login_required
-def save_cohort_for_existing_workbook(request):
-    return save_cohort(request=request, workbook_id=request.POST.get('workbook_id'), worksheet_id=request.POST.get("worksheet_id"))
-
 @login_required
 @csrf_protect
 def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=False):
