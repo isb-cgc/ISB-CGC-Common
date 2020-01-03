@@ -161,8 +161,8 @@ class Source(models.Model):
         (CLONE, 'Clone')
     )
 
-    parent = models.ForeignKey(Cohort, null=True, blank=True, related_name='source_parent')
-    cohort = models.ForeignKey(Cohort, null=False, blank=False, related_name='source_cohort')
+    parent = models.ForeignKey(Cohort, null=True, blank=True, related_name='source_parent', on_delete=models.CASCADE)
+    cohort = models.ForeignKey(Cohort, null=False, blank=False, related_name='source_cohort', on_delete=models.CASCADE)
     type = models.CharField(max_length=10, choices=SOURCE_TYPES)
     notes = models.CharField(max_length=1024, blank=True)
 
@@ -174,20 +174,20 @@ class Cohort_Perms(models.Model):
         (READER, 'Reader'),
         (OWNER, 'Owner')
     )
-    cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    user = models.ForeignKey(User, null=False, blank=True)
+    cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, null=False, blank=True, on_delete=models.CASCADE)
     perm = models.CharField(max_length=10, choices=PERMISSIONS, default=READER)
 
 
 class Filters(models.Model):
-    resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    attribute = models.ForeignKey(Attribute, null=False, blank=False)
+    resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     value = models.CharField(max_length=256, null=False, blank=False)
-    feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True)
+    feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
 
 
 class Cohort_Comments(models.Model):
-    cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment')
-    user = models.ForeignKey(User, null=False, blank=False)
+    cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment', on_delete=models.CASCADE)
+    user = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
     date_created = models.DateTimeField(auto_now_add=True)
     content = models.CharField(max_length=1024, null=False)

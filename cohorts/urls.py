@@ -20,10 +20,7 @@ from . import views
 
 urlpatterns = [
     url(r'^$',                                      views.cohorts_list, name='cohort_list'),
-    url(r'^public',                                 views.public_cohort_list, name='public_cohort_list'),
-    url(r'^new_cohort/',                            views.cohort_detail, name='cohort'),
-    url(r'^new_cohort/barcodes/',                   views.cohort_detail, name='cohort_barcodes'),
-    url(r'^validate_barcodes/',                     views.validate_barcodes, name='validate_barcodes'),
+    url(r'^api/$',                                  views.cohorts_list, name='cohort_list'),
     url(r'^(?P<cohort_id>\d+)/$',                   views.cohort_detail, name='cohort_details'),
     url(r'^filelist/(?P<cohort_id>\d+)/$',          views.cohort_filelist, name='cohort_filelist'),
     url(r'^filelist/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
@@ -32,9 +29,10 @@ urlpatterns = [
     url(r'^filelist_ajax/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
                                                     views.cohort_filelist_ajax, name='cohort_filelist_ajax_panel'),
     url(r'^save_cohort/',                           views.save_cohort, name='save_cohort'),
+    url(r'^api/save_cohort/',                           views.save_cohort, name='save_cohort'),
     url(r'^export/(?P<cohort_id>\d+)/(?P<export_type>cohort|file_manifest)/$',
                                                     views.export_data, name='export_data'),
-    url(r'^save_cohort_from_plot/',                 views.save_cohort_from_plot, name='save_cohort_from_plot'),
+    
     url(r'^delete_cohort/',                         views.delete_cohort, name='delete_cohort'),
     url(r'^clone_cohort/(?P<cohort_id>\d+)/',       views.clone_cohort, name='clone_cohort'),
     url(r'^share_cohort/$',                         views.share_cohort, name='share_cohorts'),

@@ -53,7 +53,7 @@ class Migration(migrations.Migration):
                 ('status', models.CharField(default=b'Pending', max_length=50)),
                 ('jobURL', models.CharField(max_length=250, null=True)),
                 ('key', models.CharField(default=data_upload.models.generate_upload_key, max_length=64)),
-                ('owner', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('owner', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -65,7 +65,7 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(serialize=False, primary_key=True)),
                 ('bucket', models.CharField(max_length=155, null=True)),
                 ('file', models.FileField(upload_to=data_upload.models.get_user_bucket)),
-                ('upload', models.ForeignKey(to='data_upload.UserUpload')),
+                ('upload', models.ForeignKey(to='data_upload.UserUpload', on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -74,7 +74,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='controlledfilefield',
             name='type',
-            field=models.ForeignKey(to='data_upload.FieldDataType'),
+            field=models.ForeignKey(to='data_upload.FieldDataType', on_delete=models.CASCADE),
             preserve_default=True,
         ),
     ]
