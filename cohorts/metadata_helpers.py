@@ -601,6 +601,12 @@ def get_preformatted_values(program=None):
                     PREFORMATTED_VALUES[str(pubprog['id'])].append(row[0])
                 cursor.close()
 
+            # Bug ticket 2697: pathologic stage display incorrect because 'pathologic stage'
+            # not included in the preformatted values dataset. This is a fix after the database
+            # has been read
+            for key in PREFORMATTED_VALUES:
+                PREFORMATTED_VALUES.get(key).append('pathologic_stage')
+
         if program not in PREFORMATTED_VALUES:
             return []
 
