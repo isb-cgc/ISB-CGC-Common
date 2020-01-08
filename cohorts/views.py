@@ -414,10 +414,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
             # Do not allow 0 sample cohorts
             if not found_samples:
                 messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
-                if source:
-                    redirect_url = reverse('cohort_details', args=[source])
-                else:
-                    redirect_url = reverse('explore_data')
+                redirect_url = reverse('cohort_details', args=[source]) if source else reverse('explore_data')
             else:
                 if deactivate_sources:
                     parent.active = False
