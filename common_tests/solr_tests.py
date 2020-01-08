@@ -10,7 +10,7 @@ class TestSolrHelpers(unittest.TestCase):
 
         query_str = build_solr_query({"disease_code": ["BRCA", "LUAD"]})
 
-        self.assertEqual(query_str, "(+disease_code:(BRCA LUAD))")
+        self.assertEqual(query_str, " (+disease_code:(BRCA LUAD))")
 
 
 if __name__ == '__main__':
