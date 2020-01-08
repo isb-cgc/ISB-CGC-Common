@@ -321,9 +321,7 @@ def fetch_build_data_attr(build, type=None):
         if db and db.open: db.close()
 
 
-
 def fetch_program_data_types(program, for_display=False):
-
     db = None
     cursor = None
 
