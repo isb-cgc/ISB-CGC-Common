@@ -637,7 +637,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     for cohort in cohort_id_names:
         cohort_listing.append({
             'value': int(cohort['id']),
-            'label': escape(cohort['name']).encode('utf8')
+            'label': escape(cohort['name'])
         })
     workbook = None
     worksheet = None
