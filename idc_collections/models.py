@@ -66,13 +66,13 @@ class Program(models.Model):
         programs = programs.distinct()
 
         return programs
-    
+
     @classmethod
     def get_public_programs(cls):
         return cls.objects.filter(is_public=True, active=True)
 
     def __str__(self):
-        return self.name
+        return "{} ({}), {}".format(self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email))
 
 
 class Collection(models.Model):
@@ -83,7 +83,7 @@ class Collection(models.Model):
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
     is_public = models.BooleanField(default=False)
-    objects = ProgramManager()
+    objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ManyToManyField(Program)
@@ -92,7 +92,10 @@ class Collection(models.Model):
         return self.program.all()
 
     def __str__(self):
-        return self.name
+        return "{} ({}), {}, Programs: {}".format(
+            self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
+            str(self.program.all())
+        )
 
 
 class Attribute(models.Model):
@@ -103,16 +106,17 @@ class Attribute(models.Model):
         (CATEGORICAL, 'Categorical')
     )
     id = models.AutoField(primary_key=True, null=False, blank=False)
-    name = models.CharField(max_length=40, null=False, blank=False)
+    name = models.CharField(max_length=64, null=False, blank=False)
     display_name = models.CharField(max_length=100)
     description = models.TextField(null=True, blank=True)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CATEGORICAL)
     active = models.BooleanField(default=True)
     is_cross_collex = models.BooleanField(default=False)
+    preformatted_values = models.BooleanField(default=False)
     collections = models.ManyToManyField(Collection)
 
     def get_display_values(self):
-        display_vals = self.attribute_display_values_set()
+        display_vals = self.attribute_display_values_set.all()
         result = {}
 
         for val in display_vals:
@@ -120,8 +124,12 @@ class Attribute(models.Model):
 
         return result
 
+    def __str__(self):
+        return "{} ({}), Type: {}, Found in: {}, Display values: {}".format(
+            self.name, self.display_name, self.data_type, self.collections.all(), self.attribute_display_values_set.all())
 
-class Atrribute_Display_Values(models.Model):
+
+class Attribute_Display_Values(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     raw_value = models.CharField(max_length=256, null=False, blank=False)
@@ -129,6 +137,9 @@ class Atrribute_Display_Values(models.Model):
 
     class Meta(object):
         unique_together = (("raw_value", "attribute"),)
+
+    def __str__(self):
+        return "{} - {}".format(self.raw_value, self.display_value)
 
 
 class User_Feature_Definitions(models.Model):
