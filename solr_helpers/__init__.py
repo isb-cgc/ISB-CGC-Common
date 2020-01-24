@@ -22,6 +22,7 @@ BMI_MAPPING = {
     'obese': '[30 TO *]'
 }
 
+
 # Combined query and result formatter method
 # optionally will normalize facet counting so the response structure is the same for facets+docs and just facets
 def query_solr_and_format_result(query_settings, normalize_facets=True, normalize_groups=True):
