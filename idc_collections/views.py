@@ -19,13 +19,14 @@ from copy import deepcopy
 import re
 import sys
 from django.shortcuts import render, redirect
+from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
 from django.contrib import messages
 from django.conf import settings
 from django.db.models import Q
-from django.http import JsonResponse, HttpResponseNotFound
+from django.http import JsonResponse, HttpResponseNotFound, HttpResponse
 from django.conf import settings
 from django.db import connection
 from django.urls import reverse
@@ -48,7 +49,7 @@ def public_program_list(request):
     return program_list(request, is_public=True)
 
 @login_required
-def program_list(request, is_public=False):
+def program_list(request, is_public=False, is_API=False):
     template = 'idc_collections/program_list.html'
 
     ownedPrograms = request.user.program_set.filter(active=True)
@@ -62,10 +63,30 @@ def program_list(request, is_public=False):
         'public_programs': Program.objects.filter(is_public=True, active=True),
         'is_public': is_public
     }
+
     return render(request, template, context)
 
+
+def public_program_list_api(request):
+
+    public_programs = Program.objects.filter(is_public=True)
+
+    public_programs_json = serializers.serialize('json', public_programs)
+
+    programs = []
+    for element in json.loads(public_programs_json):
+        program = {
+            'name': element['fields']['name'],
+            'short_name': element['fields']['short_name'],
+            'description': element['fields']['description'],
+            'active': element['fields']['active']
+        }
+        programs.append(program)
+    return HttpResponse(programs, content_type='application/json')
+
+
 @login_required
-def program_detail(request, program_id=0):
+def program_detail(request, program_id=0, is_API=False):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     template = 'idc_collections/program_detail.html'
 
@@ -90,7 +111,27 @@ def program_detail(request, program_id=0):
     }
     return render(request, template, context)
 
-@login_required
+#@login_required
+def program_detail_api(request, program_name=None ):
+    # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
+    programs = Program.objects.filter(is_public=True, active=True).distinct()
+    program = programs.get(short_name=program_name)
+
+    public_collections = program.collection_set.all()
+
+    collections_json = serializers.serialize('json',public_collections)
+    colls =  []
+    for element in json.loads(collections_json):
+        coll = {
+            'name': element['fields']['name'],
+            'short_name': element['fields']['short_name'],
+            'description': element['fields']['description'],
+            'active': element['fields']['active']
+        }
+        colls.append(coll)
+    return HttpResponse(colls, content_type='application/json')
+
+#@login_required
 def program_upload_existing(request):
     return program_upload(request, existing_proj=True)
 
