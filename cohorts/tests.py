@@ -13,11 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 from django.test import TestCase
 from django.contrib.auth.models import AnonymousUser, User
 
 from cohorts.models import Cohort
+
 
 class ModelTest(TestCase):
     def setUp(self):
@@ -31,3 +31,17 @@ class ModelTest(TestCase):
     def test_make_cohort(self):
         print("A test to make a cohort!")
         self.assertEqual(self.test_cohort_owner.username, 'test_user')
+
+
+class ViewTest(TestCase):
+    def setUp(self):
+        # We need 2 users to test permissions
+        self.test_cohort_owner = User.objects.create_user(username='test_user', email='test_user_email@isb-cgc.org',
+                                                      password='itsasecrettoeveryone')
+
+        self.test_other_user = User.objects.create_user(username='test_user_2', email='test_user_2_email@isb-cgc.org',
+                                                      password='itsasecrettoeveryone')
+
+    def test_create_for_new_workbook(self):
+        print("Testing cohort view")
+        self.assertEqual("true", "true")
