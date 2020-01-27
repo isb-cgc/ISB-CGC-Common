@@ -21,8 +21,9 @@ from time import sleep
 from uuid import uuid4
 import copy
 from django.conf import settings
-from google_helpers.bigquery.service import get_bigquery_service, get_user_bigquery_service
+from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.bigquery.abstract import BigQueryABC
+from googleapiclient.errors import HttpError
 
 logger = logging.getLogger('main_logger')
 
@@ -68,7 +69,7 @@ class BigQuerySupport(BigQueryABC):
         self.dataset_id = dataset_id
         # Destination table
         self.table_id = table_id
-        self.bq_service = get_bigquery_service() if not user_project else get_user_bigquery_service()
+        self.bq_service = get_bigquery_service(user_project)
         self.table_schema = table_schema
 
     def _build_request_body_from_rows(self, rows):
@@ -109,7 +110,13 @@ class BigQuerySupport(BigQueryABC):
     # Get all the tables for this object's project ID
     def get_tables(self):
         bq_tables = []
-        datasets = self.bq_service.datasets().list(projectId=self.project_id).execute(num_retries=5)
+
+        try:
+            datasets = self.bq_service.datasets().list(projectId=self.project_id).execute(num_retries=5)
+        except HttpError as e:
+            logger.warning("[WARNING] Unable to access BQ datasets and tables for GCP project {}!".format(self.project_id))
+            logger.warning("[WARNING] The monitoring service account may have been removed, or the project may have been deleted. Skipping.")
+            datasets = None
 
         if datasets and 'datasets' in datasets:
             for dataset in datasets['datasets']:
