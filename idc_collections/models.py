@@ -105,7 +105,7 @@ class SolrCollection(models.Model):
 
     def get_collection_attr(self, for_faceting=True):
         if for_faceting:
-            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL)
+            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True)
         return self.attribute_set.all()
 
     class Meta(object):
