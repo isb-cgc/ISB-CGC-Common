@@ -637,7 +637,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     for cohort in cohort_id_names:
         cohort_listing.append({
             'value': int(cohort['id']),
-            'label': escape(cohort['name']).encode('utf8')
+            'label': escape(cohort['name'])
         })
     workbook = None
     worksheet = None
@@ -1088,7 +1088,17 @@ def delete_cohort(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = 'cohort_list'
     cohort_ids = request.POST.getlist('id')
-    Cohort.objects.filter(id__in=cohort_ids).update(active=False)
+    cohorts_not_deleted = {}
+    for cohort in cohort_ids:
+        info = delete_cohort(request.user, cohort)
+        if 'message' in info:
+            cohorts_not_deleted[cohort] = info
+
+    if len(cohorts_not_deleted):
+        msg_base = "cohort ID {}: {}"
+        msgs = [msg_base.format(x, cohorts_not_deleted[x]['message']) for x in cohorts_not_deleted]
+        messages.error(request, "The following cohorts couldn't be deleted (reasons included): {}".format("\n".join(msgs)))
+
     return redirect(reverse(redirect_url))
 
 
@@ -1650,13 +1660,16 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                 'count': 0
                             }
                         metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
-                    metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in metadata_data_attr[attr]['values']]
 
             # Any value which didn't come back in the main results still needs to have a count of zero.
             for attr in metadata_data_attr:
+                attr_values = []
                 for val in metadata_data_attr[attr]['values']:
-                    if 'count' not in val or not val['count']:
-                        val['count'] = 0
+                    attr_val = metadata_data_attr[attr]['values'][val]
+                    if 'count' not in attr_val or not attr_val['count']:
+                        attr_val['count'] = 0
+                    attr_values.append(attr_val)
+                metadata_data_attr[attr]['values'] = attr_values
 
         for attr_build in metadata_data_attr_builds:
             if attr_build != build:
@@ -2288,7 +2301,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
-                bcs = BigQueryExportFileList(bq_proj_id, dataset, table)
+                bcs = BigQueryExportFileList(bq_proj_id, dataset, table, user_project=True)
                 result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
@@ -2350,11 +2363,11 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
 
             # Export the data
             if export_dest == 'table':
-                bcs = BigQueryExportCohort(bq_proj_id, dataset, table)
+                bcs = BigQueryExportCohort(bq_proj_id, dataset, table, user_project=True)
                 result = bcs.export_cohort_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
-                bcs = BigQueryExportCohort(bq_proj_id, None, None, None, gcs_bucket, file_name)
+                bcs = BigQueryExportCohort(bq_proj_id, None, None, None, gcs_bucket, file_name, user_project=True)
                 result = bcs.export_cohort_to_gcs(file_format, query_string, filter_params)
             else:
                 raise Exception("Cohort export destination not recognized.")

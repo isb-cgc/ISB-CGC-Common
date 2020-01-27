@@ -18,7 +18,6 @@ from __future__ import absolute_import
 from builtins import map
 from builtins import next
 from builtins import str
-from past.builtins import basestring
 from past.utils import old_div
 from builtins import object
 
@@ -32,6 +31,39 @@ from django.contrib.auth.models import User
 from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+
+
+def delete_cohort(user, cohort_id):
+    cohort_info = None
+    cohort = None
+
+    try:
+        cohort = Cohort.objects.get(id=cohort_id)
+    except ObjectDoesNotExist:
+        cohort_info = {
+            'message': "A cohort with the ID {} was not found!".format(cohort_id),
+        }
+    try:
+        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
+    except ObjectDoesNotExist:
+        cohort_info = {
+            'message': "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id),
+            'delete_permission': False
+        }
+    if not cohort_info:
+        try:
+            cohort = Cohort.objects.get(id=cohort_id, active=True)
+            cohort.active = False
+            cohort.save()
+            cohort_info = {
+                'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
+                'data': {'filters': cohort.get_current_filters(unformatted=True)},
+            }
+        except ObjectDoesNotExist:
+            cohort_info = {
+                'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
+            }
+    return cohort_info
 
 
 def create_cohort(user, filters=None, name=None, source_id=None, case_insens=True):
