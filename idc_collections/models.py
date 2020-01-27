@@ -98,12 +98,30 @@ class Collection(models.Model):
         )
 
 
+class SolrCollection(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False, unique=True)
+    version = models.CharField(max_length=4, null=False, blank=False)
+
+    def get_collection_attr(self, for_faceting=True):
+        if for_faceting:
+            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True)
+        return self.attribute_set.all()
+
+    class Meta(object):
+        unique_together = (("name", "version"),)
+
+
 class Attribute(models.Model):
     CONTINUOUS_NUMERIC = 'N'
     CATEGORICAL = 'C'
+    TEXT = 'T'
+    STRING = 'S'
     DATA_TYPES = (
         (CONTINUOUS_NUMERIC, 'Continuous Numeric'),
-        (CATEGORICAL, 'Categorical')
+        (CATEGORICAL, 'Categorical String'),
+        (TEXT, 'Text'),
+        (STRING, 'String')
     )
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=64, null=False, blank=False)
@@ -114,6 +132,7 @@ class Attribute(models.Model):
     is_cross_collex = models.BooleanField(default=False)
     preformatted_values = models.BooleanField(default=False)
     collections = models.ManyToManyField(Collection)
+    solr_collections = models.ManyToManyField(SolrCollection)
 
     def get_display_values(self):
         display_vals = self.attribute_display_values_set.all()
