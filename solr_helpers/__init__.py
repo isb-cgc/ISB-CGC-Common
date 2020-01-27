@@ -4,7 +4,7 @@ import requests
 import logging
 import json
 
-from metadata_utils import MOLECULAR_CATEGORIES
+from metadata.query_helpers import MOLECULAR_CATEGORIES
 
 logger = logging.getLogger('main_logger')
 
