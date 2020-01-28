@@ -5,7 +5,7 @@ try:
 except ImportError:
     print("[ERROR] Failed to import test subject: {}".format("metadata_utils"))
 
-
+'''
 class TestMetadataUtils(unittest.TestCase):
 
     def test_normalize_bmi(self):
@@ -54,9 +54,7 @@ class TestMetadataUtils(unittest.TestCase):
         #print(values)
         result = sql_simple_number_by_200(values, "White Blood Cell")
         self.assertEqual(result, " (White Blood Cell IS NULL) or (White Blood Cell <= 200)")
-
-
-
+'''
 
 if __name__ == '__main__':
     unittest.main()
