@@ -56,6 +56,7 @@ from .file_helpers import *
 from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from accounts.sa_utils import auth_dataset_whitelists_for_user
+from .utils import delete_cohort as utils_delete_cohort
 
 BQ_ATTEMPT_MAX = 10
 
@@ -1090,7 +1091,7 @@ def delete_cohort(request):
     cohort_ids = request.POST.getlist('id')
     cohorts_not_deleted = {}
     for cohort in cohort_ids:
-        info = delete_cohort(request.user, cohort)
+        info = utils_delete_cohort(request.user, cohort)
         if 'message' in info:
             cohorts_not_deleted[cohort] = info
 
