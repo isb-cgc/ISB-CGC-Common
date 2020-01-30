@@ -2,7 +2,7 @@ import unittest
 
 from solr_helpers import *
 
-
+'''
 class TestSolrHelpers(unittest.TestCase):
 
     def test_build_query(self):
@@ -11,7 +11,7 @@ class TestSolrHelpers(unittest.TestCase):
         query_str = build_solr_query({"disease_code": ["BRCA", "LUAD"]})
 
         self.assertEqual(query_str, " (+disease_code:(BRCA LUAD))")
-
+'''
 
 if __name__ == '__main__':
     unittest.main()
