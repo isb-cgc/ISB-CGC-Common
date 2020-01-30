@@ -85,6 +85,7 @@ class Collection(models.Model):
     is_public = models.BooleanField(default=False)
     objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    version = models.CharField(max_length=4, null=False, blank=False)
     # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ManyToManyField(Program)
 
