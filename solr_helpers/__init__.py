@@ -11,6 +11,7 @@ logger = logging.getLogger('main_logger')
 SOLR_URI = settings.SOLR_URI
 SOLR_LOGIN = settings.SOLR_LOGIN
 SOLR_PASSWORD = settings.SOLR_PASSWORD
+SOLR_CERT = settings.SOLR_CERT
 
 
 RANGE_FIELDS = ['wbc_at_diagnosis', 'event_free_survival', 'days_to_death', 'days_to_last_known_alive', 'days_to_last_followup', 'age_at_diagnosis', 'year_of_diagnosis']
@@ -96,7 +97,7 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
     query_result = {}
 
     try:
-        query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD))
+        query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD), verify=SOLR_CERT)
         if query_response.status_code != 200:
             raise Exception("Saw response code {} when querying solr collection {} with string {}".format(str(query_response.status_code), collection, query_string))
         query_result = query_response.json()

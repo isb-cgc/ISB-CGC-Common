@@ -237,7 +237,11 @@ def fetch_build_data_attr(build, type=None):
             cursor = db.cursor()
 
             for program in Program.objects.filter(is_public=True,active=True):
+                program_metadata = fetch_metadata_value_set(program.id)
+                disease_code_dict = None
 
+                if program_metadata and 'disease_code' in program_metadata and 'values' in program_metadata['disease_code']:
+                    disease_code_dict =  program_metadata['disease_code']['values']
                 # MySQL text searches are case-insensitive, so even if our database has 'hg' and not 'HG' this will
                 # return the right tables, should they exist
                 program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
@@ -274,9 +278,9 @@ def fetch_build_data_attr(build, type=None):
                             METADATA_DATA_ATTR[build][attr]['values']['None'] = {
                                 'displ_value': 'None',
                                 'value': 'None',
-                                'name': 'None'
+                                'name': 'None',
+                                'tooltip': ''
                             }
-
         return copy.deepcopy(METADATA_DATA_ATTR[build])
 
     except Exception as e:
@@ -287,9 +291,7 @@ def fetch_build_data_attr(build, type=None):
         if db and db.open: db.close()
 
 
-
 def fetch_program_data_types(program, for_display=False):
-
     db = None
     cursor = None
 
@@ -568,6 +570,12 @@ def get_preformatted_values(program=None):
                         PREFORMATTED_VALUES[str(pubprog['id'])] = []
                     PREFORMATTED_VALUES[str(pubprog['id'])].append(row[0])
                 cursor.close()
+
+            # Bug ticket 2697: pathologic stage display incorrect because 'pathologic stage'
+            # not included in the preformatted values dataset. This is a fix after the database
+            # has been read
+            for key in PREFORMATTED_VALUES:
+                PREFORMATTED_VALUES.get(key).append('pathologic_stage')
 
         if program not in PREFORMATTED_VALUES:
             return []
