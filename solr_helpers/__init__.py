@@ -71,13 +71,14 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fq_string=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000):
+def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
         "query": query_string or "*:*",
         "limit": 0 if counts_only else limit,
         "offset": offset,
+        "params": {"debugQuery": "on"}
     }
 
     if facets:
@@ -86,19 +87,23 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
         payload['fields'] = fields
     if sort:
         payload['sort'] = sort
+    if fqs:
+        payload['filter'] = fqs if type(fqs) is list else [fqs]
 
-    if (not fq_string and collapse_on) or (not collapse_on and fq_string):
-        payload['filter'] = fq_string or '{!collapse field=%s}' % collapse_on
-    else:
-        payload['params'] = {
-            'fq': [fq_string, '{!collapse field=%s}' % collapse_on]
-        }
+    if collapse_on:
+        collapse = '{!collapse field=%s}' % collapse_on
+        if fqs:
+            payload['filter'].append(collapse)
+        else:
+            payload['filter'] = [collapse]
 
     query_result = {}
 
     try:
         query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD), verify=SOLR_CERT)
         if query_response.status_code != 200:
+            logger.error(payload)
+            logger.error(query_response.json())
             raise Exception("Saw response code {} when querying solr collection {} with string {}".format(str(query_response.status_code), collection, query_string))
         query_result = query_response.json()
     except Exception as e:
@@ -110,26 +115,32 @@ def query_solr(collection=None, fields=None, query_string=None, fq_string=None, 
 
 # Solr facets are the bucket counting; optionally provide a set of filters to *not* be counted for purposes of
 # providing counts on the query filters
-def build_solr_facets(attr_set, filters=None, include_nulls=True):
+def build_solr_facets(attr_set, filter_tags=None, include_nulls=True):
     facets = {}
     for attr in attr_set:
-        if not filters or attr not in filters:
-            facets[attr] = {
-                'type': 'terms',
-                'field': attr,
-                'limit': -1
+        facets[attr] = {
+            'type': 'terms',
+            'field': attr,
+            'limit': -1
+        }
+        if include_nulls:
+            facets[attr]['missing'] = True
+        if filter_tags and attr in filter_tags:
+            facets[attr]['domain'] = {
+                "excludeTags": filter_tags[attr]
             }
-            if include_nulls:
-                facets[attr]['missing'] = True
 
     return facets
 
 
 # Build a query string for Solr
-def build_solr_query(filters, comb_with='OR'):
+def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
 
     first = True
     query_str = ''
+    query_set = None
+    filter_tags = None
+    count = 0
     key_order = []
     keyType = None
 
@@ -168,7 +179,7 @@ def build_solr_query(filters, comb_with='OR'):
             else:
                 query_str += ' {}'.format(comb_with)
 
-            query_str += " (%s:(%s) AND " % ('Hugo_Symbol', gene,)
+            query_str += "(%s:(%s) AND " % ('Hugo_Symbol', gene,)
 
             if(key == 'category'):
                 if value == 'any':
@@ -184,32 +195,46 @@ def build_solr_query(filters, comb_with='OR'):
             if first:
                 first = False
             else:
-                query_str += ' AND'
+                if not with_tags_for_ex:
+                    query_str += ' AND '
 
             # If it's looking for a single None value
             if value == 'None' or (isinstance(value, list) and len(value) == 1 and value[0] == 'None'):
-                query_str += ' (-%s:{* TO *})' % key
+                query_str += '(-%s:{* TO *})' % key
             # If it's a ranged value, calculate the bins
             elif key == 'bmi':
                 if 'None' in value:
                     value.remove('None')
-                    query_str += ' -(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]), key)
+                    query_str += '-(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]), key)
                 else:
-                    query_str += " +({})".format(" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]))
+                    query_str += "+({})".format(" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]))
             elif key in RANGE_FIELDS:
                 if 'None' in value:
                     value.remove('None')
-                    query_str += ' -(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]), key)
+                    query_str += '-(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]), key)
                 else:
-                    query_str += " +({})".format(" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]))
+                    query_str += "+({})".format(" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]))
             elif isinstance(value, list):
                 if 'None' in value:
                     value.remove('None')
-                    query_str += ' -(-(%s:(%s)) +(%s:{* TO *}))' % (key," ".join(value), key)
+                    query_str += '-(-(%s:(%s)) +(%s:{* TO *}))' % (key," ".join(value), key)
                 else:
-                    query_str += ' (+%s:(%s))' % (key, " ".join(value))
+                    query_str += '(+%s:(%s))' % (key, " ".join(value))
             # A single, non-None value
             else:
-                query_str += ' +%s:%s' % (key, value)
+                query_str += '+%s:%s' % (key, value)
+        if with_tags_for_ex:
+            query_set = query_set or {}
+            filter_tags = filter_tags or {}
+            tag = "f{}".format(str(count))
+            filter_tags[key] = tag
+            query_set[key] = ("{!tag=%s}" % tag)+query_str
+            query_str = ''
+            count += 1
 
-    return query_str
+    return {
+        'queries': query_set,
+        'full_query_str': query_str,
+        'filter_tags': filter_tags
+
+    }
