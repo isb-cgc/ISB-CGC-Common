@@ -20,7 +20,8 @@ from . import views
 
 urlpatterns = [
     url(r'^$',                                      views.cohorts_list, name='cohort_list'),
-    url(r'^api/$',                                  views.cohorts_list, name='cohort_list'),
+    url(r'^api/$',                                  views.cohorts_list_api, name='cohort_list_api'),
+    url(r'^api/preview$',                           views.cohorts_preview_api, name='cohort_preview_api'),
     url(r'^(?P<cohort_id>\d+)/$',                   views.cohort_detail, name='cohort_details'),
     url(r'^filelist/(?P<cohort_id>\d+)/$',          views.cohort_filelist, name='cohort_filelist'),
     url(r'^filelist/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
