@@ -267,11 +267,15 @@ def fetch_build_data_attr(build, type=None):
 
                         for row in cursor.fetchall():
                             val = "None" if not row[0] else row[0]
+                            tooltip = ''
+                            if attr == 'disease_code' and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
+                                tooltip = disease_code_dict[val]['tooltip']
                             if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                 METADATA_DATA_ATTR[build][attr]['values'][val] = {
                                     'displ_value': val,
                                     'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                    'name': val
+                                    'name': val,
+                                    'tooltip': tooltip
                                 }
 
                         if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
