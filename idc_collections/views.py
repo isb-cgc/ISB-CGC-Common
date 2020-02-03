@@ -26,13 +26,13 @@ from django.contrib.auth.models import User
 from django.contrib import messages
 from django.conf import settings
 from django.db.models import Q
-from django.http import JsonResponse, HttpResponseNotFound, HttpResponse
+from django.http import JsonResponse, HttpResponseNotFound, HttpResponse, JsonResponse
 from django.conf import settings
 from django.db import connection
 from django.urls import reverse
 from collections import OrderedDict
 from data_upload.models import UserUpload, UserUploadedFile
-from idc_collections.models import User_Feature_Definitions, User_Feature_Counts, Program, Collection
+from idc_collections.models import User_Feature_Definitions, User_Feature_Counts, Program, Collection, Attribute
 from sharing.service import create_share
 from googleapiclient.errors import HttpError
 
@@ -69,20 +69,16 @@ def program_list(request, is_public=False, is_API=False):
 
 def public_program_list_api(request):
 
-    public_programs = Program.objects.filter(is_public=True)
+    programs = Program.objects.filter(is_public=True)
 
-    public_programs_json = serializers.serialize('json', public_programs)
+    programs_info = [{
+                "name": program.name,
+                "short_name": program.short_name,
+                "description": program.description,
+                "active": program.active} for program in programs]
 
-    programs = []
-    for element in json.loads(public_programs_json):
-        program = {
-            'name': element['fields']['name'],
-            'short_name': element['fields']['short_name'],
-            'description': element['fields']['description'],
-            'active': element['fields']['active']
-        }
-        programs.append(program)
-    return HttpResponse(programs, content_type='application/json')
+    return JsonResponse(programs_info, safe=False)
+#    return HttpResponse(programs_info,  content_type='application/json')
 
 
 @login_required
@@ -112,24 +108,53 @@ def program_detail(request, program_id=0, is_API=False):
     return render(request, template, context)
 
 #@login_required
-def program_detail_api(request, program_name=None ):
+def program_detail_api(request, program_name ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     programs = Program.objects.filter(is_public=True, active=True).distinct()
     program = programs.get(short_name=program_name)
 
-    public_collections = program.collection_set.all()
+    collections = program.collection_set.all()
 
-    collections_json = serializers.serialize('json',public_collections)
-    colls =  []
-    for element in json.loads(collections_json):
-        coll = {
-            'name': element['fields']['name'],
-            'short_name': element['fields']['short_name'],
-            'description': element['fields']['description'],
-            'active': element['fields']['active']
-        }
-        colls.append(coll)
-    return HttpResponse(colls, content_type='application/json')
+    collections_info = [{
+            "name": collection.name,
+            "short_name": collection.short_name,
+            "description": collection.description,
+            "active": collection.active } for collection in collections]
+
+    return JsonResponse(collections_info, safe=False)
+
+#@login_required
+def collection_detail_api(request, program_name, collection_name, version):
+    # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
+
+    # Get attributes that are not cross collection but collection_name
+    collection = Program.objects.get(short_name=program_name).collection_set.filter(short_name=collection_name)
+    attributes_ncx = collection[0].attribute_set.filter(is_cross_collex=False)
+    # attributes_ncx = Attribute.objects.filter(is_cross_collex=False, collections__name__iexact = collection_name)
+    attributes_cx = Attribute.objects.filter(is_cross_collex=True)
+
+    attributes = attributes_ncx | attributes_cx
+
+    fields = [{
+            "id": attribute.id,
+            "name": attribute.name,
+            "display_name": attribute.display_name,
+            "description": attribute.description,
+            "data_type": attribute.data_type,
+            "active": attribute.active,
+            "cross_collections": attribute.is_cross_collex,
+            "preformatted_values": attribute.preformatted_values
+            } for attribute in attributes ]
+
+
+    collection_info = {
+        "collection_name": collection_name,
+        "version": "unknown",
+        "release_date": "unknown",
+        "fields": fields
+    }
+    # return HttpResponse(collection_info, content_type='application/json')
+    return JsonResponse(collection_info)
 
 #@login_required
 def program_upload_existing(request):
