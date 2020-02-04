@@ -49,7 +49,7 @@ from django.utils import formats
 from django.views.decorators.csrf import csrf_protect
 from django.utils.html import escape
 
-from .models import Cohort, Cohort_Perms, Source, Filters, Cohort_Comments
+from .models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
 from idc_collections.models import Program, Collection
 
 BQ_ATTEMPT_MAX = 10
@@ -317,11 +317,10 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 
 @login_required
 @csrf_protect
-def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=False):
+def save_cohort(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     parent = None
-    cohort_progs = None
     redirect_url = reverse('cohort_list')
 
     try:
@@ -339,149 +338,65 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
 
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
-            barcodes = json.loads(request.POST.get('barcodes', '{}'))
             apply_filters = request.POST.getlist('apply-filters')
-            apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
             mut_comb_with = request.POST.get('mut_filter_combine')
 
-            # we only deactivate the source if we are applying filters to a previously-existing
-            # source cohort
-            deactivate_sources = (len(filters) > 0) and source is not None and source != 0
-
             # If we're only changing the name, just edit the cohort and update it
-            if apply_name and not apply_filters and not deactivate_sources and not apply_barcodes:
+            if apply_name and not apply_filters:
                 Cohort.objects.filter(id=source).update(name=name)
                 messages.info(request, 'Changes applied successfully.')
                 return redirect(reverse('cohort_details', args=[source]))
 
             # Given cohort_id is the only source id.
             if source:
-                parent = Cohort.objects.get(id=source)
-                cohort_progs = parent.get_programs()
+                source_cohort = Cohort.objects.get(id=source)
 
             filter_obj = {}
 
-            if len(filters) > 0:
-                for this_filter in filters:
-                    tmp = json.loads(this_filter)
-                    key = tmp['feature']['name']
-                    val = tmp['value']['name']
-                    program_id = tmp['program']['id']
-
-                    if 'id' in tmp['feature'] and tmp['feature']['id']:
-                        key = tmp['feature']['id']
-
-                    if 'id' in tmp['value'] and tmp['value']['id']:
-                        val = tmp['value']['id']
-
-                    if program_id not in filter_obj:
-                        filter_obj[program_id] = {}
-
-                    if key not in filter_obj[program_id]:
-                        filter_obj[program_id][key] = {'values': [],}
-
-                    if program_id <= 0 and 'program' not in filter_obj[program_id][key]:
-                        # User Data
-                        filter_obj[program_id][key]['program'] = tmp['user_program']
-
-                    filter_obj[program_id][key]['values'].append(val)
+            # TODO: need to harvest the filters coming in from the WebApp and format them so they conform to:
+            # {
+            #     <ID>: {
+            #               'values': [<val>,(...)],
+            #               'op': (AND|OR)
+            #     }
+            # }
 
             results = {}
 
-            for prog in filter_obj:
-                results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog, comb_mut_filters=mut_comb_with)
+            # Create new cohort
+            cohort = Cohort.objects.create(name=name)
+            cohort.save()
 
-            if cohort_progs:
-                for prog in cohort_progs:
-                    if prog.id not in results:
-                        results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id, comb_mut_filters=mut_comb_with)
+            # Set permission for user to be owner
+            perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
+            perm.save()
 
-            if len(barcodes) > 0:
-                for program in barcodes:
-                    if program not in results:
-                        results[program] = {'count': 0, 'items': []}
-                    for barcode in barcodes[program]:
-                        results[program]['items'].append({'sample_barcode': barcode[0], 'case_barcode': barcode[1], 'project_id': barcode[2]})
-                        results[program]['count'] += 1
+            # Create the source if it was given
+            if source:
+                Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
 
-            found_samples = False
-
-            for prog in results:
-                if int(results[prog]['count']) > 0:
-                    found_samples = True
-
-            # Do not allow 0 sample cohorts
-            if not found_samples:
-                messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
-                redirect_url = reverse('cohort_details', args=[source]) if source else reverse('explore_data')
-            else:
-                if deactivate_sources:
-                    parent.active = False
-                    parent.save()
-
-                # Create new cohort
-                cohort = Cohort.objects.create(name=name)
-                cohort.save()
-
-                sample_list = []
-
-                for prog in results:
-                    items = results[prog]['items']
-
-                    for item in items:
-                        project = None
-                        if 'project_id' in item:
-                            project = item['project_id']
-                        sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
-
-                bulk_start = time.time()
-                Samples.objects.bulk_create(sample_list)
-                bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
-
-                # Set permission for user to be owner
-                perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-                perm.save()
-
-                # Create the source if it was given
-                if source:
-                    Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
-
-                # Create filters applied
-                if filter_obj:
-                    for prog in filter_obj:
-                        if prog <= 0:
-                            # User Data
-                            prog_filters = filter_obj[prog]
-                            for this_filter in prog_filters:
-                                prog_obj = Program.objects.get(id=prog_filters[this_filter]['program'])
-                                for val in prog_filters[this_filter]['values']:
-                                    Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter,
-                                                           value=val).save()
-                        else:
-                            prog_obj = Program.objects.get(id=prog)
-                            prog_filters = filter_obj[prog]
-                            for this_filter in prog_filters:
-                                for val in prog_filters[this_filter]['values']:
-                                    Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter, value=val).save()
-
-                # Create a filter applied object representing the barcodes sent
-                if barcodes:
-                    for prog in results:
-                        prog_obj = Program.objects.get(id=prog)
-                        Filters.objects.create(
-                            resulting_cohort=cohort,
-                            program=prog_obj,
-                            name='Barcodes',
-                            value="{} barcodes from {}".format(str(len(results[prog]['items'])), prog_obj.name)
+            # Create filters applied
+            if filter_obj:
+                # TODO: This needs to be altered so that filter IDs are what comes back, not just 'names' (i.e. not 'vital_status' but '5') because
+                # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
+                # which actually ties them to collections (and hence programs)
+                for attr_id in filters:
+                    filter_obj = filters[attr_id]
+                    grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.get_op(filter_obj['op']))
+                    for val in filter_obj['values']:
+                        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val,
+                           # filter_group=grouping
                         ).save()
 
-                # Store cohort to BigQuery
+                # Store cohort sample and case bardoes to BigQuery
                 bq_project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
+                # TODO: this will need to get the sample and case list and THEN add it; the sample and case list isn't pulled above anymore
+                # This should be done as part of a BQ query; ISB-CGC has example code for this which can be used
+                # bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
+                bq_result = {}
 
                 # If BQ insertion fails, we immediately de-activate the cohort and warn the user
                 if 'insertErrors' in bq_result:
@@ -502,15 +417,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     else:
                         redirect_url = reverse('cohort_details', args=[cohort.id])
                         messages.info(request, 'Changes applied successfully.')
-
-                    if workbook_id and worksheet_id :
-                        Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
-                        redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_id, 'worksheet_id' : worksheet_id})
-                    elif create_workbook :
-                        workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
-                        worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
-                        worksheet_model.add_cohort(cohort)
-                        redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
 
     except Exception as e:
         redirect_url = reverse('cohort_list')
