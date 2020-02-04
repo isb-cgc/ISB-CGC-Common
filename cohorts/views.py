@@ -50,6 +50,7 @@ from django.views.decorators.csrf import csrf_protect
 from django.utils.html import escape
 
 from .models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
+from .utils import _save_cohort, _delete_cohort
 from idc_collections.models import Program, Collection
 
 BQ_ATTEMPT_MAX = 10
@@ -521,106 +522,23 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
 def save_cohort(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    parent = None
     redirect_url = reverse('cohort_list')
 
     try:
-
         if request.POST:
             name = request.POST.get('name')
-            blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
-            match = blacklist.search(str(name))
-            if match:
-                # XSS risk, log and fail this cohort save
-                match = blacklist.findall(str(name))
-                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+str(match))
-                messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
-                return redirect(redirect_url)
-
-            source = request.POST.get('source')
             filters = request.POST.getlist('filters')
-            apply_filters = request.POST.getlist('apply-filters')
-            apply_name = request.POST.getlist('apply-name')
-            mut_comb_with = request.POST.get('mut_filter_combine')
+            cohort_id = request.POST.get('cohort_id', None)
 
-            # If we're only changing the name, just edit the cohort and update it
-            if apply_name and not apply_filters:
-                Cohort.objects.filter(id=source).update(name=name)
-                messages.info(request, 'Changes applied successfully.')
-                return redirect(reverse('cohort_details', args=[source]))
+            result = _save_cohort(request.user, filters, name, cohort_id)
 
-            # Given cohort_id is the only source id.
-            if source:
-                source_cohort = Cohort.objects.get(id=source)
-
-            filter_obj = {}
-
-            # TODO: need to harvest the filters coming in from the WebApp and format them so they conform to:
-            # {
-            #     <ID>: {
-            #               'values': [<val>,(...)],
-            #               'op': (AND|OR)
-            #     }
-            # }
-
-            results = {}
-
-            # Create new cohort
-            cohort = Cohort.objects.create(name=name)
-            cohort.save()
-
-            # Set permission for user to be owner
-            perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-            perm.save()
-
-            # Create the source if it was given
-            if source:
-                Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
-
-            # Create filters applied
-            if filter_obj:
-                # TODO: This needs to be altered so that filter IDs are what comes back, not just 'names' (i.e. not 'vital_status' but '5') because
-                # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
-                # which actually ties them to collections (and hence programs)
-                for attr_id in filters:
-                    filter_obj = filters[attr_id]
-                    grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.get_op(filter_obj['op']))
-                    for val in filter_obj['values']:
-                        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val,
-                           # filter_group=grouping
-                        ).save()
-
-                # Store cohort sample and case bardoes to BigQuery
-                bq_project_id = settings.BIGQUERY_PROJECT_ID
-                cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-                bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                # TODO: this will need to get the sample and case list and THEN add it; the sample and case list isn't pulled above anymore
-                # This should be done as part of a BQ query; ISB-CGC has example code for this which can be used
-                # bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
-                bq_result = {}
-
-                # If BQ insertion fails, we immediately de-activate the cohort and warn the user
-                if 'insertErrors' in bq_result:
-                    Cohort.objects.filter(id=cohort.id).update(active=False)
-                    redirect_url = reverse('cohort_list')
-                    err_msg = ''
-                    if len(bq_result['insertErrors']) > 1:
-                        err_msg = 'There were '+str(len(bq_result['insertErrors'])) + ' insertion errors '
-                    else:
-                        err_msg = 'There was an insertion error '
-                    messages.error(request, err_msg+' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.')
-
-                else:
-                    # Check if this was a new cohort or an edit to an existing one and redirect accordingly
-                    if not source:
-                        redirect_url = reverse('cohort_list')
-                        messages.info(request, 'Cohort "%s" created successfully.' % escape(cohort.name))
-                    else:
-                        redirect_url = reverse('cohort_details', args=[cohort.id])
-                        messages.info(request, 'Changes applied successfully.')
+            if 'message' not in result:
+                redirect_url = reverse('cohort_details', args=[result['cohort_id']])
+                messages.info(request, 'Cohort {} {} successfully.'.format(name, 'created' if not cohort_id else 'updated'))
+            else:
+                messages.error(request, result['message'])
 
     except Exception as e:
-        redirect_url = reverse('cohort_list')
         messages.error(request, "There was an error saving your cohort; it may not have been saved correctly.")
         logger.error('[ERROR] Exception while saving a cohort:')
         logger.exception(e)
@@ -632,9 +550,20 @@ def save_cohort(request):
 @csrf_protect
 def delete_cohort(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
-    redirect_url = 'cohort_list'
-    cohort_ids = request.POST.getlist('id')
-    Cohort.objects.filter(id__in=cohort_ids).update(active=False)
+    try:
+        redirect_url = 'cohort_list'
+        cohort_ids = request.POST.getlist('id')
+        for cohort_id in cohort_ids:
+            result = _delete_cohort(request.user, cohort_id)
+            if 'message' in result:
+                logger.error("[ERROR] {}".format(result['message']))
+                messages.error(request, result['message'])
+            else:
+                messages.info(request, result['notes'])
+    except Exception as e:
+        logger.error("[ERROR] While deleting cohort: ")
+        logger.exception(e)
+            
     return redirect(reverse(redirect_url))
 
 
