@@ -21,7 +21,7 @@ from builtins import str
 from past.utils import old_div
 from builtins import object
 
-from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
+from .models import Cohort, Samples, Cohort_Perms, Filters, Filter_Group, Cohort_Comments
 from .metadata_helpers import *
 from projects.models import Project, Program
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
@@ -94,21 +94,6 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
 
 
     # Make and save cohort
-
-    barcodes = None
-
-    if filters:
-        barcodes = get_sample_case_list_bq(filters, long_form=True)
-
-        # Need at least 1 case in 1 program for this to be a valid cohort
-        cases_found = False
-
-        if not cases_found:
-            return {
-                'result': 'error',
-                'message': 'No cases or samples were found which match the supplied filters.'
-            }
-
     # Create new cohort
     cohort = Cohort.objects.create(name=name)
     cohort.save()
@@ -117,53 +102,22 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    # Make and save filters
-    for prog in filters:
-        prog_obj = Program.objects.get(name=prog, is_public=1, active=1)
-        prog_filters = filters[prog]
-        for this_filter in prog_filters:
-            if this_filter == 'case_barcode' or this_filter == 'sample_barcode':
-                Filters.objects.create(
-                    resulting_cohort=cohort,
-                    program=prog_obj,
-                    name='Barcodes',
-                    value="{} barcodes from {}".format(str(len(prog_filters[this_filter])), prog_obj.name)
-                ).save()
-            else:
-                for val in prog_filters[this_filter]:
-                    Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter,
-                                           value=val).save()
+    if filters:
+        # TODO: This needs to be altered so that filter IDs are what comes back, not just 'names' (i.e. not 'vital_status' but '5') because
+        # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
+        # which actually ties them to collections (and hence programs)
+        for attr_id in filters:
+            filter_obj = filters[attr_id]
+            grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.get_op(filter_obj['op']))
+            for val in filter_obj['values']:
+                Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val, filter_group=grouping).save()
 
-    # Make and save sample set (CloudSQL, BQ)
-    project_ids_by_short_name = {}
-
-    all_progs = Program.objects.filter(is_public=1, active=1)
-
-    for prog in all_progs:
-        all_proj = prog.get_all_projects()
-        for proj in all_proj:
-            project_ids_by_short_name["{}-{}".format(prog.name, proj.name)] = proj.id
-
-    sample_list = []
-    for prog in barcodes:
-        items = barcodes[prog]['items']
-
-        for item in items:
-            project = None
-            if 'project_short_name' in item:
-                project = project_ids_by_short_name[item['project_short_name']]
-            item['project_id'] = project
-            sample_list.append(
-                Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'],
-                        project_id=project))
-
-    # Store cohort to BigQuery
+    # If we're storing this in BQ, that happens here
     bq_project_id = settings.BIGQUERY_PROJECT_ID
     cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
     bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    bq_result = bcs.add_cohort_to_bq(cohort.id,
-                                     [item for sublist in [barcodes[x]['items'] for x in list(barcodes.keys())] for item
-                                      in sublist])
+    # bq_result = bcs.add_cohort_to_bq(cohort.id, get_sample_case_list_bq(filters, long_form=True))
+    bq_result = {}
 
     # If BQ insertion fails, we immediately de-activate the cohort and warn the user
     if 'insertErrors' in bq_result:
