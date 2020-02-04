@@ -21,18 +21,18 @@ from builtins import str
 from past.utils import old_div
 from builtins import object
 
-from .models import Cohort, Samples, Cohort_Perms, Filters, Filter_Group, Cohort_Comments
-from .metadata_helpers import *
-from projects.models import Project, Program
-from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 import re
+import time
+from time import sleep
+import logging
 
-from django.contrib.auth.models import User
-from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+from .models import Cohort, Cohort_Perms, Filters, Filter_Group
+from idc_collections.models import Program
+from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
-import logging
 
 logger = logging.getLogger('main_logger')
 BLACKLIST_RE = settings.BLACKLIST_RE
@@ -75,7 +75,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
 
     if not filters and not name:
         # Can't save/edit a cohort when nothing is being changed!
-        return None
+        return { 'message': "Can't save a cohort with no information to save! (Name and filters not provided.)" }
 
     blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
     match = blacklist.search(str(name))
@@ -92,9 +92,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
         cohort.save()
         return {'cohort_id': cohort.id}
 
-
     # Make and save cohort
-    # Create new cohort
     cohort = Cohort.objects.create(name=name)
     cohort.save()
 
@@ -102,22 +100,20 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    if filters:
-        # TODO: This needs to be altered so that filter IDs are what comes back, not just 'names' (i.e. not 'vital_status' but '5') because
-        # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
-        # which actually ties them to collections (and hence programs)
-        for attr_id in filters:
-            filter_obj = filters[attr_id]
-            grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.get_op(filter_obj['op']))
-            for val in filter_obj['values']:
-                Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val, filter_group=grouping).save()
+    # TODO: This needs to be altered so that filter IDs are what comes back, not just 'names' (i.e. not 'vital_status' but '5') because
+    # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
+    # which actually ties them to collections (and hence programs)
+    for attr_id in filters:
+        filter_obj = filters[attr_id]
+        grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.get_op(filter_obj['op']))
+        for val in filter_obj['values']:
+            Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val, filter_group=grouping).save()
 
     # If we're storing this in BQ, that happens here
     bq_project_id = settings.BIGQUERY_PROJECT_ID
     cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
     bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    # bq_result = bcs.add_cohort_to_bq(cohort.id, get_sample_case_list_bq(filters, long_form=True))
-    bq_result = {}
+    bq_result = bcs.add_cohort_to_bq(cohort.id, get_sample_case_list_bq(filters, long_form=True))
 
     # If BQ insertion fails, we immediately de-activate the cohort and warn the user
     if 'insertErrors' in bq_result:
