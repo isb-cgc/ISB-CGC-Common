@@ -33,6 +33,7 @@ from django.urls import reverse
 from collections import OrderedDict
 from data_upload.models import UserUpload, UserUploadedFile
 from idc_collections.models import User_Feature_Definitions, User_Feature_Counts, Program, Collection, Attribute
+from solr_helpers import *
 from sharing.service import create_share
 from googleapiclient.errors import HttpError
 
@@ -44,9 +45,10 @@ logger = logging.getLogger('main_logger')
 
 BLACKLIST_RE = settings.BLACKLIST_RE
 
-@login_required
+
 def public_program_list(request):
     return program_list(request, is_public=True)
+
 
 @login_required
 def program_list(request, is_public=False, is_API=False):
@@ -107,8 +109,8 @@ def program_detail(request, program_id=0, is_API=False):
     }
     return render(request, template, context)
 
-#@login_required
-def program_detail_api(request, program_name ):
+
+def program_detail_api(request, program_name=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     programs = Program.objects.filter(is_public=True, active=True).distinct()
     program = programs.get(short_name=program_name)
@@ -126,7 +128,7 @@ def program_detail_api(request, program_name ):
 
     return JsonResponse(collections_info, safe=False)
 
-#@login_required
+
 def collection_detail_api(request, program_name, collection_name, version):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
 
@@ -159,7 +161,7 @@ def collection_detail_api(request, program_name, collection_name, version):
     # return HttpResponse(collection_info, content_type='application/json')
     return JsonResponse(collection_info)
 
-#@login_required
+
 def program_upload_existing(request):
     return program_upload(request, existing_proj=True)
 
