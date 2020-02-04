@@ -179,10 +179,38 @@ class Cohort_Perms(models.Model):
     perm = models.CharField(max_length=10, choices=PERMISSIONS, default=READER)
 
 
+class Filter_Group(models.Model):
+    AND = 'A'
+    OR = 'O'
+    OPS = (
+        (AND, 'And'),
+        (OR, 'Or')
+    )
+    id = models.AutoField(primary_key=True)
+    resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
+    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
+    
+    @classmethod
+    def get_op(cls, op_string):
+        if op_string.lower() == 'and':
+            return Filter_Group.AND
+        elif op_string.lower() == 'or':
+            return Filter_Group.OR
+        else:
+            return None
+
+
+class Filter_Group(models.Model):
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    value = models.CharField(max_length=256, null=False, blank=False)
+    feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
+    
+
 class Filters(models.Model):
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     value = models.CharField(max_length=256, null=False, blank=False)
+    filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
 
 
