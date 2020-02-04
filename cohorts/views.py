@@ -133,6 +133,207 @@ def get_cases_by_cohort(cohort_id):
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+
+def save_cohort_api(request):
+#    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
+    parent = None
+    cohort_progs = None
+    redirect_url = reverse('cohort_list')
+
+    try:
+
+        if request.POST:
+            name = request.POST.get('name')
+            description = request.POST.get('description')
+            blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+            match = blacklist.search(str(name))
+            if match:
+                # XSS risk, log and fail this cohort save
+                match = blacklist.findall(str(name))
+                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+str(match))
+                messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+                return redirect(redirect_url)
+
+            # Create new cohort
+            cohort = Cohort.objects.create(
+                name=name, description=description, active=True, data_version=1)
+            cohort.save()
+
+
+#            source = request.POST.get('source')
+            filters = request.POST.getlist('filterSet')
+#            barcodes = json.loads(request.POST.get('barcodes', '{}'))
+#             apply_filters = request.POST.getlist('apply-filters')
+#             apply_barcodes = request.POST.getlist('apply-barcodes')
+#             apply_name = request.POST.getlist('apply-name')
+#            mut_comb_with = request.POST.get('mut_filter_combine')
+
+            filter_obj = {}
+
+            for filter in filters:
+                cohort.f
+
+            if len(filters) > 0:
+                for this_filter in filters:
+                    tmp = json.loads(this_filter)
+                    key = tmp['feature']['name']
+                    val = tmp['value']['name']
+                    program_id = tmp['program']['id']
+
+                    if 'id' in tmp['feature'] and tmp['feature']['id']:
+                        key = tmp['feature']['id']
+
+                    if 'id' in tmp['value'] and tmp['value']['id']:
+                        val = tmp['value']['id']
+
+                    if program_id not in filter_obj:
+                        filter_obj[program_id] = {}
+
+                    if key not in filter_obj[program_id]:
+                        filter_obj[program_id][key] = {'values': [],}
+
+                    if program_id <= 0 and 'program' not in filter_obj[program_id][key]:
+                        # User Data
+                        filter_obj[program_id][key]['program'] = tmp['user_program']
+
+                    filter_obj[program_id][key]['values'].append(val)
+
+            results = {}
+
+            for prog in filter_obj:
+                results[prog] = get_sample_case_list(request.user, filter_obj[prog], source, prog, comb_mut_filters=mut_comb_with)
+
+            if cohort_progs:
+                for prog in cohort_progs:
+                    if prog.id not in results:
+                        results[prog.id] = get_sample_case_list(request.user, {}, source, prog.id, comb_mut_filters=mut_comb_with)
+
+            if len(barcodes) > 0:
+                for program in barcodes:
+                    if program not in results:
+                        results[program] = {'count': 0, 'items': []}
+                    for barcode in barcodes[program]:
+                        results[program]['items'].append({'sample_barcode': barcode[0], 'case_barcode': barcode[1], 'project_id': barcode[2]})
+                        results[program]['count'] += 1
+
+            found_samples = False
+
+            for prog in results:
+                if int(results[prog]['count']) > 0:
+                    found_samples = True
+
+            # Do not allow 0 sample cohorts
+            if not found_samples:
+                messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
+                redirect_url = reverse('cohort_details', args=[source]) if source else reverse('explore_data')
+            else:
+                if deactivate_sources:
+                    parent.active = False
+                    parent.save()
+
+                # Create new cohort
+                cohort = Cohort.objects.create(name=name)
+                cohort.save()
+
+                sample_list = []
+
+                for prog in results:
+                    items = results[prog]['items']
+
+                    for item in items:
+                        project = None
+                        if 'project_id' in item:
+                            project = item['project_id']
+                        sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
+
+                bulk_start = time.time()
+                Samples.objects.bulk_create(sample_list)
+                bulk_stop = time.time()
+                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
+
+                # Set permission for user to be owner
+                perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
+                perm.save()
+
+                # Create the source if it was given
+                if source:
+                    Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
+
+                # Create filters applied
+                if filter_obj:
+                    for prog in filter_obj:
+                        if prog <= 0:
+                            # User Data
+                            prog_filters = filter_obj[prog]
+                            for this_filter in prog_filters:
+                                prog_obj = Program.objects.get(id=prog_filters[this_filter]['program'])
+                                for val in prog_filters[this_filter]['values']:
+                                    Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter,
+                                                           value=val).save()
+                        else:
+                            prog_obj = Program.objects.get(id=prog)
+                            prog_filters = filter_obj[prog]
+                            for this_filter in prog_filters:
+                                for val in prog_filters[this_filter]['values']:
+                                    Filters.objects.create(resulting_cohort=cohort, program=prog_obj, name=this_filter, value=val).save()
+
+                # Create a filter applied object representing the barcodes sent
+                if barcodes:
+                    for prog in results:
+                        prog_obj = Program.objects.get(id=prog)
+                        Filters.objects.create(
+                            resulting_cohort=cohort,
+                            program=prog_obj,
+                            name='Barcodes',
+                            value="{} barcodes from {}".format(str(len(results[prog]['items'])), prog_obj.name)
+                        ).save()
+
+                # Store cohort to BigQuery
+                bq_project_id = settings.BIGQUERY_PROJECT_ID
+                cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+                bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
+
+                # If BQ insertion fails, we immediately de-activate the cohort and warn the user
+                if 'insertErrors' in bq_result:
+                    Cohort.objects.filter(id=cohort.id).update(active=False)
+                    redirect_url = reverse('cohort_list')
+                    err_msg = ''
+                    if len(bq_result['insertErrors']) > 1:
+                        err_msg = 'There were '+str(len(bq_result['insertErrors'])) + ' insertion errors '
+                    else:
+                        err_msg = 'There was an insertion error '
+                    messages.error(request, err_msg+' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.')
+
+                else:
+                    # Check if this was a new cohort or an edit to an existing one and redirect accordingly
+                    if not source:
+                        redirect_url = reverse('cohort_list')
+                        messages.info(request, 'Cohort "%s" created successfully.' % escape(cohort.name))
+                    else:
+                        redirect_url = reverse('cohort_details', args=[cohort.id])
+                        messages.info(request, 'Changes applied successfully.')
+
+                    if workbook_id and worksheet_id :
+                        Worksheet.objects.get(id=worksheet_id).add_cohort(cohort)
+                        redirect_url = reverse('worksheet_display', kwargs={'workbook_id':workbook_id, 'worksheet_id' : worksheet_id})
+                    elif create_workbook :
+                        workbook_model  = Workbook.create("default name", "This is a default workbook description", request.user)
+                        worksheet_model = Worksheet.create(workbook_model.id, "worksheet 1","This is a default description")
+                        worksheet_model.add_cohort(cohort)
+                        redirect_url = reverse('worksheet_display', kwargs={'workbook_id': workbook_model.id, 'worksheet_id' : worksheet_model.id})
+
+    except Exception as e:
+        redirect_url = reverse('cohort_list')
+        messages.error(request, "There was an error saving your cohort; it may not have been saved correctly.")
+        logger.error('[ERROR] Exception while saving a cohort:')
+        logger.exception(e)
+
+    return redirect(redirect_url)
+
+
+
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)

@@ -119,7 +119,10 @@ def program_detail_api(request, program_name ):
             "name": collection.name,
             "short_name": collection.short_name,
             "description": collection.description,
-            "active": collection.active } for collection in collections]
+            "active": collection.active,
+            "is_public": collection.is_public,
+            "owner_id": collection.owner_id,
+            "version": collection.version} for collection in collections]
 
     return JsonResponse(collections_info, safe=False)
 
