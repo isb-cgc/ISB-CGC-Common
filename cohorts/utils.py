@@ -109,23 +109,6 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
         for val in filter_obj['values']:
             Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val, filter_group=grouping).save()
 
-    # If we're storing this in BQ, that happens here
-    bq_project_id = settings.BIGQUERY_PROJECT_ID
-    cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-    bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    bq_result = bcs.add_cohort_to_bq(cohort.id, get_sample_case_list_bq(filters, long_form=True))
-
-    # If BQ insertion fails, we immediately de-activate the cohort and warn the user
-    if 'insertErrors' in bq_result:
-        Cohort.objects.filter(id=cohort.id).update(active=False)
-        err_msg = ''
-        if len(bq_result['insertErrors']) > 1:
-            err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
-        else:
-            err_msg = 'There was an insertion error '
-
-        return {'message': err_msg + ' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.'}
-
     return {'cohort_id': cohort.id}
 
 
