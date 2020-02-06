@@ -30,6 +30,7 @@ from idc_collections.models import Collection, Attribute, User_Feature_Definitio
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
@@ -92,18 +93,63 @@ class Cohort(models.Model):
         isbuser = User.objects.get(username='isb', is_superuser=True)
         return (self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user_id == isbuser.id)
 
+    # Produce a BigQuery filter WHERE clause for use in the console
+    #
+    def get_bq_filter_string(self, prefix=None):
 
-    def get_filters_as_sql(self):
-        filter_str = ''
+        filter_sets = []
 
-        
+        group_filter_dict = self.get_filters_as_dict()
 
+        for group in group_filter_dict:
+            filter_sets.append(BigQuerySupport.build_bq_where_clause(
+                group_filter_dict[group], field_prefix=prefix
+            ))
 
-        return filter_str
+        # TODO: For now there will only be a single group, but in the future if there are multiple groups
+        # we will need to consider how to return this
 
+        return filter_sets[0]
 
-    # Returns the list of filters used to create this cohort, if filters were used (i.e. it wasn't produced
-    # via a set operation or cloning)
+    # Produce a BigQuery filter clause and parameters; this is for *programmatic* use of BQ, NOT copy-paste into
+    # the console
+    #
+    def get_filters_for_bq(self, prefix=None, suffix=None, counts=False, schema=None):
+
+        filter_sets = []
+
+        group_filter_dict = self.get_filters_as_dict()
+
+        for group in group_filter_dict:
+            filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
+                group_filter_dict[group], field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
+                type_schema=schema
+                  ))
+
+        # TODO: For now there will only be a single group, but in the future if there are multiple groups
+        # we will need to consider how to return this
+
+        return filter_sets[0]
+
+    # Get a simple dict of the attributes and values of this cohort; note this is NOT intended for UI display
+    #
+    def get_filters_as_dict(self):
+        filter_dict = {}
+
+        groups = self.filter_group_set.all()
+
+        for group in groups:
+            filter_dict[group.id] = {}
+            filter_group = filter_dict[group.id]
+            filters = group.filter_set.all()
+            for filter in filters:
+                filter_group[filter.attribute.name] = filter.value.split(",")
+                if filter.attribute.data_type == filter.attribute.CONTINUOUS_NUMERIC:
+                    filter_group[filter.attribute.name] = [int(x) if "." not in x else float(x) for x in filter_dict[filter.attribute.name]]
+
+        return filter_dict
+
+    # Returns the list of filters used to create this cohort
     #
     def get_filters(self, with_display_vals=False):
         filter_list = Filters.objects.filter(resulting_cohort=self)

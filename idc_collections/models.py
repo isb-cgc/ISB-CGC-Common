@@ -160,6 +160,12 @@ class Attribute(models.Model):
 
         return result
 
+    def get_solr_bq(self):
+        return {
+            'solr': self.solr_collections_set.all().values_list('name', flat=True),
+            'bq': self.bq_tables_set.all().values_list('name', flat=True)
+        }
+
     def __str__(self):
         return "{} ({}), Type: {}, Found in: {}, Display values: {}".format(
             self.name, self.display_name, self.data_type, self.collections.all(), self.attribute_display_values_set.all())
