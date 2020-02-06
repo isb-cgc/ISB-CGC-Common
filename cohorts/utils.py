@@ -100,14 +100,16 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    # TODO: This needs to be altered so that filter IDs are what comes back, not just 'names' (i.e. not 'vital_status' but '5') because
+    # TODO: We need to receive filter IDs from the WebApp, not just 'names' (i.e. not 'vital_status' but '5') because
     # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
     # which actually ties them to collections (and hence programs)
+
+    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
+    # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
+    grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.AND)
     for attr_id in filters:
         filter_obj = filters[attr_id]
-        grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.get_op(filter_obj['op']))
-        for val in filter_obj['values']:
-            Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val, filter_group=grouping).save()
+        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_obj['values']), filter_group=grouping).save()
 
     return {'cohort_id': cohort.id}
 

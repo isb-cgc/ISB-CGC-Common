@@ -503,7 +503,7 @@ class BigQuerySupport(BigQueryABC):
     # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
     # Support for providing an explicit schema of the fields being searched
     #
-    # TODO: add support for DATES
+    # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
     def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None):
         result = {

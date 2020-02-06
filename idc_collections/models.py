@@ -113,6 +113,20 @@ class SolrCollection(models.Model):
         unique_together = (("name", "version"),)
 
 
+class BigQueryTable(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False, unique=True)
+    version = models.CharField(max_length=4, null=False, blank=False)
+
+    def get_collection_attr(self, for_faceting=True):
+        if for_faceting:
+            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True)
+        return self.attribute_set.all()
+
+    class Meta(object):
+        unique_together = (("name", "version"),)
+
+
 class Attribute(models.Model):
     CONTINUOUS_NUMERIC = 'N'
     CATEGORICAL = 'C'
@@ -134,6 +148,8 @@ class Attribute(models.Model):
     preformatted_values = models.BooleanField(default=False)
     collections = models.ManyToManyField(Collection)
     solr_collections = models.ManyToManyField(SolrCollection)
+    bq_tables = models.ManyToManyField(BigQueryTable)
+    default_ui_display = models.BooleanField(default=True)
 
     def get_display_values(self):
         display_vals = self.attribute_display_values_set.all()

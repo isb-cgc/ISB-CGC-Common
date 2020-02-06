@@ -92,6 +92,16 @@ class Cohort(models.Model):
         isbuser = User.objects.get(username='isb', is_superuser=True)
         return (self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user_id == isbuser.id)
 
+
+    def get_filters_as_sql(self):
+        filter_str = ''
+
+        
+
+
+        return filter_str
+
+
     # Returns the list of filters used to create this cohort, if filters were used (i.e. it wasn't produced
     # via a set operation or cloning)
     #
@@ -114,41 +124,6 @@ class Cohort(models.Model):
                 values[filter.value] = attribute_display_vals[filter.filter.attribute.id][filter.value] if with_display_vals else filter.value
 
         return dict_filters
-
-    # Returns a list of notes from its parents.
-    # Will only continue up the chain if there is only one parent and it was created by applying filters.
-    def get_revision_history(self):
-        revision_list = []
-        sources = Source.objects.filter(cohort=self)
-        source_filters = None
-
-        while sources:
-            # single parent
-            if sources.count() == 1:
-                source = sources[0]
-                if source.type == Source.FILTERS:
-                    if source_filters is None:
-                        source_filters = self.get_filter_history()
-                    Cohort.format_filters_for_display(source_filters[source.cohort.id])
-                    collex_filters = {}
-                    for cohort_filter in source_filters[source.cohort.id]:
-                        if cohort_filter['collection'] not in collex_filters:
-                            collex_filters[cohort_filter['collection']] = []
-                        collex_filters[cohort_filter['collection']].append(cohort_filter)
-                    revision_list.append({'type': 'filter', 'vals': collex_filters})
-                elif source.type == Source.CLONE:
-                    revision_list.append('Cloned from %s.' % escape(source.parent.name))
-                sources = Source.objects.filter(cohort=source.parent)
-
-            # multiple parents
-            if sources.count() > 1:
-                if sources[0].type == Source.SET_OPS:
-                    revision_list.append(escape(sources[0].notes))
-                sources = []
-        if len(revision_list) == 0:
-            revision_list = ['There is no revision history.']
-
-        return revision_list
 
 
 # A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning, editing,
@@ -198,12 +173,6 @@ class Filter_Group(models.Model):
             return Filter_Group.OR
         else:
             return None
-
-
-class Filter_Group(models.Model):
-    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
-    value = models.CharField(max_length=256, null=False, blank=False)
-    feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
     
 
 class Filters(models.Model):
