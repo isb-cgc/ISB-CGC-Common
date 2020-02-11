@@ -30,6 +30,7 @@ from idc_collections.models import Collection, Attribute, User_Feature_Definitio
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
@@ -92,8 +93,63 @@ class Cohort(models.Model):
         isbuser = User.objects.get(username='isb', is_superuser=True)
         return (self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user_id == isbuser.id)
 
-    # Returns the list of filters used to create this cohort, if filters were used (i.e. it wasn't produced
-    # via a set operation or cloning)
+    # Produce a BigQuery filter WHERE clause for use in the console
+    #
+    def get_bq_filter_string(self, prefix=None):
+
+        filter_sets = []
+
+        group_filter_dict = self.get_filters_as_dict()
+
+        for group in group_filter_dict:
+            filter_sets.append(BigQuerySupport.build_bq_where_clause(
+                group_filter_dict[group], field_prefix=prefix
+            ))
+
+        # TODO: For now there will only be a single group, but in the future if there are multiple groups
+        # we will need to consider how to return this
+
+        return filter_sets[0]
+
+    # Produce a BigQuery filter clause and parameters; this is for *programmatic* use of BQ, NOT copy-paste into
+    # the console
+    #
+    def get_filters_for_bq(self, prefix=None, suffix=None, counts=False, schema=None):
+
+        filter_sets = []
+
+        group_filter_dict = self.get_filters_as_dict()
+
+        for group in group_filter_dict:
+            filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
+                group_filter_dict[group], field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
+                type_schema=schema
+                  ))
+
+        # TODO: For now there will only be a single group, but in the future if there are multiple groups
+        # we will need to consider how to return this
+
+        return filter_sets[0]
+
+    # Get a simple dict of the attributes and values of this cohort; note this is NOT intended for UI display
+    #
+    def get_filters_as_dict(self):
+        filter_dict = {}
+
+        groups = self.filter_group_set.all()
+
+        for group in groups:
+            filter_dict[group.id] = {}
+            filter_group = filter_dict[group.id]
+            filters = group.filter_set.all()
+            for filter in filters:
+                filter_group[filter.attribute.name] = filter.value.split(",")
+                if filter.attribute.data_type == filter.attribute.CONTINUOUS_NUMERIC:
+                    filter_group[filter.attribute.name] = [int(x) if "." not in x else float(x) for x in filter_dict[filter.attribute.name]]
+
+        return filter_dict
+
+    # Returns the list of filters used to create this cohort
     #
     def get_filters(self, with_display_vals=False):
         filter_list = Filters.objects.filter(resulting_cohort=self)
@@ -114,41 +170,6 @@ class Cohort(models.Model):
                 values[filter.value] = attribute_display_vals[filter.filter.attribute.id][filter.value] if with_display_vals else filter.value
 
         return dict_filters
-
-    # Returns a list of notes from its parents.
-    # Will only continue up the chain if there is only one parent and it was created by applying filters.
-    def get_revision_history(self):
-        revision_list = []
-        sources = Source.objects.filter(cohort=self)
-        source_filters = None
-
-        while sources:
-            # single parent
-            if sources.count() == 1:
-                source = sources[0]
-                if source.type == Source.FILTERS:
-                    if source_filters is None:
-                        source_filters = self.get_filter_history()
-                    Cohort.format_filters_for_display(source_filters[source.cohort.id])
-                    collex_filters = {}
-                    for cohort_filter in source_filters[source.cohort.id]:
-                        if cohort_filter['collection'] not in collex_filters:
-                            collex_filters[cohort_filter['collection']] = []
-                        collex_filters[cohort_filter['collection']].append(cohort_filter)
-                    revision_list.append({'type': 'filter', 'vals': collex_filters})
-                elif source.type == Source.CLONE:
-                    revision_list.append('Cloned from %s.' % escape(source.parent.name))
-                sources = Source.objects.filter(cohort=source.parent)
-
-            # multiple parents
-            if sources.count() > 1:
-                if sources[0].type == Source.SET_OPS:
-                    revision_list.append(escape(sources[0].notes))
-                sources = []
-        if len(revision_list) == 0:
-            revision_list = ['There is no revision history.']
-
-        return revision_list
 
 
 # A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning, editing,
@@ -198,12 +219,6 @@ class Filter_Group(models.Model):
             return Filter_Group.OR
         else:
             return None
-
-
-class Filter_Group(models.Model):
-    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
-    value = models.CharField(max_length=256, null=False, blank=False)
-    feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
     
 
 class Filters(models.Model):

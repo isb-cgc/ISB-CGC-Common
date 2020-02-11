@@ -100,31 +100,16 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    # TODO: This needs to be altered so that filter IDs are what comes back, not just 'names' (i.e. not 'vital_status' but '5') because
+    # TODO: We need to receive filter IDs from the WebApp, not just 'names' (i.e. not 'vital_status' but '5') because
     # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
     # which actually ties them to collections (and hence programs)
+
+    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
+    # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
+    grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.AND)
     for attr_id in filters:
         filter_obj = filters[attr_id]
-        grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.get_op(filter_obj['op']))
-        for val in filter_obj['values']:
-            Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=val, filter_group=grouping).save()
-
-    # If we're storing this in BQ, that happens here
-    bq_project_id = settings.BIGQUERY_PROJECT_ID
-    cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-    bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-    bq_result = bcs.add_cohort_to_bq(cohort.id, get_sample_case_list_bq(filters, long_form=True))
-
-    # If BQ insertion fails, we immediately de-activate the cohort and warn the user
-    if 'insertErrors' in bq_result:
-        Cohort.objects.filter(id=cohort.id).update(active=False)
-        err_msg = ''
-        if len(bq_result['insertErrors']) > 1:
-            err_msg = 'There were ' + str(len(bq_result['insertErrors'])) + ' insertion errors '
-        else:
-            err_msg = 'There was an insertion error '
-
-        return {'message': err_msg + ' when creating your cohort in BigQuery. Creation of the BQ cohort has failed.'}
+        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_obj['values']), filter_group=grouping).save()
 
     return {'cohort_id': cohort.id}
 
