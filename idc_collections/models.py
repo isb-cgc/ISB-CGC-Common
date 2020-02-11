@@ -75,6 +75,19 @@ class Program(models.Model):
         return "{} ({}), {}".format(self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email))
 
 
+class DataVersion(models.Model):
+    IMAGE_DATA = 'I'
+    ANCILLARY_DATA = 'A'
+    DATA_TYPES = (
+        (IMAGE_DATA, 'Image Data'),
+        (ANCILLARY_DATA, 'Clinical and Biospecimen Data')
+    )
+    version = models.CharField(max_length=16, null=False, blank=False)
+    data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=ANCILLARY_DATA)
+    name = models.CharField(max_length=128, null=False, blank=False)
+    active = models.BooleanField(default=True)
+
+
 class Collection(models.Model):
     id = models.AutoField(primary_key=True)
     # Eg. BRCA
@@ -85,7 +98,7 @@ class Collection(models.Model):
     is_public = models.BooleanField(default=False)
     objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
-    version = models.CharField(max_length=4, null=False, blank=False)
+    data_versions = models.ManyToManyField(DataVersion)
     # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ManyToManyField(Program)
 
@@ -102,7 +115,7 @@ class Collection(models.Model):
 class SolrCollection(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
-    version = models.CharField(max_length=4, null=False, blank=False)
+    version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
 
     def get_collection_attr(self, for_faceting=True):
         if for_faceting:
@@ -116,7 +129,8 @@ class SolrCollection(models.Model):
 class BigQueryTable(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
-    version = models.CharField(max_length=4, null=False, blank=False)
+    version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
+    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
 
     def get_collection_attr(self, for_faceting=True):
         if for_faceting:
@@ -146,10 +160,9 @@ class Attribute(models.Model):
     active = models.BooleanField(default=True)
     is_cross_collex = models.BooleanField(default=False)
     preformatted_values = models.BooleanField(default=False)
-    collections = models.ManyToManyField(Collection)
+    default_ui_display = models.BooleanField(default=True)
     solr_collections = models.ManyToManyField(SolrCollection)
     bq_tables = models.ManyToManyField(BigQueryTable)
-    default_ui_display = models.BooleanField(default=True)
 
     def get_display_values(self):
         display_vals = self.attribute_display_values_set.all()
@@ -162,13 +175,13 @@ class Attribute(models.Model):
 
     def get_solr_bq(self):
         return {
-            'solr': self.solr_collections_set.all().values_list('name', flat=True),
-            'bq': self.bq_tables_set.all().values_list('name', flat=True)
+            'solr': self.solr_collections_set.all().filter(active=True).values_list('name', flat=True),
+            'bq': self.bq_tables_set.all().filter(active=True).values_list('name', flat=True)
         }
 
     def __str__(self):
-        return "{} ({}), Type: {}, Found in: {}, Display values: {}".format(
-            self.name, self.display_name, self.data_type, self.collections.all(), self.attribute_display_values_set.all())
+        return "{} ({}), Type: {}".format(
+            self.name, self.display_name, self.data_type)
 
 
 class Attribute_Display_Values(models.Model):

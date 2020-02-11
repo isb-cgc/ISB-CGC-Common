@@ -700,6 +700,9 @@ class BigQuerySupport(BigQueryABC):
     @staticmethod
     def build_bq_where_clause(filters, comb_with='AND', field_prefix=None, type_schema=None):
 
+        if field_prefix[-1] != ".":
+            field_prefix += "."
+
         filter_set = []
 
         mutation_filters = {}
@@ -767,7 +770,7 @@ class BigQuerySupport(BigQueryABC):
                         if '%' in values[0]:
                             filter_string += "LOWER({}{}) LIKE LOWER('{}')".format('' if not field_prefix else field_prefix, attr, values[0])
                         else:
-                            filter_string += "{}{} = {}".format('' if not field_prefix else field_prefix, attr,
+                            filter_string += "{}{} = '{}'".format('' if not field_prefix else field_prefix, attr,
                                                                  values[0])
                     elif parameter_type == 'INT64':
                         if attr.endswith('_gt') or attr.endswith('_gte'):
