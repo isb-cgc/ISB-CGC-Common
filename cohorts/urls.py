@@ -30,7 +30,7 @@ urlpatterns = [
     url(r'^filelist_ajax/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
                                                     views.cohort_filelist_ajax, name='cohort_filelist_ajax_panel'),
     url(r'^save_cohort/',                           views.save_cohort, name='save_cohort'),
-    url(r'^api/save_cohort/',                       views.save_cohort_api, name='save_cohort'),
+    url(r'^api/save_cohort/',                       views.save_cohort_api, name='save_cohort_api'),
     url(r'^export/(?P<cohort_id>\d+)/(?P<export_type>cohort|file_manifest)/$',
                                                     views.export_data, name='export_data'),
     
