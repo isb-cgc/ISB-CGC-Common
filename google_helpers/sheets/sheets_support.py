@@ -38,7 +38,6 @@ class SheetsSupport(SheetsABC):
     def get_sheet_data(self, include_grid_data=True):
         """
         Retrieve data from Google Sheet for a specified data range.
-        :param data_range: range of data to retrieve, in A1 notation.
         :param include_grid_data: TODO: clarify if this does what I think, retrieve the actual data vs just metadata
         :return: List (or list of lists) of retrieved data.
         """
