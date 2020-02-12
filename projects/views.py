@@ -103,7 +103,7 @@ def program_upload(request, existing_proj=False):
     google_projects = GoogleProject.objects.filter(user=request.user, active=1)
 
     if len(google_projects) == 0:
-        template = 'GenespotRE/register_gcp.html'
+        template = 'isb_cgc/register_gcp.html'
     else:
         template = 'projects/program_upload.html'
 
