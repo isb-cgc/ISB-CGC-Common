@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2020, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,12 +18,27 @@ from builtins import str
 from builtins import object
 from django.db import models
 from django.contrib.auth.models import User
-from django.db.models import Q
 import logging
 import datetime
 import pytz
 
 logger = logging.getLogger('main_logger')
+
+
+class UserOptInStatus(models.Model):
+    NEW = 0
+    NOT_SEEN = 1
+    NO = 2
+    YES = 3
+
+    user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
+    opt_in_status = models.IntegerField(default=NEW)
+
+    class Meta(object):
+        unique_together = (("user", "opt_in_status"),)
+
+    def __str__(self):
+        return "{} UserOptInStatus [{}]".format(self.user, self.opt_in_status)
 
 
 class NIH_User(models.Model):
