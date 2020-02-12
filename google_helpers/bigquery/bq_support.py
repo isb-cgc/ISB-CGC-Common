@@ -503,9 +503,12 @@ class BigQuerySupport(BigQueryABC):
     # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
     # Support for providing an explicit schema of the fields being searched
     #
-    # TODO: add support for DATES
+    # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None, case_insens=True):
+        if field_prefix[-1] != ".":
+            field_prefix += "."
+
         result = {
             'filter_string': '',
             'parameters': []
@@ -609,7 +612,7 @@ class BigQuerySupport(BigQueryABC):
                     # Scalar param
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
-                        if '%' in values[0]:
+                        if '%' in values[0] or case_insens:
                             filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
                         else:
                             filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
@@ -654,9 +657,9 @@ class BigQuerySupport(BigQueryABC):
                     query_param['parameterType']['arrayType'] = {
                         'type': parameter_type
                     }
-                    query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
+                    query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values]}
 
-                    filter_string += "{}{} IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
+                    filter_string += "LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
                 filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
@@ -681,3 +684,126 @@ class BigQuerySupport(BigQueryABC):
         result['filter_string'] = " {} ".format(comb_with).join(filter_set)
 
         return result
+
+
+    # Builds a BQ WHERE clause from a set of filters of the form:
+    # {
+    #     'field_name': [<value>,...]
+    # }
+    # Breaks out '<ATTR> IS NULL'
+    # 2+ values are converted to IN (<value>,...)
+    # Filters must already be pre-bucketed or formatted
+    # Use of LIKE is detected based on single-length value array and use of % in the value string
+    # Support special 'mutation' filter category
+    # Support for Greater/Less than (or equal to) via [gl]t[e]{0,1} in attr name,
+    #     eg. {"age_at_diagnosis_gte": [50,]}
+    # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
+    # Support for providing an explicit schema of the fields being searched
+    #
+    # TODO: add support for DATETIME eg 6/10/2010
+    @staticmethod
+    def build_bq_where_clause(filters, comb_with='AND', field_prefix=None, type_schema=None):
+
+        if field_prefix[-1] != ".":
+            field_prefix += "."
+
+        filter_set = []
+
+        mutation_filters = {}
+        other_filters = {}
+
+        # Split mutation filters into their own set, because of repeat use of the same attrs
+        for attr in filters:
+            if 'MUT:' in attr:
+                mutation_filters[attr] = filters[attr]
+            else:
+                other_filters[attr] = filters[attr]
+
+        mut_filtr_count = 1
+        # 'Mutation' filters, special category for MUT: type filters
+        for attr, values in list(mutation_filters.items()):
+            if type(values) is not list:
+                values = [values]
+            gene = attr.split(':')[2]
+            filter_type = attr.split(':')[-1].lower()
+            invert = bool(attr.split(':')[3] == 'NOT')
+            filter_string = '{}Hugo_Symbol = {} AND '.format('' if not field_prefix else field_prefix, gene)
+
+            if filter_type == 'category' and values[0].lower() == 'any':
+                filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix,)
+            else:
+                if filter_type == 'category':
+                    values = MOLECULAR_CATEGORIES[values[0]]['attrs']
+                filter_string += '{}Variant_Classification {}IN ({})'.format(
+                    '' if not field_prefix else field_prefix,
+                    'NOT ' if invert else '',
+                    ",".join(["'{}'".format(x) for x in values])
+                )
+
+            filter_set.append('({})'.format(filter_string))
+
+            mut_filtr_count += 1
+
+        # Standard query filters
+        for attr, values in list(other_filters.items()):
+            if type(values) is not list:
+                values = [values]
+
+            parameter_type = None
+            if type_schema and attr in type_schema and type_schema[attr]:
+                parameter_type = ('INT64' if type_schema[attr] == 'INTEGER' else 'STRING')
+            else:
+                parameter_type = (
+                    'STRING' if (
+                        type(values[0]) is not int and re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0])
+                    ) else 'INT64'
+                )
+
+            filter_string = ''
+
+            if 'None' in values:
+                values.remove('None')
+                filter_string = "{}{} IS NULL".format('' if not field_prefix else field_prefix, attr)
+
+            if len(values) > 0:
+                if len(filter_string):
+                    filter_string += " OR "
+                if len(values) == 1:
+                    # Scalar param
+                    if parameter_type == 'STRING':
+                        if '%' in values[0]:
+                            filter_string += "LOWER({}{}) LIKE LOWER('{}')".format('' if not field_prefix else field_prefix, attr, values[0])
+                        else:
+                            filter_string += "{}{} = '{}'".format('' if not field_prefix else field_prefix, attr,
+                                                                 values[0])
+                    elif parameter_type == 'INT64':
+                        if attr.endswith('_gt') or attr.endswith('_gte'):
+                            filter_string += "{}{} >{} {}".format(
+                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '=' if attr.endswith('_gte') else '',
+                                values[0]
+                            )
+                        elif attr.endswith('_lt') or attr.endswith('_lte'):
+                            filter_string += "{}{} <{} {}".format(
+                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '=' if attr.endswith('_lte') else '',
+                                values[0]
+                            )
+                        else:
+                            filter_string += "{}{} = {}".format(
+                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                values[0]
+                            )
+                elif len(values) == 2 and attr.endswith('_btw'):
+                    filter_string += "{}{} BETWEEN {} AND {}".format(
+                        '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                        values[0],
+                        values[1]
+                    )
+                else:
+                    val_list = ",".join(["'{}'".format(x) for x in values]) if parameter_type == "STRING" else ",".join(values)
+                    filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr, val_list)
+
+            filter_set.append('({})'.format(filter_string))
+
+        return " {} ".format(comb_with).join(filter_set)
