@@ -45,10 +45,14 @@ class OptInSupport(SheetsSupport):
         # preset to None in case no response result is found
         user_response = None
 
-        responses = self.get_sheet_data(data_range=DATA_RANGE, include_grid_data=True)
+        responses = self.get_sheet_data()
+
+        user_email = user_email.strip().lower()
 
         for response in responses:
-            if response[1] == user_email:
+            response_email = response[1].strip().lower()
+
+            if response_email == user_email:
                 user_response = response
                 break
 
