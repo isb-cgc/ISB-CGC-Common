@@ -505,7 +505,10 @@ class BigQuerySupport(BigQueryABC):
     #
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None, case_insens=True):
+        if field_prefix[-1] != ".":
+            field_prefix += "."
+
         result = {
             'filter_string': '',
             'parameters': []
@@ -609,7 +612,7 @@ class BigQuerySupport(BigQueryABC):
                     # Scalar param
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
-                        if '%' in values[0]:
+                        if '%' in values[0] or case_insens:
                             filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
                         else:
                             filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
@@ -654,9 +657,9 @@ class BigQuerySupport(BigQueryABC):
                     query_param['parameterType']['arrayType'] = {
                         'type': parameter_type
                     }
-                    query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
+                    query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values]}
 
-                    filter_string += "{}{} IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
+                    filter_string += "LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
                 filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
@@ -681,6 +684,7 @@ class BigQuerySupport(BigQueryABC):
         result['filter_string'] = " {} ".format(comb_with).join(filter_set)
 
         return result
+
 
     # Builds a BQ WHERE clause from a set of filters of the form:
     # {
