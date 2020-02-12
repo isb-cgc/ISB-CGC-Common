@@ -47,6 +47,7 @@ MOLECULAR_CATEGORIES = {
 
 # TODO: Convert to slider
 def normalize_bmi(bmis):
+    print("Incoming BMI counts: {}".format(bmis))
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     bmi_list = {'underweight': 0, 'normal weight': 0, 'overweight': 0, 'obese': 0, 'None': 0}
     for bmi, count in list(bmis.items()):
@@ -64,6 +65,7 @@ def normalize_bmi(bmis):
             else:
                 bmi_list['None'] += int(count)
 
+    print("Incoming BMI counts: {}".format(bmi_list))
     return bmi_list
 
 
@@ -253,7 +255,7 @@ def sql_simple_number_by_200(value, field):
     if debug: logger.debug('[DEBUG] Called ' + sys._getframe().f_code.co_name)
     result = ''
 
-    if isinstance(value, basestring):
+    if not isinstance(value, list):
         value = [value]
 
     first = True
@@ -288,7 +290,7 @@ def sql_simple_days_by_ranges(value, field):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = ''
 
-    if isinstance(value, basestring):
+    if not isinstance(value, list):
         value = [value]
 
     first = True
@@ -346,7 +348,7 @@ def sql_year_by_ranges(value):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = ''
 
-    if isinstance(value, basestring):
+    if not isinstance(value, list):
         value = [value]
 
     first = True
@@ -381,7 +383,7 @@ def sql_year_by_ranges(value):
 def sql_bmi_by_ranges(value):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = ''
-    if isinstance(value, basestring):
+    if not isinstance(value, list):
         value = [value]
 
     first = True
@@ -409,7 +411,7 @@ def sql_bmi_by_ranges(value):
 def sql_age_by_ranges(value, bin_by_five=False):
     if debug: logger.debug('[DEBUG] Called '+sys._getframe().f_code.co_name)
     result = ''
-    if isinstance(value, basestring):
+    if not isinstance(value, list):
        value = [value]
 
     first = True
@@ -455,44 +457,4 @@ def sql_age_by_ranges(value, bin_by_five=False):
                 elif str(val).lower() == 'over 40':
                     result += ' (age_at_diagnosis >= 40)'
 
-    return result
-
-
-def gql_age_by_ranges(q, key, value):
-    if debug: logger.debug('[DEBUG] Called '+sys._getframe().f_code.co_name)
-    result = ''
-    if not isinstance(value, basestring):
-        # value is a list of ranges
-        first = True
-        for val in value:
-            if first:
-                first = False
-            else:
-                result += ' or'
-            if str(val) == '10to39':
-                result += ' (%s >= 10 and %s < 40)' % (key, key)
-            elif str(val) == '40to49':
-                result += ' (%s >= 40 and %s < 50)' % (key, key)
-            elif str(val) == '50to59':
-                result += ' (%s >= 50 and %s < 60)' % (key, key)
-            elif str(val) == '60to69':
-                result += ' (%s >= 60 and %s < 70)' % (key, key)
-            elif str(val) == '70to79':
-                result += ' (%s >= 70 and %s < 80)' % (key, key)
-            elif str(val).lower() == 'over80':
-                result += ' (%s >= 80)' % key
-    else:
-        # value is a single range
-        if str(value) == '10to39':
-            result += ' (%s >= 10 and %s < 40)' % (key, key)
-        elif str(value) == '40to49':
-            result += ' (%s >= 40 and %s < 50)' % (key, key)
-        elif str(value) == '50to59':
-            result += ' (%s >= 50 and %s < 60)' % (key, key)
-        elif str(value) == '60to69':
-            result += ' (%s >= 60 and %s < 70)' % (key, key)
-        elif str(value) == '70to79':
-            result += ' (%s >= 70 and %s < 80)' % (key, key)
-        elif str(value).lower() == 'over80':
-            result += ' (%s >= 80)' % key
     return result
