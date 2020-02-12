@@ -50,7 +50,7 @@ from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.utils.html import escape
 
 from .models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
-from .utils import _save_cohort, _delete_cohort
+from .utils import _save_cohort, _delete_cohort, _save_cohort_api
 from idc_collections.models import Program, Collection
 
 BQ_ATTEMPT_MAX = 10
@@ -153,9 +153,9 @@ def save_cohort_api(request):
             filterSet = data['filterSet']
             collections = filterSet["collections"]
             filters = filterSet["filter"]
-            cohort_id = 'cohort_id' in data and data['cohort_d'] or None
+            cohort_id = 'cohort_id' in data and data['cohort_id'] or None
 
-            result = _save_cohort(user, filters, name, description, cohort_id)
+            result = _save_cohort_api(user=user, filters=filters, name=name, description=description, cohort_id=cohort_id)
 
             if 'message' not in result:
                 redirect_url = reverse('cohort_details', args=[result['cohort_id']])

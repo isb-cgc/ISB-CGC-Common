@@ -29,7 +29,7 @@ import logging
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from .models import Cohort, Cohort_Perms, Filters, Filter_Group
-from idc_collections.models import Program
+from idc_collections.models import Program, Attribute
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
@@ -69,6 +69,50 @@ def _delete_cohort(user, cohort_id):
                 'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
             }
     return cohort_info
+
+
+def _save_cohort_api(user, filters=None, name=None, description=None, cohort_id=None, case_insens=True):
+
+    if not filters and not name:
+        # Can't save/edit a cohort when nothing is being changed!
+        return { 'message': "Can't save a cohort with no information to save! (Name and filters not provided.)" }
+
+    blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
+    match = blacklist.search(str(name))
+    if match:
+        # XSS risk, log and fail this cohort save
+        match = blacklist.findall(str(name))
+        logger.error('[ERROR] While saving a cohort, saw a malformed name: ' + name + ', characters: ' + str(match))
+        return {'message': "Your cohort's name contains invalid characters; please choose another name."}
+
+    # If we're only changing the name, just edit the cohort and update it
+    if cohort_id:
+        cohort = Cohort.objects.get(id=cohort_id)
+        cohort.name = name
+        cohort.save()
+        return {'cohort_id': cohort.id}
+
+    # Make and save cohort
+    cohort = Cohort.objects.create(name=name, description=description)
+    cohort.save()
+
+    # Set permission for user to be owner
+    perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
+    perm.save()
+
+    # TODO: We need to receive filter IDs from the WebApp, not just 'names' (i.e. not 'vital_status' but '5') because
+    # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
+    # which actually ties them to collections (and hence programs)
+
+    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
+    # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
+    grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
+    for attr in filters:
+        filter_values = filters[attr]
+        attr_id = Attribute.objects.get(name=attr)
+        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
+
+    return {'cohort_id': cohort.id}
 
 
 def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True):
