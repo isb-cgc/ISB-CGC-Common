@@ -26,7 +26,7 @@ from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from idc_collections.models import Collection, Attribute, User_Feature_Definitions
+from idc_collections.models import Collection, Attribute, User_Feature_Definitions, DataVersion
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
@@ -210,7 +210,8 @@ class Filter_Group(models.Model):
     id = models.AutoField(primary_key=True)
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
-    
+    version = models.ManyToManyField(DataVersion)
+
     @classmethod
     def get_op(cls, op_string):
         if op_string.lower() == 'and':
