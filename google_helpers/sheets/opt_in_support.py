@@ -17,7 +17,8 @@
 from google_helpers.sheets.sheets_support import SheetsSupport
 
 SPREADSHEET_ID = "1FUZqWZv5drJDH4kqi0pU-oau0qVhFKevhbKRMMZrLmA"
-SHEET_ID = "Sheet1"
+SHEET_ID = "Form Responses 1"
+
 
 class OptInSupport(SheetsSupport):
     """
@@ -31,32 +32,48 @@ class OptInSupport(SheetsSupport):
         """
         super(OptInSupport, self).__init__(SHEET_ID, SPREADSHEET_ID)
 
-        # None (if no response) or list containing the user's response fields
-        # Indices: 0=Timestamp, 1=Email, 2=Name, 3=Affiliation, 4=Ok to contact, 5=Comments
+        # None (if no response) or dict containing the retrieved response.
+        # Fields: timestamp, email, name, affiliation, can_contact, comments
         self.user_response = self.set_user_response(user_email)
 
     def set_user_response(self, user_email):
         """
         Retrieves user response data from google sheet and sets the instance variable.
         :param user_email: user email for which to retrieve record
-        :return: None if no user response, else list containing user response fields [Timestamp, Email, Name, Affiliation, Ok to contact, Comments]
+        :return: None if no user response, else dict of response data
 
         """
-        # preset to None in case no response result is found
-        user_response = None
-
         responses = self.get_sheet_data()
 
         user_email = user_email.strip().lower()
 
+        # convert email strings so that comparisons are valid even with minor formatting differences
         for response in responses:
+            user_response = None
             response_email = response[1].strip().lower()
 
             if response_email == user_email:
                 user_response = response
                 break
 
-        return user_response
+        if user_response:
+            # putting values into dictionary for readability
+            response_dict = {
+                "timestamp": user_response[0],
+                "email": user_response[1],
+                "name": user_response[2],
+                "affiliation": user_response[3],
+                "can_contact": user_response[4]
+            }
+
+            if len(user_response) == 6:
+                response_dict["comments"] = user_response[5]
+            else:
+                response_dict["comments"] = None
+
+            return response_dict
+        else:
+            return None
 
     def has_responded(self):
         """

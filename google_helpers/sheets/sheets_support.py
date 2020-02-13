@@ -22,8 +22,8 @@ from time import sleep
 from uuid import uuid4
 import copy
 from django.conf import settings
-from .abstract import SheetsABC
-from .sheets_service import get_sheet_service
+from google_helpers.sheets.abstract import SheetsABC
+from google_helpers.sheets.sheets_service import get_sheet_service
 
 logger = logging.getLogger('main_logger')
 
@@ -33,18 +33,20 @@ class SheetsSupport(SheetsABC):
         self.sheet_id = sheet_id
         self.spreadsheet_id = spreadsheet_id
 
-        self.sheet_service = get_sheet_service()
+        self.sheet_service = get_sheet_service().spreadsheets()
 
-    def get_sheet_data(self, include_grid_data=True):
+    def get_sheet_data(self):
         """
-        Retrieve data from Google Sheet for a specified data range.
-        :param include_grid_data: TODO: clarify if this does what I think, retrieve the actual data vs just metadata
+        Retrieve list of lists representing rows and columns of Google Sheet for a specified data range.
         :return: List (or list of lists) of retrieved data.
         """
-        request = self.sheet_service.spreadsheets().get(
+
+        request = self.sheet_service.values().get(
             spreadsheetId=self.spreadsheet_id,
-            ranges=self.sheet_id,
-            include_grid_data=include_grid_data
+            range=self.sheet_id
         )
 
-        return request.execute()
+        response = request.execute()
+
+        # Strips away additional metadata from response, just returns the data contained in cells
+        return response['values']

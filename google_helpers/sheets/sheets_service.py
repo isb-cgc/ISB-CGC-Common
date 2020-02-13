@@ -17,7 +17,7 @@
 from oauth2client.client import GoogleCredentials
 from django.conf import settings
 import httplib2
-from .utils import build_with_retries
+from google_helpers.utils import build_with_retries
 
 
 def get_sheet_service():

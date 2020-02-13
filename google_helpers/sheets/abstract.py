@@ -29,7 +29,7 @@ class SheetsABC(with_metaclass(ABCMeta, object)):
         pass
 
     @abstractmethod
-    def get_sheet_data(self, include_grid_data):
+    def get_sheet_data(self):
         pass
 
 
