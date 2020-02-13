@@ -47,9 +47,10 @@ class OptInSupport(SheetsSupport):
 
         user_email = user_email.strip().lower()
 
+        user_response = None
+
         # convert email strings so that comparisons are valid even with minor formatting differences
         for response in responses:
-            user_response = None
             response_email = response[1].strip().lower()
 
             if response_email == user_email:
