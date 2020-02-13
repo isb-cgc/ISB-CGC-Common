@@ -25,22 +25,6 @@ import pytz
 logger = logging.getLogger('main_logger')
 
 
-class UserOptInStatus(models.Model):
-    NEW = 0
-    NOT_SEEN = 1
-    NO = 2
-    YES = 3
-
-    user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
-    opt_in_status = models.IntegerField(default=NEW)
-
-    class Meta(object):
-        unique_together = (("user", "opt_in_status"),)
-
-    def __str__(self):
-        return "{} UserOptInStatus [{}]".format(self.user, self.opt_in_status)
-
-
 class NIH_User(models.Model):
     user = models.ForeignKey(User, null=False)
     NIH_username = models.TextField(null=True)
@@ -223,3 +207,18 @@ class DCFToken(models.Model):
 
     class Meta(object):
         unique_together = (("user", "nih_username_lower"),)
+
+class UserOptInStatus(models.Model):
+    NEW = 0
+    NOT_SEEN = 1
+    NO = 2
+    YES = 3
+
+    user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
+    opt_in_status = models.IntegerField(default=NEW)
+
+    class Meta(object):
+        unique_together = (("user", "opt_in_status"),)
+
+    def __str__(self):
+        return "{} UserOptInStatus [{}]".format(self.user, self.opt_in_status)
