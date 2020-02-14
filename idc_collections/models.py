@@ -116,6 +116,7 @@ class SolrCollection(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
+    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
 
     def get_collection_attr(self, for_faceting=True):
         if for_faceting:
