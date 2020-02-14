@@ -18,7 +18,7 @@ RANGE_FIELDS = ['wbc_at_diagnosis', 'event_free_survival', 'days_to_death', 'day
 BMI_MAPPING = {
     'underweight': '[* TO 18.5}',
     'normal weight': '[18.5 TO 25}',
-    'overweight': '[25 TO 30)',
+    'overweight': '[25 TO 30}',
     'obese': '[30 TO *]'
 }
 
@@ -141,94 +141,77 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
     query_set = None
     filter_tags = None
     count = 0
-    key_order = []
-    keyType = None
 
-    for key, value in list(filters.items()):
-        gene = None
-        invert = False
+    mutation_filters = {}
+    other_filters = {}
 
-        if isinstance(value, dict) and 'values' in value:
-            value = value['values']
-
-        if isinstance(value, list) and len(value) == 1:
-            value = value[0]
-
-        # Multitable where's will come in with : in the name. Only grab the column piece for now
-        # TODO: Shouldn't throw away the entire key
-        elif ':' in key:
-            keyType = key.split(':')[0]
-            if keyType == 'MUT':
-                gene = key.split(':')[2]
-                invert = bool(key.split(':')[3] == 'NOT')
-            key = key.split(':')[-1]
-
-        # Multitable filter lists don't come in as string as they can contain arbitrary text in values
-        elif isinstance(value, str):
-            # If it's a list of values, split it into an array
-            if ',' in value:
-                value = value.split(',')
-
-        key_order.append(key)
-
-        # BQ-only format
-        if keyType == 'MUT':
-            # If it's first in the list, don't append an "and"
-            if first:
-                first = False
-            else:
-                query_str += ' {}'.format(comb_with)
-
-            query_str += "(%s:(%s) AND " % ('Hugo_Symbol', gene,)
-
-            if(key == 'category'):
-                if value == 'any':
-                    query_str += '(%s:{* TO *}' % 'Variant_Classification'
-                else:
-                    values = MOLECULAR_CATEGORIES[value]['attrs']
-                    query_str += '(%s%s:(%s))'.format("-" if invert else "", 'Variant_Classification', " ".join(values))
-            else:
-                values = value
-                query_str += '(%s%;s:(%s))'.format("-" if invert else "", 'Variant_Classification', " ".join(values))
+    # Split mutation filters into their own set, because of repeat use of the same attrs
+    for attr in filters:
+        if 'MUT:' in attr:
+            mutation_filters[attr] = filters[attr]
         else:
-            # If it's first in the list, don't append an "and"
-            if first:
-                first = False
-            else:
-                if not with_tags_for_ex:
-                    query_str += ' AND '
+            other_filters[attr] = filters[attr]
 
-            # If it's looking for a single None value
-            if value == 'None' or (isinstance(value, list) and len(value) == 1 and value[0] == 'None'):
-                query_str += '(-%s:{* TO *})' % key
-            # If it's a ranged value, calculate the bins
-            elif key == 'bmi':
-                if 'None' in value:
-                    value.remove('None')
-                    query_str += '-(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]), key)
-                else:
-                    query_str += "+({})".format(" OR ".join(["{}:{}".format(key, BMI_MAPPING[x]) for x in value]))
-            elif key in RANGE_FIELDS:
-                if 'None' in value:
-                    value.remove('None')
-                    query_str += '-(-(%s) +(%s:{* TO *}))' % (" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]), key)
-                else:
-                    query_str += "+({})".format(" OR ".join(["{}:[{}]".format(key, x.upper()) for x in value]))
-            elif isinstance(value, list):
-                if 'None' in value:
-                    value.remove('None')
-                    query_str += '-(-(%s:(%s)) +(%s:{* TO *}))' % (key," ".join(value), key)
-                else:
-                    query_str += '(+%s:(%s))' % (key, " ".join(value))
-            # A single, non-None value
+    # 'Mutation' filters, special category for MUT: type filters
+    for attr, values in list(mutation_filters.items()):
+        if type(values) is not list:
+            values = [values]
+        gene = attr.split(':')[2]
+        gene_field = "Hugo_Symbol"
+        filter_type = attr.split(':')[-1].lower()
+        invert = bool(attr.split(':')[3] == 'NOT')
+
+        # TODO: sort out how we're handling mutations
+
+    for attr, values in list(other_filters.items()):
+
+        if type(values) is dict and 'values' in values:
+            values = values['values']
+
+        if type(values) is not list:
+            if type(values) is str and "," in values:
+                values = values.split(',')
             else:
-                query_str += '+%s:%s' % (key, value)
+                values = [values]
+
+        # If it's first in the list, don't append an "and"
+        if first:
+            first = False
+        else:
+            if not with_tags_for_ex:
+                query_str += ' AND '
+
+        # If it's looking for a single None value
+        if len(values) == 1 and values[0] == 'None':
+            query_str += '(-%s:{* TO *})' % attr
+        # If it's a ranged value, calculate the bins
+        elif attr == 'bmi':
+            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
+            else:
+                query_str += "+({})".format(clause)
+        elif attr in RANGE_FIELDS:
+            clause = " {} ".format(comb_with).join(["{}:[{} TO {}]".format(attr, str(x[0]), str(x[1])) for x in values])
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
+            else:
+                query_str += "+({})".format(clause)
+        else:
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s:(%s)) +(%s:{* TO *}))' % (attr," ".join(values), attr)
+            else:
+                query_str += '(+%s:(%s))' % (attr, " ".join(values))
+
         if with_tags_for_ex:
             query_set = query_set or {}
             filter_tags = filter_tags or {}
             tag = "f{}".format(str(count))
-            filter_tags[key] = tag
-            query_set[key] = ("{!tag=%s}" % tag)+query_str
+            filter_tags[attr] = tag
+            query_set[attr] = ("{!tag=%s}" % tag)+query_str
             query_str = ''
             count += 1
 
@@ -236,5 +219,4 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
         'queries': query_set,
         'full_query_str': query_str,
         'filter_tags': filter_tags
-
     }
