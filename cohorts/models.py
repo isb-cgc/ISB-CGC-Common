@@ -171,7 +171,6 @@ class Cohort(models.Model):
 
         return dict_filters
 
-
 # A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning, editing,
 # or set operations
 class Source(models.Model):
