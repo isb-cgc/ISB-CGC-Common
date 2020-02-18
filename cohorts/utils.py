@@ -29,7 +29,7 @@ import logging
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from .models import Cohort, Cohort_Perms, Filters, Filter_Group
-from idc_collections.models import Program, Attribute, Collection
+from idc_collections.models import Program, Attribute, Collection, DataVersion, BigQueryTable
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
@@ -71,9 +71,15 @@ def _delete_cohort(user, cohort_id):
     return cohort_info
 
 
-def _save_cohort_api(user, filters=None, name=None, description=None, cohort_id=None, collections=None, case_insens=True):
+def _save_cohort_api(user, name, data, case_insens=True):
 
-    if not filters and not name:
+    description = data['description']
+    filterset = data['filterSet']
+    attributes = filterset["attributes"]
+    cohort_id = 'cohort_id' in data and data['cohort_id'] or None
+
+
+    if not filterset or not name:
         # Can't save/edit a cohort when nothing is being changed!
         return { 'message': "Can't save a cohort with no information to save! (Name and filters not provided.)" }
 
@@ -96,34 +102,31 @@ def _save_cohort_api(user, filters=None, name=None, description=None, cohort_id=
     cohort = Cohort.objects.create(name=name, description=description)
     cohort.save()
 
-    # for acollection in collections:
-    #     cohort_collection = Cohort_Collection(
-    #                             cohort = cohort,
-    #                             collection = Collection.objects.get(short_name=acollection["collection_name"]))
-    #     cohort_collection.save()
-    #     for data_version in acollection["data_versions"]:
-    #         cohort_collection_version = Cohort_Collection_Version(
-    #                                         attribute_group = data_version["attribute_group"],
-    #                                         version = data_version["version"])
-    #         cohort_collection_version.save()
-    #
-    # Set permission for user to be owner
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    # TODO: We need to receive filter IDs from the WebApp, not just 'names' (i.e. not 'vital_status' but '5') because
-    # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
-    # which actually ties them to collections (and hence programs)
-
-    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
+     # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
     # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
     grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
-    for attr in filters:
-        # Take out the if clause when  these attributes are added to Attribute
-        if attr not in ("bioclin_collection", "imaging_collection"):
-            filter_values = filters[attr]
-            attr_id = Attribute.objects.get(name=attr)
-            Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
+
+    # Get versions of datasets to be filtered, and link to filter group
+    imaging_version = 'imaging_version' in filterset and \
+                      len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
+                      DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
+                      DataVersion.objects.get(active=True, name='TCIA Image Data')
+    grouping.version.add(imaging_version)
+
+    bioclin_version = 'bioclin_version' in filterset and \
+                      len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
+                      DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
+                      DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
+    grouping.version.add(bioclin_version)
+
+
+    for attr in attributes:
+        filter_values = attributes[attr]
+        attr_id = Attribute.objects.get(name=attr)
+        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
 
     return {'cohort_id': cohort.id}
 

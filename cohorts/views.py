@@ -146,18 +146,11 @@ def save_cohort_api(request):
         if request.method == "POST":
             body = json.loads(request.body.decode('utf-8'))
 
-            username = body["user_name"]
-            user = User.objects.get(username = username)
+            user = User.objects.get(username = body['user_name'])
 
             data = body["request_data"]
-            name = data['name']
-            description = data['description']
-            filters = data['filterSet']
-#            collections = data["collections"]
-            cohort_id = 'cohort_id' in data and data['cohort_id'] or None
-
-            result = _save_cohort_api(user=user, filters=filters, name=name, description=description,
-                        cohort_id=cohort_id)
+            cohort_name = data['name']
+            result = _save_cohort_api(user, cohort_name, data)
 
             if 'message' not in result:
                 redirect_url = reverse('cohort_detail_api', args=[result['cohort_id']])
@@ -235,57 +228,27 @@ def cohort_detail_api(request, cohort_id=0):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        shared_with_users = []
-
-        # isb_user = Django_User.objects.filter(username='isb').first()
-        # program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
-        #
-        # template_values = {
-        #     'request': request,
-        #     'base_url': settings.BASE_URL,
-        #     'base_api_url': settings.BASE_API_URL,
-        #     'programs': program_list,
-        #     'program_prefixes': {x.name: True for x in program_list}
-        # }
-        #
-        # if workbook_id and worksheet_id :
-        #     template_values['workbook']  = Workbook.objects.get(id=workbook_id)
-        #     template_values['worksheet'] = Worksheet.objects.get(id=worksheet_id)
-        # elif create_workbook:
-        #     template_values['create_workbook'] = True
-        #
-        # template = 'cohorts/new_cohort.html'
-        #
-        # if '/new_cohort/barcodes/' in request.path or 'create_cohort_and_create_workbook/barcodes/' in request.path or '/create/barcodes' in request.path:
-        #     template = 'cohorts/new_cohort_barcodes.html'
-
         if cohort_id != 0:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             cohort.perm = cohort.get_perm(request)
             cohort.owner = cohort.get_owner()
 
-            if not cohort.perm:
-                messages.error(request, 'You do not have permission to view that cohort.')
-                return redirect('cohort_list')
+            attributes = {}
+            filter_group = cohort.filter_group_set.get()
+            filters = filter_group.filters_set.all()
+            for filter in filters:
+                attributes[filter.attribute.name] = filter.value
 
-            cohort.mark_viewed(request)
+            filterset = {
+                "bioclin_version": filter_group.version.get(name='TCGA Clinical and Biospecimen Data').version,
+                "imaging_version": filter_group.version.get(name='TCIA Image Data').version,
+                "attributes": attributes
+            }
 
-            cohort_progs = Program.objects.filter(id__in=Collection.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
-
-            cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
-
-            # Do not show shared users for public cohorts
-            if not cohort.is_public():
-                shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
-                shared_with_users = User.objects.filter(id__in=shared_with_ids)
-
-            template = 'cohorts/cohort_details.html'
-            template_values['cohort'] = cohort
-            template_values['total_samples'] = cohort.sample_size()
-            template_values['total_cases'] = cohort.case_size()
-            template_values['shared_with_users'] = shared_with_users
-            template_values['cohort_programs'] = cohort_programs
-            template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
+            data = {
+                "name": cohort.name,
+                "description": cohort.description,
+                "filterSet": filterset}
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
@@ -296,7 +259,8 @@ def cohort_detail_api(request, cohort_id=0):
         messages.error(request, "There was an error while trying to load that cohort's details page.")
         return redirect('cohort_list')
 
-    return render(request, template, template_values)
+    return JsonResponse(data)
+#    return render(request, template, template_values)
 
 
 @login_required
