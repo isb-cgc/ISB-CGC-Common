@@ -71,6 +71,8 @@ def extended_logout_view(request):
                 user_status_obj.opt_in_status = UserOptInStatus.YES
             elif opt_in_response == 'No':
                 user_status_obj.opt_in_status = UserOptInStatus.NO
+            user_status_obj.save()
+
     except ObjectDoesNotExist:
         logger.error("[ERROR] Unable to retrieve UserOptInStatus object on logout.")
 
