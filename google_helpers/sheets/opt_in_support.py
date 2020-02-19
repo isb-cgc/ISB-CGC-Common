@@ -15,9 +15,12 @@
 #
 
 from google_helpers.sheets.sheets_support import SheetsSupport
+import logging
 
 SPREADSHEET_ID = "1FUZqWZv5drJDH4kqi0pU-oau0qVhFKevhbKRMMZrLmA"
 SHEET_ID = "Form Responses 1"
+
+logger = logging.getLogger('main_logger')
 
 
 class OptInSupport(SheetsSupport):
@@ -44,6 +47,10 @@ class OptInSupport(SheetsSupport):
 
         """
         responses = self.get_sheet_data()
+
+        if not responses:
+            logger.error("[ERROR] Not checking opt-in form response, empty result returned by Sheets API.")
+            return None
 
         user_email = user_email.strip().lower()
 

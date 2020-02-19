@@ -29,6 +29,10 @@ logger = logging.getLogger('main_logger')
 
 
 class SheetsSupport(SheetsABC):
+    """
+    Generic functions for interaction with the Google Sheets API.
+    """
+
     def __init__(self, sheet_id, spreadsheet_id):
         self.sheet_id = sheet_id
         self.spreadsheet_id = spreadsheet_id
@@ -47,6 +51,10 @@ class SheetsSupport(SheetsABC):
         )
 
         response = request.execute()
+
+        if not response:
+            logger.error("[ERROR] Empty response from Google Sheets API.")
+            return None
 
         # Strips away additional metadata from response, just returns the data contained in cells
         return response['values']
