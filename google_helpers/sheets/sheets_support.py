@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2020, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,3 +35,16 @@ class SheetsSupport(SheetsABC):
 
         self.sheet_service = get_sheet_service()
 
+    def get_sheet_data(self, include_grid_data=True):
+        """
+        Retrieve data from Google Sheet for a specified data range.
+        :param include_grid_data: TODO: clarify if this does what I think, retrieve the actual data vs just metadata
+        :return: List (or list of lists) of retrieved data.
+        """
+        request = self.sheet_service.spreadsheets().get(
+            spreadsheetId=self.spreadsheet_id,
+            ranges=self.sheet_id,
+            include_grid_data=include_grid_data
+        )
+
+        return request.execute()

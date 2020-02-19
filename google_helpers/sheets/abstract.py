@@ -19,11 +19,29 @@ from abc import ABCMeta, abstractmethod
 from future.utils import with_metaclass
 
 
-# Base Abstract class which defines the shared methods and properties for interaction with BigQuery
 class SheetsABC(with_metaclass(ABCMeta, object)):
+    """
+    Base abstract class which defines the shared methods and properties
+    for interaction with Sheets API.
+    """
     @abstractmethod
     def __init__(self):
         pass
 
+    @abstractmethod
+    def get_sheet_data(self, include_grid_data):
+        pass
 
 
+class OptInABC(SheetsABC):
+    """
+    Abstract base class extension that adds Opt-In Form specific methods.
+    """
+
+    @abstractmethod
+    def set_user_response(self, user_email, executing_project):
+        pass
+
+    @abstractmethod
+    def has_responded(self):
+        pass
