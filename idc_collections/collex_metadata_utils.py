@@ -154,7 +154,7 @@ def get_bq_string(filters, fields, data_versions):
                 filter_attr_by_bq[bqtable.name]['attrs'].append(attr.name)
 
     for attr in field_attrs:
-        bqtables = attr.bq_tables.all().filter(version__active=True, ).distinct()
+        bqtables = attr.bq_tables.all().filter(version__in=data_versions).distinct()
         for bqtable in bqtables:
             if bqtable.name not in field_attr_by_bq:
                 field_attr_by_bq[bqtable.name] = {}

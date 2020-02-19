@@ -3,6 +3,7 @@ from django.conf import settings
 import requests
 import logging
 import json
+import re
 
 from metadata.query_helpers import MOLECULAR_CATEGORIES
 
@@ -192,11 +193,19 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
                 query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
             else:
                 query_str += "+({})".format(clause)
-        elif attr in RANGE_FIELDS:
-            clause = " {} ".format(comb_with).join(["{}:[{} TO {}]".format(attr, str(x[0]), str(x[1])) for x in values])
+        elif attr[:attr.rfind('_')] in RANGE_FIELDS:
+            attr_name = attr[:attr.rfind('_')]
+            clause = ""
+            if len(values) > 1 and type(values[0]) is list:
+                clause = " {} ".format(comb_with).join(
+                    ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
+            elif len(values) > 1 :
+                clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
+            else:
+                clause = "{}:{}".format(attr_name, values[0])
             if 'None' in values:
                 values.remove('None')
-                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
+                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
             else:
                 query_str += "+({})".format(clause)
         else:
