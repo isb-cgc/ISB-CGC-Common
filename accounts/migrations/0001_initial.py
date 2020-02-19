@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('bucket_name', models.CharField(max_length=155, null=True)),
                 ('bucket_permissions', models.TextField(null=True)),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
                 ('project_name', models.CharField(max_length=150)),
                 ('project_id', models.CharField(max_length=150)),
                 ('big_query_dataset', models.CharField(max_length=150, null=True)),
-                ('user', models.OneToOneField(to=settings.AUTH_USER_MODEL)),
+                ('user', models.OneToOneField(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -46,7 +46,7 @@ class Migration(migrations.Migration):
                 ('NIH_assertion_expiration', models.DateTimeField(null=True)),
                 ('dbGaP_authorized', models.BooleanField(default=False)),
                 ('active', models.BooleanField(default=True)),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
                 'verbose_name': 'NIH User',

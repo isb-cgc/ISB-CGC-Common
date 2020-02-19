@@ -24,7 +24,7 @@ class Migration(migrations.Migration):
                 ('active', models.BooleanField(default=True)),
                 ('last_date_saved', models.DateTimeField(auto_now_add=True)),
                 ('is_public', models.BooleanField(default=False)),
-                ('owner', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('owner', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
                 ('shared', models.ManyToManyField(to='sharing.Shared_Resource')),
             ],
             options={
@@ -36,8 +36,8 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('last_view', models.DateTimeField(auto_now=True, auto_now_add=True)),
-                ('project', models.ForeignKey(to='projects.Project')),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('project', models.ForeignKey(to='projects.Project', on_delete=models.CASCADE)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -51,9 +51,9 @@ class Migration(migrations.Migration):
                 ('description', models.TextField(null=True, blank=True)),
                 ('active', models.BooleanField(default=True)),
                 ('last_date_saved', models.DateTimeField(auto_now_add=True)),
-                ('extends', models.ForeignKey(blank=True, to='projects.Study', null=True)),
-                ('owner', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
-                ('project', models.ForeignKey(to='projects.Project')),
+                ('extends', models.ForeignKey(blank=True, to='projects.Study', null=True, on_delete=models.CASCADE)),
+                ('owner', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
+                ('project', models.ForeignKey(to='projects.Project', on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -64,8 +64,8 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('last_view', models.DateTimeField(auto_now=True, auto_now_add=True)),
-                ('study', models.ForeignKey(to='projects.Study')),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('study', models.ForeignKey(to='projects.Study', on_delete=models.CASCADE)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -78,11 +78,11 @@ class Migration(migrations.Migration):
                 ('metadata_data_table', models.CharField(max_length=200)),
                 ('metadata_samples_table', models.CharField(max_length=200)),
                 ('feature_definition_table', models.CharField(default='projects_user_feature_definitions', max_length=200)),
-                ('data_upload', models.ForeignKey(blank=True, to='data_upload.UserUpload', null=True)),
-                ('google_bucket', models.ForeignKey(to='accounts.Bucket')),
-                ('google_project', models.ForeignKey(to='accounts.GoogleProject')),
-                ('study', models.ForeignKey(to='projects.Study')),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('data_upload', models.ForeignKey(blank=True, to='data_upload.UserUpload', null=True, on_delete=models.CASCADE)),
+                ('google_bucket', models.ForeignKey(to='accounts.Bucket', on_delete=models.CASCADE)),
+                ('google_project', models.ForeignKey(to='accounts.GoogleProject', on_delete=models.CASCADE)),
+                ('study', models.ForeignKey(to='projects.Study', on_delete=models.CASCADE)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -107,7 +107,7 @@ class Migration(migrations.Migration):
                 ('bq_map_id', models.CharField(max_length=200)),
                 ('is_numeric', models.BooleanField(default=False)),
                 ('shared_map_id', models.CharField(max_length=128, null=True, blank=True)),
-                ('study', models.ForeignKey(to='projects.Study')),
+                ('study', models.ForeignKey(to='projects.Study', on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -116,7 +116,7 @@ class Migration(migrations.Migration):
         migrations.AddField(
             model_name='user_feature_counts',
             name='feature',
-            field=models.ForeignKey(to='projects.User_Feature_Definitions'),
+            field=models.ForeignKey(to='projects.User_Feature_Definitions', on_delete=models.CASCADE),
             preserve_default=True,
         ),
     ]

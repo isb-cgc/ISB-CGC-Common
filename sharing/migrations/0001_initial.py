@@ -35,7 +35,7 @@ class Migration(migrations.Migration):
                 ('active', models.BooleanField(default=True)),
                 ('created', models.DateTimeField(auto_now_add=True)),
                 ('updated', models.DateTimeField(auto_now=True)),
-                ('matched_user', models.ForeignKey(blank=True, to=settings.AUTH_USER_MODEL, null=True)),
+                ('matched_user', models.ForeignKey(blank=True, to=settings.AUTH_USER_MODEL, null=True, on_delete=models.CASCADE)),
             ],
             options={
             },

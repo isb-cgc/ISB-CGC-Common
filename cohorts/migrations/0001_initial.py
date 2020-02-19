@@ -32,8 +32,8 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('date_created', models.DateTimeField(auto_now_add=True)),
                 ('content', models.CharField(max_length=1024)),
-                ('cohort', models.ForeignKey(related_name='cohort_comment', to='cohorts.Cohort')),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('cohort', models.ForeignKey(related_name='cohort_comment', to='cohorts.Cohort', on_delete=models.CASCADE)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -44,8 +44,8 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('last_view', models.DateTimeField(auto_now=True, auto_now_add=True)),
-                ('cohort', models.ForeignKey(to='cohorts.Cohort')),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL)),
+                ('cohort', models.ForeignKey(to='cohorts.Cohort', on_delete=models.CASCADE)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -56,8 +56,8 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('perm', models.CharField(default=b'READER', max_length=10, choices=[(b'READER', b'Reader'), (b'OWNER', b'Owner')])),
-                ('cohort', models.ForeignKey(to='cohorts.Cohort')),
-                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, blank=True)),
+                ('cohort', models.ForeignKey(to='cohorts.Cohort', on_delete=models.CASCADE)),
+                ('user', models.ForeignKey(to=settings.AUTH_USER_MODEL, blank=True, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -69,8 +69,8 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('name', models.CharField(max_length=256)),
                 ('value', models.CharField(max_length=512)),
-                ('feature_def', models.ForeignKey(blank=True, to='projects.User_Feature_Definitions', null=True)),
-                ('resulting_cohort', models.ForeignKey(blank=True, to='cohorts.Cohort', null=True)),
+                ('feature_def', models.ForeignKey(blank=True, to='projects.User_Feature_Definitions', null=True, on_delete=models.CASCADE)),
+                ('resulting_cohort', models.ForeignKey(blank=True, to='cohorts.Cohort', null=True, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -81,7 +81,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('patient_id', models.TextField()),
-                ('cohort', models.ForeignKey(to='cohorts.Cohort')),
+                ('cohort', models.ForeignKey(to='cohorts.Cohort', on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -92,8 +92,8 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('sample_id', models.TextField()),
-                ('cohort', models.ForeignKey(to='cohorts.Cohort')),
-                ('study', models.ForeignKey(blank=True, to='projects.Study', null=True)),
+                ('cohort', models.ForeignKey(to='cohorts.Cohort', on_delete=models.CASCADE)),
+                ('study', models.ForeignKey(blank=True, to='projects.Study', null=True, on_delete=models.CASCADE)),
             ],
             options={
             },
@@ -105,8 +105,8 @@ class Migration(migrations.Migration):
                 ('id', models.AutoField(verbose_name='ID', serialize=False, auto_created=True, primary_key=True)),
                 ('type', models.CharField(max_length=10, choices=[(b'FILTERS', b'Filters'), (b'SET_OPS', b'Set Operations'), (b'PLOT_SEL', b'Plot Selections'), (b'CLONE', b'Clone')])),
                 ('notes', models.CharField(max_length=1024, blank=True)),
-                ('cohort', models.ForeignKey(related_name='source_cohort', to='cohorts.Cohort')),
-                ('parent', models.ForeignKey(related_name='source_parent', blank=True, to='cohorts.Cohort', null=True)),
+                ('cohort', models.ForeignKey(related_name='source_cohort', to='cohorts.Cohort', on_delete=models.CASCADE)),
+                ('parent', models.ForeignKey(related_name='source_parent', blank=True, to='cohorts.Cohort', null=True, on_delete=models.CASCADE)),
             ],
             options={
             },
