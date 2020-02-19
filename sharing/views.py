@@ -43,7 +43,12 @@ def sharing_add(request, sharing_id=0):
             redirect_page = 'workbook_detail'
             redirect_id_key = 'workbook_id'
             resource = shared.workbook_set.all().first()
-        # TODO: Add check for cohort
+        elif shared.cohort_set.count() > 0:
+            type = 'cohorts'
+            title = 'Cohort'
+            redirect_page = 'cohort_details'
+            redirect_id_key = 'cohort_id'
+            resource = shared.cohort_set.all().first()
         if not resource:
             message = 'we were not able to find the resource'
 
