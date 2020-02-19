@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseRedirect, JsonResponse
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from sharing.models import Shared_Resource
 from django.contrib import messages
 
@@ -43,7 +43,12 @@ def sharing_add(request, sharing_id=0):
             redirect_page = 'workbook_detail'
             redirect_id_key = 'workbook_id'
             resource = shared.workbook_set.all().first()
-        # TODO: Add check for cohort
+        elif shared.cohort_set.count() > 0:
+            type = 'cohorts'
+            title = 'Cohort'
+            redirect_page = 'cohort_details'
+            redirect_id_key = 'cohort_id'
+            resource = shared.cohort_set.all().first()
         if not resource:
             message = 'we were not able to find the resource'
 
