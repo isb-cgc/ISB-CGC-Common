@@ -47,6 +47,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
         if 'docs' in result['response'] and len(result['response']['docs']):
             formatted_query_result['docs'] = result['response']['docs']
+        else:
+            formatted_query_result['docs'] = []
 
         if 'facets' in result:
             if normalize_facets:
