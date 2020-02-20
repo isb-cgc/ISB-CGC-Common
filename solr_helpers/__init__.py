@@ -203,6 +203,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
                 clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
             else:
                 clause = "{}:{}".format(attr_name, values[0])
+
             if 'None' in values:
                 values.remove('None')
                 query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
@@ -213,7 +214,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
                 values.remove('None')
                 query_str += '-(-(%s:(%s)) +(%s:{* TO *}))' % (attr," ".join(values), attr)
             else:
-                query_str += '(+%s:(%s))' % (attr, " ".join(values))
+                query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
 
         if with_tags_for_ex:
             query_set = query_set or {}
