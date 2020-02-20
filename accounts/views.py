@@ -59,17 +59,19 @@ MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 @login_required
 def extended_logout_view(request):
     try:
-        user_status_obj = UserOptInStatus.objects.get(request.user)
-        if user_status_obj and user_status_obj.opt_in_status == UserOptInStatus.SEEN or \
-                user_status_obj.opt_in_status != UserOptInStatus.NOT_SEEN:
+        user = User.objects.get(id=request.user.id)
+        user_status_obj = UserOptInStatus.objects.filter(user=user).first()
+
+        if user_status_obj and user_status_obj.opt_in_status != UserOptInStatus.YES and \
+                user_status_obj.opt_in_status != UserOptInStatus.NO:
 
             opt_in_response = get_opt_in_response(request.user.email)
 
             if not opt_in_response:
                 user_status_obj.opt_in_status = UserOptInStatus.NOT_SEEN
-            elif opt_in_response == 'Yes':
+            elif opt_in_response["can_contact"] == 'Yes':
                 user_status_obj.opt_in_status = UserOptInStatus.YES
-            elif opt_in_response == 'No':
+            elif opt_in_response["can_contact"] == 'No':
                 user_status_obj.opt_in_status = UserOptInStatus.NO
             user_status_obj.save()
 
