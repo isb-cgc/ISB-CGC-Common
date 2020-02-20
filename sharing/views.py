@@ -16,7 +16,7 @@ def sharing_add(request, sharing_id=0):
     message = ""
 
     if shared:
-        if request.user.is_authenticated():
+        if request.user.is_authenticated:
             if shared.redeemed and shared.matched_user_id != request.user.id:
                 message = 'this invitation has already been redeemed by a different user'
             else :
@@ -54,7 +54,7 @@ def sharing_add(request, sharing_id=0):
 
     else:
         messages.error(request, "This shared resource has already been removed")
-        if request.user.is_authenticated():
+        if request.user.is_authenticated:
             redirect_page = 'dashboard'
         else:
             redirect_page = 'landing_page'
@@ -70,7 +70,7 @@ def sharing_add(request, sharing_id=0):
         }
         return render(request, template, context)
 
-    if request.user.is_authenticated():
+    if request.user.is_authenticated:
         return HttpResponseRedirect(reverse(redirect_page, kwargs={
             redirect_id_key: resource.id
         }))

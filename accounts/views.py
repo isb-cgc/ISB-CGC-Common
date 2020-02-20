@@ -40,7 +40,7 @@ from projects.models import User_Data_Tables
 from django.utils.html import escape
 from .sa_utils import verify_service_account, register_service_account, service_account_dict, \
                      controlled_auth_datasets, have_linked_user
-from .utils import verify_gcp_for_reg, register_or_refresh_gcp, unreg_gcp
+from .utils import verify_gcp_for_reg, register_or_refresh_gcp, unreg_gcp, get_opt_in_response
 
 from .dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
                         InternalTokenError, RefreshTokenExpired, DCFCommFailure
@@ -58,8 +58,26 @@ MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 @login_required
 def extended_logout_view(request):
+    try:
+        user_status_obj = UserOptInStatus.objects.get(request.user)
+        if user_status_obj and user_status_obj.opt_in_status == UserOptInStatus.SEEN or \
+                user_status_obj.opt_in_status != UserOptInStatus.NOT_SEEN:
+
+            opt_in_response = get_opt_in_response(request.user.email)
+
+            if not opt_in_response:
+                user_status_obj.opt_in_status = UserOptInStatus.NOT_SEEN
+            elif opt_in_response == 'Yes':
+                user_status_obj.opt_in_status = UserOptInStatus.YES
+            elif opt_in_response == 'No':
+                user_status_obj.opt_in_status = UserOptInStatus.NO
+            user_status_obj.save()
+
+    except ObjectDoesNotExist:
+        logger.error("[ERROR] Unable to retrieve UserOptInStatus object on logout.")
 
     response = None
+
     try:
         response = account_views.logout(request)
     except Exception as e:
@@ -67,6 +85,7 @@ def extended_logout_view(request):
         logger.exception(e)
         messages.error(request,"There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
+
     return response
 
 # GCP RELATED VIEWS

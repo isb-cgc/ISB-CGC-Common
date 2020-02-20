@@ -45,3 +45,20 @@ class OptInABC(SheetsABC):
     @abstractmethod
     def has_responded(self):
         pass
+    @abstractmethod
+    def get_sheet_data(self):
+        pass
+
+
+class OptInABC(SheetsABC):
+    """
+    Abstract base class extension that adds Opt-In Form specific methods.
+    """
+
+    @abstractmethod
+    def set_user_response(self, user_email, executing_project):
+        pass
+
+    @abstractmethod
+    def has_responded(self):
+        pass
