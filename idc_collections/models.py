@@ -222,7 +222,7 @@ class Attribute_Ranges(models.Model):
     # include_upper works the as include_lower, but for last and the upper bounds
     include_upper = models.BooleanField(default=True)
     # Depending on the setting of include_lower, is either the lower bound of the first range, or the upper bound of the first range.
-    first = models.IntegerField(null=False, blank=False, default=0)
+    first = models.IntegerField(null=False, blank=False, default=10)
     # Depending on the setting of include_upper, is either the upper bound of the last range, or the lower bound of the last range.
     last = models.IntegerField(null=False, blank=False, default=80)
     # The bucket's range
