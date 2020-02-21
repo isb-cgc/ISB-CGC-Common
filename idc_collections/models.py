@@ -113,6 +113,8 @@ class Collection(models.Model):
 
 
 class SolrCollection(models.Model):
+    QUERY = 'query'
+    TERMS = 'terms'
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
@@ -120,8 +122,20 @@ class SolrCollection(models.Model):
 
     def get_collection_attr(self, for_faceting=True):
         if for_faceting:
-            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True)
+            ranged_numerics = self.attribute_set.all().filter(
+                id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                ).values_list('attribute__id', flat=True)
+            )
+            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True) | ranged_numerics
         return self.attribute_set.all()
+
+    @staticmethod
+    def get_facet_type(attr):
+        if attr.data_type == Attribute.CONTINUOUS_NUMERIC and len(Attribute_Ranges.objects.filter(attribute=attr)) > 0:
+            return SolrCollection.QUERY
+        else:
+            return SolrCollection.TERMS
 
     class Meta(object):
         unique_together = (("name", "version"),)
@@ -196,6 +210,26 @@ class Attribute_Display_Values(models.Model):
 
     def __str__(self):
         return "{} - {}".format(self.raw_value, self.display_value)
+
+
+class Attribute_Ranges(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    # These fields help determine how first and last are used in query building
+    # include_lower=True causes first=10 to produce a range bucket of x:[* to 10] or WHERE (x <= 10)
+    # include_lower=False causes first=10 to produce a range bucket of x:[10 to (first+gap)] or WHERE (x >= 10 AND x < (first+gap))
+    include_lower = models.BooleanField(default=True)
+    # include_upper works the as include_lower, but for last and the upper bounds
+    include_upper = models.BooleanField(default=True)
+    # Depending on the setting of include_lower, is either the lower bound of the first range, or the upper bound of the first range.
+    first = models.IntegerField(null=False, blank=False, default=0)
+    # Depending on the setting of include_upper, is either the upper bound of the last range, or the lower bound of the last range.
+    last = models.IntegerField(null=False, blank=False, default=80)
+    # The bucket's range
+    gap = models.IntegerField(null=False, blank=False, default=10)
+
+    def __str__(self):
+        return "{}: {} to {} by {}".format(self.attribute.name, str(self.start), str(self.last), str(self.gap))
 
 
 class User_Feature_Definitions(models.Model):
