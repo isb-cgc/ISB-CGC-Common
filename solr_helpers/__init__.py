@@ -219,8 +219,6 @@ def build_solr_facets(attr_set, filter_tags=None, include_nulls=True):
                     "excludeTags": filter_tags[attr.name]
                 }
 
-    print(facets)
-
     return facets
 
 
