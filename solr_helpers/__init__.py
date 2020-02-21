@@ -275,7 +275,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
         else:
             if 'None' in values:
                 values.remove('None')
-                query_str += '-(-(%s:(%s)) +(%s:{* TO *}))' % (attr," ".join(values), attr)
+                query_str += '-(-(%s:("%s")) +(%s:{* TO *}))' % (attr,"\" \"".join(values), attr)
             else:
                 query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
 
