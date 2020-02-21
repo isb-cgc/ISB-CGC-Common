@@ -54,6 +54,7 @@ from django.utils.html import escape
 from .models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
 from .utils import _save_cohort, _delete_cohort, _save_cohort_api
 from idc_collections.models import Program, Collection
+from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string, get_bq_metadata_api, get_bq_string_api
 
 BQ_ATTEMPT_MAX = 10
 
@@ -135,6 +136,67 @@ def get_cases_by_cohort(cohort_id):
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
+
+@csrf_exempt
+def cohort_objects_api(request, cohort_id=0):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
+    # template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+
+
+    try:
+        if 'version' in request.GET:
+            version = request.GET['version']
+        else:
+            version = DataVersion.objects.get(name=attribute_group, active=True)
+        dataVersion = DataVersion.objects.get(name=attribute_group, version=version)
+
+    if cohort_id == 0:
+        messages.error(request, 'Cohort requested does not exist.')
+        return redirect('/user_landing')
+
+    try:
+        cohort = Cohort.objects.get(id=cohort_id, active=True)
+        cohort.perm = cohort.get_perm(request)
+        cohort.owner = cohort.get_owner()
+
+        attributes = {}
+        filter_group = cohort.filter_group_set.get()
+        filters = {}
+        for filter in filter_group.filters_set.all():
+            filters[filter.attribute.name] = filter.value.split(",")
+
+        # data_versions = {}
+        # for version in filter_group.version.all():
+        #     data_versions[version.name]=version.version
+        data_versions = filter_group.version.all()
+
+        levels = { 'Instance':['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID','SOPInstanceUID'],
+                   'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
+                   'Study': ['collection_id', 'PatientID', 'StudyInstanceUID'],
+                   'Patient': ['collection_id', 'PatientID'],
+                   'Collection': ['collection_id']
+                   }
+
+        fields = levels[request.GET['return_level']]
+
+        filelist = get_bq_metadata_api(filters, fields, data_versions)
+
+        objects = {}
+        for row in filelist:
+            objects[row['f'][0]] = row['f'][1]['v']
+            objects[row['f'][0]][row['f'][1]['v']] = row['f'[2]['v']]
+
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to view the cohort file list: ")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.")
+        return redirect(reverse('cohort_details', args=[cohort_id]))
+
+
+    return JsonResponse(filelist)
+
 
 @csrf_exempt
 def save_cohort_api(request):
@@ -246,6 +308,7 @@ def cohort_detail_api(request, cohort_id=0):
             }
 
             data = {
+                "id": cohort_id,
                 "name": cohort.name,
                 "description": cohort.description,
                 "filterSet": filterset}

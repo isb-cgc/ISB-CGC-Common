@@ -105,7 +105,7 @@ def _save_cohort_api(user, name, data, case_insens=True):
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-     # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
+    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
     # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
     grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
 
