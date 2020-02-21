@@ -106,7 +106,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True
 
     # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
     # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
-    grouping = Filter_Group.create(resulting_cohort=cohort, operator=Filter_Group.AND)
+    grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
     for attr_id in filters:
         filter_obj = filters[attr_id]
         Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_obj['values']), filter_group=grouping).save()
