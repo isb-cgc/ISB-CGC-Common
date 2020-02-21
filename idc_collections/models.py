@@ -213,20 +213,29 @@ class Attribute_Display_Values(models.Model):
 
 
 class Attribute_Ranges(models.Model):
+    FLOAT = 'F'
+    INT = 'I'
+    RANGE_TYPES = (
+        (FLOAT, 'Float'),
+        (INT, 'Integer')
+    )
     id = models.AutoField(primary_key=True, null=False, blank=False)
+    # The type determines what a ranging method will do to cast a numeric value onto first, last, and gap
+    type = models.CharField(max_length=1, blank=False, null=False, choices=RANGE_TYPES, default=INT)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
-    # These fields help determine how first and last are used in query building
-    # include_lower=True causes first=10 to produce a range bucket of x:[* to 10] or WHERE (x <= 10)
-    # include_lower=False causes first=10 to produce a range bucket of x:[10 to (first+gap)] or WHERE (x >= 10 AND x < (first+gap))
+    # In any range with an lower value, use <= or >= rather than < or >
     include_lower = models.BooleanField(default=True)
-    # include_upper works the as include_lower, but for last and the upper bounds
-    include_upper = models.BooleanField(default=True)
-    # Depending on the setting of include_lower, is either the lower bound of the first range, or the upper bound of the first range.
-    first = models.IntegerField(null=False, blank=False, default=10)
-    # Depending on the setting of include_upper, is either the upper bound of the last range, or the lower bound of the last range.
-    last = models.IntegerField(null=False, blank=False, default=80)
-    # The bucket's range
-    gap = models.IntegerField(null=False, blank=False, default=10)
+    # In any range with an upper value, use <= or >= rather than < or >
+    include_upper = models.BooleanField(default=False)
+    # Include ranges for [* to first] and [last to *]
+    unbounded = models.BooleanField(default=True)
+    # The beginning and end of the range
+    first = models.CharField(max_length=128, null=False, blank=False, default="10")
+    last = models.CharField(max_length=128, null=False, blank=False, default="80")
+    # The bucket's range. If gap == 0, this can be assumed to be a single range bucket
+    gap = models.CharField(max_length=128, null=False, blank=False, default="10")
+    # Optional, for UI display purposes
+    label = models.CharField(max_length=256, null=True, blank=True)
 
     def __str__(self):
         return "{}: {} to {} by {}".format(self.attribute.name, str(self.start), str(self.last), str(self.gap))

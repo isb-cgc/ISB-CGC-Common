@@ -140,46 +140,71 @@ def build_solr_facets(attr_set, filter_tags=None, include_nulls=True):
         facet_type = SolrCollection.get_facet_type(attr)
         if facet_type == "query":
             # We need to make a series of query buckets
-            attr_range = Attribute_Ranges.objects.get(attribute=attr)
+            attr_ranges = Attribute_Ranges.objects.filter(attribute=attr)
 
-            lower = attr_range.first
-            upper = attr_range.first+attr_range.gap
+            for attr_range in attr_ranges:
+                u_boundary = "]" if attr_range.include_upper else "}"
+                l_boundary = "[" if attr_range.include_lower else "{"
+                if attr_range.gap == "0":
+                    # This is a single range, no iteration to be done
 
-            if attr_range.include_lower:
-                upper = lower
-                lower = "*"
-
-            while lower == "*" or lower < attr_range.last:
-                facet_name = "{}:{} to {}".format(attr.name, str(lower), str(upper))
-                facets[facet_name] = {
-                    'type': facet_type,
-                    'field': attr.name,
-                    'limit': -1,
-                    'q': "{}:[{} TO {}]".format(attr.name, str(lower), str(upper))
-                }
-                if filter_tags and attr.name in filter_tags:
-                    facets[facet_name]['domain'] = {
-                        "excludeTags": filter_tags[attr.name]
+                    lower = attr_range.first
+                    upper = attr_range.last
+                    facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, str(lower), str(upper))
+                    facets[facet_name] = {
+                        'type': facet_type,
+                        'field': attr.name,
+                        'limit': -1,
+                        'q': "{}:{}{} TO {}{}".format(attr.name, l_boundary, str(lower), str(upper), u_boundary)
                     }
-                lower = upper
-                upper = lower+attr_range.gap
+                    if filter_tags and attr.name in filter_tags:
+                        facets[facet_name]['domain'] = {
+                            "excludeTags": filter_tags[attr.name]
+                        }
+                else:
+                    # Iterated range
+                    cast = int if attr_range.type == Attribute_Ranges.INT else float
+                    gap = cast(attr_range.gap)
+                    last = cast(attr_range.last)
+                    lower = cast(attr_range.first)
+                    upper = cast(attr_range.first)+gap
 
-            # If we stopped *at* the end, we need to add one last bucket.
-            if attr_range.include_upper:
-                facets["{}:{} to {}".format(attr.name, str(attr_range.last), "*")] = {
-                    'type': facet_type,
-                    'field': attr.name,
-                    'limit': -1,
-                    'q': "{}:[{} TO {}]".format(attr.name, str(attr_range.last), "*")
-                }
+                    if attr_range.unbounded:
+                        upper = lower
+                        lower = "*"
 
-            if include_nulls:
-                facets["{}:None".format(attr.name)] = {
-                    'type': facet_type,
-                    'field': attr.name,
-                    'limit': -1,
-                    'q': '-{}:[* TO *]'.format(attr.name)
-                }
+                    while lower == "*" or lower < last:
+                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, str(lower), str(upper))
+                        facets[facet_name] = {
+                            'type': facet_type,
+                            'field': attr.name,
+                            'limit': -1,
+                            'q': "{}:{}{} TO {}{}".format(attr.name, l_boundary, str(lower), str(upper), u_boundary)
+                        }
+                        if filter_tags and attr.name in filter_tags:
+                            facets[facet_name]['domain'] = {
+                                "excludeTags": filter_tags[attr.name]
+                            }
+                        lower = upper
+                        upper = lower+gap
+
+                    # If we stopped *at* the end, we need to add one last bucket.
+                    if attr_range.unbounded:
+                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, str(attr_range.last), "*")
+                        facets[facet_name] = {
+                            'type': facet_type,
+                            'field': attr.name,
+                            'limit': -1,
+                            'q': "{}:{}{} TO {}]".format(attr.name, l_boundary, str(attr_range.last), "*")
+                        }
+
+                    if include_nulls:
+                        facets["{}:None".format(attr.name)] = {
+                            'type': facet_type,
+                            'field': attr.name,
+                            'limit': -1,
+                            'q': '-{}:[* TO *]'.format(attr.name)
+                        }
         else:
             facets[attr.name] = {
                 'type': facet_type,
@@ -193,6 +218,8 @@ def build_solr_facets(attr_set, filter_tags=None, include_nulls=True):
                 facets[attr.name]['domain'] = {
                     "excludeTags": filter_tags[attr.name]
                 }
+
+    print(facets)
 
     return facets
 
