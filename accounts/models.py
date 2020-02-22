@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2020, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@ from builtins import str
 from builtins import object
 from django.db import models
 from django.contrib.auth.models import User
-from django.db.models import Q
 import logging
 import datetime
 import pytz
@@ -27,7 +26,7 @@ logger = logging.getLogger('main_logger')
 
 
 class NIH_User(models.Model):
-    user = models.ForeignKey(User, null=False)
+    user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
     NIH_username = models.TextField(null=True)
     NIH_assertion = models.TextField(null=True)
     NIH_assertion_expiration = models.DateTimeField(null=True)
@@ -84,7 +83,7 @@ class GoogleProject(models.Model):
 
 
 class Bucket(models.Model):
-    google_project = models.ForeignKey(GoogleProject, null=False)
+    google_project = models.ForeignKey(GoogleProject, null=False, on_delete=models.CASCADE)
     bucket_name = models.CharField(null=True,max_length=155, unique=True)
     bucket_permissions = models.TextField(null=True)
 
@@ -92,7 +91,7 @@ class Bucket(models.Model):
         return self.bucket_name
 
 class BqDataset(models.Model):
-    google_project = models.ForeignKey(GoogleProject, null=False)
+    google_project = models.ForeignKey(GoogleProject, null=False, on_delete=models.CASCADE)
     dataset_name = models.CharField(null=False, max_length=155)
 
     class Meta(object):
@@ -141,8 +140,8 @@ class AuthorizedDataset(models.Model):
 
 
 class UserAuthorizedDatasets(models.Model):
-    nih_user = models.ForeignKey(NIH_User, null=False)
-    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
+    nih_user = models.ForeignKey(NIH_User, null=False, on_delete=models.CASCADE)
+    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False, on_delete=models.CASCADE)
 
     class Meta(object):
         unique_together = (("nih_user", "authorized_dataset"),)
@@ -155,7 +154,7 @@ class UserAuthorizedDatasets(models.Model):
 
 
 class ServiceAccount(models.Model):
-    google_project = models.ForeignKey(GoogleProject, null=False)
+    google_project = models.ForeignKey(GoogleProject, null=False, on_delete=models.CASCADE)
     service_account = models.CharField(max_length=1024, null=False)
     active = models.BooleanField(default=False, null=False)
     authorized_date = models.DateTimeField(auto_now=True)
@@ -188,13 +187,13 @@ class ServiceAccount(models.Model):
 
 
 class ServiceAccountAuthorizedDatasets(models.Model):
-    service_account = models.ForeignKey(ServiceAccount, null=False)
-    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False)
+    service_account = models.ForeignKey(ServiceAccount, null=False, on_delete=models.CASCADE)
+    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False, on_delete=models.CASCADE)
     authorized_date = models.DateTimeField(auto_now=True)
 
 
 class DCFToken(models.Model):
-    user = models.OneToOneField(User, null=False)
+    user = models.OneToOneField(User, null=False, on_delete=models.CASCADE)
     nih_username = models.TextField(null=False)
     nih_username_lower = models.CharField(max_length=128, null=False) # Must be limited to include in constraint
     dcf_user = models.CharField(max_length=128, null=False)
@@ -208,3 +207,20 @@ class DCFToken(models.Model):
 
     class Meta(object):
         unique_together = (("user", "nih_username_lower"),)
+
+
+class UserOptInStatus(models.Model):
+    NEW = 0
+    NOT_SEEN = 1
+    NO = 2
+    YES = 3
+    SEEN = 4
+
+    user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
+    opt_in_status = models.IntegerField(default=NEW)
+
+    class Meta(object):
+        unique_together = (("user", "opt_in_status"),)
+
+    def __str__(self):
+        return "{} UserOptInStatus [{}]".format(self.user, self.opt_in_status)
