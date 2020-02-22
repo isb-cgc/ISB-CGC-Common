@@ -395,10 +395,10 @@ class Cohort(models.Model):
 
 
 class Samples(models.Model):
-    cohort = models.ForeignKey(Cohort, null=False, blank=False)
+    cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     sample_barcode = models.CharField(max_length=45, null=False, db_index=True)
     case_barcode = models.CharField(max_length=45, null=True, blank=False, default=None)
-    project = models.ForeignKey(Project, null=True, blank=True)
+    project = models.ForeignKey(Project, null=True, blank=True, on_delete=models.CASCADE)
 
 
 class Source(models.Model):
@@ -413,8 +413,8 @@ class Source(models.Model):
         (CLONE, 'Clone')
     )
 
-    parent = models.ForeignKey(Cohort, null=True, blank=True, related_name='source_parent')
-    cohort = models.ForeignKey(Cohort, null=False, blank=False, related_name='source_cohort')
+    parent = models.ForeignKey(Cohort, null=True, blank=True, related_name='source_parent', on_delete=models.CASCADE)
+    cohort = models.ForeignKey(Cohort, null=False, blank=False, related_name='source_cohort', on_delete=models.CASCADE)
     type = models.CharField(max_length=10, choices=SOURCE_TYPES)
     notes = models.CharField(max_length=1024, blank=True)
 
@@ -426,24 +426,24 @@ class Cohort_Perms(models.Model):
         (OWNER, 'Owner')
     )
 
-    cohort = models.ForeignKey(Cohort, null=False, blank=False)
-    user = models.ForeignKey(User, null=False, blank=True)
+    cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, null=False, blank=True, on_delete=models.CASCADE)
     perm = models.CharField(max_length=10, choices=PERMISSIONS, default=READER)
 
 class Filters(models.Model):
-    resulting_cohort = models.ForeignKey(Cohort, null=True, blank=True)
+    resulting_cohort = models.ForeignKey(Cohort, null=True, blank=True, on_delete=models.CASCADE)
     name = models.CharField(max_length=256, null=False)
     value = models.CharField(max_length=512, null=False)
-    program = models.ForeignKey(Program, null=True, blank=True)
-    feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True)
+    program = models.ForeignKey(Program, null=True, blank=True, on_delete=models.CASCADE)
+    feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
 
 class Cohort_Comments(models.Model):
-    cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment')
-    user = models.ForeignKey(User, null=False, blank=False)
+    cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment', on_delete=models.CASCADE)
+    user = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
     date_created = models.DateTimeField(auto_now_add=True)
     content = models.CharField(max_length=1024, null=False)
 
 class Cohort_Last_View(models.Model):
-    cohort = models.ForeignKey(Cohort, blank=False)
-    user = models.ForeignKey(User, null=False, blank=False)
+    cohort = models.ForeignKey(Cohort, blank=False, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
     last_view = models.DateTimeField(auto_now=True)
