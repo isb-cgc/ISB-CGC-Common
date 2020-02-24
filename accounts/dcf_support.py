@@ -62,7 +62,7 @@ class RefreshTokenExpired(Exception):
         self.token = token
 
 
-def get_stored_dcf_token(user_id):
+def get_stored_dcf_token(user_id, forced=False):
     """
     When a user breaks their connection with DCF, we flush out the revoked tokens. But if they have a
     session running in another browser, they might still be clicking on links that expect a token. So
@@ -78,6 +78,9 @@ def get_stored_dcf_token(user_id):
         if num_tokens > 1:
             logger.error('[ERROR] Unexpected Server Error: Multiple tokens found for user {}'.format(user_id))
             raise InternalTokenError()
+        elif forced:
+            logger.info('[INFO] User {} tried to use a flushed token. No DCF token found for the user.'.format(user_id))
+            return
         else:
             logger.info('[INFO] User {} tried to use a flushed token'.format(user_id))
             raise TokenFailure()
@@ -1541,6 +1544,29 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
                                           'refresh_expires_at': refresh_expire_time,
                                           'google_id': google_id # May be none on create...
                                       })
+
+
+def unlink_all_dcf_tokens():
+    dcf_tokens = DCFToken.objects.all()
+    for token in dcf_tokens:
+        try:
+            unlink_at_dcf(token.user_id, False)  # Don't refresh, we are about to drop the record...
+        except TokenFailure:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={ user_id }). Internal error:{ error_code }".format(
+                    user_id=token.user_id, error_code="0071"))
+        except InternalTokenError:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={ user_id }). Internal error:{ error_code }".format(
+                    user_id=token.user_id, error_code="0072"))
+        except RefreshTokenExpired:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={ user_id }). Internal error:{ error_code }".format(
+                    user_id=token.user_id, error_code="0073"))
+        except DCFCommFailure:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={ user_id }) - Communications problem contacting Data Commons Framework.").format(
+                user_id=token.user_id)
 
 
 def unlink_at_dcf(user_id, do_refresh):
