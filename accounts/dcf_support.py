@@ -1565,6 +1565,8 @@ def unlink_at_dcf(user_id, do_refresh):
 
     success = False
     throw_later = None
+    resp = None
+
 
     #
     # Call DCF to drop the linkage. Note that this will immediately remove them from controlled access.
