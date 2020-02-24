@@ -62,7 +62,7 @@ class RefreshTokenExpired(Exception):
         self.token = token
 
 
-def get_stored_dcf_token(user_id):
+def get_stored_dcf_token(user_id, forced=False):
     """
     When a user breaks their connection with DCF, we flush out the revoked tokens. But if they have a
     session running in another browser, they might still be clicking on links that expect a token. So
@@ -78,6 +78,9 @@ def get_stored_dcf_token(user_id):
         if num_tokens > 1:
             logger.error('[ERROR] Unexpected Server Error: Multiple tokens found for user {}'.format(user_id))
             raise InternalTokenError()
+        elif forced:
+            logger.info('[INFO] User {} tried to use a flushed token. No DCF token found for the user.'.format(user_id))
+            return
         else:
             logger.info('[INFO] User {} tried to use a flushed token'.format(user_id))
             raise TokenFailure()
