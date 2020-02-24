@@ -62,7 +62,7 @@ class RefreshTokenExpired(Exception):
         self.token = token
 
 
-def get_stored_dcf_token(user_id):
+def get_stored_dcf_token(user_id, force_unlink=False):
     """
     When a user breaks their connection with DCF, we flush out the revoked tokens. But if they have a
     session running in another browser, they might still be clicking on links that expect a token. So
@@ -78,6 +78,9 @@ def get_stored_dcf_token(user_id):
         if num_tokens > 1:
             logger.error('[ERROR] Unexpected Server Error: Multiple tokens found for user {}'.format(user_id))
             raise InternalTokenError()
+        elif force_unlink:
+            logger.info('[INFO] User {} tried to use a flushed token. No DCF token found for the user.'.format(user_id))
+            return
         else:
             logger.info('[INFO] User {} tried to use a flushed token'.format(user_id))
             raise TokenFailure()
@@ -1338,7 +1341,7 @@ def _decode_token(token):
     return decode_token_chunk(token, 1)
 
 
-def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, params_dict=None, headers=None):
+def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, params_dict=None, headers=None, force_unlink=False):
     """
     All the stuff around a DCF call that handles token management and refreshes.
 
@@ -1348,7 +1351,7 @@ def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, 
     :raises RefreshTokenExpired:
     """
 
-    dcf_token = get_stored_dcf_token(user_id)
+    dcf_token = get_stored_dcf_token(user_id, force_unlink)
 
     expires_in = (dcf_token.expires_at - pytz.utc.localize(datetime.datetime.utcnow())).total_seconds()
     logger.info("[INFO] Token Expiration : {} seconds".format(expires_in))
@@ -1543,7 +1546,7 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
                                       })
 
 
-def unlink_at_dcf(user_id, do_refresh):
+def unlink_at_dcf(user_id, do_refresh, force_unlink=False):
     """
     There are only three places where we call DCF to do a Google unlink: 1) If they login via NIH and we get
     a token for the user that tells us they already are linked to a Google ID that does not match their ISB-CGC
@@ -1573,7 +1576,7 @@ def unlink_at_dcf(user_id, do_refresh):
     #
 
     try:
-        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='delete')  # can raise TokenFailure, DCFCommFailure
+        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='delete', force_unlink=force_unlink)  # can raise TokenFailure, DCFCommFailure
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         throw_later = e # hold off so we can try a refresh first...
     except Exception as e:
