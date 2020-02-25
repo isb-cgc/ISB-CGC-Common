@@ -1547,23 +1547,23 @@ def unlink_all_dcf_tokens():
     dcf_tokens = DCFToken.objects.all()
     for token in dcf_tokens:
         try:
-            unlink_at_dcf(token.user_id, False)  # Don't refresh, we are about to drop the record...
+            unlink_at_dcf(token.user.id, False)  # Don't refresh, we are about to drop the record...
         except TokenFailure:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={ user_id }). Internal error:{ error_code }".format(
-                    user_id=token.user_id, error_code="0071"))
+                    user_id=token.user.id, error_code="0071"))
         except InternalTokenError:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={ user_id }). Internal error:{ error_code }".format(
-                    user_id=token.user_id, error_code="0072"))
+                    user_id=token.user.id, error_code="0072"))
         except RefreshTokenExpired:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={ user_id }). Internal error:{ error_code }".format(
-                    user_id=token.user_id, error_code="0073"))
+                    user_id=token.user.id, error_code="0073"))
         except DCFCommFailure:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={ user_id }) - Communications problem contacting Data Commons Framework.").format(
-                user_id=token.user_id)
+                user_id=token.user.id)
 
 
 def unlink_at_dcf(user_id, do_refresh):
