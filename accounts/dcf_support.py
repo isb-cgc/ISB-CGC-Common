@@ -62,7 +62,7 @@ class RefreshTokenExpired(Exception):
         self.token = token
 
 
-def get_stored_dcf_token(user_id, forced=False):
+def get_stored_dcf_token(user_id):
     """
     When a user breaks their connection with DCF, we flush out the revoked tokens. But if they have a
     session running in another browser, they might still be clicking on links that expect a token. So
@@ -78,9 +78,6 @@ def get_stored_dcf_token(user_id, forced=False):
         if num_tokens > 1:
             logger.error('[ERROR] Unexpected Server Error: Multiple tokens found for user {}'.format(user_id))
             raise InternalTokenError()
-        elif forced:
-            logger.info('[INFO] User {} tried to use a flushed token. No DCF token found for the user.'.format(user_id))
-            return
         else:
             logger.info('[INFO] User {} tried to use a flushed token'.format(user_id))
             raise TokenFailure()
@@ -1435,42 +1432,42 @@ def _read_dict(my_file_name):
             retval[split_line[0].strip()] = split_line[1].strip()
     return retval
 
-def _access_token_storage(token_dict, cgc_uid):
-    """
-    This call just replaces the access key and user token part of the DCF record. Used when we use the
-    refresh token to get a new access key.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises RefreshTokenExpired:
-    """
-
-    # This refers to the *access key* expiration (~20 minutes)
-    if 'expires_at' in token_dict:
-        expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
-    else:
-        expiration_time = pytz.utc.localize(
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
-        logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
-
-    logger.info('[INFO] Access token storage. New token expires at {}'.format(str(expiration_time)))
-
-    #
-    # Right now (5/30/18) we only get full user info back during the token refresh call. So decode
-    # it and stash it as well:
-    #
-    id_token_decoded, _ = _decode_token(token_dict['id_token'])
-
-    try:
-        dcf_token = get_stored_dcf_token(cgc_uid)
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
-        logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
-        raise e
-
-    dcf_token.access_token = token_dict['access_token']
-    dcf_token.user_token = id_token_decoded
-    dcf_token.expires_at = expiration_time
-    dcf_token.save()
+# def _access_token_storage(token_dict, cgc_uid):
+#     """
+#     This call just replaces the access key and user token part of the DCF record. Used when we use the
+#     refresh token to get a new access key.
+#
+#     :raises TokenFailure:
+#     :raises InternalTokenError:
+#     :raises RefreshTokenExpired:
+#     """
+#
+#     # This refers to the *access key* expiration (~20 minutes)
+#     if 'expires_at' in token_dict:
+#         expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
+#     else:
+#         expiration_time = pytz.utc.localize(
+#             datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
+#         logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
+#
+#     logger.info('[INFO] Access token storage. New token expires at {}'.format(str(expiration_time)))
+#
+#     #
+#     # Right now (5/30/18) we only get full user info back during the token refresh call. So decode
+#     # it and stash it as well:
+#     #
+#     id_token_decoded, _ = _decode_token(token_dict['id_token'])
+#
+#     try:
+#         dcf_token = get_stored_dcf_token(cgc_uid)
+#     except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
+#         logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
+#         raise e
+#
+#     dcf_token.access_token = token_dict['access_token']
+#     dcf_token.user_token = id_token_decoded
+#     dcf_token.expires_at = expiration_time
+#     dcf_token.save()
 
 
 def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from_dcf, dcf_uid, cgc_uid, google_id):
