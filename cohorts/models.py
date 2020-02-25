@@ -48,36 +48,33 @@ class CohortManager(models.Manager):
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
-    def get_all_tcga_cohort(self):
-        isb_user = User.objects.get(is_superuser=True, username='isb')
-        all_isb_cohort_ids = Cohort_Perms.objects.filter(user=isb_user, perm=Cohort_Perms.OWNER).values_list('cohort_id', flat=True)
-        return Cohort.objects.filter(name='All TCGA Data', id__in=all_isb_cohort_ids)[0]
-
 
 class Cohort(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=255, null=False, blank=True)
     description = models.TextField(null=True, blank=True)
-    data_version = models.IntegerField(blank=False, null=False, default=1)
     active = models.BooleanField(default=True)
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
 
+    # Returns the collections found in this Cohort
+    # Return value is a QuerySet
     def get_collections(self):
         collex_filters = self.filters_set.values_list('collection_id', flat=True).distinct()
         return Collection.objects.filter(active=True, id__in=collex_filters).distinct()
 
+    # Returns the names only of the collections found in this Cohort
+    # Return value is an array of strings
     def get_collection_names(self):
         collex = self.get_collections()
         names = collex.distinct().values_list('name', flat=True)
         return [str(x) for x in names]
 
+    # Determines if the Cohort has only user-owned collections
     def only_user_data(self):
         return bool(Collection.objects.filter(id__in=self.get_collections(), is_public=True).count() <= 0)
 
-    '''
-    Returns the highest level of permission the user has.
-    '''
+    # Returns the highest level of permission the user has.
     def get_perm(self, request):
         perm = self.cohort_perms_set.filter(user_id=request.user.id).order_by('perm')
 
@@ -89,12 +86,61 @@ class Cohort(models.Model):
     def get_owner(self):
         return self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user
 
+    # If a Cohort is owned by the IDC Superuser, it's considered public; this checks for the owner and returns a bool
+    # based on that determination
     def is_public(self):
-        isbuser = User.objects.get(username='isb', is_superuser=True)
-        return (self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user_id == isbuser.id)
+        idc_su = User.objects.get(username='isb', is_superuser=True)
+        return (self.cohort_perms_set.get(perm=Cohort_Perms.OWNER).user_id == idc_su.id)
 
-    # Produce a BigQuery filter WHERE clause for use in the console
-    #
+
+    def get_data_versions(self):
+
+        versions = []
+
+        groups = self.filter_group_set.all()
+
+        for group in groups:
+            data_versions = group.data_versions.all()
+            for dv in data_versions:
+                if dv.id not in versions:
+                    versions.append(dv.id)
+
+        return DataVersion.objects.filter(id__in=versions)
+
+
+    def get_filters_by_data_source(self, source_type=None, data_sources_only=False):
+        result = {}
+
+        cohort_filters = Filters.objects.filter(resulting_cohort=self)
+        attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
+
+        data_versions = self.get_data_versions()
+
+        for attr in attributes:
+            for source in DataSource.SOURCE_TYPES:
+                if not source_type or source_type == source[0]:
+                    data_source = attr.data_sources.all().filter(data_version__in=data_versions, source_type=source[0]).distinct()
+                    for data in data_source:
+                        if source[0] not in result:
+                            result[source[0]] = {data.id: data}
+                        else:
+                            if data.id not in result[source[0]]:
+                                result[source[0]][data.id] = data
+
+
+        if not data_sources_only:
+            for source in DataSource.SOURCE_TYPES:
+                if not source_type or source_type == source[0]:
+                    for data_source in result[source[0]]:
+                        source_attrs = result[source[0]][data_source].attribute_set.filter(id__in=attributes)
+                        result[source[0]][data_source] = {
+                            'source': result[source[0]][data_source],
+                            'filters': cohort_filters.filter(attribute__id__in=source_attrs)
+                        }
+
+        return result
+
+    # Produce a BigQuery filter WHERE clause for this cohort's filters that can be used in the BQ console
     def get_bq_filter_string(self, prefix=None):
 
         filter_sets = []
@@ -113,7 +159,6 @@ class Cohort(models.Model):
 
     # Produce a BigQuery filter clause and parameters; this is for *programmatic* use of BQ, NOT copy-paste into
     # the console
-    #
     def get_filters_for_bq(self, prefix=None, suffix=None, counts=False, schema=None):
 
         filter_sets = []
@@ -132,7 +177,6 @@ class Cohort(models.Model):
         return filter_sets[0]
 
     # Get a simple dict of the attributes and values of this cohort; note this is NOT intended for UI display
-    #
     def get_filters_as_dict(self):
         filter_dict = {}
 
@@ -149,9 +193,8 @@ class Cohort(models.Model):
 
         return filter_dict
 
-    # Returns the list of filters used to create this cohort
-    #
-    def get_filters(self, with_display_vals=False):
+    # Returns the list of filters used to create this cohort as a JSON-compatible dict, for use in UI display
+    def get_filters_as_json(self, with_display_vals=False):
         filter_list = Filters.objects.filter(resulting_cohort=self)
         dict_filters = {}
 
@@ -172,8 +215,7 @@ class Cohort(models.Model):
         return dict_filters
 
 
-# A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning, editing,
-# or set operations
+# A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning or set operations
 class Source(models.Model):
     SET_OPS = 'SET_OPS'
     CLONE = 'CLONE'
@@ -210,7 +252,7 @@ class Filter_Group(models.Model):
     id = models.AutoField(primary_key=True)
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
-    version = models.ManyToManyField(DataVersion)
+    data_versions = models.ManyToManyField(DataVersion)
 
     @classmethod
     def get_op(cls, op_string):

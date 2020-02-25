@@ -16,7 +16,7 @@
 
 import logging
 
-from idc_collections.models import SolrCollection, Attribute, Program
+from idc_collections.models import DataSource, Attribute, Program
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from django.conf import settings
@@ -47,7 +47,7 @@ def get_bq_metadata(filters, fields, data_versions):
     table_info = {}
 
     for attr in filter_attrs:
-        bqtables = attr.bq_tables.all().filter(version__in=data_versions).distinct()
+        bqtables = attr.data_sources.all().filter(version__in=data_versions).distinct()
         for bqtable in bqtables:
             if bqtable.name not in filter_attr_by_bq:
                 filter_attr_by_bq[bqtable.name] = {}
@@ -61,7 +61,7 @@ def get_bq_metadata(filters, fields, data_versions):
                 filter_attr_by_bq[bqtable.name]['attrs'].append(attr.name)
 
     for attr in field_attrs:
-        bqtables = attr.bq_tables.all().filter(version__active=True, ).distinct()
+        bqtables = attr.data_sources.all().filter(version__active=True, ).distinct()
         for bqtable in bqtables:
             if bqtable.name not in field_attr_by_bq:
                 field_attr_by_bq[bqtable.name] = {}
@@ -140,7 +140,7 @@ def get_bq_string(filters, fields, data_versions):
     table_info = {}
 
     for attr in filter_attrs:
-        bqtables = attr.bq_tables.all().filter(version__in=data_versions).distinct()
+        bqtables = attr.data_sources.all().filter(version__in=data_versions).distinct()
         for bqtable in bqtables:
             if bqtable.name not in filter_attr_by_bq:
                 filter_attr_by_bq[bqtable.name] = {}
@@ -154,7 +154,7 @@ def get_bq_string(filters, fields, data_versions):
                 filter_attr_by_bq[bqtable.name]['attrs'].append(attr.name)
 
     for attr in field_attrs:
-        bqtables = attr.bq_tables.all().filter(version__in=data_versions).distinct()
+        bqtables = attr.data_sources.all().filter(version__in=data_versions).distinct()
         for bqtable in bqtables:
             if bqtable.name not in field_attr_by_bq:
                 field_attr_by_bq[bqtable.name] = {}

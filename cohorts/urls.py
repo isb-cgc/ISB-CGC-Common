@@ -42,7 +42,7 @@ urlpatterns = [
     url(r'^set_operation/',                         views.set_operation, name='set_operation'),
     url(r'^save_cohort_comment/',                   views.save_comment, name='save_cohort_comment'),
     url(r'^download_filelist/(?P<cohort_id>\d+)/',  views.streaming_csv_view, name='download_filelist'),
-    url(r'^download_ids/(?P<cohort_id>\d+)/',       views.cohort_samples_cases, name='download_ids'),
+    url(r'^download_ids/(?P<cohort_id>\d+)/',       views.cohort_uuids, name='download_ids'),
 
     url(r'^get_metadata_ajax/$',                                        views.get_metadata, name='metadata_count_ajax'),
     url(r'^filter_panel/(?P<program_id>\d+)/$',                         views.get_cohort_filter_panel, name='cohort_filter_panel'),

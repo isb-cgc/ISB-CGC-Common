@@ -112,13 +112,20 @@ class Collection(models.Model):
         )
 
 
-class SolrCollection(models.Model):
+class DataSource(models.Model):
     QUERY = 'query'
     TERMS = 'terms'
+    SOLR = 'S'
+    BIGQUERY = 'B'
+    SOURCE_TYPES = (
+        (SOLR, "Solr Data Collection"),
+        (BIGQUERY, "BigQuery Table")
+    )
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
+    source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
 
     def get_collection_attr(self, for_faceting=True):
         if for_faceting:
@@ -133,27 +140,12 @@ class SolrCollection(models.Model):
     @staticmethod
     def get_facet_type(attr):
         if attr.data_type == Attribute.CONTINUOUS_NUMERIC and len(Attribute_Ranges.objects.filter(attribute=attr)) > 0:
-            return SolrCollection.QUERY
+            return DataSource.QUERY
         else:
-            return SolrCollection.TERMS
+            return DataSource.TERMS
 
     class Meta(object):
-        unique_together = (("name", "version"),)
-
-
-class BigQueryTable(models.Model):
-    id = models.AutoField(primary_key=True, null=False, blank=False)
-    name = models.CharField(max_length=128, null=False, blank=False, unique=True)
-    version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
-
-    def get_collection_attr(self, for_faceting=True):
-        if for_faceting:
-            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True)
-        return self.attribute_set.all()
-
-    class Meta(object):
-        unique_together = (("name", "version"),)
+        unique_together = (("name", "version", "source_type"),)
 
 
 class Attribute(models.Model):
@@ -176,8 +168,7 @@ class Attribute(models.Model):
     is_cross_collex = models.BooleanField(default=False)
     preformatted_values = models.BooleanField(default=False)
     default_ui_display = models.BooleanField(default=True)
-    solr_collections = models.ManyToManyField(SolrCollection)
-    bq_tables = models.ManyToManyField(BigQueryTable)
+    data_sources = models.ManyToManyField(DataSource)
 
     def get_display_values(self):
         display_vals = self.attribute_display_values_set.all()
@@ -188,11 +179,8 @@ class Attribute(models.Model):
 
         return result
 
-    def get_solr_bq(self):
-        return {
-            'solr': self.solr_collections_set.all().filter(active=True).values_list('name', flat=True),
-            'bq': self.bq_tables_set.all().filter(active=True).values_list('name', flat=True)
-        }
+    def get_data_sources(self):
+        return self.data_sources.all().filter(active=True).values_list('name', flat=True)
 
     def __str__(self):
         return "{} ({}), Type: {}".format(

@@ -5,7 +5,7 @@ import logging
 import json
 import re
 
-from idc_collections.models import Attribute, SolrCollection, Attribute_Ranges
+from idc_collections.models import Attribute, DataSource, Attribute_Ranges
 
 from metadata.query_helpers import MOLECULAR_CATEGORIES
 
@@ -135,7 +135,7 @@ def build_solr_facets(attr_set, filter_tags=None, include_nulls=True):
     attrs = Attribute.objects.filter(name__in=attr_set)
 
     for attr in attrs:
-        facet_type = SolrCollection.get_facet_type(attr)
+        facet_type = DataSource.get_facet_type(attr)
         if facet_type == "query":
             # We need to make a series of query buckets
             attr_ranges = Attribute_Ranges.objects.filter(attribute=attr)
