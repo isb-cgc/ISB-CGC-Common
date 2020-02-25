@@ -137,19 +137,154 @@ def get_cases_by_cohort(cohort_id):
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+
+def build_collections(objects):
+    collections = []
+    for collection in objects:
+        patients = build_patients(collection, objects[collection])
+        collections.append(
+            {
+                # "collection": {
+                #     "collection_id":collection
+                # },
+                "collection_id":collection,
+                "patients":patients
+            }
+        )
+    return collections
+
+
+def build_patients(collection,collection_patients):
+    patients = []
+    for patient in collection_patients:
+        studies = build_studies(collection, patient, collection_patients[patient])
+        patients.append(
+            {
+                # "patient": {
+                #     "patientID":patient
+                # },
+                "patientID":patient,
+                "studies":studies
+            }
+        )
+    return patients
+
+
+def build_studies(collection, patient, patient_studies):
+    studies = []
+    for study in patient_studies:
+        series = build_series(collection, patient, study, patient_studies[study])
+        studies.append(
+            {
+                 "StudyInstanceUID": study,
+                "GUID": "",
+                "AccessMethods": [
+                    {
+                        "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}".format(collection,study),
+                        "region": "Multi-region",
+                        "type": "gs"
+
+                    }
+                ],
+                "series":series
+            }
+        )
+    return studies
+
+
+def build_series(collection, patient, study, patient_studies):
+    series = []
+    for aseries in patient_studies:
+        instances = build_instances(collection, patient, study, aseries, patient_studies[aseries])
+        series.append(
+            {
+                "SeriesInstanceUID": study,
+                "GUID": "",
+                "AccessMethods": [
+                    {
+                        "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}".format(collection,
+                                        study, aseries),
+                        "region": "Multi-region",
+                        "type": "gs"
+
+                    }
+                ],
+                "instances": instances
+            }
+        )
+    return series
+
+
+def build_instances(collection, patient, study, series, study_series):
+    instances = []
+    for instance in study_series:
+         instances.append(
+            {
+                "instance": {
+                    "SOPInstanceUID": study,
+                    "GUID": "",
+                    "AccessMethods": [
+                        {
+                            "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}.{}.dcm".format(collection,
+                                            study,series,instance),
+                            "region": "Multi-region",
+                            "type": "gs"
+
+                        }
+                    ]
+                },
+            }
+        )
+    return instances
+
+
+def build_hierarchy(rows,return_level):
+    objects = {}
+#    reorder = [3,1,2,0]
+    for raw in rows:
+        row = [val['v'] for val in raw['f']]
+        row[0] = row[0].replace('_','-')
+        if not row[0] in objects:
+            objects[row[0]] = {}
+        if return_level == 'Collection':
+            continue
+        if not row[1] in objects[row[0]]:
+            objects[row[0]][row[1]] = {}
+        if return_level == 'Patient':
+            continue
+        if not row[2] in objects[row[0]][row[1]]:
+            objects[row[0]][row[1]][row[2]] = {}
+        if return_level == 'Study':
+            continue
+        if not row[3] in objects[row[0]][row[1]][row[2]]:
+            objects[row[0]][row[1]][row[2]][row[3]] = []
+        if return_level == 'Series':
+            continue
+        if not row[4] in objects[row[0]][row[1]][row[2]][row[3]]:
+            # objects[row[0]][row[1]][row[2]][row[3]][row[4]] = {}
+            objects[row[0]][row[1]][row[2]][row[3]].append(row[4])
+    return objects
+
+def get_filter(cohort):
+    attributes = {}
+    filter_group = cohort.filter_group_set.get()
+    filters = filter_group.filters_set.all()
+    for filter in filters:
+        attributes[filter.attribute.name] = filter.value.split(",")
+
+    filterset = {
+        "bioclin_version": filter_group.version.get(name='TCGA Clinical and Biospecimen Data').version,
+        "imaging_version": filter_group.version.get(name='TCIA Image Data').version,
+        "attributes": attributes
+    }
+
+    return filterset
+
 @csrf_exempt
 def cohort_objects_api(request, cohort_id=0):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     # template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
-
-
-    try:
-        if 'version' in request.GET:
-            version = request.GET['version']
-        else:
-            version = DataVersion.objects.get(name=attribute_group, active=True)
-        dataVersion = DataVersion.objects.get(name=attribute_group, version=version)
 
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
@@ -165,10 +300,12 @@ def cohort_objects_api(request, cohort_id=0):
         filters = {}
         for filter in filter_group.filters_set.all():
             filters[filter.attribute.name] = filter.value.split(",")
+            if filter.attribute.name == 'collection_id':
+                collections = []
+                for collection in filters['collection_id']:
+                    collections.append(collection.lower().replace('-','_'))
+                filters['collection_id'] = collections
 
-        # data_versions = {}
-        # for version in filter_group.version.all():
-        #     data_versions[version.name]=version.version
         data_versions = filter_group.version.all()
 
         levels = { 'Instance':['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID','SOPInstanceUID'],
@@ -180,22 +317,30 @@ def cohort_objects_api(request, cohort_id=0):
 
         fields = levels[request.GET['return_level']]
 
-        filelist = get_bq_metadata_api(filters, fields, data_versions)
+        allfiles = get_bq_metadata_api(filters, fields, data_versions)
+        filelist = allfiles[int(request.GET['offset']):int(request.GET['fetch_count'])]
 
-        objects = {}
-        for row in filelist:
-            objects[row['f'][0]] = row['f'][1]['v']
-            objects[row['f'][0]][row['f'][1]['v']] = row['f'[2]['v']]
+        # We first build a tree of the object values
+        # reorder is a temporary hack to enable reordering the fields
+#        reorder = [0,1,2,3,4]
+        objects = build_hierarchy(filelist,request.GET['return_level'])
+        collections = build_collections(objects)
+        cohort_json = {
+            "name": cohort.name,
+            "description": cohort.description,
+            "filterSet": get_filter(cohort),
+            "collections": collections
+        }
 
 
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         messages.error(request, "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.")
-        return redirect(reverse('cohort_details', args=[cohort_id]))
+        return redirect(reverse('cohort_details_api', args=[cohort_id]))
 
 
-    return JsonResponse(filelist)
+    return JsonResponse(cohort_json)
 
 
 @csrf_exempt
@@ -216,7 +361,7 @@ def save_cohort_api(request):
 
             if 'message' not in result:
                 redirect_url = reverse('cohort_detail_api', args=[result['cohort_id']])
-                messages.info(request, 'Cohort {} {} successfully.'.format(name, 'created' if not cohort_id else 'updated'))
+                messages.info(request, 'Cohort {} {} successfully.'.format(cohort_name, 'created' if not result['cohort_id'] else 'updated'))
             else:
                 messages.error(request, result['message'])
 
@@ -228,62 +373,116 @@ def save_cohort_api(request):
     return redirect(redirect_url)
 
 
-@csrf_exempt
-def cohorts_list_api(request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=False):
-    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+# @csrf_exempt
+# def cohorts_list_api(request):
+#     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+#
+#     try:
+#         cohorts = Cohort.objects.all()
+#         cohort = Cohort.objects.get(id=cohort_id, active=True)
+#         cohort.perm = cohort.get_perm(request)
+#         cohort.owner = cohort.get_owner()
+#
+#         attributes = {}
+#         filter_group = cohort.filter_group_set.get()
+#         filters = {}
+#         for filter in filter_group.filters_set.all():
+#             filters[filter.attribute.name] = filter.value.split(",")
+#             if filter.attribute.name == 'collection_id':
+#                 collections = []
+#                 for collection in filters['collection_id']:
+#                     collections.append(collection.lower().replace('-', '_'))
+#                 filters['collection_id'] = collections
+#
+#         data_versions = filter_group.version.all()
+#
+#         levels = {'Instance': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID'],
+#                   'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
+#                   'Study': ['collection_id', 'PatientID', 'StudyInstanceUID'],
+#                   'Patient': ['collection_id', 'PatientID'],
+#                   'Collection': ['collection_id']
+#                   }
+#
+#         fields = levels[request.GET['return_level']]
+#
+#         allfiles = get_bq_metadata_api(filters, fields, data_versions)
+#         filelist = allfiles[int(request.GET['offset']):int(request.GET['fetch_count'])]
+#
+#         # We first build a tree of the object values
+#         # reorder is a temporary hack to enable reordering the fields
+#         #        reorder = [0,1,2,3,4]
+#         objects = build_hierarchy(filelist, request.GET['return_level'])
+#         collections = build_collections(objects)
+#         cohort_json = {
+#             "name": cohort.name,
+#             "description": cohort.description,
+#             "filterSet": get_filter(cohort),
+#             "collections": collections
+#         }
+#
+#
+#     except Exception as e:
+#         logger.error("[ERROR] While trying to view the cohort file list: ")
+#         logger.exception(e)
+#         messages.error(request,
+#                        "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.")
+#         return redirect(reverse('cohort_details_api', args=[cohort_id]))
+#
+#     return JsonResponse(cohort_list)
 
-    # check to see if user has read access to 'All TCGA Data' cohort
-    idc_superuser = User.objects.get(username='idc')
-    superuser_perm = Cohort_Perms.objects.get(user=idc_superuser)
-    user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
-    if not user_all_data_perm:
-        Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
 
-    # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
-
-    users = User.objects.filter(is_superuser=0)
-    cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
-
-    cohorts.has_private_cohorts = False
-    shared_users = {}
-
-    for item in cohorts:
-        item.perm = item.get_perm(request).get_perm_display()
-        item.owner = item.get_owner()
-        shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user',
-                                                                                                         flat=True)
-        item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
-        if not item.owner.is_superuser:
-            cohorts.has_private_cohorts = True
-            # if it is not a public cohort and it has been shared with other users
-            # append the list of shared users to the shared_users array
-            if item.shared_with_users and item.owner.id == request.user.id:
-                shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users,
-                                                                   fields=('last_name', 'first_name', 'email'))
-
-    # Used for autocomplete listing
-    cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
-    cohort_listing = []
-    for cohort in cohort_id_names:
-        cohort_listing.append({
-            'value': int(cohort['id']),
-            'label': escape(cohort['name']).encode('utf8')
-        })
-
-    previously_selected_cohort_ids = []
-
-    return render(request, 'cohorts/cohort_list.html', {'request': request,
-                                                        'cohorts': cohorts,
-                                                        'user_list': users,
-                                                        'cohorts_listing': cohort_listing,
-                                                        'shared_users': json.dumps(shared_users),
-                                                        'base_url': settings.BASE_URL,
-                                                        'base_api_url': settings.BASE_API_URL,
-                                                        'is_public': is_public,
-                                                        'previously_selected_cohort_ids': previously_selected_cohort_ids
-                                                        })
-
+    # # check to see if user has read access to 'All TCGA Data' cohort
+    # idc_superuser = User.objects.get(username='idc')
+    # superuser_perm = Cohort_Perms.objects.get(user=idc_superuser)
+    # user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
+    # if not user_all_data_perm:
+    #     Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
+    #
+    # # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
+    #
+    # users = User.objects.filter(is_superuser=0)
+    # cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
+    # cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
+    #
+    # cohorts.has_private_cohorts = False
+    # shared_users = {}
+    #
+    # for item in cohorts:
+    #     item.perm = item.get_perm(request).get_perm_display()
+    #     item.owner = item.get_owner()
+    #     shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user',
+    #                                                                                                      flat=True)
+    #     item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
+    #     if not item.owner.is_superuser:
+    #         cohorts.has_private_cohorts = True
+    #         # if it is not a public cohort and it has been shared with other users
+    #         # append the list of shared users to the shared_users array
+    #         if item.shared_with_users and item.owner.id == request.user.id:
+    #             shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users,
+    #                                                                fields=('last_name', 'first_name', 'email'))
+    #
+    # # Used for autocomplete listing
+    # cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
+    # cohort_listing = []
+    # for cohort in cohort_id_names:
+    #     cohort_listing.append({
+    #         'value': int(cohort['id']),
+    #         'label': escape(cohort['name']).encode('utf8')
+    #     })
+    #
+    # previously_selected_cohort_ids = []
+    #
+    # return render(request, 'cohorts/cohort_list.html', {'request': request,
+    #                                                     'cohorts': cohorts,
+    #                                                     'user_list': users,
+    #                                                     'cohorts_listing': cohort_listing,
+    #                                                     'shared_users': json.dumps(shared_users),
+    #                                                     'base_url': settings.BASE_URL,
+    #                                                     'base_api_url': settings.BASE_API_URL,
+    #                                                     'is_public': is_public,
+    #                                                     'previously_selected_cohort_ids': previously_selected_cohort_ids
+    #                                                     })
+    #
 
 @csrf_exempt
 def cohort_detail_api(request, cohort_id=0):
@@ -295,24 +494,6 @@ def cohort_detail_api(request, cohort_id=0):
             cohort.perm = cohort.get_perm(request)
             cohort.owner = cohort.get_owner()
 
-            attributes = {}
-            filter_group = cohort.filter_group_set.get()
-            filters = filter_group.filters_set.all()
-            for filter in filters:
-                attributes[filter.attribute.name] = filter.value
-
-            filterset = {
-                "bioclin_version": filter_group.version.get(name='TCGA Clinical and Biospecimen Data').version,
-                "imaging_version": filter_group.version.get(name='TCIA Image Data').version,
-                "attributes": attributes
-            }
-
-            data = {
-                "id": cohort_id,
-                "name": cohort.name,
-                "description": cohort.description,
-                "filterSet": filterset}
-
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
         return redirect('cohort_list')
@@ -321,6 +502,13 @@ def cohort_detail_api(request, cohort_id=0):
         logger.exception(e)
         messages.error(request, "There was an error while trying to load that cohort's details page.")
         return redirect('cohort_list')
+
+    data = {
+        "id": cohort_id,
+        "name": cohort.name,
+        "description": cohort.description,
+        "filterSet": get_filter(cohort)
+    }
 
     return JsonResponse(data)
 #    return render(request, template, template_values)

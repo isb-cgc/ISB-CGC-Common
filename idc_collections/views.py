@@ -138,66 +138,74 @@ def collection_detail_api(request, program_name, collection_name):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
 
     collection_info = {}
-
-    attribute_group = request.GET['attribute_group']
-
     try:
-        if 'version' in request.GET:
-            version = request.GET['version']
-        else:
-            version = DataVersion.objects.get(name=attribute_group, active=True)
-        dataVersion = DataVersion.objects.get(name=attribute_group, version=version)
-
+        collection = Collection.objects.get(name=collection_name)
 
     except ObjectDoesNotExist as e:
         collection_info = {
-            "message": "Attribute group/version {}/{} does not exist".format(attribute_group, version),
+            "message": "Collection {} does not exist".format(collection_name),
             "code": "",
             "not_found": ""
         }
     else:
+
+        attribute_group = request.GET['attribute_group']
+        version = request.GET['version']
+
         try:
-            # Get attributes that are not cross collection but collection_name
-            collection = Program.objects.get(short_name__iexact=program_name).collection_set.get(
-                short_name__iexact=collection_name)
-            data_version = collection.data_versions.get(name=attribute_group, version=version)
-
-            if data_version.data_type == 'A':
-                bq_tables = dataVersion.bigquerytable_set.all()
+            if 'version' in request.GET:
+                dataVersion = collection.data_versions.get(name=attribute_group, version=version)
             else:
-                bq_tables = dataVersion.bigquerytable_set.filter(name__icontains=collection_name)
-
-            fields = []
-            for table in bq_tables:
-                for attribute in table.attribute_set.all():
-                    fields.append({
-                        "id": attribute.id,
-                        "name": attribute.name,
-                        "display_name": attribute.display_name,
-                        "description": attribute.description,
-                        "data_type": attribute.data_type,
-                        "active": attribute.active,
-                        "cross_collections": attribute.is_cross_collex,
-                        "preformatted_values": attribute.preformatted_values,
-                        "bq_table": table.name
-                        # } for attribute in attributes ]
-                    })
-
-            collection_info = {
-                "collection_name": collection_name,
-                "attribute_group": attribute_group,
-                "version": version,
-                "active": DataVersion.objects.get(name=attribute_group, version=version).active,
-                "fields": fields
-            }
+                dataVersion = collection.data_versions.get(name=attribute_group, active=True)
 
         except ObjectDoesNotExist as e:
             collection_info = {
-                "message": "Program/collection {}/{} does not exist".format(program_name, collection_name),
+                "message": "Attribute group/version {}/{} does not exist".format(attribute_group, version),
                 "code": "",
                 "not_found": ""
             }
+        else:
+            try:
+                # # Get attributes that are not cross collection but collection_name
+                # collection = Program.objects.get(short_name__iexact=program_name).collection_set.get(
+                #     short_name__iexact=collection_name)
+                # data_version = collection.data_versions.get(name=attribute_group, version=version)
 
+                # if data_version.data_type == 'A':
+                #     bq_tables = dataVersion.bigquerytable_set.all()
+                # else:
+                #     bq_tables = dataVersion.bigquerytable_set.filter(name__icontains=collection_name)
+                bq_tables = dataVersion.bigquerytable_set.all()
+
+                fields = []
+                for table in bq_tables:
+                    for attribute in table.attribute_set.all():
+                        fields.append({
+                            "id": attribute.id,
+                            "name": attribute.name,
+                            "display_name": attribute.display_name,
+                            "description": attribute.description,
+                            "data_type": attribute.data_type,
+                            "active": attribute.active,
+                            "preformatted_values": attribute.preformatted_values,
+                            "bq_table": table.name
+                            # } for attribute in attributes ]
+                        })
+
+                collection_info = {
+                    "collection_name": collection_name,
+                    "attribute_group": attribute_group,
+                    "version": version,
+                    "active": DataVersion.objects.get(name=attribute_group, version=version).active,
+                    "fields": fields
+                }
+
+            except ObjectDoesNotExist as e:
+                collection_info = {
+                    "message": "Program/collection {}/{} does not exist".format(program_name, collection_name),
+                    "code": "",
+                    "not_found": ""
+                }
 
     # return HttpResponse(collection_info, content_type='application/json')
     return JsonResponse(collection_info)

@@ -38,8 +38,9 @@ def get_bq_metadata_api(filters, fields, data_versions):
 
 
     filter_attrs = Attribute.objects.filter(active=True, name__in=list(filters.keys()))
-    field_attrs = Attribute.objects.filter(active=True, name__in=fields)
-
+#    field_attrs = Attribute.objects.filter(active=True, name__in=fields)
+    # Preserve the order of fields when building field_attrs
+    field_attrs = [Attribute.objects.get(active=True, name=field) for field in fields]
     table_info = {}
 
     for attr in filter_attrs:
