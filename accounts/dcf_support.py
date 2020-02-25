@@ -1432,42 +1432,42 @@ def _read_dict(my_file_name):
             retval[split_line[0].strip()] = split_line[1].strip()
     return retval
 
-def _access_token_storage(token_dict, cgc_uid):
-    """
-    This call just replaces the access key and user token part of the DCF record. Used when we use the
-    refresh token to get a new access key.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises RefreshTokenExpired:
-    """
-
-    # This refers to the *access key* expiration (~20 minutes)
-    if 'expires_at' in token_dict:
-        expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
-    else:
-        expiration_time = pytz.utc.localize(
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
-        logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
-
-    logger.info('[INFO] Access token storage. New token expires at {}'.format(str(expiration_time)))
-
-    #
-    # Right now (5/30/18) we only get full user info back during the token refresh call. So decode
-    # it and stash it as well:
-    #
-    id_token_decoded, _ = _decode_token(token_dict['id_token'])
-
-    try:
-        dcf_token = get_stored_dcf_token(cgc_uid)
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
-        logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
-        raise e
-
-    dcf_token.access_token = token_dict['access_token']
-    dcf_token.user_token = id_token_decoded
-    dcf_token.expires_at = expiration_time
-    dcf_token.save()
+# def _access_token_storage(token_dict, cgc_uid):
+#     """
+#     This call just replaces the access key and user token part of the DCF record. Used when we use the
+#     refresh token to get a new access key.
+#
+#     :raises TokenFailure:
+#     :raises InternalTokenError:
+#     :raises RefreshTokenExpired:
+#     """
+#
+#     # This refers to the *access key* expiration (~20 minutes)
+#     if 'expires_at' in token_dict:
+#         expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
+#     else:
+#         expiration_time = pytz.utc.localize(
+#             datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
+#         logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
+#
+#     logger.info('[INFO] Access token storage. New token expires at {}'.format(str(expiration_time)))
+#
+#     #
+#     # Right now (5/30/18) we only get full user info back during the token refresh call. So decode
+#     # it and stash it as well:
+#     #
+#     id_token_decoded, _ = _decode_token(token_dict['id_token'])
+#
+#     try:
+#         dcf_token = get_stored_dcf_token(cgc_uid)
+#     except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
+#         logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
+#         raise e
+#
+#     dcf_token.access_token = token_dict['access_token']
+#     dcf_token.user_token = id_token_decoded
+#     dcf_token.expires_at = expiration_time
+#     dcf_token.save()
 
 
 def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from_dcf, dcf_uid, cgc_uid, google_id):
@@ -1543,6 +1543,29 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
                                       })
 
 
+def unlink_all_dcf_tokens():
+    dcf_tokens = DCFToken.objects.all()
+    for token in dcf_tokens:
+        try:
+            unlink_at_dcf(token.user.id, False)  # Don't refresh, we are about to drop the record...
+        except TokenFailure:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
+                    user_id=token.user.id, error_code="0071"))
+        except InternalTokenError:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
+                    user_id=token.user.id, error_code="0072"))
+        except RefreshTokenExpired:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
+                    user_id=token.user.id, error_code="0073"))
+        except DCFCommFailure:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}) - Communications problem contacting Data Commons Framework.".format(
+                user_id=token.user.id))
+
+
 def unlink_at_dcf(user_id, do_refresh):
     """
     There are only three places where we call DCF to do a Google unlink: 1) If they login via NIH and we get
@@ -1565,6 +1588,8 @@ def unlink_at_dcf(user_id, do_refresh):
 
     success = False
     throw_later = None
+    resp = None
+
 
     #
     # Call DCF to drop the linkage. Note that this will immediately remove them from controlled access.
