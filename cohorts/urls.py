@@ -21,8 +21,8 @@ from . import views
 urlpatterns = [
     url(r'^$',                                      views.cohorts_list, name='cohort_list'),
     url(r'^public',                                 views.public_cohort_list, name='public_cohort_list'),
-    url(r'^new_cohort/',                            views.new_cohort, name='cohort'),
-    url(r'^new_cohort/barcodes/',                   views.new_cohort, name='cohort_barcodes'),
+    url(r'^new_cohort/',                            views.cohort_detail, name='cohort'),
+    url(r'^new_cohort/barcodes/',                   views.cohort_detail, name='cohort_barcodes'),
     url(r'^validate_barcodes/',                     views.validate_barcodes, name='validate_barcodes'),
     url(r'^(?P<cohort_id>\d+)/$',                   views.cohort_detail, name='cohort_details'),
     url(r'^filelist/(?P<cohort_id>\d+)/$',          views.cohort_filelist, name='cohort_filelist'),
