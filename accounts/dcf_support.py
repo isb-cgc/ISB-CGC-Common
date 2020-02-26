@@ -31,7 +31,7 @@ from requests_oauthlib.oauth2_session import OAuth2Session
 from oauthlib.oauth2 import MissingTokenError
 from base64 import urlsafe_b64decode
 from json import loads as json_loads, dumps as json_dumps
-from .sa_utils import unlink_account_in_db_for_dcf
+# from .sa_utils import unlink_account_in_db_for_dcf
 
 logger = logging.getLogger('main_logger')
 
@@ -1628,15 +1628,15 @@ def unlink_internally(user_id):
     # good for:
     #
 
-    try:
-        unlink_account_in_db_for_dcf(user_id)
-    except Exception as e:
-        still_to_throw = still_to_throw if still_to_throw else e
-        logger.error("[ERROR] While unlinking accounts:")
-        logger.exception(e)
-
-    if still_to_throw:
-        raise still_to_throw
+    # try:
+    #     unlink_account_in_db_for_dcf(user_id)
+    # except Exception as e:
+    #     still_to_throw = still_to_throw if still_to_throw else e
+    #     logger.error("[ERROR] While unlinking accounts:")
+    #     logger.exception(e)
+    #
+    # if still_to_throw:
+    #     raise still_to_throw
 
     return
 
