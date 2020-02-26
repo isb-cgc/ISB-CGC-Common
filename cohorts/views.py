@@ -753,7 +753,8 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'program_prefixes': {x.name: True for x in program_list},
+            'is_logged_in': request.user.is_authenticated
         }
 
         if workbook_id and worksheet_id :
@@ -2006,7 +2007,6 @@ def unshare_cohort(request, cohort_id=0):
         })
 
 
-@login_required
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
     comb_mut_filters = request.GET.get('mut_filter_combine', 'OR')
