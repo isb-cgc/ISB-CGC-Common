@@ -237,7 +237,8 @@ def get_bq_metadata(filters, fields, data_versions):
     """
 
     filter_attrs = Attribute.objects.filter(active=True, name__in=list(filters.keys()))
-    field_attrs = Attribute.objects.filter(active=True, name__in=fields)
+    # Preserve the order of fields parameter when building field_attrs
+    field_attrs = [Attribute.objects.get(active=True, name=field) for field in fields]
 
     table_info = {}
 
@@ -293,6 +294,7 @@ def get_bq_metadata(filters, fields, data_versions):
         query_filters = []
         fields = [field_clauses[image_table]] if image_table in field_clauses else []
         if image_table in filter_attr_by_bq:
+            filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq[image_table]['attrs']}
             filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
                 filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
                 case_insens=True
