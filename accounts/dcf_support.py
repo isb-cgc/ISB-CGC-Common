@@ -31,7 +31,7 @@ from requests_oauthlib.oauth2_session import OAuth2Session
 from oauthlib.oauth2 import MissingTokenError
 from base64 import urlsafe_b64decode
 from json import loads as json_loads, dumps as json_dumps
-#from .sa_utils import unlink_account_in_db_for_dcf
+from .sa_utils import unlink_account_in_db_for_dcf
 
 logger = logging.getLogger('main_logger')
 
@@ -1592,53 +1592,54 @@ def dcf_disconnect_users():
 #
 #
 #
-# def unlink_internally(user_id):
-#     """
-#     If we need to unlink a user who was previously ACTUALLY linked, there are internal fixes to be made.
-#
-#     :raises TokenFailure:
-#     :raises InternalTokenError:
-#     :raises Exception:
-#     """
-#
-#     still_to_throw = None
-#     dcf_token = None
-#
-#     #
-#     # The Token table records the User's Google ID. This needs to be nulled. The expiration time in the DCFToken
-#     # is for the access token, not the google link (that info is stored in the NIH_user):
-#     #
-#
-#     try:
-#         dcf_token = get_stored_dcf_token(user_id)
-#     except (TokenFailure, InternalTokenError) as e:
-#         # We either have no token, or it is corrupted. But we still want to get the NIH table cleaned up:
-#         still_to_throw = e
-#     except RefreshTokenExpired as e:
-#         # An expired token still needs to have field cleared:
-#         dcf_token = e.token
-#
-#     if dcf_token:
-#         dcf_token.google_id = None
-#         dcf_token.save()
-#
-#     #
-#     # Now drop the link flag and active flag from the DB, plus our db records of what datasets the user is
-#     # good for:
-#     #
-#
-#     try:
-#         unlink_account_in_db_for_dcf(user_id)
-#     except Exception as e:
-#         still_to_throw = still_to_throw if still_to_throw else e
-#         logger.error("[ERROR] While unlinking accounts:")
-#         logger.exception(e)
-#
-#     if still_to_throw:
-#         raise still_to_throw
-#
-#     return
-#
+
+def unlink_internally(user_id):
+    """
+    If we need to unlink a user who was previously ACTUALLY linked, there are internal fixes to be made.
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises Exception:
+    """
+
+    still_to_throw = None
+    dcf_token = None
+
+    #
+    # The Token table records the User's Google ID. This needs to be nulled. The expiration time in the DCFToken
+    # is for the access token, not the google link (that info is stored in the NIH_user):
+    #
+
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except (TokenFailure, InternalTokenError) as e:
+        # We either have no token, or it is corrupted. But we still want to get the NIH table cleaned up:
+        still_to_throw = e
+    except RefreshTokenExpired as e:
+        # An expired token still needs to have field cleared:
+        dcf_token = e.token
+
+    if dcf_token:
+        dcf_token.google_id = None
+        dcf_token.save()
+
+    #
+    # Now drop the link flag and active flag from the DB, plus our db records of what datasets the user is
+    # good for:
+    #
+
+    try:
+        unlink_account_in_db_for_dcf(user_id)
+    except Exception as e:
+        still_to_throw = still_to_throw if still_to_throw else e
+        logger.error("[ERROR] While unlinking accounts:")
+        logger.exception(e)
+
+    if still_to_throw:
+        raise still_to_throw
+
+    return
+
 
 
 def unlink_at_dcf(user_id, do_refresh):
