@@ -36,6 +36,7 @@ from google_helpers.stackdriver import StackDriverLogger
 from .sa_utils import found_linking_problems, DemoLoginResults, \
                      handle_user_db_update_for_dcf_linking, \
                      unlink_account_in_db_for_dcf, refresh_user_projects, have_linked_user
+#refresh_user_projects, have_linked_user
 
 from .dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
@@ -44,6 +45,7 @@ from .dcf_support import get_stored_dcf_token, \
                         user_data_token_dict_massaged, drop_dcf_token, \
                         user_data_token_dict_to_user_dict, get_secrets, refresh_token_storage, \
                         unlink_at_dcf, refresh_at_dcf, decode_token_chunk, calc_expiration_time
+#unlink_at_dcf, refresh_at_dcf, decode_token_chunk, calc_expiration_time, unlink_internally
 
 from requests_oauthlib.oauth2_session import OAuth2Session
 from json import loads as json_loads
@@ -907,6 +909,7 @@ def dcf_disconnect_user(request):
 
     try:
         _unlink_internally(request.user.id)
+        # unlink_internally(request.user.id)
     except TokenFailure:
         # Token problem? Don't care; it is about to be blown away
         pass
