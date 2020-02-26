@@ -31,7 +31,7 @@ from requests_oauthlib.oauth2_session import OAuth2Session
 from oauthlib.oauth2 import MissingTokenError
 from base64 import urlsafe_b64decode
 from json import loads as json_loads, dumps as json_dumps
-# from .sa_utils import unlink_account_in_db_for_dcf
+from .sa_utils import unlink_account_in_db_for_dcf
 
 logger = logging.getLogger('main_logger')
 
