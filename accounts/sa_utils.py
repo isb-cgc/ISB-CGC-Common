@@ -870,34 +870,34 @@ def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion
     return nih_user, warn_message
 
 
-def unlink_account_in_db_for_dcf(user_id):
-    """
-    This function modifies the 'NIH_User' objects!
-
-    We find the NIH user(s) linked to the user_id, and set the Linked and Active states to False. We then remove their
-    authorized dataset records. This should only have to deal with one user, but we are set up to handle multiple users
-    to be safe.
-
-    """
-
-    user_email = User.objects.get(id=user_id).email
-    nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
-    num_linked = len(nih_user_query_set)
-
-    # If nobody is linked, we are actually done. There is nothing to do.
-    if num_linked == 0:
-        return
-    elif num_linked > 1:
-        logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
-
-    for nih_account_to_unlink in nih_user_query_set:
-        nih_account_to_unlink.linked = False
-        nih_account_to_unlink.active = False
-        nih_account_to_unlink.save()
-        nih_account_to_unlink.delete_all_auth_datasets() # Drop the user's approved data sets!
-        logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
-
-    return
+# def unlink_account_in_db_for_dcf(user_id):
+#     """
+#     This function modifies the 'NIH_User' objects!
+#
+#     We find the NIH user(s) linked to the user_id, and set the Linked and Active states to False. We then remove their
+#     authorized dataset records. This should only have to deal with one user, but we are set up to handle multiple users
+#     to be safe.
+#
+#     """
+#
+#     user_email = User.objects.get(id=user_id).email
+#     nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
+#     num_linked = len(nih_user_query_set)
+#
+#     # If nobody is linked, we are actually done. There is nothing to do.
+#     if num_linked == 0:
+#         return
+#     elif num_linked > 1:
+#         logger.warn("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
+#
+#     for nih_account_to_unlink in nih_user_query_set:
+#         nih_account_to_unlink.linked = False
+#         nih_account_to_unlink.active = False
+#         nih_account_to_unlink.save()
+#         nih_account_to_unlink.delete_all_auth_datasets() # Drop the user's approved data sets!
+#         logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
+#
+#     return
 
 
 def handle_user_db_entry(user_id, NIH_username, user_email, auth_response, num_auth_datasets,
