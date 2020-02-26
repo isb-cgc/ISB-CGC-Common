@@ -52,11 +52,7 @@ from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.utils.html import escape
 
 from .models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
-<<<<<<< HEAD
-from .utils import _save_cohort, _delete_cohort, _save_cohort_api
-=======
-from .utils import _save_cohort, _delete_cohort, get_cohort_uuids
->>>>>>> master
+from .utils import _save_cohort, _save_cohort_api, _delete_cohort, get_cohort_uuids
 from idc_collections.models import Program, Collection
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string, get_bq_metadata_api, get_bq_string_api
 
@@ -277,8 +273,8 @@ def get_filter(cohort):
         attributes[filter.attribute.name] = filter.value.split(",")
 
     filterset = {
-        "bioclin_version": filter_group.version.get(name='TCGA Clinical and Biospecimen Data').version,
-        "imaging_version": filter_group.version.get(name='TCIA Image Data').version,
+        "bioclin_version": filter_group.data_versions.get(name='TCGA Clinical and Biospecimen Data').version,
+        "imaging_version": filter_group.data_versions.get(name='TCIA Image Data').version,
         "attributes": attributes
     }
 
@@ -310,7 +306,7 @@ def cohort_objects_api(request, cohort_id=0):
                     collections.append(collection.lower().replace('-','_'))
                 filters['collection_id'] = collections
 
-        data_versions = filter_group.version.all()
+        data_versions = filter_group.data_versions.all()
 
         levels = { 'Instance':['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID','SOPInstanceUID'],
                    'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
@@ -321,7 +317,7 @@ def cohort_objects_api(request, cohort_id=0):
 
         fields = levels[request.GET['return_level']]
 
-        allfiles = get_bq_metadata_api(filters, fields, data_versions)
+        allfiles = get_bq_metadata(filters, fields, data_versions)
         filelist = allfiles[int(request.GET['offset']):int(request.GET['fetch_count'])]
 
         # We first build a tree of the object values

@@ -114,13 +114,13 @@ def _save_cohort_api(user, name, data, case_insens=True):
                       len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
                       DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
                       DataVersion.objects.get(active=True, name='TCIA Image Data')
-    grouping.version.add(imaging_version)
+    grouping.data_versions.add(imaging_version)
 
     bioclin_version = 'bioclin_version' in filterset and \
                       len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
                       DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
                       DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
-    grouping.version.add(bioclin_version)
+    grouping.data_versions.add(bioclin_version)
 
 
     for attr in attributes:

@@ -175,7 +175,10 @@ def collection_detail_api(request, program_name, collection_name):
                 #     bq_tables = dataVersion.bigquerytable_set.all()
                 # else:
                 #     bq_tables = dataVersion.bigquerytable_set.filter(name__icontains=collection_name)
-                bq_tables = dataVersion.bigquerytable_set.all()
+
+
+                # bq_tables = dataVersion.bigquerytable_set.all()
+                bq_tables = dataVersion.datasource_set.filter(source_type='B')
 
                 fields = []
                 for table in bq_tables:
