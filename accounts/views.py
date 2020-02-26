@@ -139,7 +139,7 @@ def user_gcp_list(request, user_id):
 
         else:
             messages.error(request,"You are not allowed to view that user's Google Cloud Project list.")
-            logger.warn("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
+            logger.warning("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
             template = '403.html'
 
     except TokenFailure:

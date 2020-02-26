@@ -31,6 +31,7 @@ from requests_oauthlib.oauth2_session import OAuth2Session
 from oauthlib.oauth2 import MissingTokenError
 from base64 import urlsafe_b64decode
 from json import loads as json_loads, dumps as json_dumps
+from .sa_utils import unlink_account_in_db_for_dcf
 
 logger = logging.getLogger('main_logger')
 
@@ -41,6 +42,7 @@ DCF_GOOGLE_SA_VERIFY_URL = settings.DCF_GOOGLE_SA_VERIFY_URL
 DCF_GOOGLE_SA_MONITOR_URL = settings.DCF_GOOGLE_SA_MONITOR_URL
 DCF_GOOGLE_SA_URL = settings.DCF_GOOGLE_SA_URL
 DCF_URL_URL = settings.DCF_URL_URL
+DCF_REVOKE_URL = settings.DCF_REVOKE_URL
 
 class DCFCommFailure(Exception):
     """Thrown if we have problems communicating with DCF """
@@ -1543,27 +1545,100 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
                                       })
 
 
-def unlink_all_dcf_tokens():
+def dcf_disconnect_users():
     dcf_tokens = DCFToken.objects.all()
     for token in dcf_tokens:
+        user_id = token.user.id
         try:
-            unlink_at_dcf(token.user.id, False)  # Don't refresh, we are about to drop the record...
+            unlink_at_dcf(user_id, False)  # Don't refresh, we are about to drop the record...
         except TokenFailure:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
-                    user_id=token.user.id, error_code="0071"))
+                    user_id=user_id, error_code="0071"))
         except InternalTokenError:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
-                    user_id=token.user.id, error_code="0072"))
+                    user_id=user_id, error_code="0072"))
         except RefreshTokenExpired:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
-                    user_id=token.user.id, error_code="0073"))
+                    user_id=user_id, error_code="0073"))
         except DCFCommFailure:
             logger.error(
                 "[ERROR] There was an error while trying to unlink user (user_id={user_id}) - Communications problem contacting Data Commons Framework.".format(
-                user_id=token.user.id))
+                user_id=user_id))
+
+        client_id, client_secret = get_secrets()
+        data = {
+            'token': token.refresh_token
+        }
+        auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+        resp = requests.request('POST', DCF_REVOKE_URL, data=data, auth=auth)
+        if resp.status_code != 200 and resp.status_code != 204:
+            logger.error('[ERROR] Token revocation problem: {} : {}'.format(resp.status_code, resp.text))
+
+        try:
+            unlink_internally(user_id)
+        except TokenFailure:
+            # Token problem? Don't care; it is about to be blown away
+            pass
+        except (InternalTokenError, Exception) as e:
+            logger.warning("Internal problem encountered while unlinking DCF token internally.")
+
+        try:
+            drop_dcf_token(user_id)
+        except InternalTokenError:
+            logger.warning("Internal problem encountered while deleting DCF token from Data Commons.")
+
+
+
+def unlink_internally(user_id):
+    """
+    If we need to unlink a user who was previously ACTUALLY linked, there are internal fixes to be made.
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises Exception:
+    """
+
+    still_to_throw = None
+    dcf_token = None
+
+    #
+    # The Token table records the User's Google ID. This needs to be nulled. The expiration time in the DCFToken
+    # is for the access token, not the google link (that info is stored in the NIH_user):
+    #
+
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except (TokenFailure, InternalTokenError) as e:
+        # We either have no token, or it is corrupted. But we still want to get the NIH table cleaned up:
+        still_to_throw = e
+    except RefreshTokenExpired as e:
+        # An expired token still needs to have field cleared:
+        dcf_token = e.token
+
+    if dcf_token:
+        dcf_token.google_id = None
+        dcf_token.save()
+
+    #
+    # Now drop the link flag and active flag from the DB, plus our db records of what datasets the user is
+    # good for:
+    #
+
+    try:
+        unlink_account_in_db_for_dcf(user_id)
+    except Exception as e:
+        still_to_throw = still_to_throw if still_to_throw else e
+        logger.error("[ERROR] While unlinking accounts:")
+        logger.exception(e)
+
+    if still_to_throw:
+        raise still_to_throw
+
+    return
+
 
 
 def unlink_at_dcf(user_id, do_refresh):
