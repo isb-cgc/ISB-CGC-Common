@@ -372,117 +372,88 @@ def save_cohort_api(request):
 
     return redirect(redirect_url)
 
+# Return a list of all cohorts owned by some user
+# ***Need to add shared cohorts***
+@csrf_exempt
+def cohorts_list_api(request):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
-# @csrf_exempt
-# def cohorts_list_api(request):
-#     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
-#
-#     try:
-#         cohorts = Cohort.objects.all()
-#         cohort = Cohort.objects.get(id=cohort_id, active=True)
-#         cohort.perm = cohort.get_perm(request)
-#         cohort.owner = cohort.get_owner()
-#
-#         attributes = {}
-#         filter_group = cohort.filter_group_set.get()
-#         filters = {}
-#         for filter in filter_group.filters_set.all():
-#             filters[filter.attribute.name] = filter.value.split(",")
-#             if filter.attribute.name == 'collection_id':
-#                 collections = []
-#                 for collection in filters['collection_id']:
-#                     collections.append(collection.lower().replace('-', '_'))
-#                 filters['collection_id'] = collections
-#
-#         data_versions = filter_group.version.all()
-#
-#         levels = {'Instance': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID'],
-#                   'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
-#                   'Study': ['collection_id', 'PatientID', 'StudyInstanceUID'],
-#                   'Patient': ['collection_id', 'PatientID'],
-#                   'Collection': ['collection_id']
-#                   }
-#
-#         fields = levels[request.GET['return_level']]
-#
-#         allfiles = get_bq_metadata_api(filters, fields, data_versions)
-#         filelist = allfiles[int(request.GET['offset']):int(request.GET['fetch_count'])]
-#
-#         # We first build a tree of the object values
-#         # reorder is a temporary hack to enable reordering the fields
-#         #        reorder = [0,1,2,3,4]
-#         objects = build_hierarchy(filelist, request.GET['return_level'])
-#         collections = build_collections(objects)
-#         cohort_json = {
-#             "name": cohort.name,
-#             "description": cohort.description,
-#             "filterSet": get_filter(cohort),
-#             "collections": collections
-#         }
-#
-#
-#     except Exception as e:
-#         logger.error("[ERROR] While trying to view the cohort file list: ")
-#         logger.exception(e)
-#         messages.error(request,
-#                        "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.")
-#         return redirect(reverse('cohort_details_api', args=[cohort_id]))
-#
-#     return JsonResponse(cohort_list)
+    try:
+        cohortList = {"cohorts":[]}
+
+        cohorts = Cohort.objects.all()
+        users_cohorts = [cohort for cohort in cohorts if cohort.get_owner().username == request.GET['user_name']]
+        for cohort in users_cohorts:
+            cohortMetadata = {
+                "id": cohort.id,
+                "name": cohort.name,
+                "description": cohort.description,
+                "file_count": 0,
+                "hashes": []
+            }
+            cohortList["cohorts"].append(cohortMetadata)
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to view the cohort file list: ")
+        logger.exception(e)
+        messages.error(request,
+            "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.")
+
+    return JsonResponse(cohortList)
 
 
-    # # check to see if user has read access to 'All TCGA Data' cohort
-    # idc_superuser = User.objects.get(username='idc')
-    # superuser_perm = Cohort_Perms.objects.get(user=idc_superuser)
-    # user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
-    # if not user_all_data_perm:
-    #     Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
-    #
-    # # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
-    #
-    # users = User.objects.filter(is_superuser=0)
-    # cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    # cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
-    #
-    # cohorts.has_private_cohorts = False
-    # shared_users = {}
-    #
-    # for item in cohorts:
-    #     item.perm = item.get_perm(request).get_perm_display()
-    #     item.owner = item.get_owner()
-    #     shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user',
-    #                                                                                                      flat=True)
-    #     item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
-    #     if not item.owner.is_superuser:
-    #         cohorts.has_private_cohorts = True
-    #         # if it is not a public cohort and it has been shared with other users
-    #         # append the list of shared users to the shared_users array
-    #         if item.shared_with_users and item.owner.id == request.user.id:
-    #             shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users,
-    #                                                                fields=('last_name', 'first_name', 'email'))
-    #
-    # # Used for autocomplete listing
-    # cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
-    # cohort_listing = []
-    # for cohort in cohort_id_names:
-    #     cohort_listing.append({
-    #         'value': int(cohort['id']),
-    #         'label': escape(cohort['name']).encode('utf8')
-    #     })
-    #
-    # previously_selected_cohort_ids = []
-    #
-    # return render(request, 'cohorts/cohort_list.html', {'request': request,
-    #                                                     'cohorts': cohorts,
-    #                                                     'user_list': users,
-    #                                                     'cohorts_listing': cohort_listing,
-    #                                                     'shared_users': json.dumps(shared_users),
-    #                                                     'base_url': settings.BASE_URL,
-    #                                                     'base_api_url': settings.BASE_API_URL,
-    #                                                     'is_public': is_public,
-    #                                                     'previously_selected_cohort_ids': previously_selected_cohort_ids
-    #                                                     })
-    #
+# # check to see if user has read access to 'All TCGA Data' cohort
+# idc_superuser = User.objects.get(username='idc')
+# superuser_perm = Cohort_Perms.objects.get(user=idc_superuser)
+# user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
+# if not user_all_data_perm:
+#     Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
+#
+# # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
+#
+# users = User.objects.filter(is_superuser=0)
+# cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
+# cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
+#
+# cohorts.has_private_cohorts = False
+# shared_users = {}
+#
+# for item in cohorts:
+#     item.perm = item.get_perm(request).get_perm_display()
+#     item.owner = item.get_owner()
+#     shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user',
+#                                                                                                      flat=True)
+#     item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
+#     if not item.owner.is_superuser:
+#         cohorts.has_private_cohorts = True
+#         # if it is not a public cohort and it has been shared with other users
+#         # append the list of shared users to the shared_users array
+#         if item.shared_with_users and item.owner.id == request.user.id:
+#             shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users,
+#                                                                fields=('last_name', 'first_name', 'email'))
+#
+# # Used for autocomplete listing
+# cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
+# cohort_listing = []
+# for cohort in cohort_id_names:
+#     cohort_listing.append({
+#         'value': int(cohort['id']),
+#         'label': escape(cohort['name']).encode('utf8')
+#     })
+#
+# previously_selected_cohort_ids = []
+#
+# return render(request, 'cohorts/cohort_list.html', {'request': request,
+#                                                     'cohorts': cohorts,
+#                                                     'user_list': users,
+#                                                     'cohorts_listing': cohort_listing,
+#                                                     'shared_users': json.dumps(shared_users),
+#                                                     'base_url': settings.BASE_URL,
+#                                                     'base_api_url': settings.BASE_API_URL,
+#                                                     'is_public': is_public,
+#                                                     'previously_selected_cohort_ids': previously_selected_cohort_ids
+#                                                     })
+#
 
 @csrf_exempt
 def cohort_detail_api(request, cohort_id=0):
