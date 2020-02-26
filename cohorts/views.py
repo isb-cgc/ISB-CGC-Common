@@ -52,7 +52,11 @@ from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.utils.html import escape
 
 from .models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
+<<<<<<< HEAD
 from .utils import _save_cohort, _delete_cohort, _save_cohort_api
+=======
+from .utils import _save_cohort, _delete_cohort, get_cohort_uuids
+>>>>>>> master
 from idc_collections.models import Program, Collection
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string, get_bq_metadata_api, get_bq_string_api
 
@@ -1334,29 +1338,26 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
 @login_required
 @csrf_protect
-def cohort_samples_cases(request, cohort_id=0):
+def cohort_uuids(request, cohort_id=0):
     if cohort_id == 0:
-        messages.error(request, 'Cohort provided does not exist.')
-        response = redirect('cohort_list')
+        messages.error(request, 'Cohort provided is invalid.')
+        return redirect('cohort_list')
 
     try:
         cohort_name = Cohort.objects.get(id=cohort_id).name
-        samples = Samples.objects.filter(cohort=cohort_id)
 
-        rows = (["Sample and Case List for Cohort '"+cohort_name+"'"],)
-        rows += (["Sample Barcode", "Case Barcode"],)
+        rows = ["UUIDs for Cohort {} ({})".format(str(cohort_id, cohort_name))]
 
-        for sample in samples:
-            rows += ([sample.sample_barcode, sample.case_barcode],)
+        rows.append(get_cohort_uuids(cohort_id))
 
         pseudo_buffer = Echo()
         writer = csv.writer(pseudo_buffer)
         response = StreamingHttpResponse((writer.writerow(row) for row in rows),
                                          content_type="text/csv")
-        response['Content-Disposition'] = 'attachment; filename="samples_cases_in_cohort_{}.csv"'.format(str(cohort_id))
+        response['Content-Disposition'] = 'attachment; filename="uuids_in_cohort_{}.csv"'.format(str(cohort_id))
 
     except ObjectDoesNotExist:
-        messages.error(request, "A cohort of the ID {} was not found.".format(str(cohort_id)))
+        messages.error(request, "A cohort with the ID {} was not found.".format(str(cohort_id)))
         response = redirect('cohort_list')
     except Exception as e:
         logger.error("[ERROR] While trying to download a list of samples and cases for cohort {}:".format(str(cohort_id)))

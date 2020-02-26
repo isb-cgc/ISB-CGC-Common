@@ -115,13 +115,20 @@ class Collection(models.Model):
         )
 
 
-class SolrCollection(models.Model):
+class DataSource(models.Model):
     QUERY = 'query'
     TERMS = 'terms'
+    SOLR = 'S'
+    BIGQUERY = 'B'
+    SOURCE_TYPES = (
+        (SOLR, "Solr Data Collection"),
+        (BIGQUERY, "BigQuery Table")
+    )
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
+    source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
 
     def get_collection_attr(self, for_faceting=True):
         if for_faceting:
@@ -136,27 +143,12 @@ class SolrCollection(models.Model):
     @staticmethod
     def get_facet_type(attr):
         if attr.data_type == Attribute.CONTINUOUS_NUMERIC and len(Attribute_Ranges.objects.filter(attribute=attr)) > 0:
-            return SolrCollection.QUERY
+            return DataSource.QUERY
         else:
-            return SolrCollection.TERMS
+            return DataSource.TERMS
 
     class Meta(object):
-        unique_together = (("name", "version"),)
-
-
-class BigQueryTable(models.Model):
-    id = models.AutoField(primary_key=True, null=False, blank=False)
-    name = models.CharField(max_length=128, null=False, blank=False, unique=True)
-    version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
-
-    def get_collection_attr(self, for_faceting=True):
-        if for_faceting:
-            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True)
-        return self.attribute_set.all()
-
-    class Meta(object):
-        unique_together = (("name", "version"),)
+        unique_together = (("name", "version", "source_type"),)
 
 
 class Attribute(models.Model):
@@ -179,8 +171,7 @@ class Attribute(models.Model):
     is_cross_collex = models.BooleanField(default=False)
     preformatted_values = models.BooleanField(default=False)
     default_ui_display = models.BooleanField(default=True)
-    solr_collections = models.ManyToManyField(SolrCollection)
-    bq_tables = models.ManyToManyField(BigQueryTable)
+    data_sources = models.ManyToManyField(DataSource)
 
     def get_display_values(self):
         display_vals = self.attribute_display_values_set.all()
@@ -191,11 +182,8 @@ class Attribute(models.Model):
 
         return result
 
-    def get_solr_bq(self):
-        return {
-            'solr': self.solr_collections_set.all().filter(active=True).values_list('name', flat=True),
-            'bq': self.bq_tables_set.all().filter(active=True).values_list('name', flat=True)
-        }
+    def get_data_sources(self):
+        return self.data_sources.all().filter(active=True).values_list('name', flat=True)
 
     def __str__(self):
         return "{} ({}), Type: {}".format(
@@ -216,20 +204,29 @@ class Attribute_Display_Values(models.Model):
 
 
 class Attribute_Ranges(models.Model):
+    FLOAT = 'F'
+    INT = 'I'
+    RANGE_TYPES = (
+        (FLOAT, 'Float'),
+        (INT, 'Integer')
+    )
     id = models.AutoField(primary_key=True, null=False, blank=False)
+    # The type determines what a ranging method will do to cast a numeric value onto first, last, and gap
+    type = models.CharField(max_length=1, blank=False, null=False, choices=RANGE_TYPES, default=INT)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
-    # These fields help determine how first and last are used in query building
-    # include_lower=True causes first=10 to produce a range bucket of x:[* to 10] or WHERE (x <= 10)
-    # include_lower=False causes first=10 to produce a range bucket of x:[10 to (first+gap)] or WHERE (x >= 10 AND x < (first+gap))
+    # In any range with an lower value, use <= or >= rather than < or >
     include_lower = models.BooleanField(default=True)
-    # include_upper works the as include_lower, but for last and the upper bounds
-    include_upper = models.BooleanField(default=True)
-    # Depending on the setting of include_lower, is either the lower bound of the first range, or the upper bound of the first range.
-    first = models.IntegerField(null=False, blank=False, default=10)
-    # Depending on the setting of include_upper, is either the upper bound of the last range, or the lower bound of the last range.
-    last = models.IntegerField(null=False, blank=False, default=80)
-    # The bucket's range
-    gap = models.IntegerField(null=False, blank=False, default=10)
+    # In any range with an upper value, use <= or >= rather than < or >
+    include_upper = models.BooleanField(default=False)
+    # Include ranges for [* to first] and [last to *]
+    unbounded = models.BooleanField(default=True)
+    # The beginning and end of the range
+    first = models.CharField(max_length=128, null=False, blank=False, default="10")
+    last = models.CharField(max_length=128, null=False, blank=False, default="80")
+    # The bucket's range. If gap == 0, this can be assumed to be a single range bucket
+    gap = models.CharField(max_length=128, null=False, blank=False, default="10")
+    # Optional, for UI display purposes
+    label = models.CharField(max_length=256, null=True, blank=True)
 
     def __str__(self):
         return "{}: {} to {} by {}".format(self.attribute.name, str(self.start), str(self.last), str(self.gap))
