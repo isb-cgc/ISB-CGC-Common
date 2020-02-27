@@ -128,8 +128,8 @@ def user_gcp_list(request, user_id):
                             template = '500.html'
                             return render(request, template, context)
                     else:
-                        raise RefreshTokenExpired
-                        # sa_dicts = []
+                        # raise RefreshTokenExpired
+                        sa_dicts = []
                     gcp_and_sa_tuples.append((gcp, sa_dicts))
                 context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples, 'linked': is_linked}
 
