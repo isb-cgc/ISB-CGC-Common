@@ -34,7 +34,7 @@ from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, AnonymousUser
 from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 from django.core import serializers
@@ -2016,7 +2016,10 @@ def get_metadata(request):
 
     program_id = int(program_id) if program_id is not None else None
 
-    user = Django_User.objects.get(id=request.user.id)
+    if (request.user.is_authenticated):
+        user = Django_User.objects.get(id=request.user.id)
+    else:
+        user = AnonymousUser
 
     if program_id is not None and program_id > 0:
         results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit, comb_mut_filters=comb_mut_filters)
