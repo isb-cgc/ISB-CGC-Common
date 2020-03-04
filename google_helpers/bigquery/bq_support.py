@@ -285,7 +285,7 @@ class BigQuerySupport(BigQueryABC):
     # If self.project_id, self.dataset_id, and self.table_id are set they
     # will be used as the destination table for the query
     # WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
 
@@ -311,7 +311,10 @@ class BigQuerySupport(BigQueryABC):
                 logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
-                query_results = self.fetch_job_results(query_job['jobReference'])
+                if with_schema:
+                    query_results = self.fetch_job_results_with_schema(query_job['jobReference'])
+                else:
+                    query_results = self.fetch_job_results(query_job['jobReference'])
                 logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
         else:
             logger.error("[ERROR] Query took longer than the allowed time to execute--" +
@@ -344,6 +347,32 @@ class BigQuerySupport(BigQueryABC):
                                                  jobId=query_job['jobReference']['jobId']).execute(num_retries=5)
 
         return job_is_done and job_is_done['status']['state'] == 'DONE'
+
+
+    # TODO: shim until we have time to rework this into a single method
+    # Fetch the results of a job based on the reference provided
+    def fetch_job_results_with_schema(self, job_ref):
+        result = []
+        page_token = None
+        schema = None
+
+        while True:
+            page = self.bq_service.jobs().getQueryResults(
+                pageToken=page_token,
+                **job_ref).execute(num_retries=2)
+            if not schema:
+                schema = page['schema']
+            if int(page['totalRows']) == 0:
+                break
+
+            rows = page['rows']
+            result.extend(rows)
+
+            page_token = page.get('pageToken')
+            if not page_token:
+                break
+
+        return {'results': result, 'schema': schema}
 
     # Fetch the results of a job based on the reference provided
     def fetch_job_results(self, job_ref):
