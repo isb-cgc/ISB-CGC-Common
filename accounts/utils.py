@@ -29,7 +29,7 @@ from .sa_utils import get_project_deleters, unregister_all_gcp_sa
 from google_helpers.sheets.opt_in_support import OptInSupport
 
 
-from accounts.models import GoogleProject
+from accounts.models import GoogleProject, UserOptInStatus
 
 logger = logging.getLogger('main_logger')
 
@@ -331,6 +331,20 @@ def api_gcp_delete(user, gcp_id):
         status = 404
 
     return response, status
+
+
+def retrieve_opt_in_status(request, user_status):
+    if user_status and user_status.opt_in_status != UserOptInStatus.YES and \
+            user_status.opt_in_status != UserOptInStatus.NO:
+        opt_in_response = get_opt_in_response(request.user.email)
+
+        if not opt_in_response:
+            user_status.opt_in_status = UserOptInStatus.NOT_SEEN
+        elif opt_in_response["can_contact"] == 'Yes':
+            user_status.opt_in_status = UserOptInStatus.YES
+        elif opt_in_response["can_contact"] == 'No':
+            user_status.opt_in_status = UserOptInStatus.NO
+        user_status.save()
 
 
 def get_opt_in_response(email):
