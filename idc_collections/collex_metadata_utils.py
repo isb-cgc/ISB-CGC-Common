@@ -24,7 +24,12 @@ from django.conf import settings
 logger = logging.getLogger('main_logger')
 
 
-def get_bq_metadata(filters, fields, data_versions):
+# Fetch the related metadata from BigQuery
+# filters: dict filter set
+# fields: list of columns to return, string format only
+# data_versions: QuerySet<DataVersion> of the data versions(s) to search
+# returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
+def get_bq_metadata(filters, fields, data_versions, group_by=None, limit=0, offset=0, order_by=None, order_asc=True):
     results = {}
     filter_attr_by_bq = {}
     field_attr_by_bq = {}
@@ -34,6 +39,10 @@ def get_bq_metadata(filters, fields, data_versions):
         FROM {table_clause} 
         {join_clause}
         {where_clause}
+        {group_clause}
+        {order_clause}
+        {limit_clause}
+        {offset_clause}
     """
 
     join_clause_base = """
@@ -144,12 +153,16 @@ def get_bq_metadata(filters, fields, data_versions):
             field_clause=",".join(fields),
             table_clause="`{}` {}".format(image_table, table_info[image_table]['alias']),
             join_clause=""" """.join(joins),
-            where_clause="WHERE {}".format(" AND ".join(query_filters)) if len(query_filters) else "")
-        )
+            where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters)) if len(query_filters) else ""),
+            order_clause="{}".format("ORDER BY {}".format(", ".join(["{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by])) if order_by and len(order_by) else ""),
+            group_clause="{}".format("GROUP BY {}".format(", ".join(group_by)) if group_by and len(group_by) else ""),
+            limit_clause="{}".format("LIMIT {}".format(str(limit)) if limit > 0 else ""),
+            offset_clause="{}".format("OFFSET {}".format(str(offset)) if offset > 0 else "")
+        ))
 
     full_query_str = """UNION DISTINCT""".join(for_union)
 
-    results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params)
+    results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, with_schema=True)
 
     return results
 

@@ -355,6 +355,7 @@ class BigQuerySupport(BigQueryABC):
         result = []
         page_token = None
         schema = None
+        totalFound = None
 
         while True:
             page = self.bq_service.jobs().getQueryResults(
@@ -364,15 +365,23 @@ class BigQuerySupport(BigQueryABC):
                 schema = page['schema']
             if int(page['totalRows']) == 0:
                 break
+            if totalFound is None:
+                totalFound = page['totalRows']
 
             rows = page['rows']
-            result.extend(rows)
+            if len(rows) > settings.MAX_BQ_RECORD_RESULT:
+                result.extend(rows[:settings.MAX_BQ_RECORD_RESULT])
+            else:
+                result.extend(rows)
+
+            if len(result) >= settings.MAX_BQ_RECORD_RESULT:
+                break
 
             page_token = page.get('pageToken')
             if not page_token:
                 break
 
-        return {'results': result, 'schema': schema}
+        return {'results': result, 'schema': schema, 'totalFound': totalFound}
 
     # Fetch the results of a job based on the reference provided
     def fetch_job_results(self, job_ref):
@@ -390,6 +399,9 @@ class BigQuerySupport(BigQueryABC):
 
             rows = page['rows']
             result.extend(rows)
+
+            if len(result) > settings.MAX_BQ_RECORD_RESULT:
+                break
 
             page_token = page.get('pageToken')
             if not page_token:
@@ -410,9 +422,9 @@ class BigQuerySupport(BigQueryABC):
 
     # Execute a query, optionally parameterized, and fetch its results
     @classmethod
-    def execute_query_and_fetch_results(cls, query, parameters=None):
+    def execute_query_and_fetch_results(cls, query, parameters=None, with_schema=False):
         bqs = cls(None, None, None)
-        return bqs.execute_query(query, parameters)
+        return bqs.execute_query(query, parameters, with_schema=with_schema)
 
     @classmethod
     # Execute a query, optionally parameterized, to be saved on a temp table
