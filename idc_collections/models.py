@@ -130,15 +130,19 @@ class DataSource(models.Model):
     shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
 
-    def get_collection_attr(self, for_faceting=True):
+    def get_collection_attr(self, for_faceting=True, for_ui=False):
         if for_faceting:
             ranged_numerics = self.attribute_set.all().filter(
                 id__in=Attribute_Ranges.objects.filter(
                     attribute__in=self.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
                 ).values_list('attribute__id', flat=True)
             )
-            return self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True) | ranged_numerics
-        return self.attribute_set.all()
+            attr_set = self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True) | ranged_numerics
+        else:
+            attr_set = self.attribute_set.all()
+        if for_ui:
+            return attr_set.filter(default_ui_display=True)
+        return attr_set
 
     @staticmethod
     def get_facet_type(attr):

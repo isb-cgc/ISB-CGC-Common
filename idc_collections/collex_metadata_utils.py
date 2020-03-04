@@ -286,10 +286,10 @@ def get_bq_metadata(filters, fields, data_versions):
     for_union = []
     params = []
     param_sfx = 0
-    tables_in_query = []
 
     # We join image tables to corresponding ancillary tables, and union between image tables
     for image_table in image_tables:
+        tables_in_query = []
         joins = []
         query_filters = []
         fields = [field_clauses[image_table]] if image_table in field_clauses else []
@@ -417,10 +417,10 @@ def get_bq_string(filters, fields, data_versions):
         field_clauses[bqtable] = ",".join(["{}.{}".format(alias, x) for x in field_attr_by_bq[bqtable]['attrs']])
 
     for_union = []
-    tables_in_query = []
 
     # We join image tables to corresponding ancillary tables, and union between image tables
     for image_table in image_tables:
+        tables_in_query = []
         joins = []
         fields = [field_clauses[image_table]] if image_table in field_clauses else []
         filter_set = [filter_clauses[image_table]] if image_table in filter_clauses else []
