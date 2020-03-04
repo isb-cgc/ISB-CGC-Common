@@ -30,7 +30,6 @@ logger = logging.getLogger('main_logger')
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
 # returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
 def get_bq_metadata(filters, fields, data_versions, group_by=None, limit=0, offset=0, order_by=None, order_asc=True):
-    results = {}
     filter_attr_by_bq = {}
     field_attr_by_bq = {}
 
