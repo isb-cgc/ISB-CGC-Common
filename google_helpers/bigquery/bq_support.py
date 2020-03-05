@@ -30,17 +30,6 @@ logger = logging.getLogger('main_logger')
 MAX_INSERT = settings.MAX_BQ_INSERT
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
 
-COHORT_DATASETS = {
-    'prod': 'cloud_deployment_cohorts',
-    'staging': 'cloud_deployment_cohorts',
-    'dev': 'dev_deployment_cohorts'
-}
-
-COHORT_TABLES = {
-    'prod': 'prod_cohorts',
-    'staging': 'staging_cohorts'
-}
-
 MOLECULAR_CATEGORIES = {
     'nonsilent': {
         'name': 'Non-silent',
