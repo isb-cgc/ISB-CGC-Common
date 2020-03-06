@@ -23,10 +23,10 @@ logger = logging.getLogger('main_logger')
 MAX_INSERT = settings.MAX_BQ_INSERT
 
 
-class BigQueryMetricsSupport(BigQuerySupport):
+class BigQueryFeedbackSupport(BigQuerySupport):
 
     def __init__(self):
-        super(BigQueryMetricsSupport, self).__init__(settings.BIGQUERY_DATA_PROJECT_ID,
+        super(BigQueryFeedbackSupport, self).__init__(settings.BIGQUERY_DATA_PROJECT_ID,
                                                      settings.BIGQUERY_FEEDBACK_DATASET,
                                                      settings.BIGQUERY_FEEDBACK_TABLE)
 
@@ -34,6 +34,6 @@ class BigQueryMetricsSupport(BigQuerySupport):
     # Note that this is a class method therefor the rows must be supplied formatted ready
     # for insertion, build_row will not be called!
     @classmethod
-    def add_rows_to_table(cls, rows, table):
-        bqs = cls(table)
+    def add_rows_to_table(cls, rows):
+        bqs = cls()
         return bqs._streaming_insert(rows)
