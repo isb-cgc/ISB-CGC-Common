@@ -552,7 +552,8 @@ class BigQuerySupport(BigQueryABC):
 
         result = {
             'filter_string': '',
-            'parameters': []
+            'parameters': [],
+            'attr_params': {}
         }
 
         if with_count_toggle:
@@ -713,6 +714,9 @@ class BigQuerySupport(BigQueryABC):
                         'value': 'filtering'
                     }
                 }
+                if attr not in result['attr_params']:
+                    result['attr_params'][attr] = []
+                result['attr_params'][attr].append(param_name)
                 result['parameters'].append(result['count_params'][param_name])
 
             filter_set.append('({})'.format(filter_string))
