@@ -26,10 +26,11 @@ from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.resourcemanager_service import get_special_crm_resource
 from .dcf_support import TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure
 from .sa_utils import get_project_deleters, unregister_all_gcp_sa
-from google_helpers.sheets.opt_in_support import OptInSupport
+# from google_helpers.sheets.opt_in_support import OptInSupport
 
 
-from accounts.models import GoogleProject, UserOptInStatus
+from accounts.models import GoogleProject\
+    # , UserOptInStatus
 
 logger = logging.getLogger('main_logger')
 
@@ -333,31 +334,31 @@ def api_gcp_delete(user, gcp_id):
     return response, status
 
 
-def retrieve_opt_in_status(request, user_status):
-    if user_status and user_status.opt_in_status != UserOptInStatus.YES and \
-            user_status.opt_in_status != UserOptInStatus.NO:
-        opt_in_response = get_opt_in_response(request.user.email)
-
-        if not opt_in_response:
-            user_status.opt_in_status = UserOptInStatus.NOT_SEEN
-        elif opt_in_response["can_contact"] == 'Yes':
-            user_status.opt_in_status = UserOptInStatus.YES
-        elif opt_in_response["can_contact"] == 'No':
-            user_status.opt_in_status = UserOptInStatus.NO
-        user_status.save()
-
-
-def get_opt_in_response(email):
-    """
-    Look for user response to opt-in form contained in Google Sheet.
-    :param email: user email for which to locate response
-    :return: None if no response, 'Yes' or 'No' otherwise
-    """
-    try:
-        opt_in_response = OptInSupport(email)
-    except Exception as e:
-        logger.error("[ERROR] While retrieving user opt-in response from google sheet.")
-        logger.exception(e)
-        return None
-
-    return opt_in_response.user_response
+# def retrieve_opt_in_status(request, user_status):
+#     if user_status and user_status.opt_in_status != UserOptInStatus.YES and \
+#             user_status.opt_in_status != UserOptInStatus.NO:
+#         opt_in_response = get_opt_in_response(request.user.email)
+#
+#         if not opt_in_response:
+#             user_status.opt_in_status = UserOptInStatus.NOT_SEEN
+#         elif opt_in_response["can_contact"] == 'Yes':
+#             user_status.opt_in_status = UserOptInStatus.YES
+#         elif opt_in_response["can_contact"] == 'No':
+#             user_status.opt_in_status = UserOptInStatus.NO
+#         user_status.save()
+#
+#
+# def get_opt_in_response(email):
+#     """
+#     Look for user response to opt-in form contained in Google Sheet.
+#     :param email: user email for which to locate response
+#     :return: None if no response, 'Yes' or 'No' otherwise
+#     """
+#     try:
+#         opt_in_response = OptInSupport(email)
+#     except Exception as e:
+#         logger.error("[ERROR] While retrieving user opt-in response from google sheet.")
+#         logger.exception(e)
+#         return None
+#
+#     return opt_in_response.user_response
