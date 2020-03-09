@@ -212,9 +212,9 @@ class DCFToken(models.Model):
 class UserOptInStatus(models.Model):
     NEW = 0
     NOT_SEEN = 1
-    NO = 2
+    SEEN = 2
     YES = 3
-    SEEN = 4
+    NO = 4
 
     user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
     opt_in_status = models.IntegerField(default=NEW)
