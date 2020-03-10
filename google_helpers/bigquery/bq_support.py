@@ -285,7 +285,7 @@ class BigQuerySupport(BigQueryABC):
     # If self.project_id, self.dataset_id, and self.table_id are set they
     # will be used as the destination table for the query
     # WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
 
@@ -311,7 +311,10 @@ class BigQuerySupport(BigQueryABC):
                 logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
-                query_results = self.fetch_job_results(query_job['jobReference'])
+                if with_schema:
+                    query_results = self.fetch_job_results_with_schema(query_job['jobReference'])
+                else:
+                    query_results = self.fetch_job_results(query_job['jobReference'])
                 logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
         else:
             logger.error("[ERROR] Query took longer than the allowed time to execute--" +
@@ -345,6 +348,41 @@ class BigQuerySupport(BigQueryABC):
 
         return job_is_done and job_is_done['status']['state'] == 'DONE'
 
+
+    # TODO: shim until we have time to rework this into a single method
+    # Fetch the results of a job based on the reference provided
+    def fetch_job_results_with_schema(self, job_ref):
+        result = []
+        page_token = None
+        schema = None
+        totalFound = None
+
+        while True:
+            page = self.bq_service.jobs().getQueryResults(
+                pageToken=page_token,
+                **job_ref).execute(num_retries=2)
+            if not schema:
+                schema = page['schema']
+            if int(page['totalRows']) == 0:
+                break
+            if totalFound is None:
+                totalFound = page['totalRows']
+
+            rows = page['rows']
+            if len(rows) > settings.MAX_BQ_RECORD_RESULT:
+                result.extend(rows[:settings.MAX_BQ_RECORD_RESULT])
+            else:
+                result.extend(rows)
+
+            if len(result) >= settings.MAX_BQ_RECORD_RESULT:
+                break
+
+            page_token = page.get('pageToken')
+            if not page_token:
+                break
+
+        return {'results': result, 'schema': schema, 'totalFound': totalFound}
+
     # Fetch the results of a job based on the reference provided
     def fetch_job_results(self, job_ref):
         logger.info(str(job_ref))
@@ -361,6 +399,9 @@ class BigQuerySupport(BigQueryABC):
 
             rows = page['rows']
             result.extend(rows)
+
+            if len(result) > settings.MAX_BQ_RECORD_RESULT:
+                break
 
             page_token = page.get('pageToken')
             if not page_token:
@@ -381,9 +422,9 @@ class BigQuerySupport(BigQueryABC):
 
     # Execute a query, optionally parameterized, and fetch its results
     @classmethod
-    def execute_query_and_fetch_results(cls, query, parameters=None):
+    def execute_query_and_fetch_results(cls, query, parameters=None, with_schema=False):
         bqs = cls(None, None, None)
-        return bqs.execute_query(query, parameters)
+        return bqs.execute_query(query, parameters, with_schema=with_schema)
 
     @classmethod
     # Execute a query, optionally parameterized, to be saved on a temp table
@@ -511,7 +552,8 @@ class BigQuerySupport(BigQueryABC):
 
         result = {
             'filter_string': '',
-            'parameters': []
+            'parameters': [],
+            'attr_params': {}
         }
 
         if with_count_toggle:
@@ -672,6 +714,9 @@ class BigQuerySupport(BigQueryABC):
                         'value': 'filtering'
                     }
                 }
+                if attr not in result['attr_params']:
+                    result['attr_params'][attr] = []
+                result['attr_params'][attr].append(param_name)
                 result['parameters'].append(result['count_params'][param_name])
 
             filter_set.append('({})'.format(filter_string))
