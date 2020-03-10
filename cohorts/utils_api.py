@@ -29,15 +29,12 @@ logger = logging.getLogger('main_logger')
 BLACKLIST_RE = settings.BLACKLIST_RE
 
 
-def build_collections(objects):
+def build_collections(objects, dois, urls):
     collections = []
     for collection in objects:
-        patients = build_patients(collection, objects[collection])
+        patients = build_patients(collection, objects[collection], dois, urls)
         collections.append(
             {
-                # "collection": {
-                #     "collection_id":collection
-                # },
                 "collection_id":collection,
             }
         )
@@ -46,10 +43,10 @@ def build_collections(objects):
     return collections
 
 
-def build_patients(collection,collection_patients):
+def build_patients(collection,collection_patients, dois, urls):
     patients = []
     for patient in collection_patients:
-        studies = build_studies(collection, patient, collection_patients[patient])
+        studies = build_studies(collection, patient, collection_patients[patient], dois, urls)
         patients.append({
                 "patientID":patient,
             }
@@ -59,39 +56,42 @@ def build_patients(collection,collection_patients):
     return patients
 
 
-def build_studies(collection, patient, patient_studies):
+def build_studies(collection, patient, patient_studies, dois, urls):
     studies = []
     for study in patient_studies:
-        series = build_series(collection, patient, study, patient_studies[study])
+        series = build_series(collection, patient, study, patient_studies[study], dois, urls)
         studies.append(
             {
-                "StudyInstanceUID": study,
-                "GUID": "",
-                "AccessMethods": [
+                "StudyInstanceUID": study
+            })
+        if dois:
+            studies[-1]["GUID"] = ""
+        if urls:
+            studies[-1]["AccessMethods"] = [
                     {
                         "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}".format(collection,study),
                         "region": "Multi-region",
                         "type": "gs"
 
                     }
-                ],
-
-            }
-        )
+            ]
         if len(series) > 0:
             studies[-1]["series"] = series
     return studies
 
 
-def build_series(collection, patient, study, patient_studies):
+def build_series(collection, patient, study, patient_studies, dois, urls):
     series = []
     for aseries in patient_studies:
-        instances = build_instances(collection, patient, study, aseries, patient_studies[aseries])
+        instances = build_instances(collection, patient, study, aseries, patient_studies[aseries], dois, urls)
         series.append(
             {
-                "SeriesInstanceUID": study,
-                "GUID": "",
-                "AccessMethods": [
+                "SeriesInstanceUID": aseries
+            })
+        if dois:
+            series[-1]["GUID"] = ""
+        if urls:
+            series[-1]["AccessMethods"] = [
                     {
                         "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}".format(collection,
                                         study, aseries),
@@ -99,42 +99,39 @@ def build_series(collection, patient, study, patient_studies):
                         "type": "gs"
 
                     }
-                ],
-            }
-        )
+            ]
         if len(instances) > 0:
             series[-1]["instances"] = instances
     return series
 
 
-def build_instances(collection, patient, study, series, study_series):
+def build_instances(collection, patient, study, series, study_series, dois, urls):
     instances = []
     for instance in study_series:
          instances.append(
             {
-                "instance": {
-                    "SOPInstanceUID": study,
-                    "GUID": "",
-                    "AccessMethods": [
+                "SOPInstanceUID": instance
+            })
+        if dois:
+            instances[-1]["GUID"] = ""
+        if urls:
+            instances[-1]["AccessMethods"] = [
                         {
-                            "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}.{}.dcm".format(collection,
+                            "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}/{}.dcm".format(collection,
                                             study,series,instance),
                             "region": "Multi-region",
                             "type": "gs"
 
                         }
                     ]
-                },
-            }
-        )
     return instances
 
 
-def build_hierarchy(rows,return_level):
-    objects = {}
-#    reorder = [3,1,2,0]
+def build_hierarchy(objects, rows, return_level, reorder):
+#
     for raw in rows:
-        row = [val['v'] for val in raw['f']]
+        rawv = [val['v'] for val in raw['f']]
+        row = [rawv[i] for i in reorder]
         row[0] = row[0].replace('_','-')
         if not row[0] in objects:
             objects[row[0]] = {}

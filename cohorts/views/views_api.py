@@ -53,13 +53,19 @@ def cohort_objects_api(request, cohort_id=0):
         return redirect('/user_landing')
 
     try:
-        # users_cohorts = [cohort for cohort in cohorts if cohort.get_owner().username == request.GET['user_name']]
-
         cohort = Cohort.objects.get(id=cohort_id, active=True)
         cohort.perm = cohort.get_perm(request)
         cohort.owner = cohort.get_owner()
 
-        attributes = {}
+        cohort_info = {
+            "cohort": {
+                "id":   int(cohort_id),
+                "name": cohort.name,
+                "description": cohort.description,
+            }
+        }
+
+        if request.GET['return_objects']:
         filter_group = cohort.filter_group_set.get()
         filters = {}
         for filter in filter_group.filters_set.all():
@@ -79,25 +85,61 @@ def cohort_objects_api(request, cohort_id=0):
                    'Collection': ['collection_id']
                    }
 
-        fields = levels[request.GET['return_level']]
 
-        allfiles = get_bq_metadata(filters, fields, data_versions)
-        filelist = allfiles[int(request.GET['offset']):int(request.GET['fetch_count'])]
+            # We first build a tree of just the object values: collection_ids, PatientIDs, etc.
+            rows_left = fetch_count = int(request.GET['fetch_count'])
+            page = int(request.GET['page'])
+            return_level = request.GET['return_level']
+            select = levels[return_level]
+            offset = int(request.GET['offset']) + (fetch_count * (page - 1))
+            objects = {}
+            totalFound = 0
+            # get_bq_metadata() should be addind the table alias. Until then, we do it here
+            group_by = ["{}.{}".format('dicom_metadata',field) for field in select]
+            while rows_left > 0:
+                results = get_bq_metadata(
+                    filters=filters, fields=select, data_versions=data_versions,
+                    limit=fetch_count, offset=offset, group_by=group_by)
+                if results['totalFound'] == None:
+                    break
+                found = int(results['totalFound'])
+                totalFound += found
 
-        # We first build a tree of the object values
-        # reorder is a temporary hack to enable reordering the fields
-#        reorder = [0,1,2,3,4]
-        objects = build_hierarchy(filelist,request.GET['return_level'])
-        collections = build_collections(objects)
-        cohort_info = {
-            "cohort": {
-                "name": cohort.name,
-                "description": cohort.description,
-                "filterSet": get_filterSet_api(cohort),
+                fields = [field['name'] for field in results['schema']['fields']]
+                rows = results['results']
+
+                unFound = rows_left - found
+                reorder = [fields.index(x) for x in select]
+                if unFound >= 0:
+                    #  We need to add all the rows just received from BQ to the hierarchy
+                    objects = build_hierarchy(
+                        objects=objects,
+                        rows=rows,
+                        reorder=reorder,
+                        return_level=return_level)
+                    rows_left -= found
+                    offset += found
+                else:
+                    # If we got more than requested by user, trim the list of rows received from BQ
+                    objects = build_hierarchy(
+                        objects=objects,
+                        rows=rows[:unFound],
+                        reorder= reorder,
+                        return_level=return_level)
+                    break
+
+            # Then we add the details such as DOI, URL, etc. about each object
+            dois = request.GET['return_DOIs']
+            urls = request.GET['return_URLs']
+            collections = build_collections(objects, dois, urls)
+
+            cohort_info['cohort']["cohortObjects"] = {
+                "totalRows": totalFound,
                 "collections": collections
             }
-        }
 
+        if request.GET['return_filter']:
+            cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
 
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
