@@ -26,13 +26,14 @@ from django.contrib.auth.models import User
 from django.contrib import messages
 from django.conf import settings
 from django.db.models import Q
-from django.http import JsonResponse, HttpResponseNotFound, HttpResponse
+from django.http import JsonResponse, HttpResponseNotFound, HttpResponse, JsonResponse
 from django.conf import settings
 from django.db import connection
 from django.urls import reverse
 from collections import OrderedDict
 from data_upload.models import UserUpload, UserUploadedFile
-from idc_collections.models import User_Feature_Definitions, User_Feature_Counts, Program, Collection
+from idc_collections.models import User_Feature_Definitions, User_Feature_Counts, \
+    Program, Collection
 from solr_helpers import *
 from sharing.service import create_share
 from googleapiclient.errors import HttpError
@@ -69,24 +70,6 @@ def program_list(request, is_public=False, is_API=False):
     return render(request, template, context)
 
 
-def public_program_list_api(request):
-
-    public_programs = Program.objects.filter(is_public=True)
-
-    public_programs_json = serializers.serialize('json', public_programs)
-
-    programs = []
-    for element in json.loads(public_programs_json):
-        program = {
-            'name': element['fields']['name'],
-            'short_name': element['fields']['short_name'],
-            'description': element['fields']['description'],
-            'active': element['fields']['active']
-        }
-        programs.append(program)
-    return HttpResponse(programs, content_type='application/json')
-
-
 @login_required
 def program_detail(request, program_id=0, is_API=False):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
@@ -112,26 +95,6 @@ def program_detail(request, program_id=0, is_API=False):
         'shared': shared
     }
     return render(request, template, context)
-
-
-def program_detail_api(request, program_name=None ):
-    # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
-    programs = Program.objects.filter(is_public=True, active=True).distinct()
-    program = programs.get(short_name=program_name)
-
-    public_collections = program.collection_set.all()
-
-    collections_json = serializers.serialize('json',public_collections)
-    colls =  []
-    for element in json.loads(collections_json):
-        coll = {
-            'name': element['fields']['name'],
-            'short_name': element['fields']['short_name'],
-            'description': element['fields']['description'],
-            'active': element['fields']['active']
-        }
-        colls.append(coll)
-    return HttpResponse(colls, content_type='application/json')
 
 
 def program_upload_existing(request):

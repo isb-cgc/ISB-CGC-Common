@@ -87,6 +87,9 @@ class DataVersion(models.Model):
     name = models.CharField(max_length=128, null=False, blank=False)
     active = models.BooleanField(default=True)
 
+    def get_active_version(self):
+        return DataVersion.objects.get(active=True, name=name).version
+
 
 class Collection(models.Model):
     id = models.AutoField(primary_key=True)

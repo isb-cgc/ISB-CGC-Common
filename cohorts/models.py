@@ -185,7 +185,7 @@ class Cohort(models.Model):
         for group in groups:
             filter_dict[group.id] = {}
             filter_group = filter_dict[group.id]
-            filters = group.filter_set.all()
+            filters = group.filters_set.all()
             for filter in filters:
                 filter_group[filter.attribute.name] = filter.value.split(",")
                 if filter.attribute.data_type == filter.attribute.CONTINUOUS_NUMERIC:

@@ -29,7 +29,7 @@ import logging
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from .models import Cohort, Cohort_Perms, Filters, Filter_Group
-from idc_collections.models import Program
+from idc_collections.models import Program, Attribute, DataVersion
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
 

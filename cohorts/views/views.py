@@ -15,6 +15,8 @@
 #
 from __future__ import absolute_import
 
+import sys
+
 from builtins import map
 from builtins import next
 from builtins import str
@@ -46,11 +48,11 @@ from django.http import HttpResponse, JsonResponse
 from django.http import StreamingHttpResponse
 from django.shortcuts import render, redirect
 from django.utils import formats
-from django.views.decorators.csrf import csrf_protect
+from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.utils.html import escape
 
-from .models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
-from .utils import _save_cohort, _delete_cohort, get_cohort_uuids
+from cohorts.models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
+from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids
 from idc_collections.models import Program, Collection
 
 BQ_ATTEMPT_MAX = 10
@@ -133,6 +135,9 @@ def get_cases_by_cohort(cohort_id):
     finally:
         if cursor: cursor.close()
         if db and db.open: db.close()
+
+
+
 
 @login_required
 def public_cohort_list(request):
