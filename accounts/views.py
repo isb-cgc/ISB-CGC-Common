@@ -26,7 +26,7 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import JsonResponse
 from django.shortcuts import render, redirect
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery.service import get_bigquery_service
@@ -58,8 +58,8 @@ MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
 @login_required
 def extended_logout_view(request):
-
     response = None
+
     try:
         response = account_views.logout(request)
     except Exception as e:
@@ -67,6 +67,7 @@ def extended_logout_view(request):
         logger.exception(e)
         messages.error(request,"There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
+
     return response
 
 # GCP RELATED VIEWS
@@ -118,7 +119,7 @@ def user_gcp_list(request, user_id):
 
         else:
             messages.error(request,"You are not allowed to view that user's Google Cloud Project list.")
-            logger.warn("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
+            logger.warning("[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(str(request.user.id),str(user_id)))
             template = '403.html'
 
     except TokenFailure:

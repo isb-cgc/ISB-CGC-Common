@@ -47,7 +47,6 @@ MOLECULAR_CATEGORIES = {
 
 # TODO: Convert to slider
 def normalize_bmi(bmis):
-    print("Incoming BMI counts: {}".format(bmis))
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     bmi_list = {'underweight': 0, 'normal weight': 0, 'overweight': 0, 'obese': 0, 'None': 0}
     for bmi, count in list(bmis.items()):

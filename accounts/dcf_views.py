@@ -28,14 +28,15 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
 from django.contrib.auth.models import User
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.http import HttpResponseRedirect
 
 from google_helpers.stackdriver import StackDriverLogger
 
 from .sa_utils import found_linking_problems, DemoLoginResults, \
                      handle_user_db_update_for_dcf_linking, \
-                     unlink_account_in_db_for_dcf, refresh_user_projects, have_linked_user
+                    refresh_user_projects, have_linked_user
+
 
 from .dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
@@ -43,7 +44,7 @@ from .dcf_support import get_stored_dcf_token, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
                         user_data_token_dict_massaged, drop_dcf_token, \
                         user_data_token_dict_to_user_dict, get_secrets, refresh_token_storage, \
-                        unlink_at_dcf, refresh_at_dcf, decode_token_chunk, calc_expiration_time
+                        unlink_at_dcf, refresh_at_dcf, decode_token_chunk, calc_expiration_time, unlink_internally
 
 from requests_oauthlib.oauth2_session import OAuth2Session
 from json import loads as json_loads
@@ -778,54 +779,6 @@ def _finish_the_link(user_id, user_email, expiration_time, st_logger, refresh_fi
     return warning
 
 
-def _unlink_internally(user_id):
-    """
-    If we need to unlink a user who was previously ACTUALLY linked, there are internal fixes to be made.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises Exception:
-    """
-
-    still_to_throw = None
-    dcf_token = None
-
-    #
-    # The Token table records the User's Google ID. This needs to be nulled. The expiration time in the DCFToken
-    # is for the access token, not the google link (that info is stored in the NIH_user):
-    #
-
-    try:
-        dcf_token = get_stored_dcf_token(user_id)
-    except (TokenFailure, InternalTokenError) as e:
-        # We either have no token, or it is corrupted. But we still want to get the NIH table cleaned up:
-        still_to_throw = e
-    except RefreshTokenExpired as e:
-        # An expired token still needs to have field cleared:
-        dcf_token = e.token
-
-    if dcf_token:
-        dcf_token.google_id = None
-        dcf_token.save()
-
-    #
-    # Now drop the link flag and active flag from the DB, plus our db records of what datasets the user is
-    # good for:
-    #
-
-    try:
-        unlink_account_in_db_for_dcf(user_id)
-    except Exception as e:
-        still_to_throw = still_to_throw if still_to_throw else e
-        logger.error("[ERROR] While unlinking accounts:")
-        logger.exception(e)
-
-    if still_to_throw:
-        raise still_to_throw
-
-    return
-
-
 @login_required
 def dcf_disconnect_user(request):
     """
@@ -906,7 +859,7 @@ def dcf_disconnect_user(request):
     #
 
     try:
-        _unlink_internally(request.user.id)
+        unlink_internally(request.user.id)
     except TokenFailure:
         # Token problem? Don't care; it is about to be blown away
         pass
