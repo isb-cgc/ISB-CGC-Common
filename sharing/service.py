@@ -6,7 +6,7 @@ from django.core.validators import validate_email
 from django.template.loader import get_template
 from django.contrib.auth.models import User
 from django.conf import settings
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.core.exceptions import ObjectDoesNotExist
 
 from urllib.parse import urlencode

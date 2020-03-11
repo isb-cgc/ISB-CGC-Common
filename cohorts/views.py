@@ -39,7 +39,7 @@ from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.db.models import Count
 from django.http import HttpResponse, JsonResponse
 from django.http import StreamingHttpResponse
@@ -53,6 +53,7 @@ from accounts.models import GoogleProject
 from .metadata_helpers import *
 from .metadata_counting import *
 from .file_helpers import *
+from sharing.service import create_share
 from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
 from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
 from accounts.sa_utils import auth_dataset_whitelists_for_user
@@ -1177,6 +1178,10 @@ def share_cohort(request, cohort_id=0):
             if len(list(newly_shared.keys())):
                 user_set = set([y for x in newly_shared for y in newly_shared[x]])
                 success_msg = ('Cohort ID {} has'.format(str(list(newly_shared.keys())[0])) if len(list(newly_shared.keys())) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in list(newly_shared.keys())]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
+
+                for share_cohort_id, share_emails in newly_shared.items():
+                    cohort_to_share = Cohort.objects.get(id=share_cohort_id)
+                    create_share(request, cohort_to_share, share_emails, 'Cohort')
 
             if len(already_shared):
                 user_set = set([y for x in already_shared for y in already_shared[x]])

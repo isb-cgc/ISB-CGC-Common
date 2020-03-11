@@ -33,7 +33,7 @@ def get_user_bucket(instance, filename):
 
 class UserUpload(models.Model):
     id = models.AutoField(primary_key=True)
-    owner = models.ForeignKey(User, null=False, blank=False)
+    owner = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
     status = models.CharField(max_length=50,default="Pending")
     jobURL = models.CharField(max_length=250,null=True)
     key = models.CharField(max_length=64,default=generate_upload_key)
@@ -42,7 +42,7 @@ class UserUpload(models.Model):
 
 class UserUploadedFile(models.Model):
     id = models.AutoField(primary_key=True)
-    upload = models.ForeignKey(UserUpload)
+    upload = models.ForeignKey(UserUpload, on_delete=models.CASCADE)
     bucket = models.CharField(max_length=155, null=True)
     file = models.FileField(storage=storage_system, upload_to=get_user_bucket, max_length=255)
 
@@ -59,7 +59,7 @@ class FieldDataType(models.Model):
 class ControlledFileField(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=120)
-    type = models.ForeignKey(FieldDataType)
+    type = models.ForeignKey(FieldDataType, on_delete=models.CASCADE)
 
 
 class FileDataType(models.Model):

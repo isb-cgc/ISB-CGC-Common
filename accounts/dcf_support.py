@@ -25,12 +25,14 @@ import datetime
 import pytz
 
 from django.conf import settings
+from django.contrib.auth.models import User
 
 from .models import DCFToken, NIH_User
 from requests_oauthlib.oauth2_session import OAuth2Session
 from oauthlib.oauth2 import MissingTokenError
 from base64 import urlsafe_b64decode
 from json import loads as json_loads, dumps as json_dumps
+
 
 logger = logging.getLogger('main_logger')
 
@@ -41,6 +43,7 @@ DCF_GOOGLE_SA_VERIFY_URL = settings.DCF_GOOGLE_SA_VERIFY_URL
 DCF_GOOGLE_SA_MONITOR_URL = settings.DCF_GOOGLE_SA_MONITOR_URL
 DCF_GOOGLE_SA_URL = settings.DCF_GOOGLE_SA_URL
 DCF_URL_URL = settings.DCF_URL_URL
+DCF_REVOKE_URL = settings.DCF_REVOKE_URL
 
 class DCFCommFailure(Exception):
     """Thrown if we have problems communicating with DCF """
@@ -1432,43 +1435,6 @@ def _read_dict(my_file_name):
             retval[split_line[0].strip()] = split_line[1].strip()
     return retval
 
-def _access_token_storage(token_dict, cgc_uid):
-    """
-    This call just replaces the access key and user token part of the DCF record. Used when we use the
-    refresh token to get a new access key.
-
-    :raises TokenFailure:
-    :raises InternalTokenError:
-    :raises RefreshTokenExpired:
-    """
-
-    # This refers to the *access key* expiration (~20 minutes)
-    if 'expires_at' in token_dict:
-        expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(token_dict['expires_at']))
-    else:
-        expiration_time = pytz.utc.localize(
-            datetime.datetime.utcnow() + datetime.timedelta(seconds=token_dict["expires_in"]))
-        logger.info("[INFO] Have to build an expiration time for token: {}".format(expiration_time))
-
-    logger.info('[INFO] Access token storage. New token expires at {}'.format(str(expiration_time)))
-
-    #
-    # Right now (5/30/18) we only get full user info back during the token refresh call. So decode
-    # it and stash it as well:
-    #
-    id_token_decoded, _ = _decode_token(token_dict['id_token'])
-
-    try:
-        dcf_token = get_stored_dcf_token(cgc_uid)
-    except (TokenFailure, InternalTokenError, RefreshTokenExpired) as e:
-        logger.error("[INFO] _access_token_storage aborted: {}".format(str(e)))
-        raise e
-
-    dcf_token.access_token = token_dict['access_token']
-    dcf_token.user_token = id_token_decoded
-    dcf_token.expires_at = expiration_time
-    dcf_token.save()
-
 
 def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from_dcf, dcf_uid, cgc_uid, google_id):
     """
@@ -1543,6 +1509,131 @@ def refresh_token_storage(token_dict, decoded_jwt, user_token, nih_username_from
                                       })
 
 
+def dcf_disconnect_users():
+    dcf_tokens = DCFToken.objects.all()
+    for token in dcf_tokens:
+        user_id = token.user.id
+        try:
+            unlink_at_dcf(user_id, False)  # Don't refresh, we are about to drop the record...
+        except TokenFailure:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
+                    user_id=user_id, error_code="0071"))
+        except InternalTokenError:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
+                    user_id=user_id, error_code="0072"))
+        except RefreshTokenExpired:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}). Internal error:{error_code}".format(
+                    user_id=user_id, error_code="0073"))
+        except DCFCommFailure:
+            logger.error(
+                "[ERROR] There was an error while trying to unlink user (user_id={user_id}) - Communications problem contacting Data Commons Framework.".format(
+                user_id=user_id))
+
+        client_id, client_secret = get_secrets()
+        data = {
+            'token': token.refresh_token
+        }
+        auth = requests.auth.HTTPBasicAuth(client_id, client_secret)
+        resp = requests.request('POST', DCF_REVOKE_URL, data=data, auth=auth)
+        if resp.status_code != 200 and resp.status_code != 204:
+            logger.error('[ERROR] Token revocation problem: {} : {}'.format(resp.status_code, resp.text))
+
+        try:
+            unlink_internally(user_id)
+        except TokenFailure:
+            # Token problem? Don't care; it is about to be blown away
+            pass
+        except (InternalTokenError, Exception) as e:
+            logger.warning("Internal problem encountered while unlinking DCF token internally.")
+
+        try:
+            drop_dcf_token(user_id)
+        except InternalTokenError:
+            logger.warning("Internal problem encountered while deleting DCF token from Data Commons.")
+
+
+
+
+def unlink_internally(user_id):
+    """
+    If we need to unlink a user who was previously ACTUALLY linked, there are internal fixes to be made.
+
+    :raises TokenFailure:
+    :raises InternalTokenError:
+    :raises Exception:
+    """
+
+    still_to_throw = None
+    dcf_token = None
+
+    #
+    # The Token table records the User's Google ID. This needs to be nulled. The expiration time in the DCFToken
+    # is for the access token, not the google link (that info is stored in the NIH_user):
+    #
+
+    try:
+        dcf_token = get_stored_dcf_token(user_id)
+    except (TokenFailure, InternalTokenError) as e:
+        # We either have no token, or it is corrupted. But we still want to get the NIH table cleaned up:
+        still_to_throw = e
+    except RefreshTokenExpired as e:
+        # An expired token still needs to have field cleared:
+        dcf_token = e.token
+
+    if dcf_token:
+        dcf_token.google_id = None
+        dcf_token.save()
+
+    #
+    # Now drop the link flag and active flag from the DB, plus our db records of what datasets the user is
+    # good for:
+    #
+
+    try:
+        unlink_account_in_db_for_dcf(user_id)
+    except Exception as e:
+        still_to_throw = still_to_throw if still_to_throw else e
+        logger.error("[ERROR] While unlinking accounts:")
+        logger.exception(e)
+
+    if still_to_throw:
+        raise still_to_throw
+
+    return
+
+
+def unlink_account_in_db_for_dcf(user_id):
+    """
+    This function modifies the 'NIH_User' objects!
+
+    We find the NIH user(s) linked to the user_id, and set the Linked and Active states to False. We then remove their
+    authorized dataset records. This should only have to deal with one user, but we are set up to handle multiple users
+    to be safe.
+
+    """
+
+    user_email = User.objects.get(id=user_id).email
+    nih_user_query_set = NIH_User.objects.filter(user_id=user_id, linked=True)
+    num_linked = len(nih_user_query_set)
+
+    # If nobody is linked, we are actually done. There is nothing to do.
+    if num_linked == 0:
+        return
+    elif num_linked > 1:
+        logger.warning("[WARNING] Found multiple linked accounts for user {}! Unlinking all accounts.".format(user_email))
+
+    for nih_account_to_unlink in nih_user_query_set:
+        nih_account_to_unlink.linked = False
+        nih_account_to_unlink.active = False
+        nih_account_to_unlink.save()
+        nih_account_to_unlink.delete_all_auth_datasets() # Drop the user's approved data sets!
+        logger.info("[STATUS] Unlinked NIH User {} from user {}.".format(nih_account_to_unlink.NIH_username, user_email))
+
+    return
+
 def unlink_at_dcf(user_id, do_refresh):
     """
     There are only three places where we call DCF to do a Google unlink: 1) If they login via NIH and we get
@@ -1565,6 +1656,8 @@ def unlink_at_dcf(user_id, do_refresh):
 
     success = False
     throw_later = None
+    resp = None
+
 
     #
     # Call DCF to drop the linkage. Note that this will immediately remove them from controlled access.

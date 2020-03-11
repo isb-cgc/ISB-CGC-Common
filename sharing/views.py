@@ -1,7 +1,7 @@
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponseRedirect, JsonResponse
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from sharing.models import Shared_Resource
 from django.contrib import messages
 
@@ -16,7 +16,7 @@ def sharing_add(request, sharing_id=0):
     message = ""
 
     if shared:
-        if request.user.is_authenticated():
+        if request.user.is_authenticated:
             if shared.redeemed and shared.matched_user_id != request.user.id:
                 message = 'this invitation has already been redeemed by a different user'
             else :
@@ -43,13 +43,18 @@ def sharing_add(request, sharing_id=0):
             redirect_page = 'workbook_detail'
             redirect_id_key = 'workbook_id'
             resource = shared.workbook_set.all().first()
-        # TODO: Add check for cohort
+        elif shared.cohort_set.count() > 0:
+            type = 'cohorts'
+            title = 'Cohort'
+            redirect_page = 'cohort_details'
+            redirect_id_key = 'cohort_id'
+            resource = shared.cohort_set.all().first()
         if not resource:
             message = 'we were not able to find the resource'
 
     else:
         messages.error(request, "This shared resource has already been removed")
-        if request.user.is_authenticated():
+        if request.user.is_authenticated:
             redirect_page = 'dashboard'
         else:
             redirect_page = 'landing_page'
@@ -65,7 +70,7 @@ def sharing_add(request, sharing_id=0):
         }
         return render(request, template, context)
 
-    if request.user.is_authenticated():
+    if request.user.is_authenticated:
         return HttpResponseRedirect(reverse(redirect_page, kwargs={
             redirect_id_key: resource.id
         }))
