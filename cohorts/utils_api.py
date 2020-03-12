@@ -108,7 +108,7 @@ def build_series(collection, patient, study, patient_studies, dois, urls):
 def build_instances(collection, patient, study, series, study_series, dois, urls):
     instances = []
     for instance in study_series:
-         instances.append(
+        instances.append(
             {
                 "SOPInstanceUID": instance
             })
