@@ -24,6 +24,8 @@ from django.http import JsonResponse
 import logging
 logger = logging.getLogger('main_logger')
 
+# Adapted from the Django REST Framework's TokenAuthentization class
+# https://github.com/encode/django-rest-framework/blob/master/rest_framework/authentication.py
 def api_auth(function):
     def wrap(request, *args, **kwargs):
         try:
@@ -43,7 +45,7 @@ def api_auth(function):
 
             # Now actually validate with the token
             token = auth_header[1].decode()
-            token_user = Token.objects.select_related('user').get(key=token)
+            Token.objects.select_related('user').get(key=token)
 
             # If a user was found, we've received a valid API call, and can proceed.
             return function(request, *args, **kwargs)
@@ -52,5 +54,5 @@ def api_auth(function):
             return JsonResponse({'message': 'Invalid API auth token supplied.'}, status=403)
     wrap.__doc__ = function.__doc__
     wrap.__name__ = function.__name__
-    
+
     return wrap
