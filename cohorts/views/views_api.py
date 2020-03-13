@@ -94,28 +94,29 @@ def cohort_objects_api(request, cohort_id=0):
             select = levels[return_level]
             offset = int(request.GET['offset']) + (fetch_count * (page - 1))
             objects = {}
-            totalReturned = totalFound = 0
+            totalReturned = 0
             all_rows = []
+            sql = ""
 
-            if request.GET['return_sql'] in [True,'True']:
-                sql = get_bq_string(
-                    filters=filters, fields=select, data_versions=data_versions,
-                    limit=fetch_count, offset=offset)
-            else:
-                sql = ""
 
             # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
             while rows_left > 0:
+                # Accumulate the SQL for each call
+                if request.GET['return_sql'] in [True, 'True']:
+                    sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
+                        filters=filters, fields=select, data_versions=data_versions,
+                        limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+                        order_by=select[-1:]))
+
                 results = get_bq_metadata(
                     filters=filters, fields=select, data_versions=data_versions,
-                    limit=min(fetch_count,settings.MAX_BQ_RECORD_RESULT), offset=offset)
+                    limit=min(fetch_count,settings.MAX_BQ_RECORD_RESULT), offset=offset,
+                    order_by=select[-1:])
                 if results['totalFound'] == None:
                     # If there are not as many rows as asked for, we're done with BQ
                     break
 
-                # BQ reports the total rows found by the query. This may be more that the number returned,
-                # if limited by the limit param or other imposed limits
-                totalFound = max(totalFound,int(results['totalFound']))
+
                 # returned has the number of rows actually returned by the query
                 returned = len(results["results"])
 
@@ -164,12 +165,15 @@ def cohort_objects_api(request, cohort_id=0):
             urls = request.GET['return_URLs'] in ['True', True]
             collections = build_collections(objects, dois, urls)
 
+            # Add the schema to the front of the rows to be returned
+            # schema_rows = [fields]
+            # schema_rows.extend(all_rows)
+
             cohort_info['cohort']["cohortObjects"] = {
-                "totalRowsFound": totalFound,
-                "totalRowsReturned": totalReturned,
+                "totalRowsInCohort": totalReturned,
                 "collections": collections,
                 "sql": sql,
-                "rows": all_rows
+                # "rows": schema_rows if request.GET["return_rows"] in ['True', True] else []
             }
 
         if request.GET['return_filter'] == 'True':

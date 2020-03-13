@@ -35,7 +35,7 @@ def build_collections(objects, dois, urls):
         patients = build_patients(collection, objects[collection], dois, urls)
         collections.append(
             {
-                "collection_id":collection,
+                "id":collection,
             }
         )
         if len(patients) > 0:
@@ -48,7 +48,7 @@ def build_patients(collection,collection_patients, dois, urls):
     for patient in collection_patients:
         studies = build_studies(collection, patient, collection_patients[patient], dois, urls)
         patients.append({
-                "patientID":patient,
+                "id":patient,
             }
         )
         if len(studies) > 0:
@@ -62,7 +62,7 @@ def build_studies(collection, patient, patient_studies, dois, urls):
         series = build_series(collection, patient, study, patient_studies[study], dois, urls)
         studies.append(
             {
-                "StudyInstanceUID": study
+                "id": study
             })
         if dois:
             studies[-1]["GUID"] = ""
@@ -86,7 +86,7 @@ def build_series(collection, patient, study, patient_studies, dois, urls):
         instances = build_instances(collection, patient, study, aseries, patient_studies[aseries], dois, urls)
         series.append(
             {
-                "SeriesInstanceUID": aseries
+                "id": aseries
             })
         if dois:
             series[-1]["GUID"] = ""
@@ -110,7 +110,7 @@ def build_instances(collection, patient, study, series, study_series, dois, urls
     for instance in study_series:
         instances.append(
             {
-                "SOPInstanceUID": instance
+                "id": instance
             })
         if dois:
             instances[-1]["GUID"] = ""
