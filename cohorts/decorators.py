@@ -39,8 +39,7 @@ def api_auth(function):
 
             # Make sure our Auth Header is the expected size
             if len(auth_header) == 1 or len(auth_header) > 2:
-                return JsonResponse({'message': 'API access token not provided, or the wrong key was used.'},
-                                    status=403)
+                return JsonResponse({'message': 'API access token not provided, or the wrong key was used.'},status=403)
 
             # Now actually validate with the token
             token = auth_header[1].decode()
@@ -50,8 +49,8 @@ def api_auth(function):
             return function(request, *args, **kwargs)
 
         except (ObjectDoesNotExist, UnicodeError):
-            return JsonResponse({'message': 'Invalid API auth token supplied.'},
-                                status=403)
+            return JsonResponse({'message': 'Invalid API auth token supplied.'}, status=403)
     wrap.__doc__ = function.__doc__
     wrap.__name__ = function.__name__
+    
     return wrap
