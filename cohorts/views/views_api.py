@@ -27,6 +27,9 @@ from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.views.decorators.csrf import csrf_protect, csrf_exempt
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.permissions import IsAuthenticated
+from ..decorators import api_auth
 
 from cohorts.models import Cohort, Cohort_Perms
 from cohorts.utils_api import _save_cohort_api, _delete_cohort_api, get_filterSet_api, build_collections, build_hierarchy
@@ -45,6 +48,7 @@ USER_DATA_ON = settings.USER_DATA_ON
 
 # Refactor this function
 @csrf_exempt
+@api_auth
 def cohort_objects_api(request, cohort_id=0):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
@@ -214,37 +218,39 @@ def save_cohort_api(request):
 # Return a list of all cohorts owned by some user
 # ***Need to add shared cohorts***
 @csrf_exempt
+@api_auth
 def cohort_list_api(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
-
+    result = {}
+    status=200
     try:
         cohortList = []
-        body = json.loads(request.body.decode('utf-8'))
-        user = User.objects.get(username=body['user_name'])
-        # user = User.objects.get(username=body[request.GET['user_name']])
+        print(request.GET.get('email',''))
+        try:
+            user = User.objects.get(email=request.GET.get('email',''))
 
-        # cohorts = Cohort.objects.all()
-        # users_cohorts = [cohort for cohort in cohorts if cohort.get_owner().username == request.GET['user_name']]
-        cohorts = [cohort for cohort in Cohort.objects.filter(active=True) if
-                   len(Cohort_Perms.objects.filter(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)) >= 1]
-        for cohort in cohorts:
-            cohortMetadata = {
-                "id": cohort.id,
-                "name": cohort.name,
-                "description": cohort.description,
-                "file_count": 0,
-                "hashes": []
-            }
-            cohortList.append(cohortMetadata)
-        cohortList = {"cohorts": cohortList}
+            # cohorts = Cohort.objects.all()
+            # users_cohorts = [cohort for cohort in cohorts if cohort.get_owner().username == request.GET['user_name']]
+            cohorts = [cohort for cohort in Cohort.objects.filter(active=True) if
+                       len(Cohort_Perms.objects.filter(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)) >= 1]
+            for cohort in cohorts:
+                cohortMetadata = {
+                    "id": cohort.id,
+                    "name": cohort.name,
+                    "description": cohort.description,
+                    "file_count": 0,
+                    "hashes": []
+                }
+                cohortList.append(cohortMetadata)
+            result = {"cohorts": cohortList}
 
+        except ObjectDoesNotExist:
+            result = {'message': 'No user with the email {} was found on this system.'.format(request.GET.get('email',''))}
+            status=404
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
-        messages.error(request,
-            "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.")
-
-    return JsonResponse(cohortList)
+    return JsonResponse(result, status=status)
 
 
 @csrf_exempt
