@@ -207,6 +207,8 @@ def save_cohort_api(request):
             response = _save_cohort_api(user, cohort_name, data)
 
     except Exception as e:
+        logger.error("[ERROR] While trying to view the cohort file list: ")
+        logger.exception(e)
         response = {
             "message": "There was an error saving your cohort; it may not have been saved correctly.",
             "code": 400,
@@ -240,15 +242,17 @@ def cohort_list_api(request):
                 "hashes": []
             }
             cohortList.append(cohortMetadata)
-        cohortList = {"cohorts": cohortList}
+        response = {"cohorts": cohortList}
 
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
-        messages.error(request,
-            "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.")
+        response = {
+            "message": "There was an error while trying to obtain the cohort objects. Please contact the administrator for help.",
+            "code": 400
+        }
 
-    return JsonResponse(cohortList)
+    return JsonResponse(response)
 
 
 @csrf_exempt
@@ -261,23 +265,27 @@ def cohort_detail_api(request, cohort_id=0):
             cohort.perm = cohort.get_perm(request)
             cohort.owner = cohort.get_owner()
 
+        response = {
+            "id": cohort_id,
+            "name": cohort.name,
+            "description": cohort.description,
+            "filterSet": get_filterSet_api(cohort)
+        }
+
     except ObjectDoesNotExist:
-        messages.error(request, 'The cohort you were looking for does not exist.')
-        return redirect('cohort_list')
+        response = {
+            "messages": "The cohort does not exist",
+            "code": 400
+        }
     except Exception as e:
-        logger.error("[ERROR] Exception while trying to view a cohort:")
+        logger.error("[ERROR] While deleting cohort: ")
         logger.exception(e)
-        messages.error(request, "There was an error while trying to load that cohort's details page.")
-        return redirect('cohort_list')
+        response = {
+            "messages": "[ERROR] Exception while trying to retrieve cohort details",
+            "code": 400
+        }
 
-    data = {
-        "id": cohort_id,
-        "name": cohort.name,
-        "description": cohort.description,
-        "filterSet": get_filterSet_api(cohort)
-    }
-
-    return JsonResponse(data)
+    return JsonResponse(response)
 
 
 @csrf_exempt

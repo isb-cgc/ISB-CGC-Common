@@ -36,32 +36,41 @@ def public_program_list_api(request):
                 "active": program.active} for program in programs]}
 
     return JsonResponse(programs_info)
-#    return HttpResponse(programs_info,  content_type='application/json')
 
 
 def program_detail_api(request, program_name=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     collections_info = {}
 
-    programs = Program.objects.filter(is_public=True, active=True).distinct()
-    program = programs.get(short_name__iexact=program_name)
+    try:
 
-    collections = program.collection_set.all()
+        programs = Program.objects.filter(is_public=True, active=True).distinct()
+        program = programs.get(short_name__iexact=program_name)
 
-    collections_list = []
-    for collection in collections:
-        dvs = collection.data_versions.all()
-        data = {
-            "name": collection.name,
-            "short_name": collection.short_name,
-            "description": collection.description,
-            "active": collection.active,
-            "is_public": collection.is_public,
-            "owner_id": collection.owner_id,
-            "data_version": [{"name":dv.name.replace(' ','_'),"data_type":dv.data_type, "version":dv.version} for dv in dvs] }
-        collections_list.append(data)
+        collections = program.collection_set.all()
 
-    collections_info = {"collections": collections_list}
+        collections_list = []
+        for collection in collections:
+            dvs = collection.data_versions.all()
+            data = {
+                "name": collection.name,
+                "short_name": collection.short_name,
+                "description": collection.description,
+                "active": collection.active,
+                "is_public": collection.is_public,
+                "owner_id": collection.owner_id,
+                "data_version": [{"name":dv.name.replace(' ','_'),"data_type":dv.data_type, "version":dv.version} for dv in dvs] }
+            collections_list.append(data)
+
+        collections_info = {"collections": collections_list}
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to retrieve program details")
+        logger.exception(e)
+        cohort_info = {
+            "message": "Error while trying to retrieve program details.",
+            "code": 400
+        }
 
     return JsonResponse(collections_info)
 
@@ -77,7 +86,6 @@ def collection_detail_api(request, program_name, collection_name):
         collection_info = {
             "message": "Collection {} does not exist".format(collection_name),
             "code": "",
-            "not_found": []
         }
     else:
 
@@ -94,8 +102,7 @@ def collection_detail_api(request, program_name, collection_name):
             collection_info = {
                 "message": "Attribute group/version {}/{} does not exist".format(attribute_group, version),
                 "code": "",
-                "not_found": []
-            }
+             }
         else:
             try:
                 bq_tables = dataVersion.datasource_set.filter(source_type='B')
@@ -127,10 +134,8 @@ def collection_detail_api(request, program_name, collection_name):
                 collection_info = {
                     "message": "Program/collection {}/{} does not exist".format(program_name, collection_name),
                     "code": 400,
-                    "not_found": []
                 }
 
-    # return HttpResponse(collection_info, content_type='application/json')
     return JsonResponse(collection_info)
 
 
