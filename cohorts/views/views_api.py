@@ -27,6 +27,9 @@ from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.views.decorators.csrf import csrf_protect, csrf_exempt
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.permissions import IsAuthenticated
+from ..decorators import api_auth
 
 from cohorts.models import Cohort, Cohort_Perms
 from cohorts.utils_api import _save_cohort_api, _delete_cohort_api, get_filterSet_api, build_collections, build_hierarchy
@@ -45,6 +48,7 @@ USER_DATA_ON = settings.USER_DATA_ON
 
 # Refactor this function
 @csrf_exempt
+@api_auth
 def cohort_objects_api(request, cohort_id=0):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
@@ -194,8 +198,6 @@ def cohort_objects_api(request, cohort_id=0):
 def save_cohort_api(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    result = {}
-
     try:
         if request.method == "POST":
             body = json.loads(request.body.decode('utf-8'))
@@ -220,17 +222,14 @@ def save_cohort_api(request):
 # Return a list of all cohorts owned by some user
 # ***Need to add shared cohorts***
 @csrf_exempt
+@api_auth
 def cohort_list_api(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
+    print(request.GET.get('email', ''))
     try:
+        user = User.objects.get(email=request.GET.get('email', ''))
         cohortList = []
-        body = json.loads(request.body.decode('utf-8'))
-        user = User.objects.get(username=body['user_name'])
-        # user = User.objects.get(username=body[request.GET['user_name']])
-
-        # cohorts = Cohort.objects.all()
-        # users_cohorts = [cohort for cohort in cohorts if cohort.get_owner().username == request.GET['user_name']]
         cohorts = [cohort for cohort in Cohort.objects.filter(active=True) if
                    len(Cohort_Perms.objects.filter(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)) >= 1]
         for cohort in cohorts:
@@ -253,6 +252,7 @@ def cohort_list_api(request):
         }
 
     return JsonResponse(response)
+
 
 
 @csrf_exempt
@@ -278,7 +278,7 @@ def cohort_detail_api(request, cohort_id=0):
             "code": 400
         }
     except Exception as e:
-        logger.error("[ERROR] While deleting cohort: ")
+        logger.error("[ERROR] While retrieving cohort detail: ")
         logger.exception(e)
         response = {
             "messages": "[ERROR] Exception while trying to retrieve cohort details",
