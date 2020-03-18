@@ -753,8 +753,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list},
-            'is_logged_in': request.user.is_authenticated
+            'program_prefixes': {x.name: True for x in program_list}
         }
 
         if workbook_id and worksheet_id :
