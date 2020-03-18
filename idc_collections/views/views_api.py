@@ -16,6 +16,7 @@
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
 from idc_collections.models import Program, Collection
 from solr_helpers import *
 
@@ -25,6 +26,7 @@ logger = logging.getLogger('main_logger')
 
 BLACKLIST_RE = settings.BLACKLIST_RE
 
+@require_http_methods(["GET"])
 def public_program_list_api(request):
 
     programs = Program.objects.filter(is_public=True)
@@ -38,6 +40,7 @@ def public_program_list_api(request):
     return JsonResponse(programs_info)
 
 
+@require_http_methods(["GET"])
 def program_detail_api(request, program_name=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     collections_info = {}
@@ -75,6 +78,7 @@ def program_detail_api(request, program_name=None ):
     return JsonResponse(collections_info)
 
 
+@require_http_methods(["GET"])
 def collection_detail_api(request, program_name, collection_name):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
 
