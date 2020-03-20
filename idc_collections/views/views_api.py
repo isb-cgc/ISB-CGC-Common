@@ -43,12 +43,10 @@ def public_program_list_api(request):
 @require_http_methods(["GET"])
 def program_detail_api(request, program_name=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
-    collections_info = {}
 
     try:
 
-        programs = Program.objects.filter(is_public=True, active=True).distinct()
-        program = programs.get(short_name__iexact=program_name)
+        program = Program.objects.get(is_public=True, active=True, short_name__iexact=program_name)
 
         collections = program.collection_set.all()
 
@@ -62,15 +60,22 @@ def program_detail_api(request, program_name=None ):
                 "active": collection.active,
                 "is_public": collection.is_public,
                 "owner_id": collection.owner_id,
-                "data_version": [{"name":dv.name.replace(' ','_'),"data_type":dv.data_type, "version":dv.version} for dv in dvs] }
+                "data_version": [{"name":dv.name,"data_type":dv.data_type, "version":dv.version} for dv in dvs] }
             collections_list.append(data)
 
         collections_info = {"collections": collections_list}
 
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Specified program does not exist")
+        logger.exception(e)
+        collections_info = {
+            "message": "Specified program does not exist",
+            "code": 400
+        }
     except Exception as e:
         logger.error("[ERROR] While trying to retrieve program details")
         logger.exception(e)
-        cohort_info = {
+        collections_info = {
             "message": "Error while trying to retrieve program details.",
             "code": 400
         }
@@ -93,18 +98,18 @@ def collection_detail_api(request, program_name, collection_name):
         }
     else:
 
-        attribute_group = request.GET['attribute_group']
+        attribute_type = request.GET['attribute_type']
         version = ""
         try:
             if 'version' in request.GET:
                 version = request.GET["version"]
-                dataVersion = collection.data_versions.get(name=attribute_group, version=request.GET["version"])
+                dataVersion = collection.data_versions.get(data_type=attribute_type, version=request.GET["version"])
             else:
-                dataVersion = collection.data_versions.get(name=attribute_group, active=True)
+                dataVersion = collection.data_versions.get(data_type=attribute_type, active=True)
                 version = dataVersion.version
         except ObjectDoesNotExist as e:
             collection_info = {
-                "message": "Attribute group/version {}/{} does not exist".format(attribute_group, version),
+                "message": "Attribute type/version {}/{} does not exist".format(attribute_type, version),
                 "code": "",
              }
         else:
@@ -128,7 +133,7 @@ def collection_detail_api(request, program_name, collection_name):
 
                 collection_info = {"collection":{
                     "collection_name": collection_name,
-                    "attribute_group": attribute_group,
+                    "attribute_type": attribute_type,
                     "version": version,
                     "active": dataVersion.active,
                     "fields": fields
