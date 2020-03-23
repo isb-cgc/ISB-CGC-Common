@@ -81,7 +81,7 @@ def cohort_detail_api(request, cohort_id=0):
         logger.exception(e)
         cohort_info = {
             "message": "{} isn't the owner of cohort ID {} and so cannot delete it.".format(request.GET.get('email', ''), cohort_id),
-            "code": 400
+            "code": 403
         }
         return JsonResponse(cohort_info)
 
