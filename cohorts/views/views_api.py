@@ -182,28 +182,20 @@ def cohort_list_api(request):
     try:
         user = User.objects.get(email=request.GET.get('email', ''))
         cohortList = []
+
         cohorts = [cohort for cohort in Cohort.objects.filter(active=True) if
-                   len(Cohort_Perms.objects.filter(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)) >= 1]
+                   len(Cohort_Perms.objects.filter(user=user, cohort=cohort)) >= 1]
         for cohort in cohorts:
             cohortMetadata = {
                 "id": cohort.id,
                 "name": cohort.name,
                 "description": cohort.description,
-                "permission": Cohort_Perms.OWNER,
+                "owner": "{} {}".format(cohort.cohort_perms_set.get().user.first_name,cohort.cohort_perms_set.get().user.last_name),
+                "permission": cohort.cohort_perms_set.get().perm,
                 "hashes": []
             }
             cohortList.append(cohortMetadata)
-        cohorts = [cohort for cohort in Cohort.objects.filter(active=True) if
-                   len(Cohort_Perms.objects.filter(user=user, cohort=cohort, perm=Cohort_Perms.READER)) >= 1]
-        for cohort in cohorts:
-            cohortMetadata = {
-                "id": cohort.id,
-                "name": cohort.name,
-                "description": cohort.description,
-                "permission": Cohort_Perms.READER,
-                "hashes": []
-            }
-            cohortList.append(cohortMetadata)
+
         response = {"cohorts": cohortList}
 
     except Exception as e:
