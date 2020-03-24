@@ -62,7 +62,7 @@ def _delete_cohort(user, cohort_id):
             cohort.save()
             cohort_info = {
                 'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
-                'data': {'filters': cohort.get_current_filters(unformatted=True)},
+                'data': {'filters': cohort.get_filters_as_dict()},
             }
         except ObjectDoesNotExist:
             cohort_info = {
@@ -71,47 +71,75 @@ def _delete_cohort(user, cohort_id):
     return cohort_info
 
 
-def _save_cohort(user, filters=None, name=None, cohort_id=None, case_insens=True):
+def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_insens=True):
+    cohort_info = {}
 
-    if not filters and not name:
-        # Can't save/edit a cohort when nothing is being changed!
-        return { 'message': "Can't save a cohort with no information to save! (Name and filters not provided.)" }
+    try:
+        if not filters and not name:
+            # Can't save/edit a cohort when nothing is being changed!
+            return { 'message': "Can't save a cohort with no information to save! (Name and filters not provided.)" }
+    
+        if name or desc:
+            blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
+            check = {'name': {'val': name, 'match': blacklist.search(str(name))},
+                     'description': {'val': desc, 'match': blacklist.search(str(desc))}}
+            if len([check[x]['match'] for x in check if check[x]['match'] is not None]):
+                mal = " and ".join([x for x in check if check[x]['match'] is not None])
+                s = "" if len([check[x]['match'] for x in check if check[x]['match'] is not None]) > 1 else "s"
+                vals = ", ".join([y for x in check if check[x]['match'] is not None for y in blacklist.findall(str(check[x]['val']))])
+                logger.error('[ERROR] While saving a cohort, saw a malformed {}: characters: {}'.format(mal,s,vals))
+                return {'message': "Your cohort's {} contain{} invalid characters; please choose another name.".format(mal,s)}
 
-    blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
-    match = blacklist.search(str(name))
-    if match:
-        # XSS risk, log and fail this cohort save
-        match = blacklist.findall(str(name))
-        logger.error('[ERROR] While saving a cohort, saw a malformed name: ' + name + ', characters: ' + str(match))
-        return {'message': "Your cohort's name contains invalid characters; please choose another name."}
-
-    # If we're only changing the name, just edit the cohort and update it
-    if cohort_id:
-        cohort = Cohort.objects.get(id=cohort_id)
-        cohort.name = name
+        # If we're only changing the name/desc, just edit the cohort and update it
+        if cohort_id and not filters:
+            cohort = Cohort.objects.get(id=cohort_id)
+            if name:
+                cohort.name = name
+            if desc:
+                cohort.description = desc
+            cohort.save()
+            return {'cohort_id': cohort.id}
+    
+        # Make and save cohort
+        cohort = Cohort.objects.create(name=name)
         cohort.save()
-        return {'cohort_id': cohort.id}
+    
+        # Set permission for user to be owner
+        perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
+        perm.save()
+    
+        # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
+        # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
+        grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
+    
+        # Get versions of datasets to be filtered, and link to filter group
+        imaging_version = 'imaging_version' in filterset and \
+                          len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
+                          DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
+                          DataVersion.objects.get(active=True, name='TCIA Image Data')
+        grouping.data_versions.add(imaging_version)
+    
+        bioclin_version = 'bioclin_version' in filterset and \
+                          len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
+                          DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
+                          DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
+        grouping.data_versions.add(bioclin_version)
+    
+        for attr in attributes:
+            filter_values = attributes[attr]
+            attr_id = Attribute.objects.get(name=attr)
+            Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
 
-    # Make and save cohort
-    cohort = Cohort.objects.create(name=name)
-    cohort.save()
-
-    # Set permission for user to be owner
-    perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
-    perm.save()
-
-    # TODO: We need to receive filter IDs from the WebApp, not just 'names' (i.e. not 'vital_status' but '5') because
-    # names are NOT guaranteed to be unique. Filters will also not be 'program' bucketed anymore, as there's a table
-    # which actually ties them to collections (and hence programs)
-
-    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
-    # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
-    grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
-    for attr_id in filters:
-        filter_obj = filters[attr_id]
-        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_obj['values']), filter_group=grouping).save()
-
-    return {'cohort_id': cohort.id}
+        cohort_info = {
+            'cohort_id': cohort.id,
+            "name": cohort.name,
+            "description": cohort.description
+        }
+    except Exception as e:
+        logger.error("[ERROR] While saving a cohort: ")
+        logger.exception(e)
+    
+    return cohort_info
 
 
 
