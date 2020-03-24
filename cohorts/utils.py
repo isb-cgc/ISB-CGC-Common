@@ -62,7 +62,7 @@ def _delete_cohort(user, cohort_id):
             cohort.save()
             cohort_info = {
                 'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
-                'data': {'filters': cohort.get_current_filters(unformatted=True)},
+                'data': {'filters': cohort.get_filters_as_dict()},
             }
         except ObjectDoesNotExist:
             cohort_info = {
