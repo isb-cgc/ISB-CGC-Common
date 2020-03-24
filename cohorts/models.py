@@ -57,12 +57,6 @@ class Cohort(models.Model):
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
 
-    # Returns the collections found in this Cohort
-    # Return value is a QuerySet
-    def get_collections(self):
-        collex_filters = self.filters_set.values_list('collection_id', flat=True).distinct()
-        return Collection.objects.filter(active=True, id__in=collex_filters).distinct()
-
     # Returns the names only of the collections found in this Cohort
     # Return value is an array of strings
     def get_collection_names(self):
@@ -92,7 +86,8 @@ class Cohort(models.Model):
         idc_su = User.objects.get(username='isb', is_superuser=True)
         return (self.cohort_perms_set.get(perm=Cohort_Perms.OWNER).user_id == idc_su.id)
 
-
+    # Returns the data versions identified in the filter groups for this cohort
+    # Returns a DataVersion QuerySet
     def get_data_versions(self):
 
         versions = []
@@ -107,8 +102,9 @@ class Cohort(models.Model):
 
         return DataVersion.objects.filter(id__in=versions)
 
-
-    def get_filters_by_data_source(self, source_type=None, data_sources_only=False):
+    # Returns the list of data sources used by this cohort, as a function of the filters which define it
+    # Return values can be
+    def get_data_sources(self, source_type=None):
         result = {}
 
         cohort_filters = Filters.objects.filter(resulting_cohort=self)
@@ -119,24 +115,53 @@ class Cohort(models.Model):
         for attr in attributes:
             for source in DataSource.SOURCE_TYPES:
                 if not source_type or source_type == source[0]:
-                    data_source = attr.data_sources.all().filter(data_version__in=data_versions, source_type=source[0]).distinct()
-                    for data in data_source:
+                    data_sources = attr.data_sources.all().filter(data_version__in=data_versions, source_type=source[0]).distinct()
+                    for data_source in data_sources:
                         if source[0] not in result:
-                            result[source[0]] = {data.id: data}
+                            result[source[0]] = {data_source.id: data_source}
                         else:
-                            if data.id not in result[source[0]]:
-                                result[source[0]][data.id] = data
+                            if data_source.id not in result[source[0]]:
+                                result[source[0]][data_source.id] = data_source
+        return reesult
 
+    # Returns the set of filters defining this cohort as a dict organized by data source
+    def get_filters_by_data_source(self, source_type=None):
 
-        if not data_sources_only:
-            for source in DataSource.SOURCE_TYPES:
-                if not source_type or source_type == source[0]:
-                    for data_source in result[source[0]]:
-                        source_attrs = result[source[0]][data_source].attribute_set.filter(id__in=attributes)
-                        result[source[0]][data_source] = {
-                            'source': result[source[0]][data_source],
-                            'filters': cohort_filters.filter(attribute__id__in=source_attrs)
-                        }
+        cohort_filters = Filters.objects.filter(resulting_cohort=self)
+        result = self.get_data_sources(source_type)
+
+        for source in DataSource.SOURCE_TYPES:
+            if not source_type or source_type == source[0]:
+                for data_source in result[source[0]]:
+                    source_attrs = result[source[0]][data_source].attribute_set.filter(id__in=attributes)
+                    result[source[0]][data_source] = {
+                        'source': result[source[0]][data_source],
+                        'filters': cohort_filters.filter(attribute__id__in=source_attrs)
+                    }
+
+        return result
+
+    # Returns a dict of the filters defining this cohort organized by filter group
+    def get_filters_as_dict(self):
+        result = []
+
+        filter_groups = self.filter_group_set.all()
+
+        for fg in filter_groups:
+            dvs = group.data_versions_set.all()
+            group = {
+                'id': fg.id,
+                'data_versions': [x.name for x in dvs],
+                'filters': []
+            }
+            filters = fg.filters_set.all()
+            attributes = Attribute.objects.filter(id__in=filters.values_list('attribute', flat=True))
+            for attr in attributes:
+                group['filters'].append({
+                    'id': attr.id,
+                    'name': attr.name,
+                    'values': filters.filter(attribute=attr).value.split(",")
+                })
 
         return result
 
@@ -152,10 +177,7 @@ class Cohort(models.Model):
                 group_filter_dict[group], field_prefix=prefix
             ))
 
-        # TODO: For now there will only be a single group, but in the future if there are multiple groups
-        # we will need to consider how to return this
-
-        return filter_sets[0]
+        return filter_sets
 
     # Produce a BigQuery filter clause and parameters; this is for *programmatic* use of BQ, NOT copy-paste into
     # the console
@@ -171,48 +193,25 @@ class Cohort(models.Model):
                 type_schema=schema
                   ))
 
-        # TODO: For now there will only be a single group, but in the future if there are multiple groups
-        # we will need to consider how to return this
+        return filter_sets
 
-        return filter_sets[0]
+    # Returns the set of filters used to create this cohort as a JSON-compatible dict, for use in UI display
+    def get_filters_for_ui(self, with_display_vals=False):
+        cohort_filters = self.get_filters_as_dict()
 
-    # Get a simple dict of the attributes and values of this cohort; note this is NOT intended for UI display
-    def get_filters_as_dict(self):
-        filter_dict = {}
+        if with_display_vals:
+            attribute_display_vals = {}
+            for fg in cohort_filters:
+                for filter in fg['filters']:
+                    attr = Attributes.objects.get(filter['id'])
+                    if attr.id not in attribute_display_vals:
+                        attribute_display_vals[attr.id] = attr.get_display_values()
+                    values = filter['values']
+                    filter['values'] = []
+                    for val in values:
+                        filter['values'].append({'value': val, 'display_val': attribute_display_vals[attr.id][val]})
 
-        groups = self.filter_group_set.all()
-
-        for group in groups:
-            filter_dict[group.id] = {}
-            filter_group = filter_dict[group.id]
-            filters = group.filters_set.all()
-            for filter in filters:
-                filter_group[filter.attribute.name] = filter.value.split(",")
-                if filter.attribute.data_type == filter.attribute.CONTINUOUS_NUMERIC:
-                    filter_group[filter.attribute.name] = [int(x) if "." not in x else float(x) for x in filter_dict[filter.attribute.name]]
-
-        return filter_dict
-
-    # Returns the list of filters used to create this cohort as a JSON-compatible dict, for use in UI display
-    def get_filters_as_json(self, with_display_vals=False):
-        filter_list = Filters.objects.filter(resulting_cohort=self)
-        dict_filters = {}
-
-        attribute_display_vals = {}
-
-        for filter in filter_list:
-            if with_display_vals and filter.attribute.id not in attribute_display_vals:
-                attribute_display_vals[filter.attribute.id] = filter.attribute.get_display_values()
-            if filter.collection.short_name not in dict_filters:
-                dict_filters[filter.collection.name] = {}
-            collex_filters = dict_filters[filter.collection.name]
-            if filter.attribute.name not in collex_filters:
-                collex_filters[filter.attribute.name] = {}
-            values = collex_filters[filter.attribute.name]
-            if filter.value not in values:
-                values[filter.value] = attribute_display_vals[filter.filter.attribute.id][filter.value] if with_display_vals else filter.value
-
-        return dict_filters
+        return cohort_filters
 
 
 # A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning or set operations
