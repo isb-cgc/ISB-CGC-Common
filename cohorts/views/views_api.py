@@ -36,6 +36,7 @@ from ..decorators import api_auth
 from cohorts.models import Cohort, Cohort_Perms
 from cohorts.utils_api import _save_cohort_api, _delete_cohort_api, get_filterSet_api, _cohort_detail_api, _cohort_preview_api
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
+from ..views.views import _save_cohort,_delete_cohort
 
 BQ_ATTEMPT_MAX = 10
 
@@ -88,7 +89,7 @@ def cohort_detail_api(request, cohort_id=0):
     try:
         cohort_info = {
             "cohort": {
-                "id":   int(cohort_id),
+                "cohort_id": int(cohort_id),
                 "name": cohort.name,
                 "description": cohort.description,
             }
@@ -122,8 +123,12 @@ def save_cohort_api(request):
         body = json.loads(request.body.decode('utf-8'))
         user = User.objects.get(email=request.GET.get('email', ''))
         data = body["request_data"]
-        cohort_name = data['name']
-        response = _save_cohort_api(user, cohort_name, data)
+        name = data['name']
+        description = data['description']
+        filterset = data['filterSet']
+        response = _save_cohort(user, filterset, name, description)
+        cohort = Cohort.objects.get(id=response["cohort_id"])
+        response["filterSet"] = get_filterSet_api(cohort)
 
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -135,6 +140,27 @@ def save_cohort_api(request):
         }
 
     return JsonResponse(response)
+# def save_cohort_api(request):
+#     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+#
+#     print(request.GET.get('email', ''))
+#     try:
+#         body = json.loads(request.body.decode('utf-8'))
+#         user = User.objects.get(email=request.GET.get('email', ''))
+#         data = body["request_data"]
+#         cohort_name = data['name']
+#         response = _save_cohort_api(user, cohort_name, data)
+#
+#     except Exception as e:
+#         logger.error("[ERROR] While trying to view the cohort file list: ")
+#         logger.exception(e)
+#         response = {
+#             "message": "There was an error saving your cohort; it may not have been saved correctly.",
+#             "code": 400,
+#             "not_found": []
+#         }
+#
+#     return JsonResponse(response)
 
 
 @csrf_exempt
@@ -178,16 +204,23 @@ def cohort_preview_api(request):
 def cohort_list_api(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
+
     print(request.GET.get('email', ''))
     try:
+        # response = cohorts_list(request)
+
         user = User.objects.get(email=request.GET.get('email', ''))
         cohortList = []
 
         cohorts = [cohort for cohort in Cohort.objects.filter(active=True) if
                    len(Cohort_Perms.objects.filter(user=user, cohort=cohort)) >= 1]
+
         for cohort in cohorts:
+            # d=cohort.get_filters_as_dict()
+            # d=cohort.get_bq_filter_string()
+            # d=cohort.get_filters_for_bq()
             cohortMetadata = {
-                "id": cohort.id,
+                "cohort_id": cohort.id,
                 "name": cohort.name,
                 "description": cohort.description,
                 "owner": "{} {}".format(cohort.cohort_perms_set.get().user.first_name,cohort.cohort_perms_set.get().user.last_name),
@@ -224,7 +257,8 @@ def delete_cohort_api(request):
         cohort_ids = body["cohort_ids"]
 
         for cohort_id in cohort_ids:
-            result = _delete_cohort_api(user, cohort_id)
+            # result = _delete_cohort_api(user, cohort_id)
+            result = _delete_cohort(user, cohort_id)
             cohort_info.append({"cohort_id": cohort_id, "result": result})
         cohort_info = {"cohorts": cohort_info}
 

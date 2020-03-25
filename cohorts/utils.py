@@ -48,26 +48,27 @@ def _delete_cohort(user, cohort_id):
         cohort_info = {
             'message': "A cohort with the ID {} was not found!".format(cohort_id),
         }
-    try:
-        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
-    except ObjectDoesNotExist:
-        cohort_info = {
-            'message': "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id),
-            'delete_permission': False
-        }
-    if not cohort_info:
+    else:
         try:
-            cohort = Cohort.objects.get(id=cohort_id, active=True)
-            cohort.active = False
-            cohort.save()
-            cohort_info = {
-                'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
-                'data': {'filters': cohort.get_filters_as_dict()},
-            }
+            Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
         except ObjectDoesNotExist:
             cohort_info = {
-                'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
+                'message': "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id),
+                'delete_permission': False
             }
+        else:
+            try:
+                cohort = Cohort.objects.get(id=cohort_id, active=True)
+                cohort.active = False
+                cohort.save()
+                cohort_info = {
+                    'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
+                    'data': {'filters': cohort.get_filters_as_dict()},
+                }
+            except ObjectDoesNotExist:
+                cohort_info = {
+                    'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
+                }
     return cohort_info
 
 
@@ -101,7 +102,7 @@ def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_
             return {'cohort_id': cohort.id}
     
         # Make and save cohort
-        cohort = Cohort.objects.create(name=name)
+        cohort = Cohort.objects.create(name=name, description=desc)
         cohort.save()
     
         # Set permission for user to be owner
@@ -113,18 +114,19 @@ def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_
         grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
     
         # Get versions of datasets to be filtered, and link to filter group
-        imaging_version = 'imaging_version' in filterset and \
-                          len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
-                          DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
+        imaging_version = 'imaging_version' in filters and \
+                          len(DataVersion.objects.filter(name='TCIA Image Data', version=filters['imaging_version'])) == 1 and \
+                          DataVersion.objects.get(name='TCIA Image Data', version=filters['imaging_version']) or \
                           DataVersion.objects.get(active=True, name='TCIA Image Data')
         grouping.data_versions.add(imaging_version)
     
-        bioclin_version = 'bioclin_version' in filterset and \
-                          len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
-                          DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
+        bioclin_version = 'bioclin_version' in filters and \
+                          len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filters['bioclin_version'])) == 1 and \
+                          DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filters['bioclin_version']) or \
                           DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
         grouping.data_versions.add(bioclin_version)
     
+        attributes = filters["attributes"]
         for attr in attributes:
             filter_values = attributes[attr]
             attr_id = Attribute.objects.get(name=attr)
