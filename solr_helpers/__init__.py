@@ -34,9 +34,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     try:
         result = query_solr(**query_settings)
 
-        formatted_query_result['numFound'] = result['response']['numFound']
-
         if 'grouped' in result:
+            formatted_query_result['numFound'] = result['grouped'][list(result['grouped'].keys())[0]]['matches']
             if normalize_groups:
                 formatted_query_result['groups'] = []
                 for group in result['grouped']:
@@ -46,8 +45,10 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                             formatted_query_result['groups'].append(doc)
             else:
                 formatted_query_result['groups'] = result['grouped']
+        else:
+            formatted_query_result['numFound'] = result['response']['numFound']
 
-        if 'docs' in result['response'] and len(result['response']['docs']):
+        if 'response' in result and 'docs' in result['response'] and len(result['response']['docs']):
             formatted_query_result['docs'] = result['response']['docs']
         else:
             formatted_query_result['docs'] = []
@@ -64,7 +65,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                             if 'missing' in facet_counts:
                                 formatted_query_result['facets'][facet]['None'] = facet_counts['missing']['count']
                             for bucket in facet_counts['buckets']:
-                                formatted_query_result['facets'][facet][bucket['val']] = bucket['count']
+                                formatted_query_result['facets'][facet][bucket['val']] = bucket['unique_count'] if 'unique_count' in bucket else bucket['count']
                         else:
                             # This is a query facet
                             facet_name = facet.split(":")[0]
@@ -104,6 +105,8 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     if fqs:
         payload['filter'] = fqs if type(fqs) is list else [fqs]
 
+    # Note that collapse does NOT allow for proper faceted counting of facets where documents may have more than one entry
+    # in such a case, build a unique facet in the facet builder
     if collapse_on:
         collapse = '{!collapse field=%s}' % collapse_on
         if fqs:
@@ -129,7 +132,7 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
 # Solr facets are the bucket counting; optionally provide a set of filters to *not* be counted for purposes of
 # providing counts on the query filters
-def build_solr_facets(attr_set, filter_tags=None, include_nulls=True):
+def build_solr_facets(attr_set, filter_tags=None, include_nulls=True, unique=None):
     facets = {}
 
     attrs = Attribute.objects.filter(name__in=attr_set)
@@ -216,6 +219,8 @@ def build_solr_facets(attr_set, filter_tags=None, include_nulls=True):
                 facets[attr.name]['domain'] = {
                     "excludeTags": filter_tags[attr.name]
                 }
+            if unique:
+                facets[attr.name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
     return facets
 
