@@ -86,7 +86,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, group_on=None, offset=0, limit=1000):
+def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -105,9 +105,8 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     if fqs:
         payload['filter'] = fqs if type(fqs) is list else [fqs]
 
-    # We will only ever group OR collapse, not both
-    # Group is used when a collection may have more than one entry for the collapse field
-    # Collapse is used when collapsed documents are understood to be unique in the collection
+    # Note that collapse does NOT allow for proper faceted counting of facets where documents may have more than one entry
+    # in such a case, build a unique facet in the facet builder
     if collapse_on:
         collapse = '{!collapse field=%s}' % collapse_on
         if fqs:
