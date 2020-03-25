@@ -14,7 +14,7 @@ class Shared_Resource(models.Model):
     id = models.AutoField(primary_key=True)
     email = models.EmailField()
     share_key = models.CharField(default=generate_key, max_length=150)
-    matched_user = models.ForeignKey(User, null=True, blank=True)
+    matched_user = models.ForeignKey(User, null=True, blank=True, on_delete=models.CASCADE)
     redeemed = models.BooleanField(default=False)
     active = models.BooleanField(default=True)
     created = models.DateTimeField(auto_now_add=True)

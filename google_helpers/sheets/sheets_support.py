@@ -22,21 +22,39 @@ from time import sleep
 from uuid import uuid4
 import copy
 from django.conf import settings
-from .abstract import SheetsABC
-from .sheets_service import get_sheet_service
+from google_helpers.sheets.abstract import SheetsABC
+from google_helpers.sheets.sheets_service import get_sheet_service
 
 logger = logging.getLogger('main_logger')
 
 
 class SheetsSupport(SheetsABC):
-    def __init__(self, project_id, executing_project=None):
-        # Project which will execute any jobs run by this class
-        self.executing_project = executing_project or settings.BIGQUERY_PROJECT_ID
-        # Destination project
-        self.project_id = project_id
+    """
+    Generic functions for interaction with the Google Sheets API.
+    """
 
-        self.sheet_service = get_sheet_service()
+    def __init__(self, sheet_id, spreadsheet_id):
+        self.sheet_id = sheet_id
+        self.spreadsheet_id = spreadsheet_id
 
+        self.sheet_service = get_sheet_service().spreadsheets()
 
+    def get_sheet_data(self):
+        """
+        Retrieve list of lists representing rows and columns of Google Sheet for a specified data range.
+        :return: List (or list of lists) of retrieved data.
+        """
 
+        request = self.sheet_service.values().get(
+            spreadsheetId=self.spreadsheet_id,
+            range=self.sheet_id
+        )
 
+        response = request.execute()
+
+        if not response:
+            logger.error("[ERROR] Empty response from Google Sheets API.")
+            return None
+
+        # Strips away additional metadata from response, just returns the data contained in cells
+        return response['values']
