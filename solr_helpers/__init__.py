@@ -54,6 +54,9 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
             formatted_query_result['docs'] = []
 
         if 'facets' in result:
+            if 'unique_count' in result['facets']:
+                formatted_query_result['totalNumFound'] = formatted_query_result['numFound']
+                formatted_query_result['numFound'] = result['facets']['unique_count']
             if normalize_facets:
                 formatted_query_result['facets'] = {}
                 for facet in result['facets']:
@@ -86,18 +89,24 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000):
+def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000, unique=None):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
         "query": query_string or "*:*",
         "limit": 0 if counts_only else limit,
         "offset": offset,
-        "params": {"debugQuery": "on"}
+        "params": {
+            "debugQuery": "on"
+        }
     }
 
     if facets:
         payload['facet'] = facets
+    if unique:
+        if not facets:
+            payload['facet'] = {}
+        payload['facet']['unique_count'] = "unique({})".format(unique)
     if fields:
         payload['fields'] = fields
     if sort:
