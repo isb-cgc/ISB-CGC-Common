@@ -25,7 +25,6 @@ BMI_MAPPING = {
     'obese': '[30 TO *]'
 }
 
-
 # Combined query and result formatter method
 # optionally will normalize facet counting so the response structure is the same for facets+docs and just facets
 def query_solr_and_format_result(query_settings, normalize_facets=True, normalize_groups=True):
@@ -60,7 +59,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
             if normalize_facets:
                 formatted_query_result['facets'] = {}
                 for facet in result['facets']:
-                    if facet != 'count':
+                    if facet != 'count' and facet != 'unique_count':
                         facet_counts = result['facets'][facet]
                         if 'buckets' in facet_counts:
                             # This is a standard term facet
@@ -84,6 +83,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
+        print("Excepted result:")
+        print(result)
 
     return formatted_query_result
 
