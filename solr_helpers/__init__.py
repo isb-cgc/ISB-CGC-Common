@@ -60,7 +60,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
             if normalize_facets:
                 formatted_query_result['facets'] = {}
                 for facet in result['facets']:
-                    if facet != 'count':
+                    if facet != 'count' and facet != 'unique_count':
                         facet_counts = result['facets'][facet]
                         if 'buckets' in facet_counts:
                             # This is a standard term facet
