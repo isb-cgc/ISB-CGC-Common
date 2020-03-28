@@ -84,6 +84,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
+        print("Excepted result:")
+        print(result)
 
     return formatted_query_result
 
