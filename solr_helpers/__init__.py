@@ -65,7 +65,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                             # This is a standard term facet
                             formatted_query_result['facets'][facet] = {}
                             if 'missing' in facet_counts:
-                                formatted_query_result['facets'][facet]['None'] = facet_counts['missing']['count']
+                                formatted_query_result['facets'][facet]['None'] = facet_counts['missing']['unique_count'] if 'unique_count' in facet_counts['missing'] else facet_counts['missing']['count']
                             for bucket in facet_counts['buckets']:
                                 formatted_query_result['facets'][facet][bucket['val']] = bucket['unique_count'] if 'unique_count' in bucket else bucket['count']
                         else:
@@ -223,12 +223,14 @@ def build_solr_facets(attr_set, filter_tags=None, include_nulls=True, unique=Non
                 'limit': -1
             }
 
-            if include_nulls:
-                facets[attr.name]['missing'] = True
             if filter_tags and attr.name in filter_tags:
                 facets[attr.name]['domain'] = {
                     "excludeTags": filter_tags[attr.name]
                 }
+
+            if include_nulls:
+                facets[attr.name]['missing'] = True
+
             if unique:
                 facets[attr.name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
