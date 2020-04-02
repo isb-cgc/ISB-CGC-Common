@@ -13,7 +13,7 @@ from django.conf import settings
 class CloudUploadService(object):
 
     def __init__(self):
-        self.storage = storage_service.get_storage_resource()
+        self.storage = storage_service.get_storage_resource(True)
 
     def upload(self, file, filename=None):
         media = http.MediaInMemoryUpload(file)
