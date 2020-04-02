@@ -12,7 +12,7 @@ import string
 
 storage_system = FileSystemStorage()
 if settings.USE_CLOUD_STORAGE is not 'False':
-    storage_system = cloud_file_storage.CloudFileStorage()
+    storage_system = cloud_file_storage.CloudFileStorage(True)
 
 
 def generate_upload_key():

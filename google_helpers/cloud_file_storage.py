@@ -29,8 +29,8 @@ from .utils import execute_with_retries
 
 class CloudFileStorage(Storage):
 
-    def __init__(self):
-        self.storage = storage_service.get_storage_resource()
+    def __init__(self, for_user_project=False):
+        self.storage = storage_service.get_storage_resource(for_user_project)
 
     def _open(self, name, mode):
         filepath = name.split('/')
