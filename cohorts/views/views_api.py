@@ -34,7 +34,7 @@ from django.views.decorators.http import require_http_methods
 from ..decorators import api_auth
 
 from cohorts.models import Cohort, Cohort_Perms
-from cohorts.utils_api import _save_cohort_api, _delete_cohort_api, get_filterSet_api, _cohort_detail_api, _cohort_preview_api
+from cohorts.utils_api import get_filterSet_api, _cohort_detail_api, _cohort_preview_api
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
 from ..views.views import _save_cohort,_delete_cohort
 
@@ -216,9 +216,6 @@ def cohort_list_api(request):
                    len(Cohort_Perms.objects.filter(user=user, cohort=cohort)) >= 1]
 
         for cohort in cohorts:
-            # d=cohort.get_filters_as_dict()
-            # d=cohort.get_bq_filter_string()
-            # d=cohort.get_filters_for_bq()
             cohortMetadata = {
                 "cohort_id": cohort.id,
                 "name": cohort.name,

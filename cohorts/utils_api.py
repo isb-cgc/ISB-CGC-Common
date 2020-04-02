@@ -170,28 +170,6 @@ def get_filterSet_api(cohort):
 
     return filterset
 
-def _delete_cohort_api(user, cohort_id):
-    cohort_info = None
-
-    try:
-        cohort = Cohort.objects.get(id=cohort_id)
-    except ObjectDoesNotExist:
-        cohort_info = "A cohort with the ID {} was not found!".format(cohort_id)
-    else:
-        try:
-            Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
-        except ObjectDoesNotExist:
-            cohort_info = "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id)
-        else:
-            try:
-                cohort = Cohort.objects.get(id=cohort_id, active=True)
-                cohort.active = False
-                cohort.save()
-                cohort_info = 'Cohort ID {} has been deleted.'.format(cohort_id)
-            except ObjectDoesNotExist:
-                cohort_info = 'Cohort ID {} was previously deleted.'.format(cohort_id)
-    return cohort_info
-
 def get_cohort_objects(request, filters, data_versions, cohort_info):
 
     levels = {'Instance': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID'],
@@ -317,69 +295,6 @@ def get_dataversions(filterset):
                       DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
 
     return (imaging_version, bioclin_version)
-
-def _save_cohort_api(user, name, data, case_insens=True):
-
-    description = data['description']
-    filterset = data['filterSet']
-    attributes = filterset["attributes"]
-    cohort_id = 'cohort_id' in data and data['cohort_id'] or None
-
-
-    if not filterset or not name:
-        # Can't save/edit a cohort when nothing is being changed!
-        return {
-            "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
-            "code": 400
-            }
-
-    blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
-    match = blacklist.search(str(name))
-    if match:
-        # XSS risk, log and fail this cohort save
-        match = blacklist.findall(str(name))
-        logger.error('[ERROR] While saving a cohort, saw a malformed name: ' + name + ', characters: ' + str(match))
-        return {
-            'message': "Your cohort's name contains invalid characters; please choose another name.",
-            "code": 400
-            }
-
-    # If we're only changing the name, just edit the cohort and update it
-    if cohort_id:
-        cohort = Cohort.objects.get(id=cohort_id)
-        cohort.name = name
-        cohort.save()
-        return {'cohort_id': cohort.id}
-
-    # Make and save cohort
-    cohort = Cohort.objects.create(name=name, description=description)
-    cohort.save()
-
-    perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
-    perm.save()
-
-    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
-    # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
-    grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
-
-    # Get versions of datasets to be filtered, and link to filter group
-    (imaging_version, bioclin_version) = get_dataversions(filterset)
-    grouping.data_versions.add(imaging_version)
-    grouping.data_versions.add(bioclin_version)
-
-
-    for attr in attributes:
-        filter_values = attributes[attr]
-        attr_id = Attribute.objects.get(name=attr)
-        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
-
-    cohort_info = {
-        "id": cohort.id,
-        "name": cohort.name,
-        "description": cohort.description,
-        "filterSet": get_filterSet_api(cohort)
-    }
-    return cohort_info
 
 def _cohort_preview_api(request, data, cohort_info):
     filterset = data['filterSet']['attributes']
