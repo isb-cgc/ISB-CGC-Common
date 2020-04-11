@@ -194,11 +194,26 @@ class Attribute(models.Model):
             self.name, self.display_name, self.data_type)
 
 
+class Attribute_Display_ValuesQuerySet(models.QuerySet):
+    def to_dict(self):
+        dvals = {}
+        for dv in self.all().select_related('attribute'):
+            if dv.attribute.id not in dvals:
+                dvals[dv.attribute.id] = {}
+            dvals[dv.attribute.id][dv.raw_value] = dv.display_value
+
+        return dvals
+
+class Attribute_Display_ValuesManager(models.Manager):
+    def get_queryset(self):
+        return Attribute_Display_ValuesQuerySet(self.model, using=self._db)
+
 class Attribute_Display_Values(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     raw_value = models.CharField(max_length=256, null=False, blank=False)
     display_value = models.CharField(max_length=256, null=False, blank=False)
+    objects = Attribute_Display_ValuesManager()
 
     class Meta(object):
         unique_together = (("raw_value", "attribute"),)
