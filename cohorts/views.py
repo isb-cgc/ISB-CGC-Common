@@ -606,7 +606,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     # check to see if user has read access to 'All TCGA Data' cohort
-    isb_superuser = User.objects.get(username='isb')
+    isb_superuser = User.objects.get(is_staff=True, is_superuser=True, is_active=True)
     superuser_perm = Cohort_Perms.objects.get(user=isb_superuser)
     user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
     if not user_all_data_perm:
@@ -745,7 +745,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        isb_user = Django_User.objects.filter(username='isb').first()
+        isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
         template_values = {
@@ -784,7 +784,7 @@ def cohort_detail(request, cohort_id):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        isb_user = Django_User.objects.filter(username='isb').first()
+        isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
         template_values  = {
