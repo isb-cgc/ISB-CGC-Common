@@ -8,7 +8,7 @@ def cohort_owner_permission(list):
 
 @register.simple_tag
 def public_cohort_count():
-    isb_superuser = User.objects.get(is_staff=True, is_superuser=True, active=True)
+    isb_superuser = User.objects.get(is_staff=True, is_superuser=True, is_active=True)
     count = Cohort_Perms.objects.filter(user=isb_superuser,perm=Cohort_Perms.OWNER).distinct().count()
 
     return count
