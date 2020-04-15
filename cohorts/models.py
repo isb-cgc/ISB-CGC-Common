@@ -49,7 +49,7 @@ class CohortManager(models.Manager):
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
     def get_all_tcga_cohort(self):
-        isb_user = User.objects.get(is_superuser=True, username='isb')
+        isb_user = User.objects.get(is_staff=True, is_superuser=True, active=True)
         all_isb_cohort_ids = Cohort_Perms.objects.filter(user=isb_user, perm=Cohort_Perms.OWNER).values_list('cohort_id', flat=True)
         return Cohort.objects.filter(name='All TCGA Data', id__in=all_isb_cohort_ids)[0]
 
@@ -117,7 +117,7 @@ class Cohort(models.Model):
         return self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user
 
     def is_public(self):
-        isbuser = User.objects.get(username='isb', is_superuser=True)
+        isbuser = User.objects.get(is_staff=True, is_superuser=True, active=True)
         return (self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user_id == isbuser.id)
 
 
