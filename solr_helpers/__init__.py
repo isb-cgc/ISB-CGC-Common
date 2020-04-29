@@ -142,10 +142,8 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
 # Solr facets are the bucket counting; optionally provide a set of filters to *not* be counted for purposes of
 # providing counts on the query filters
-def build_solr_facets(attr_set, filter_tags=None, include_nulls=True, unique=None):
+def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
     facets = {}
-
-    attrs = Attribute.objects.filter(name__in=attr_set)
 
     for attr in attrs:
         facet_type = DataSource.get_facet_type(attr)
@@ -158,7 +156,6 @@ def build_solr_facets(attr_set, filter_tags=None, include_nulls=True, unique=Non
                 l_boundary = "[" if attr_range.include_lower else "{"
                 if attr_range.gap == "0":
                     # This is a single range, no iteration to be done
-
                     lower = attr_range.first
                     upper = attr_range.last
                     facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, str(lower), str(upper))

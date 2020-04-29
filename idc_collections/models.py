@@ -115,6 +115,63 @@ class Collection(models.Model):
         )
 
 
+class DataSourceQuerySet(models.QuerySet):
+    def to_dicts(self):
+        return [{
+            "id": ds.id,
+            "name": ds.name,
+            "version": "{}: {}".format(ds.name, ds.version),
+            "type": ds.source_type,
+
+        } for ds in self.select_related('version').all()]
+
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None):
+        attrs = { 'list': None }
+        if by_source:
+            attrs['sources'] = {}
+
+        for ds in self.select_related('version').all():
+            attr_set = ds.attribute_set.filter(default_ui_display=for_ui, active=True) if for_ui is not None else ds.attribute_set.all()
+            attr_set = attr_set.filter(name__in=named_set) if named_set else attr_set
+
+            if for_faceting:
+                attr_set = attr_set.filter(data_type=Attribute.CATEGORICAL, active=True) | attr_set.filter(
+                    id__in=Attribute_Ranges.objects.filter(
+                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                    ).values_list('attribute__id', flat=True)
+                )
+
+            if by_source:
+                attrs['sources'][ds.id] = {
+                    'list': attr_set.values_list('name', flat=True).distinct(),
+                    'attrs': attr_set.distinct(),
+                    'shared_id_col': ds.shared_id_col,
+                    'name': ds.name,
+                    'data_type': ds.version.data_type
+                }
+
+            attrs['list'] = attr_set.values_list('name', flat=True) if not attrs['list'] else (attrs['list'] | attr_set.values_list('name', flat=True))
+
+        attrs['list'] = attrs['list'].distinct()
+
+        return attrs
+
+class DataSourceManager(models.Manager):
+    def get_queryset(self):
+        return DataSourceQuerySet(self.model, using=self._db)
+
+    def search(self, search_terms):
+        terms = [term.strip() for term in search_terms.split()]
+        q_objects = []
+        for term in terms:
+            q_objects.append(Q(name__icontains=term))
+
+        # Start with a bare QuerySet
+        qs = self.get_queryset()
+
+        # Use operator's or_ to string together all of your Q objects.
+        return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
+
 class DataSource(models.Model):
     QUERY = 'query'
     TERMS = 'terms'
@@ -129,17 +186,18 @@ class DataSource(models.Model):
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
+    objects = DataSourceManager()
 
     def get_collection_attr(self, for_faceting=True, for_ui=False):
         if for_faceting:
-            ranged_numerics = self.attribute_set.all().filter(
+            ranged_numerics = self.attribute_set.filter(
                 id__in=Attribute_Ranges.objects.filter(
-                    attribute__in=self.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                    attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
                 ).values_list('attribute__id', flat=True)
             )
-            attr_set = self.attribute_set.all().filter(data_type=Attribute.CATEGORICAL, active=True) | ranged_numerics
+            attr_set = self.attribute_set.filter(data_type=Attribute.CATEGORICAL, active=True) | ranged_numerics
         else:
-            attr_set = self.attribute_set.all()
+            attr_set = self.attribute_set.filter(active=True)
         if for_ui:
             return attr_set.filter(default_ui_display=True)
         return attr_set
@@ -174,7 +232,7 @@ class Attribute(models.Model):
     active = models.BooleanField(default=True)
     is_cross_collex = models.BooleanField(default=False)
     preformatted_values = models.BooleanField(default=False)
-    default_ui_display = models.BooleanField(default=True)
+    default_ui_display = models.BooleanField(default=True, null=False, blank=False)
     data_sources = models.ManyToManyField(DataSource)
 
     def get_display_values(self):
