@@ -197,8 +197,6 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                     where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters)) if len(query_filters) else ""),
                     join_clause=""" """.join(joins),
                 )
-                if facet == 'Modality':
-                    print(count_query)
                 # Toggle 'don't filter'
                 if filtering_this_facet:
                     for param in filter_clauses[facet_table]['attr_params'][facet]:
@@ -210,7 +208,6 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                     for param in filter_clauses[facet_table]['attr_params'][facet]:
                         filter_clauses[facet_table]['count_params'][param]['parameterValue']['value'] = 'filtering'
 
-        start = time.time()
         not_done = True
         still_checking = True
         num_retries = 0
@@ -229,8 +226,6 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
         if not_done:
             logger.error("[ERROR] Timed out while trying to count case/sample totals in BQ")
         else:
-            stop = time.time()
-            logger.debug("[BENCHMARKING] Time to finish BQ counts: {}s".format(str(((stop-start)/1000))))
             for facet in count_jobs:
                 bq_results = BigQuerySupport.get_job_results(count_jobs[facet]['job']['jobReference'])
                 for row in bq_results:
