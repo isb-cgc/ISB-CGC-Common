@@ -131,12 +131,11 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['sources'] = {}
 
         for ds in self.select_related('version').all():
-            attr_set = ds.attribute_set.filter(default_ui_display=for_ui) if for_ui is not None else ds.attribute_set.all()
+            attr_set = ds.attribute_set.filter(default_ui_display=for_ui, active=True) if for_ui is not None else ds.attribute_set.all()
             attr_set = attr_set.filter(name__in=named_set) if named_set else attr_set
 
             if for_faceting:
-                facet_set = ['BodyPartExamined','Modality','disease_code', 'collection_id', 'vital_status', 'gender', 'race','ethnicity']
-                attr_set = attr_set.filter(data_type=Attribute.CATEGORICAL, active=True, name__in=facet_set) | attr_set.filter(
+                attr_set = attr_set.filter(data_type=Attribute.CATEGORICAL, active=True) | attr_set.filter(
                     id__in=Attribute_Ranges.objects.filter(
                         attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
                     ).values_list('attribute__id', flat=True)

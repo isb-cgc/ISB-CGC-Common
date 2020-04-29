@@ -112,8 +112,8 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
     param_sfx = 0
 
     results = {'facets': {
-        'cross_collex': {},
-        'clinical': {}
+        'origin_set': {},
+        'related_set': {}
     }}
 
     facet_map = {}
@@ -171,7 +171,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
         for facet_table in facet_attr_by_bq['sources']:
             for attr_facet in facet_attr_by_bq['sources'][facet_table]['attrs']:
                 facet = attr_facet.name
-                source_set = 'cross_collex' if table_info[facet_table]['type'] == DataVersion.IMAGE_DATA else 'clinical'
+                source_set = 'origin_set' if table_info[facet_table]['type'] == DataVersion.IMAGE_DATA else 'related_set'
                 if source_set not in results['facets']:
                     results['facets'][source_set] = { facet_table: {'facets': {}}}
                 if facet_table not in results['facets'][source_set]:
