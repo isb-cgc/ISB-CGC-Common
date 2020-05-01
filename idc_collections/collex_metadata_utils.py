@@ -27,13 +27,23 @@ BQ_ATTEMPT_MAX = 10
 
 logger = logging.getLogger('main_logger')
 
-# If ancillary data is involved, only a SINGLE program (case superset) can be examined. This is because programs
-# often do not share data models, so filters for one program may not fit filters for another, resulting in
-# no records found should a given filter set be applied to multiple programs.
+
+# Helper method which, given a list of attribute names, a set of data version objects,
+# and a data source type, will produce a list of the Attribute ORM objects. Primarily
+# for use with the API, which will accept filter sets from users, who won't be able to
+# provide Attribute keys
 #
-# If no ancillary data is requested, any number of image tables can be examined.
-
-
+# The returned dict is keyed by source names (as source names must be unique in BigQuery and Solr), with the following
+# structure:
+# {
+#     <source name>: {
+#         'shared_id_col': <column used to join this Solr collection or BQ table,
+#         'alias': <alias for table in BQ queries; required for BQ, unneeded for Solr>,
+#         'list': <list of attributes by name>,
+#         'attrs': <list of attributes as ORM objects>,
+#         'data_type': <data type of the this source, per its version>
+#     }
+# }
 def _build_attr_by_source(attrs, data_versions, source_type):
     attr_by_src = {}
     attr_objs = Attribute.objects.filter(active=True, name__in=attrs)
@@ -55,6 +65,16 @@ def _build_attr_by_source(attrs, data_versions, source_type):
 
     return attr_by_src
 
+# Faceted counting for an arbitrary set of filters and facets.
+# filters and facets can be provided as lists of names (in which case _build_attr_by_source is used to convert them
+# into Attribute objects) or as part of the sources_and_attrs construct, which is a dictionary of objects with the same
+# structure as the dict output by _build_attr_by_source.
+#
+# Queries are structured with the 'image' data type sources as the first table, and all 'ancillary' (i.e. non-image)
+# tables as JOINs into the first table. Faceted counts are done on a per attribute basis (though could be restructed into
+# a single call). Filters are handled by BigQuery API parameterization, and disabled for faceted bucket counts based on
+# their presense in a secondary WHERE clause field which resolves to 'true' if that filter's attribute is the attribute
+# currently being counted
 def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
     filter_attr_by_bq = {}
     facet_attr_by_bq = {}
@@ -118,7 +138,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 
     facet_map = {}
 
-    # We join image tables to corresponding ancillary tables, and union between image tables
+    # We join image tables to corresponding ancillary tables
     for image_table in image_tables:
         tables_in_query = []
         joins = []
@@ -208,6 +228,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                     for param in filter_clauses[facet_table]['attr_params'][facet]:
                         filter_clauses[facet_table]['count_params'][param]['parameterValue']['value'] = 'filtering'
 
+        # Poll the jobs until they're done, or we've timed out
         not_done = True
         still_checking = True
         num_retries = 0
@@ -218,7 +239,6 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                     count_jobs[facet]['done'] = BigQuerySupport.check_job_is_done(count_jobs[facet]['job'])
                     if not count_jobs[facet]['done']:
                         not_done = True
-
             sleep(1)
             num_retries += 1
             still_checking = (num_retries < BQ_ATTEMPT_MAX)
