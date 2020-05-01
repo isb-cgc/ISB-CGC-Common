@@ -421,6 +421,11 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
 
     return results
 
+# For faceted counting of continuous numeric fields, ranges must be constructed so the faceted counts are properly
+# bucketed. This method makes use of the Attribute_Ranges ORM object, and requires this be set for an attribute
+# in order to build a range clause.
+#
+# Attributes must be passed in as a proper Attribute ORM object
 def _get_bq_range_case_clause(attr, table, alias, count_on, include_nulls=True):
     ranges = Attribute_Ranges.objects.filter(attribute=attr)
     ranges_case = []
