@@ -1796,6 +1796,7 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'), ]
 
+
         result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
