@@ -1676,7 +1676,9 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
             inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
                 request.POST.get('filters', '{}'))
             if request.GET.get('case_barcode', None):
-                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'),]
+                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')),]
+                ##  this is for dicom panel to work against solr
+                # inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'),]
 
             items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
 
@@ -1794,8 +1796,8 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
-            inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'), ]
-
+            inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')), ]
+            # inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'), ]
 
         result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
