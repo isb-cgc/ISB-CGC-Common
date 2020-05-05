@@ -215,7 +215,6 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                 if filtering_this_facet:
                     for param in filter_clauses[facet_table]['attr_params'][facet]:
                         filter_clauses[facet_table]['count_params'][param]['parameterValue']['value'] = 'not_filtering'
-                print(count_query)
                 count_jobs[facet]['job'] = BigQuerySupport.insert_query_job(count_query, params if len(params) else None)
                 count_jobs[facet]['done'] = False
                 # Toggle 'don't filter'
