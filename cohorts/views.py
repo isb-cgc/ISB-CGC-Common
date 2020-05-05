@@ -34,7 +34,7 @@ from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.models import User
+from django.contrib.auth.models import User, AnonymousUser
 from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 from django.core import serializers
@@ -606,7 +606,7 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
     # check to see if user has read access to 'All TCGA Data' cohort
-    isb_superuser = User.objects.get(username='isb')
+    isb_superuser = User.objects.get(is_staff=True, is_superuser=True, is_active=True)
     superuser_perm = Cohort_Perms.objects.get(user=isb_superuser)
     user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
     if not user_all_data_perm:
@@ -679,12 +679,12 @@ def cohort_select_for_existing_workbook(request, workbook_id, worksheet_id):
 
 @login_required
 def cohort_create_for_new_workbook(request):
-    return cohort_detail(request=request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=True)
+    return new_cohort(request=request, workbook_id=0, worksheet_id=0, create_workbook=True)
 
 
 @login_required
 def cohort_create_for_existing_workbook(request, workbook_id, worksheet_id):
-    return cohort_detail(request=request, cohort_id=0, workbook_id=workbook_id, worksheet_id=worksheet_id)
+    return new_cohort(request=request, workbook_id=workbook_id, worksheet_id=worksheet_id)
 
 
 @login_required
@@ -741,14 +741,11 @@ def validate_barcodes(request):
     }, status=status)
 
 
-@login_required
-def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
+def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        shared_with_users = []
-
-        isb_user = Django_User.objects.filter(username='isb').first()
+        isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
         template_values = {
@@ -770,33 +767,62 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         if '/new_cohort/barcodes/' in request.path or 'create_cohort_and_create_workbook/barcodes/' in request.path or '/create/barcodes' in request.path:
             template = 'cohorts/new_cohort_barcodes.html'
 
-        if cohort_id != 0:
-            cohort = Cohort.objects.get(id=cohort_id, active=True)
-            cohort.perm = cohort.get_perm(request)
-            cohort.owner = cohort.get_owner()
+    except Exception as e:
+        logger.error("[ERROR] Exception while trying to new a cohort:")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to load new cohort's details page.")
+        if request.is_authenticated():
+            return redirect('cohort_list')
+        else:
+            return redirect('')
 
-            if not cohort.perm:
-                messages.error(request, 'You do not have permission to view that cohort.')
-                return redirect('cohort_list')
+    return render(request, template, template_values)
 
-            cohort.mark_viewed(request)
 
-            cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
+@login_required
+def cohort_detail(request, cohort_id):
+    if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
-            cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
+    try:
+        isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
+        program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
-            # Do not show shared users for public cohorts
-            if not cohort.is_public():
-                shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
-                shared_with_users = User.objects.filter(id__in=shared_with_ids)
+        template_values  = {
+            'request': request,
+            'base_url': settings.BASE_URL,
+            'base_api_url': settings.BASE_API_URL,
+            'programs': program_list,
+            'program_prefixes': {x.name: True for x in program_list}
+        }
 
-            template = 'cohorts/cohort_details.html'
-            template_values['cohort'] = cohort
-            template_values['total_samples'] = cohort.sample_size()
-            template_values['total_cases'] = cohort.case_size()
-            template_values['shared_with_users'] = shared_with_users
-            template_values['cohort_programs'] = cohort_programs
-            template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
+        shared_with_users = []
+
+        cohort = Cohort.objects.get(id=cohort_id, active=True)
+        cohort.perm = cohort.get_perm(request)
+        cohort.owner = cohort.get_owner()
+
+        if not cohort.perm:
+            messages.error(request, 'You do not have permission to view that cohort.')
+            return redirect('cohort_list')
+
+        cohort.mark_viewed(request)
+
+        cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
+
+        cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
+
+        # Do not show shared users for public cohorts
+        if not cohort.is_public():
+            shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
+            shared_with_users = User.objects.filter(id__in=shared_with_ids)
+
+        template = 'cohorts/cohort_details.html'
+        template_values['cohort'] = cohort
+        template_values['total_samples'] = cohort.sample_size()
+        template_values['total_cases'] = cohort.case_size()
+        template_values['shared_with_users'] = shared_with_users
+        template_values['cohort_programs'] = cohort_programs
+        template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
@@ -808,7 +834,6 @@ def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_wo
         return redirect('cohort_list')
 
     return render(request, template, template_values)
-
 
 '''
 Saves a cohort, adds the new cohort to an existing worksheet, then redirected back to the worksheet display
@@ -1771,6 +1796,7 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'), ]
 
+
         result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
@@ -1981,7 +2007,6 @@ def unshare_cohort(request, cohort_id=0):
         })
 
 
-@login_required
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
     comb_mut_filters = request.GET.get('mut_filter_combine', 'OR')
@@ -1991,7 +2016,10 @@ def get_metadata(request):
 
     program_id = int(program_id) if program_id is not None else None
 
-    user = Django_User.objects.get(id=request.user.id)
+    if (request.user.is_authenticated):
+        user = Django_User.objects.get(id=request.user.id)
+    else:
+        user = AnonymousUser
 
     if program_id is not None and program_id > 0:
         results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit, comb_mut_filters=comb_mut_filters)
@@ -2023,7 +2051,6 @@ def get_metadata(request):
     return JsonResponse(results)
 
 
-@login_required
 def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     template = 'cohorts/isb-cgc-data.html'

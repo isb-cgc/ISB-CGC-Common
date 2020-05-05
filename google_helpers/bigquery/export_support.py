@@ -241,11 +241,11 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         if job_is_done and job_is_done['status']['state'] == 'DONE':
             if 'status' in job_is_done and 'errors' in job_is_done['status']:
                 msg = "Export of {} to GCS bucket {} was unsuccessful, reason: {}".format(
-                    export_type, self.bucket, job_is_done['status']['errors'][0]['message'])
+                    export_type, self.bucket_path, job_is_done['status']['errors'][0]['message'])
                 logger.error("[ERROR] {}".format(msg))
                 result['status'] = 'error'
                 result['message'] = "Unable to export {} to bucket {}--please contact the administrator.".format(
-                    export_type, self.bucket)
+                    export_type, self.bucket_path)
             else:
                 # Check the file
                 exported_file = get_storage_resource(True).objects().get(bucket=self.bucket_path, object=self.file_name).execute()
