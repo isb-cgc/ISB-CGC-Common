@@ -696,8 +696,7 @@ class BigQuerySupport(BigQueryABC):
                             )
                         else:
                             filter_string += "{}{} = @{}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                                param_name
+                                '' if not field_prefix else field_prefix, attr, param_name
                             )
                 elif len(values) == 2 and attr.endswith('_btw'):
                     param_name_1 = param_name + '_btw_1'
