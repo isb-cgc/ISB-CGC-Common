@@ -84,16 +84,14 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 
     query_base = """
         #standardSQL
-        SELECT {facet}, COUNT(*) AS count
-        FROM (
-            SELECT {count_clause}
-            FROM {table_clause} 
-            {join_clause}
-            {where_clause}
-            GROUP BY {group_by_clause}
-        )
+        SELECT {count_clause}
+        FROM {table_clause} 
+        {join_clause}
+        {where_clause}
         GROUP BY {facet}
     """
+
+    count_clause_base = "{sel_count_col}, COUNT(DISTINCT {count_col}) AS count"
 
     join_clause_base = """
         JOIN `{join_to_table}` {join_to_alias}
@@ -200,22 +198,18 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                 facet_map[facet] = {'set': source_set, 'source': facet_table}
                 filtering_this_facet = facet_table in filter_clauses and facet in filter_clauses[facet_table]['attr_params']
                 count_jobs[facet] = {}
-                count_clause = None
+                sel_count_col = None
                 if attr_facet.data_type == Attribute.CONTINUOUS_NUMERIC:
-                    count_clause = _get_bq_range_case_clause(attr_facet, table_info[facet_table]['name'], table_info[facet_table]['alias'], table_info[facet_table]['shared_id_col'])
+                    sel_count_col = _get_bq_range_case_clause(attr_facet, table_info[facet_table]['name'], table_info[facet_table]['alias'], table_info[facet_table]['shared_id_col'])
                 else:
-                    count_clause = "{}.{}, {}.{}".format(table_info[facet_table]['alias'], table_info[facet_table]['shared_id_col'],
-                                          table_info[facet_table]['alias'], facet)
-                group_by_clause = "{}.{}, {}.{}".format(table_info[facet_table]['alias'],
-                                                        table_info[facet_table]['shared_id_col'],
-                                                        table_info[facet_table]['alias'], facet)
+                    sel_count_col = "{}.{} AS {}".format(table_info[facet_table]['alias'], facet, facet)
+                count_clause = count_clause_base.format(sel_count_col=sel_count_col, count_col="{}.{}".format(table_info[image_table]['alias'], table_info[image_table]['shared_id_col'],))
                 count_query = query_base.format(
                     facet=facet,
                     table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),
                     count_clause=count_clause,
-                    group_by_clause=group_by_clause,
                     where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters)) if len(query_filters) else ""),
-                    join_clause=""" """.join(joins),
+                    join_clause=""" """.join(joins)
                 )
                 # Toggle 'don't filter'
                 if filtering_this_facet:
@@ -462,7 +456,7 @@ def _get_bq_range_case_clause(attr, table, alias, count_on, include_nulls=True):
                 else:
                     ranges_case.append(
                         "WHEN {}.{} BETWEEN {} AND {} THEN {}".format(alias, attr.name, str(lower),
-                                                                       str(lower), "'{} TO {}'".format(str(lower),str(upper))))
+                                                                       str(upper), "'{} TO {}'".format(str(lower),str(upper))))
                 lower = upper
                 upper = lower + gap
 
