@@ -16,6 +16,7 @@
 
 import logging
 import time
+import copy
 from time import sleep
 
 from idc_collections.models import DataVersion, DataSource
@@ -146,7 +147,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
             if len(filter_set):
                 filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
                     filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
-                    case_insens=True, with_count_toggle=True
+                    case_insens=True, with_count_toggle=True, type_schema={'sample_type': 'STRING'}
                 )
                 param_sfx += 1
                 query_filters.append(filter_clauses[image_table]['filter_string'])
@@ -158,7 +159,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_filter_and_params(
                         filter_set, param_suffix=str(param_sfx), field_prefix=table_info[filter_bqtable]['alias'],
-                        case_insens=True, with_count_toggle=True
+                        case_insens=True, with_count_toggle=True, type_schema={'sample_type': 'STRING'}
                     )
                     param_sfx += 1
 
@@ -172,22 +173,18 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                     params.append(filter_clauses[filter_bqtable]['parameters'])
                     query_filters.append(filter_clauses[filter_bqtable]['filter_string'])
                     tables_in_query.append(filter_bqtable)
-
-        # Any remaining facets not pulled are for tables not being filtered and which aren't the image table,
-        # so we add them last
-        for facet_bqtable in facet_attr_by_bq['sources']:
-            if facet_bqtable not in image_tables and facet_bqtable not in tables_in_query:
-                joins.append(join_clause_base.format(
-                    join_from_alias=table_info[image_table]['alias'],
-                    join_from_id=table_info[image_table]['shared_id_col'],
-                    join_to_alias=table_info[facet_bqtable]['alias'],
-                    join_to_table=table_info[facet_bqtable]['name'],
-                    join_to_id=table_info[facet_bqtable]['shared_id_col']
-                ))
-
         # Submit jobs, toggling the 'don't filter' var for each facet
         for facet_table in facet_attr_by_bq['sources']:
             for attr_facet in facet_attr_by_bq['sources'][facet_table]['attrs']:
+                facet_joins = copy.deepcopy(joins)
+                if facet_table not in image_tables and facet_table not in tables_in_query:
+                    facet_joins.append(join_clause_base.format(
+                        join_from_alias=table_info[image_table]['alias'],
+                        join_from_id=table_info[image_table]['shared_id_col'],
+                        join_to_alias=table_info[facet_table]['alias'],
+                        join_to_table=table_info[facet_table]['name'],
+                        join_to_id=table_info[facet_table]['shared_id_col']
+                    ))
                 facet = attr_facet.name
                 source_set = 'origin_set' if table_info[facet_table]['type'] == DataVersion.IMAGE_DATA else 'related_set'
                 if source_set not in results['facets']:
@@ -209,7 +206,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                     table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),
                     count_clause=count_clause,
                     where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters)) if len(query_filters) else ""),
-                    join_clause=""" """.join(joins)
+                    join_clause=""" """.join(facet_joins)
                 )
                 # Toggle 'don't filter'
                 if filtering_this_facet:
@@ -221,7 +218,6 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                 if filtering_this_facet:
                     for param in filter_clauses[facet_table]['attr_params'][facet]:
                         filter_clauses[facet_table]['count_params'][param]['parameterValue']['value'] = 'filtering'
-
         # Poll the jobs until they're done, or we've timed out
         not_done = True
         still_checking = True
@@ -355,7 +351,7 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
             if len(filter_set):
                 filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
                     filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
-                    case_insens=True
+                    case_insens=True, type_schema={'sample_type': 'STRING'}
                 )
                 param_sfx += 1
                 query_filters.append(filter_clauses[image_table]['filter_string'])
@@ -367,7 +363,7 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_filter_and_params(
                         filter_set, param_suffix=str(param_sfx), field_prefix=table_info[filter_bqtable]['alias'],
-                        case_insens=True
+                        case_insens=True, type_schema={'sample_type': 'STRING'}
                     )
                     param_sfx += 1
 
@@ -538,7 +534,7 @@ def get_bq_string(filters, fields, data_versions, group_by=None, limit=0, offset
 
     for bqtable in filter_attr_by_bq:
         filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq[bqtable]['list']}
-        filter_clauses[bqtable] = BigQuerySupport.build_bq_where_clause(filter_set, field_prefix=table_info[bqtable]['alias'])
+        filter_clauses[bqtable] = BigQuerySupport.build_bq_where_clause(filter_set, field_prefix=table_info[bqtable]['alias'], type_schema={'sample_type': 'STRING'})
 
     for bqtable in field_attr_by_bq:
         alias = table_info[bqtable]['alias']
