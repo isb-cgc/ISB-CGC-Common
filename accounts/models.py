@@ -215,6 +215,7 @@ class UserOptInStatus(models.Model):
     SEEN = 2
     YES = 3
     NO = 4
+    SKIP_ONCE = 5
 
     user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
     opt_in_status = models.IntegerField(default=NEW)
