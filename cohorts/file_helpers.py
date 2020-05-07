@@ -113,7 +113,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
 
             query_params = {
-                "collection": "tcia_images",
+                "collection": "tcga_tcia_images",
                 "fields": fields,
                 "query_string": filtered_query_string,
                 "fq_string": fq_query_string,
