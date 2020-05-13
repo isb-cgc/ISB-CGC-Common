@@ -388,7 +388,7 @@ def get_project_deleters(gcp_id, user_email, st_logger, log_name):
             })
 
             return {
-                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of the project in order to unregister it.'.format(user_email, gcp_id),
+                'message': 'Failed to unregister: Your user email [{}] was not found in GCP {}.'.format(user_email, gcp_id),
             }
 
         # 3) Verify which users have ever registered with with NIH:
@@ -473,7 +473,7 @@ def _get_project_users(gcp_id, service_account, user_email, st_logger, log_name,
             })
 
             return {
-                'message': 'Your user email ({}) was not found in GCP {}. You must be a member of a project in order to {} its service accounts.'.format(user_email, gcp_id, "refresh" if is_refresh else "register"),
+                'message': 'Unable to {} Service Accounts: Your user email ({}) was not found in GCP {}. You must be a member of a project in order to {} its service accounts.'.format("Refresh" if is_refresh else "Register", user_email, gcp_id),
                 'redirect': True,
                 'user_not_found': True,
                 'all_users_registered': False

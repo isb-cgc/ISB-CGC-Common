@@ -228,14 +228,14 @@ def verify_gcp(request, user_id):
 
         logger.info("[STATUS] Response: {}".format(str(response)))
 
-        if status == '403':
+        if status == 403:
             response['redirect'] = reverse('user_gcp_list', kwargs={'user_id': user_id})
 
     except Exception as e:
-        logger.error("[ERROR] While attempting to verify GCP {}:")
+        logger.error("[ERROR] While attempting to verify GCP {}:".format(gcp_id))
         logger.exception(e)
         response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
-        status = '500'
+        status = 500
 
     return JsonResponse(response, status=status)
 
@@ -407,7 +407,7 @@ def verify_sa(request, user_id):
             #
             if 'message' in list(result.keys()):
                 logger.info("[INFO] Gotta message")
-                status = '400'
+                status = 400
                 st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
                 # Users attempting to refresh a project they're not on go back to their GCP list (because this GCP was probably removed from it)
                 if 'redirect' in list(result.keys()):
@@ -432,33 +432,33 @@ def verify_sa(request, user_id):
                         len(result['dcf_messages']['dcf_problems']) > 0:
 
                         result = {'message': ','.join(result['dcf_messages']['dcf_problems'])}
-                        status = '503'
+                        status = 503
                         return JsonResponse(result, status=status)
 
                 result['user_sa'] = user_sa
                 result['datasets'] = datasets
-                status = '200'
+                status = 200
         else:
             result = {'message': 'There was no Google Cloud Project provided.'}
-            status = '404'
+            status = 404
 
     except TokenFailure:
         result = {'message': "Your Data Commons Framework identity needs to be reestablished to complete this task."}
-        status = '403'
+        status = 403
     except InternalTokenError:
         result = {'message': "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1932")}
-        status = '500'
+        status = 500
     except RefreshTokenExpired:
         result = {'message': "Your login to the Data Commons Framework has expired. You will need to log in again."}
-        status = '403'
+        status = 403
     except DCFCommFailure:
         result = {'message': "There was a communications problem contacting the Data Commons Framework."}
-        status = '503'
+        status = 503
     except Exception as e:
         logger.error("[ERROR] While verifying Service Accounts: ")
         logger.exception(e)
         result = {'message': 'There was an error while trying to verify this service account. Please contact feedback@isb-cgc.org.'}
-        status = '500'
+        status = 500
 
     return JsonResponse(result, status=status)
 
@@ -537,6 +537,11 @@ def register_sa(request, user_id):
         return redirect(reverse('user_detail', args=[user_id]))
     except DCFCommFailure:
         messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
+    except HttpError as e:
+        if e.resp.status == 403:
+            messages.error(request, 'Unable to register Service Accounts: Access to the Google Cloud Project [{}] was denied. Check permissions for the project.'.format(gcp_id))
+        else:
+            messages.error(request, 'Unable to register Service Accounts: Error occurred while accessing GCP [{}].'.format(gcp_id))
     except Exception as e:
         logger.error("[ERROR]: Unexpected Exception registering a Service Account {}".format(str(e)))
         logger.exception(e)
@@ -752,7 +757,7 @@ def delete_bqdataset(request, user_id, bqdataset_id):
 @csrf_protect
 def get_user_buckets(request, user_id):
     result = None
-    status = '200'
+    status = 200
 
     try:
         if int(request.user.id) != int(user_id):
@@ -770,7 +775,7 @@ def get_user_buckets(request, user_id):
         gcps = GoogleProject.objects.filter(user=req_user, active=1)
 
         if not gcps.count():
-            status = '500'
+            status = 500
             result = {
                 'status': 'error',
                 'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
@@ -787,7 +792,7 @@ def get_user_buckets(request, user_id):
                     result['data']['projects'].append(this_proj)
 
             if not len(result['data']['projects']):
-                status = '500'
+                status = 500
                 result = {
                     'status': 'error',
                     'msg': "No registered GCS buckets were found in your Google Cloud Projects. Please register "
@@ -796,7 +801,7 @@ def get_user_buckets(request, user_id):
                 logger.info(
                     "[STATUS] No registered buckets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
             else:
-                status = '200'
+                status = 200
                 result['status'] = 'success'
 
 
@@ -804,7 +809,7 @@ def get_user_buckets(request, user_id):
         logger.error("[ERROR] While retrieving user {}'s registered GCS buckets:".format(str(user_id)))
         logger.exception(e)
         result = {'message': "There was an error while retrieving your GCS buckets--please contact feedback@isb-cgc.org.".format(str(request.user.id)), 'status': 'error'}
-        status='500'
+        status=500
 
     return JsonResponse(result, status=status)
 
@@ -813,7 +818,7 @@ def get_user_buckets(request, user_id):
 def get_user_datasets(request,user_id):
 
     result = None
-    status = '200'
+    status = 200
 
     try:
         if int(request.user.id) != int(user_id):
@@ -831,7 +836,7 @@ def get_user_datasets(request,user_id):
         gcps = GoogleProject.objects.filter(user=req_user, active=1)
 
         if not gcps.count():
-            status = '500'
+            status = 500
             result = {
                 'status': 'error',
                 'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
@@ -858,7 +863,7 @@ def get_user_datasets(request,user_id):
                     result['data']['projects'].append(this_proj)
 
             if not len(result['data']['projects']):
-                status = '500'
+                status = 500
                 result = {
                     'status': 'error',
                     'msg': "No registered BigQuery datasets were found in your Google Cloud Projects. Please register "
@@ -867,7 +872,7 @@ def get_user_datasets(request,user_id):
                 logger.info(
                     "[STATUS] No registered datasets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
             else:
-                status = '200'
+                status = 200
                 result['status'] = 'success'
 
 
@@ -875,6 +880,6 @@ def get_user_datasets(request,user_id):
         logger.error("[ERROR] While retrieving user {}'s registered BQ datasets and tables:".format(str(user_id)))
         logger.exception(e)
         result = {'message': "There was an error while retrieving your datasets and BQ tables. Please contact feedback@isb-cgc.org.".format(str(request.user.id)), 'status': 'error'}
-        status='500'
+        status=500
 
     return JsonResponse(result, status=status)

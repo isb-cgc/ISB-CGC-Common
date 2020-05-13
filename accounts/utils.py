@@ -44,7 +44,7 @@ def verify_gcp_for_reg(user, gcp_id, is_refresh=False):
     try:
 
         try:
-            gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+            gcp = GoogleProject.objects.get(project_id=gcp_id, active=1, user=user)
             # Can't register the same GCP twice - return immediately
             if not is_refresh:
                 return {'message': 'A Google Cloud Project with the project ID {} has already been registered.'.format(gcp_id)}, '400'
@@ -84,14 +84,15 @@ def verify_gcp_for_reg(user, gcp_id, is_refresh=False):
                 "register" if not is_refresh else "refresh",gcp_id)
             )
             logger.error("User {} was not found on GCP {}'s IAM policy.".format(user.email,gcp_id))
-            status = '403'
-            response['message'] = 'Your user email ({}) was not found in GCP {}. You may not {} a project you do not belong to.'.format(user.email,gcp_id,"register" if not is_refresh else "refresh")
+            status = 403
+            response['message'] = 'Unable to {} the project: Your account [{}] no longer has access to the GCP [{}].'.format("register" if not is_refresh else "refresh", user.email,gcp_id)
             if is_refresh:
                 gcp.user.set(gcp.user.all().exclude(id=user.id))
                 gcp.save()
+                response['message'] += '\nGCP project [{}] has been removed from your list.'.format(gcp_id)
         else:
             response = {'roles': roles, 'gcp_id': gcp_id}
-            status = '200'
+            status = 200
             if not fence_sa_found:
                 logger.warning("[WARNING] DCF Fence SA was not added to the IAM policy for GCP {}".format(gcp_id))
                 response['message'] = "The DCF Monitoring Service Account {} was not added to your project's IAM ".format(settings.DCF_MONITORING_SA) \
@@ -99,13 +100,18 @@ def verify_gcp_for_reg(user, gcp_id, is_refresh=False):
 
     except Exception as e:
         if type(e) is HttpError:
-            logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(gcp_id))
-            response['message'] = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
-            status = '400'
+            if e.resp.status == 403:
+                logger.error("[ERROR] Access to the GCP {} was denied during the verification process.".format(gcp_id))
+                response['message'] =  'Your access to the Google Cloud Project [{}] was denied during the verification process. Check permissions for the project.'.format(gcp_id)
+                status = 403
+            else:
+                logger.error("[ERROR] While trying to access IAM policies for GCP ID {}:".format(gcp_id))
+                response['message'] = 'There was an error accessing this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
+                status = 400
         else:
             logger.error("[ERROR] While trying to verify GCP ID {}:".format(gcp_id))
             response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
-            status = '500'
+            status = 500
         logger.exception(e)
 
     return response, status
@@ -146,9 +152,9 @@ def register_or_refresh_gcp(user, gcp_id, user_list, is_refresh=False):
             return response, status
         else:
             try:
-                gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
+                gcp = GoogleProject.objects.get(project_id=gcp_id, active=1, user=user)
                 if not is_refresh:
-                    response = {'message': "A Google Cloud Project with the id {} already exists.".format(gcp_id)}
+                    response = {'message': "A Google Cloud Project with the ID [{}] already exists.".format(gcp_id)}
                     status = 400
                     return response, status
 
