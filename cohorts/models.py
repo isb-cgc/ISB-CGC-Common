@@ -34,8 +34,20 @@ from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
+class CohortQuerySet(models.QuerySet):
+    def to_dicts(self):
+        return [{
+            "id": cohort.id,
+            "name": cohort.name,
+            "description": cohort.description,
+            "file_count": 0,
+            "hashes": []
+        } for cohort in self.all()]
 
 class CohortManager(models.Manager):
+    def get_queryset(self):
+        return CohortQuerySet(self.model, using=self._db)
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -107,7 +119,7 @@ class Cohort(models.Model):
     def get_data_sources(self, source_type=None):
         result = {}
 
-        cohort_filters = Filters.objects.filter(resulting_cohort=self)
+        cohort_filters = Filters.objects.select_related('attribute').filter(resulting_cohort=self)
         attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
 
         data_versions = self.get_data_versions()
@@ -127,7 +139,7 @@ class Cohort(models.Model):
     # Returns the set of filters defining this cohort as a dict organized by data source
     def get_filters_by_data_source(self, source_type=None):
 
-        cohort_filters = Filters.objects.filter(resulting_cohort=self)
+        cohort_filters = Filters.objects.select_related('attribute').filter(resulting_cohort=self)
         result = self.get_data_sources(source_type)
 
         for source in DataSource.SOURCE_TYPES:
