@@ -128,15 +128,16 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     query_result = {}
 
     try:
-        print("SOLR_CERT md5: {}".format(hashlib.md5(open(SOLR_CERT, 'rb').read()).hexdigest()))
         query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD), verify=SOLR_CERT)
         if query_response.status_code != 200:
-            logger.error(payload)
-            logger.error(query_response.json())
-            raise Exception("Saw response code {} when querying solr collection {} with string {}".format(str(query_response.status_code), collection, query_string))
+            msg = "Saw response code {} when querying solr collection {} with string {}\npayload: {}\nresponse text: {}".format(
+                str(query_response.status_code), collection, query_string, payload,
+                query_response.text
+            )
+            raise Exception(msg)
         query_result = query_response.json()
     except Exception as e:
-        logger.error("[ERROR] While querying solr collection {} with string {}".format(collection, query_string))
+        logger.error("[ERROR] While querying solr collection {}:".format(collection, query_string))
         logger.exception(e)
 
     return query_result
