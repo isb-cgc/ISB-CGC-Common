@@ -1571,7 +1571,7 @@ def set_minus_cohort(request):
 @csrf_protect
 def save_comment(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-    content = request.POST.get('content').encode('utf-8')
+    content = request.POST.get('content')
     cohort = Cohort.objects.get(id=int(request.POST.get('cohort_id')))
     obj = Cohort_Comments.objects.create(user=request.user, cohort=cohort, content=content)
     obj.save()
