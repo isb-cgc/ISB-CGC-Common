@@ -27,7 +27,8 @@ from django.conf import settings
 from .metadata_counting import count_public_data_type
 from .metadata_helpers import get_sql_connection, build_where_clause
 
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
+from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables, \
+    Attribute, Attribute_Ranges, Attribute_Display_Values, DataSource, DataVersion
 from cohorts.models import Cohort, Cohort_Perms
 
 from solr_helpers import *
@@ -56,6 +57,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
     user_id = user.id
     db = None
     cursor = None
+    facets = None
     limit_clause = ""
     offset_clause = ""
     file_list = []
@@ -66,35 +68,17 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
         if type == 'dicom':
-
-            filtered_query_string = "*:*"
-            fq_query_string = None
-
+            
+            solr_query = build_solr_query(inc_filters, with_tags_for_ex=do_filter_count) if inc_filters else None
             if cohort_id:
                 cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                fq_query_string = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
+                solr_query['queries'].append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
-            if inc_filters:
-                filtered_query_string = build_solr_query(inc_filters, "TCGA")
+            if do_filter_count:
+                facet_attr = Attribute.objects.filter(name__in=["disease_code", "Modality", "BodyPartExamined"])
+                facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None)
 
-            fiiltered_facets = build_solr_facets({"disease_code": []}, inc_filters)
-
-            unfiltered_queries = {}
-
-            fields = ["file_path", "case_barcode", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "disease_code", "project_short_name"]
-            count_facets = {"disease_code": []}
-
-            for filter in inc_filters:
-                if filter in count_facets:
-                    unfiltered = copy.deepcopy(inc_filters)
-                    del unfiltered[filter]
-                    unfiltered_queries[filter] = {}
-                    if len(unfiltered) <= 0:
-                        unfiltered = None
-                        unfiltered_queries[filter]['query'] = "*:*"
-                    else:
-                        unfiltered_queries[filter]['query'] = build_solr_query(unfiltered, "TCGA")
-                    unfiltered_queries[filter]['facets'] = build_solr_facets(count_facets, unfiltered)
+            fields = ["file_path", "case_barcode", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality", "disease_code", "project_short_name"]
 
             # col_map: used in the sql ORDER BY clause
             # key: html column attribute 'columnId'
@@ -115,9 +99,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             query_params = {
                 "collection": "tcga_tcia_images",
                 "fields": fields,
-                "query_string": filtered_query_string,
-                "fq_string": fq_query_string,
-                "facets": fiiltered_facets,
+                "fq_string": solr_query['queries'],
+                "facets": facets,
                 "sort": sort,
                 "offset": offset,
                 "limit": limit,
@@ -143,16 +126,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             if 'facets' in file_query_result:
                 filter_counts = file_query_result['facets']
-    
-            if do_filter_count:
-                for filter in unfiltered_queries:
-                    query_params['query_string'] = unfiltered_queries[filter]['query']
-                    query_params['counts_only'] = True
-                    query_params['facets'] = unfiltered_queries[filter]['facets']
-                    query_params['limit'] = 0
-                    unfiltered_result = query_solr_and_format_result(query_params)
-                    if 'facets' in unfiltered_result:
-                        filter_counts = unfiltered_result['facets']
 
         else:
             case_barcode = None
