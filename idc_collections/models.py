@@ -78,18 +78,31 @@ class Program(models.Model):
 class DataVersion(models.Model):
     IMAGE_DATA = 'I'
     ANCILLARY_DATA = 'A'
+    DERIVED_DATA = 'D'
     DATA_TYPES = (
         (IMAGE_DATA, 'Image Data'),
-        (ANCILLARY_DATA, 'Clinical and Biospecimen Data')
+        (ANCILLARY_DATA, 'Clinical and Biospecimen Data'),
+        (DERIVED_DATA, 'Derived Data')
     )
+    SET_TYPES = {
+        IMAGE_DATA: 'origin_set',
+        ANCILLARY_DATA: 'related_set',
+        DERIVED_DATA: 'derived_set'
+    }
     version = models.CharField(max_length=16, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=ANCILLARY_DATA)
     name = models.CharField(max_length=128, null=False, blank=False)
+    programs = models.ManyToManyField(Program)
     active = models.BooleanField(default=True)
 
     def get_active_version(self):
         return DataVersion.objects.get(active=True, name=name).version
 
+    def get_set_type(self):
+        return self.SET_TYPES[self.data_type]
+
+    def __str__(self):
+        return "{} ({}): {}".format(self.name, self.version, self.data_type)
 
 class Collection(models.Model):
     id = models.AutoField(primary_key=True)
@@ -186,6 +199,7 @@ class DataSource(models.Model):
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
+    programs = models.ManyToManyField(Program)
     objects = DataSourceManager()
 
     def get_collection_attr(self, for_faceting=True, for_ui=False):
@@ -208,6 +222,9 @@ class DataSource(models.Model):
             return DataSource.QUERY
         else:
             return DataSource.TERMS
+
+    def __str__(self):
+        return "{}: {} [{}]".format(self.name, self.version, self.source_type)
 
     class Meta(object):
         unique_together = (("name", "version", "source_type"),)
