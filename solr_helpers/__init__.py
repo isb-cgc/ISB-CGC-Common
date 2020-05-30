@@ -243,7 +243,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
 
     first = True
-    query_str = ''
+    full_query_str = ''
     query_set = None
     filter_tags = None
     count = 0
@@ -270,6 +270,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
         # TODO: sort out how we're handling mutations
 
     for attr, values in list(other_filters.items()):
+        query_str = ''
 
         if type(values) is dict and 'values' in values:
             values = values['values']
@@ -285,7 +286,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
             first = False
         else:
             if not with_tags_for_ex:
-                query_str += ' AND '
+                full_query_str += ' AND '
 
         # If it's looking for a single None value
         if len(values) == 1 and values[0] == 'None':
@@ -327,11 +328,11 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
             tag = "f{}".format(str(count))
             filter_tags[attr] = tag
             query_set[attr] = ("{!tag=%s}" % tag)+query_str
-            query_str = ''
+            full_query_str += query_str
             count += 1
 
     return {
         'queries': query_set,
-        'full_query_str': query_str,
+        'full_query_str': full_query_str,
         'filter_tags': filter_tags
     }
