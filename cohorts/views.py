@@ -1646,6 +1646,108 @@ def save_cohort_from_plot(request):
 
     return HttpResponse(json.dumps(result), status=200)
 
+@csrf_protect
+def filelist(request, panel_type=None):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
+    # Mi TODO - Need different html for different panel type later
+    if panel_type:
+        template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+    else:
+        template = 'cohorts/filelist.html'
+
+    try:
+        metadata_data_attr_builds = {
+            'HG19': fetch_build_data_attr('HG19', panel_type),
+            'HG38': fetch_build_data_attr('HG38', panel_type)
+        }
+
+        build = request.GET.get('build', 'HG19')
+
+        metadata_data_attr = metadata_data_attr_builds[build]
+
+        # Mi TODO - What about authentication??
+        # has_access = auth_dataset_whitelists_for_user(request.user.id)
+        has_access = None
+
+        items = None
+
+        if panel_type:
+            inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
+                request.POST.get('filters', '{}'))
+            if request.GET.get('case_barcode', None):
+                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'),]
+
+            # inc_filters = None
+
+            items = cohort_files(None, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
+
+            for attr in items['metadata_data_counts']:
+                if attr in metadata_data_attr:
+                    for val in items['metadata_data_counts'][attr]:
+                        if val not in metadata_data_attr[attr]['values']:
+                            metadata_data_attr[attr]['values'][val] = {
+                                'displ_value': val,
+                                'value': val,
+                                'name': val,
+                                'count': 0
+                            }
+                        metadata_data_attr[attr]['values'][val]['count'] = items['metadata_data_counts'][attr][val]
+
+            # Any value which didn't come back in the main results still needs to have a count of zero.
+            for attr in metadata_data_attr:
+                attr_values = []
+                for val in metadata_data_attr[attr]['values']:
+                    attr_val = metadata_data_attr[attr]['values'][val]
+                    if 'count' not in attr_val or not attr_val['count']:
+                        attr_val['count'] = 0
+                    attr_values.append(attr_val)
+                metadata_data_attr[attr]['values'] = attr_values
+
+        for attr_build in metadata_data_attr_builds:
+            if attr_build != build:
+                for attr in metadata_data_attr_builds[attr_build]:
+                    for val in metadata_data_attr_builds[attr_build][attr]['values']:
+                        metadata_data_attr_builds[attr_build][attr]['values'][val]['count'] = 0
+                    metadata_data_attr_builds[attr_build][attr]['values'] = [metadata_data_attr_builds[attr_build][attr]['values'][x] for x in
+                                                                             metadata_data_attr_builds[attr_build][attr]['values']]
+            metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
+
+        # cohort = Cohort.objects.get(id=cohort_id, active=True)
+        # cohort.perm = cohort.get_perm(request)
+
+        # Check if cohort contains user data samples - return info message if it does.
+        # Get user accessed projects
+        # user_projects = Project.get_user_projects(request.user)
+        # cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
+        # if cohort_sample_list.count():
+        #     messages.info(
+        #         request,
+        #         "File listing is not available for cohort samples that come from a user uploaded project. " +
+        #         "This functionality is currently being worked on and will become available in a future release."
+        #     )
+
+        logger.debug("[STATUS] Returning response from cohort_filelist")
+
+        return render(request, template, {'request': request,
+                                            # 'cohort': cohort,
+                                            'total_file_count': (items['total_file_count'] if items else 0),
+                                            # 'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                            # 'export_url': reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'}),
+                                            'metadata_data_attr': metadata_data_attr_builds,
+                                            'file_list': (items['file_list'] if items else []),
+                                            'file_list_max': MAX_FILE_LIST_ENTRIES,
+                                            'sel_file_max': MAX_SEL_FILES,
+                                            'img_thumbs_url': settings.IMG_THUMBS_URL,
+                                            'has_user_data': False,
+                                            'build': build})
+                                            # 'programs_this_cohort': cohort.get_program_names()})
+    except Exception as e:
+        logger.error("[ERROR] While trying to view the cohort file list: ")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
+        return redirect(reverse('cohort'))
+
 
 @login_required
 @csrf_protect

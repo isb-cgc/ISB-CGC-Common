@@ -46,14 +46,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
-    if not cohort_id:
-        raise Exception("A cohort ID must be supplied to view a its files.")
+    # if not cohort_id:
+        # raise Exception("A cohort ID must be supplied to view a its files.")
 
     if not inc_filters:
         inc_filters = {}
 
-    user_email = user.email
-    user_id = user.id
+    user_email = 'mi@isb.org' #user.email
+    user_id = '123' #user.id
     db = None
     cursor = None
     limit_clause = ""
@@ -63,7 +63,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
-        Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
+        # Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
         if type == 'dicom':
 
@@ -170,7 +170,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                  JOIN (
                      SELECT DISTINCT case_barcode
                      FROM cohorts_samples
-                     WHERE cohort_id = {cohort_id}
                  ) cs
                  ON cs.case_barcode = md.case_barcode
                  WHERE TRUE {filter_conditions} {case_barcode_condition}
@@ -203,7 +202,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             db = get_sql_connection()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
 
-            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+            #cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+            cohort_programs = Program.objects.filter(active=True, name='CCLE').distinct()
             select_clause = ''
             count_select_clause = ''
             first_program = True
