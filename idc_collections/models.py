@@ -54,42 +54,59 @@ class Program(models.Model):
         return self.idc_collections_set.filter(active=1)
 
     @classmethod
-    def get_user_programs(cls, user, includeShared=True, includePublic=False):
-        programs = user.program_set.filter(active=True)
-        if includeShared:
-            sharedPrograms = cls.objects.filter(shared__matched_user=user, shared__active=True, active=True)
-            programs = programs | sharedPrograms
-        if includePublic:
-            publicPrograms = cls.objects.filter(is_public=True, active=True)
-            programs = programs | publicPrograms
-
-        programs = programs.distinct()
-
-        return programs
-
-    @classmethod
     def get_public_programs(cls):
-        return cls.objects.filter(is_public=True, active=True)
+        return Program.objects.filter(active=True,is_public=True,owner=User.objects.get(is_active=True,username="idc",is_superuser=True,is_staff=True))
 
     def __str__(self):
         return "{} ({}), {}".format(self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email))
 
 
+class Project(models.Model):
+    id = models.AutoField(primary_key=True)
+    # Eg. TCGA-BRCA
+    short_name = models.CharField(max_length=15, null=False, blank=False)
+    # Eg. Framingham Heart Study
+    name = models.CharField(max_length=255, null=True)
+    description = models.TextField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+    owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    is_public = models.BooleanField(default=False)
+    shared = models.ManyToManyField(Shared_Resource)
+    program = models.ForeignKey(Program, on_delete=models.CASCADE)
+
+    def __str__(self):
+        return "{} ({}), {}".format(self.short_name, self.name,
+                                    "Public" if self.is_public else "Private (owner: {})".format(self.owner.email))
+
+
 class DataVersion(models.Model):
     IMAGE_DATA = 'I'
     ANCILLARY_DATA = 'A'
+    DERIVED_DATA = 'D'
     DATA_TYPES = (
         (IMAGE_DATA, 'Image Data'),
-        (ANCILLARY_DATA, 'Clinical and Biospecimen Data')
+        (ANCILLARY_DATA, 'Clinical and Biospecimen Data'),
+        (DERIVED_DATA, 'Derived Data')
     )
+    SET_TYPES = {
+        IMAGE_DATA: 'origin_set',
+        ANCILLARY_DATA: 'related_set',
+        DERIVED_DATA: 'derived_set'
+    }
     version = models.CharField(max_length=16, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=ANCILLARY_DATA)
     name = models.CharField(max_length=128, null=False, blank=False)
+    programs = models.ManyToManyField(Program)
     active = models.BooleanField(default=True)
 
     def get_active_version(self):
         return DataVersion.objects.get(active=True, name=name).version
 
+    def get_set_type(self):
+        return self.SET_TYPES[self.data_type]
+
+    def __str__(self):
+        return "{} ({}): {}".format(self.name, self.version, self.data_type)
 
 class Collection(models.Model):
     id = models.AutoField(primary_key=True)
@@ -186,6 +203,7 @@ class DataSource(models.Model):
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
+    programs = models.ManyToManyField(Program)
     objects = DataSourceManager()
 
     def get_collection_attr(self, for_faceting=True, for_ui=False):
@@ -208,6 +226,9 @@ class DataSource(models.Model):
             return DataSource.QUERY
         else:
             return DataSource.TERMS
+
+    def __str__(self):
+        return "{}: {} [{}]".format(self.name, self.version, self.source_type)
 
     class Meta(object):
         unique_together = (("name", "version", "source_type"),)

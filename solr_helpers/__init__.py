@@ -84,8 +84,6 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
-        print("Excepted result:")
-        print(result)
 
     return formatted_query_result
 
@@ -236,38 +234,83 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
 
     return facets
 
-
 # Build a query string for Solr
-def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
+def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
 
     first = True
-    query_str = ''
+    full_query_str = ''
     query_set = None
     filter_tags = None
     count = 0
-
     mutation_filters = {}
-    other_filters = {}
+    main_filters = {}
 
-    # Split mutation filters into their own set, because of repeat use of the same attrs
-    for attr in filters:
+    # Because mutation filters can have their operation specified, split them out separately:
+    for attr, values in list(filters.items()):
         if 'MUT:' in attr:
-            mutation_filters[attr] = filters[attr]
+            mutation_filters[attr] = values
         else:
-            other_filters[attr] = filters[attr]
+            main_filters[attr] = values
 
-    # 'Mutation' filters, special category for MUT: type filters
+    # Mutation filters
     for attr, values in list(mutation_filters.items()):
+        if type(values) is dict and 'values' in values:
+            values = values['values']
+
         if type(values) is not list:
-            values = [values]
-        gene = attr.split(':')[2]
+            if type(values) is str and "," in values:
+                values = values.split(',')
+            else:
+                values = [values]
+
+        # If it's first in the list, don't append an "and"
+        if first:
+            first = False
+        else:
+            if not with_tags_for_ex:
+                full_query_str += ' {} '.format(comb_with)
+
+        attr_name = 'Variant_Classification'
         gene_field = "Hugo_Symbol"
+        gene = attr.split(':')[2]
         filter_type = attr.split(':')[-1].lower()
-        invert = bool(attr.split(':')[3] == 'NOT')
+        invert = bool(re.search("\:NOT\:", attr))
 
-        # TODO: sort out how we're handling mutations
+        values_filter = ''
+        if filter_type == 'category':
+            if values[0].lower() == 'any':
+                values_filter = "*"
+            else:
+                for val in values:
+                    values_filter += ("(\"" + "\" \"".join(MOLECULAR_CATEGORIES[val]) + "\")")
+        else:
+            values_filter += ("(\"" + "\" \"".join(values) + "\")")
 
-    for attr, values in list(other_filters.items()):
+        query = '(+%s:("%s") AND +%s:%s)' % (gene_field, gene, attr_name, values_filter)
+
+        if invert:
+            inverted_query = "{!join to=%s from=%s}%s" % (
+                subq_join_field, subq_join_field, query.replace("\"", "\\\"")
+            )
+            query_str = ' (-_query_:"{}")'.format(inverted_query)
+        else:
+            query_str = query
+
+        query_set = query_set or {}
+        full_query_str += query_str
+
+        if with_tags_for_ex:
+            filter_tags = filter_tags or {}
+            tag = "f{}".format(str(count))
+            filter_tags[attr] = tag
+            query_str = ("{!tag=%s}" % tag)+query_str
+            count += 1
+
+        query_set[attr] = query_str
+
+    # All other filters
+    for attr, values in list(main_filters.items()):
+        query_str = ''
 
         if type(values) is dict and 'values' in values:
             values = values['values']
@@ -283,53 +326,60 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False):
             first = False
         else:
             if not with_tags_for_ex:
-                query_str += ' AND '
+                full_query_str += ' AND '
 
-        # If it's looking for a single None value
-        if len(values) == 1 and values[0] == 'None':
-            query_str += '(-%s:{* TO *})' % attr
-        # If it's a ranged value, calculate the bins
-        elif attr == 'bmi':
-            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
-            if 'None' in values:
-                values.remove('None')
-                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
-            else:
-                query_str += "+({})".format(clause)
-        elif attr[:attr.rfind('_')] in RANGE_FIELDS:
-            attr_name = attr[:attr.rfind('_')]
-            clause = ""
-            if len(values) > 1 and type(values[0]) is list:
-                clause = " {} ".format(comb_with).join(
-                    ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
-            elif len(values) > 1 :
-                clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
-            else:
-                clause = "{}:{}".format(attr_name, values[0])
-
-            if 'None' in values:
-                values.remove('None')
-                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
-            else:
-                query_str += "+({})".format(clause)
+        # Mutation filter
+        if 'MUT:' in attr:
+            continue
         else:
-            if 'None' in values:
-                values.remove('None')
-                query_str += '-(-(%s:("%s")) +(%s:{* TO *}))' % (attr,"\" \"".join(values), attr)
+            # If it's looking for a single None value
+            if len(values) == 1 and values[0] == 'None':
+                query_str += '(-%s:{* TO *})' % attr
+            # If it's a ranged value, calculate the bins
+            elif attr == 'bmi':
+                clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+                if 'None' in values:
+                    values.remove('None')
+                    query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
+                else:
+                    query_str += "+({})".format(clause)
+            elif attr[:attr.rfind('_')] in RANGE_FIELDS:
+                attr_name = attr[:attr.rfind('_')]
+                clause = ""
+                if len(values) > 1 and type(values[0]) is list:
+                    clause = " {} ".format(comb_with).join(
+                        ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
+                elif len(values) > 1 :
+                    clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
+                else:
+                    clause = "{}:{}".format(attr_name, values[0])
+
+                if 'None' in values:
+                    values.remove('None')
+                    query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
+                else:
+                    query_str += "+({})".format(clause)
             else:
-                query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
+                if 'None' in values:
+                    values.remove('None')
+                    query_str += '-(-(%s:("%s")) +(%s:{* TO *}))' % (attr,"\" \"".join(values), attr)
+                else:
+                    query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
+
+        query_set = query_set or {}
+        full_query_str += query_str
 
         if with_tags_for_ex:
-            query_set = query_set or {}
             filter_tags = filter_tags or {}
             tag = "f{}".format(str(count))
             filter_tags[attr] = tag
-            query_set[attr] = ("{!tag=%s}" % tag)+query_str
-            query_str = ''
+            query_str = ("{!tag=%s}" % tag)+query_str
             count += 1
+
+        query_set[attr] = query_str
 
     return {
         'queries': query_set,
-        'full_query_str': query_str,
+        'full_query_str': full_query_str,
         'filter_tags': filter_tags
     }

@@ -71,7 +71,7 @@ def _delete_cohort(user, cohort_id):
     return cohort_info
 
 
-def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_insens=True):
+def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, versions=None, case_insens=True):
     cohort_info = {}
 
     try:
@@ -102,6 +102,8 @@ def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_
     
         # Make and save cohort
         cohort = Cohort.objects.create(name=name)
+        if desc:
+            cohort.description = desc
         cohort.save()
     
         # Set permission for user to be owner
@@ -111,20 +113,13 @@ def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_
         # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
         # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
         grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
-    
-        # Get versions of datasets to be filtered, and link to filter group
-        imaging_version = 'imaging_version' in filterset and \
-                          len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
-                          DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
-                          DataVersion.objects.get(active=True, name='TCIA Image Data')
-        grouping.data_versions.add(imaging_version)
-    
-        bioclin_version = 'bioclin_version' in filterset and \
-                          len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
-                          DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
-                          DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
-        grouping.data_versions.add(bioclin_version)
-    
+
+        # If versions aren't specified, assume active versions
+        versions = versions or DataVersion.objects.filter(active=True)
+
+        for v in versions:
+            grouping.data_versions.add(v)
+
         for attr in attributes:
             filter_values = attributes[attr]
             attr_id = Attribute.objects.get(name=attr)
