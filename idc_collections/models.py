@@ -53,6 +53,9 @@ class Program(models.Model):
     def get_all_collections(self):
         return self.idc_collections_set.filter(active=1)
 
+    def get_public_programs(self):
+        return self.objects.filter(active=True,is_public=True,owner=User.objects.get(active=True,name="idc",is_superuser=True,is_staff=True))
+
     def __str__(self):
         return "{} ({}), {}".format(self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email))
 
