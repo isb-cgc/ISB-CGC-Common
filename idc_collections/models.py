@@ -164,7 +164,8 @@ class DataSourceQuerySet(models.QuerySet):
                     'attrs': attr_set.distinct(),
                     'shared_id_col': ds.shared_id_col,
                     'name': ds.name,
-                    'data_type': ds.version.data_type
+                    'data_type': ds.version.data_type,
+                    'set_type': ds.version.get_set_type()
                 }
 
             attrs['list'] = attr_set.values_list('name', flat=True) if not attrs['list'] else (attrs['list'] | attr_set.values_list('name', flat=True))
