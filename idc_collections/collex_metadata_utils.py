@@ -58,7 +58,8 @@ def _build_attr_by_source(attrs, data_versions, source_type):
                     'alias': source.name.split(".")[-1].lower().replace("-", "_"),
                     'list': [attr.name],
                     'attrs': [attr],
-                    'data_type': source.version.data_type
+                    'data_type': source.version.data_type,
+                    'set_type': source.version.get_set_type()
                 }
             else:
                 attr_by_src[source.name]['list'].append(attr.name)
@@ -120,7 +121,8 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
             'name': y['sources'][x]['name'],
             'alias': y['sources'][x]['name'].split(".")[-1].lower().replace("-", "_"),
             'shared_id_col': y['sources'][x]['shared_id_col'],
-            'type': y['sources'][x]['data_type']
+            'type': y['sources'][x]['data_type'],
+            'set': y['sources'][x]['set_type']
         } for y in [facet_attr_by_bq, filter_attr_by_bq] for x in y['sources']
     }
 
@@ -186,7 +188,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                         join_to_id=table_info[facet_table]['shared_id_col']
                     ))
                 facet = attr_facet.name
-                source_set = 'origin_set' if table_info[facet_table]['type'] == DataVersion.IMAGE_DATA else 'related_set'
+                source_set = table_info[facet_table]['set']
                 if source_set not in results['facets']:
                     results['facets'][source_set] = { facet_table: {'facets': {}}}
                 if facet_table not in results['facets'][source_set]:
