@@ -19,7 +19,7 @@ import time
 import copy
 from time import sleep
 
-from idc_collections.models import DataVersion, DataSource
+from idc_collections.models import DataVersion, DataSource, DataSourceJoin
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from django.conf import settings
@@ -38,7 +38,7 @@ logger = logging.getLogger('main_logger')
 # structure:
 # {
 #     <source name>: {
-#         'shared_id_col': <column used to join this Solr collection or BQ table,
+#         'id': ID of this Solr collection or BQ table,
 #         'alias': <alias for table in BQ queries; required for BQ, unneeded for Solr>,
 #         'list': <list of attributes by name>,
 #         'attrs': <list of attributes as ORM objects>,
@@ -54,7 +54,7 @@ def _build_attr_by_source(attrs, data_versions, source_type):
         for source in sources:
             if source.name not in attr_by_src:
                 attr_by_src[source.name] = {
-                    'shared_id_col': source.shared_id_col,
+                    'id': source.id,
                     'alias': source.name.split(".")[-1].lower().replace("-", "_"),
                     'list': [attr.name],
                     'attrs': [attr],
@@ -120,9 +120,10 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
         x: {
             'name': y['sources'][x]['name'],
             'alias': y['sources'][x]['name'].split(".")[-1].lower().replace("-", "_"),
-            'shared_id_col': y['sources'][x]['shared_id_col'],
+            'id': y['sources'][x]['id'],
             'type': y['sources'][x]['data_type'],
-            'set': y['sources'][x]['set_type']
+            'set': y['sources'][x]['set_type'],
+            'count_col': y['sources'][x]['count_col']
         } for y in [facet_attr_by_bq, filter_attr_by_bq] for x in y['sources']
     }
 
@@ -165,12 +166,17 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                     )
                     param_sfx += 1
 
+                    source_join = DataSourceJoin.objects.get(
+                        from_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']],
+                        to_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']]
+                    )
+
                     joins.append(join_clause_base.format(
                         join_to_table=table_info[filter_bqtable]['name'],
                         join_to_alias=table_info[filter_bqtable]['alias'],
-                        join_to_id=table_info[filter_bqtable]['shared_id_col'],
+                        join_to_id=source_join.get_col(table_info[filter_bqtable]['name']),
                         join_from_alias=table_info[image_table]['alias'],
-                        join_from_id=table_info[image_table]['shared_id_col']
+                        join_from_id=source_join.get_col(table_info[image_table]['name'])
                     ))
                     params.append(filter_clauses[filter_bqtable]['parameters'])
                     query_filters.append(filter_clauses[filter_bqtable]['filter_string'])
@@ -179,13 +185,18 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
         for facet_table in facet_attr_by_bq['sources']:
             for attr_facet in facet_attr_by_bq['sources'][facet_table]['attrs']:
                 facet_joins = copy.deepcopy(joins)
+                source_join = None
                 if facet_table not in image_tables and facet_table not in tables_in_query:
+                    source_join = DataSourceJoin.objects.get(
+                        from_src__in=[table_info[facet_table]['id'], table_info[image_table]['id']],
+                        to_src__in=[table_info[facet_table]['id'], table_info[image_table]['id']]
+                    )
                     facet_joins.append(join_clause_base.format(
                         join_from_alias=table_info[image_table]['alias'],
-                        join_from_id=table_info[image_table]['shared_id_col'],
+                        join_from_id=source_join.get_col(table_info[image_table]['name']),
                         join_to_alias=table_info[facet_table]['alias'],
                         join_to_table=table_info[facet_table]['name'],
-                        join_to_id=table_info[facet_table]['shared_id_col']
+                        join_to_id=source_join.get_col(table_info[facet_table]['name']),
                     ))
                 facet = attr_facet.name
                 source_set = table_info[facet_table]['set']
@@ -199,10 +210,16 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                 count_jobs[facet] = {}
                 sel_count_col = None
                 if attr_facet.data_type == Attribute.CONTINUOUS_NUMERIC:
-                    sel_count_col = _get_bq_range_case_clause(attr_facet, table_info[facet_table]['name'], table_info[facet_table]['alias'], table_info[facet_table]['shared_id_col'])
+                    sel_count_col = _get_bq_range_case_clause(
+                        attr_facet,
+                        table_info[facet_table]['name'],
+                        table_info[facet_table]['alias'],
+                        source_join.get_col(table_info[facet_table]['name'])
+                    )
                 else:
                     sel_count_col = "{}.{} AS {}".format(table_info[facet_table]['alias'], facet, facet)
-                count_clause = count_clause_base.format(sel_count_col=sel_count_col, count_col="{}.{}".format(table_info[image_table]['alias'], table_info[image_table]['shared_id_col'],))
+                count_clause = count_clause_base.format(
+                    sel_count_col=sel_count_col, count_col="{}.{}".format(table_info[image_table]['alias'], table_info[image_table]['count_col'],))
                 count_query = query_base.format(
                     facet=facet,
                     table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),
@@ -307,7 +324,7 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
         x: {
             'name': y['sources'][x]['name'],
             'alias': y['sources'][x]['name'].split(".")[-1].lower().replace("-", "_"),
-            'shared_id_col': y['sources'][x]['shared_id_col']
+            'id': y['sources'][x]['id']
         } for y in [field_attr_by_bq, filter_attr_by_bq] for x in y['sources']
     }
 
@@ -369,12 +386,17 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
                     )
                     param_sfx += 1
 
+                    source_join = DataSourceJoin.objects.get(
+                        from_src__in=[table_info[filter_bqtable]['id'],table_info[image_table]['id']],
+                        to_src__in=[table_info[filter_bqtable]['id'],table_info[image_table]['id']]
+                    )
+
                     joins.append(join_clause_base.format(
                         filter_alias=table_info[filter_bqtable]['alias'],
                         filter_table=table_info[filter_bqtable]['name'],
-                        filter_join_id=table_info[filter_bqtable]['shared_id_col'],
+                        filter_join_id=source_join.get_col(filter_bqtable),
                         field_alias=table_info[image_table]['alias'],
-                        field_join_id=table_info[image_table]['shared_id_col']
+                        field_join_id=source_join.get_col(image_table)
                     ))
                     params.append(filter_clauses[filter_bqtable]['parameters'])
                     query_filters.append(filter_clauses[filter_bqtable]['filter_string'])
@@ -386,12 +408,16 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
             if field_bqtable not in image_tables and field_bqtable not in tables_in_query:
                 if len(field_clauses[field_bqtable]):
                     fields.append(field_clauses[field_bqtable])
+                source_join = DataSourceJoin.objects.get(
+                    from_src__in=[table_info[field_bqtable]['id'], table_info[image_table]['id']],
+                    to_src__in=[table_info[field_bqtable]['id'], table_info[image_table]['id']]
+                )
                 joins.append(join_clause_base.format(
                     field_alias=table_info[image_table]['alias'],
-                    field_join_id=table_info[image_table]['shared_id_col'],
+                    field_join_id=source_join.get_col(table_info[image_table]['name']),
                     filter_alias=table_info[field_bqtable]['alias'],
                     filter_table=table_info[field_bqtable]['name'],
-                    filter_join_id=table_info[field_bqtable]['shared_id_col']
+                    filter_join_id=source_join.get_col(table_info[field_bqtable]['name'])
                 ))
 
         for_union.append(query_base.format(
@@ -505,7 +531,7 @@ def get_bq_string(filters, fields, data_versions, group_by=None, limit=0, offset
             if bqtable.name not in filter_attr_by_bq:
                 filter_attr_by_bq[bqtable.name] = {}
                 table_info[bqtable.name] = {
-                    'id_col': bqtable.shared_id_col
+                    'id': bqtable.id
                 }
                 alias = bqtable.name.split(".")[-1].lower().replace("-", "_")
                 table_info[bqtable.name]['alias'] = alias
@@ -524,7 +550,7 @@ def get_bq_string(filters, fields, data_versions, group_by=None, limit=0, offset
                 field_attr_by_bq[bqtable.name] = {}
                 field_attr_by_bq[bqtable.name]['list'] = [attr.name]
                 table_info[bqtable.name] = {
-                    'id_col': bqtable.shared_id_col
+                    'id': bqtable.id
                 }
                 alias = bqtable.name.split(".")[-1].lower().replace("-", "_")
                 table_info[bqtable.name]['alias'] = alias

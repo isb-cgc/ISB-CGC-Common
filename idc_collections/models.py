@@ -162,9 +162,10 @@ class DataSourceQuerySet(models.QuerySet):
                 attrs['sources'][ds.id] = {
                     'list': attr_set.values_list('name', flat=True).distinct(),
                     'attrs': attr_set.distinct(),
-                    'shared_id_col': ds.shared_id_col,
+                    'id': ds.id,
                     'name': ds.name,
                     'data_type': ds.version.data_type,
+                    'count_col': ds.count_col,
                     'set_type': ds.version.get_set_type()
                 }
 
@@ -202,7 +203,7 @@ class DataSource(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
+    count_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     programs = models.ManyToManyField(Program)
     objects = DataSourceManager()
@@ -233,6 +234,20 @@ class DataSource(models.Model):
 
     class Meta(object):
         unique_together = (("name", "version", "source_type"),)
+
+
+class DataSourceJoin(models.Model):
+    from_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="from_data_source")
+    from_src_col = models.CharField(max_length=64, null=False, blank=False)
+    to_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="to_data_source")
+    to_src_col = models.CharField(max_length=64, null=False, blank=False)
+
+    def get_col(self, source_name):
+        if source_name == self.from_src.name:
+            return self.from_src_col
+        elif source_name == self.to_src.name:
+            return self.to_src_col
+        return None
 
 
 class Attribute(models.Model):
