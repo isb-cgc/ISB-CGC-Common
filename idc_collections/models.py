@@ -108,6 +108,7 @@ class DataVersion(models.Model):
     def __str__(self):
         return "{} ({}): {}".format(self.name, self.version, self.data_type)
 
+
 class Collection(models.Model):
     id = models.AutoField(primary_key=True)
     # Eg. BRCA
@@ -175,6 +176,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         return attrs
 
+
 class DataSourceManager(models.Manager):
     def get_queryset(self):
         return DataSourceQuerySet(self.model, using=self._db)
@@ -190,6 +192,7 @@ class DataSourceManager(models.Manager):
 
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
+
 
 class DataSource(models.Model):
     QUERY = 'query'
@@ -252,12 +255,14 @@ class DataSourceJoin(models.Model):
 
 class Attribute(models.Model):
     CONTINUOUS_NUMERIC = 'N'
+    CATEGORICAL_NUMERIC = 'M'
     CATEGORICAL = 'C'
     TEXT = 'T'
     STRING = 'S'
     DATA_TYPES = (
         (CONTINUOUS_NUMERIC, 'Continuous Numeric'),
         (CATEGORICAL, 'Categorical String'),
+        (CATEGORICAL_NUMERIC, 'Categorical Number'),
         (TEXT, 'Text'),
         (STRING, 'String')
     )
@@ -269,6 +274,7 @@ class Attribute(models.Model):
     active = models.BooleanField(default=True)
     is_cross_collex = models.BooleanField(default=False)
     preformatted_values = models.BooleanField(default=False)
+    units = models.CharField(max_length=256, blank=True, null=True)
     default_ui_display = models.BooleanField(default=True, null=False, blank=False)
     data_sources = models.ManyToManyField(DataSource)
 
@@ -299,9 +305,11 @@ class Attribute_Display_ValuesQuerySet(models.QuerySet):
 
         return dvals
 
+
 class Attribute_Display_ValuesManager(models.Manager):
     def get_queryset(self):
         return Attribute_Display_ValuesQuerySet(self.model, using=self._db)
+
 
 class Attribute_Display_Values(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -315,7 +323,6 @@ class Attribute_Display_Values(models.Model):
 
     def __str__(self):
         return "{} - {}".format(self.raw_value, self.display_value)
-
 
 class Attribute_Ranges(models.Model):
     FLOAT = 'F'
@@ -352,10 +359,9 @@ class User_Feature_Definitions(models.Model):
     bq_map_id = models.CharField(max_length=200)
     is_numeric = models.BooleanField(default=False)
     shared_map_id = models.CharField(max_length=128, null=True, blank=True)
-    
+
 
 class User_Feature_Counts(models.Model):
     feature = models.ForeignKey(User_Feature_Definitions, null=False, on_delete=models.CASCADE)
     value = models.TextField()
     count = models.IntegerField()
-
