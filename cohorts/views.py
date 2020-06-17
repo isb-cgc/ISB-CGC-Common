@@ -2058,7 +2058,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     try:
         # Check program ID against public programs
-        public_program = Program.objects.filter(id=program_id).first()
+        public_program = Program.objects.get(id=program_id)
         user = request.user
 
         if public_program:
@@ -2070,12 +2070,15 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 # Currently we do not select anything by default
                 filters = None
 
-            clin_attr = fetch_program_attr(program_id)
+            case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
+                version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
+            ).get_source_attrs(for_ui=True)
 
+            #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
             molecular_attr_builds = None
 
-            if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
+            if len(public_program.get_data_sources(data_type=DataVersion.MUTATION_DATA)):
                 molecular_attr = {
                     'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
                     'attrs': MOLECULAR_ATTR
@@ -2092,16 +2095,24 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                         if ma:
                             ma['category'] = cat['value']
 
-            data_types = fetch_program_data_types(program_id)
+            data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.TYPE_AVAILABILITY_DATA).get_source_attrs(for_ui=True)
 
             results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
 
+            print(results)
+
+            # TODO: Eventually we will rewrite our template to not need this, but for now...
+            attr_counts = []
+            for set in results['counts']:
+                for attr in results['counts'][set]:
+                    val_list = [y for x, y in results['counts'][set][attr]['values'].items()]
+                    attr_counts.append(results['counts'][set][attr].update({'values': val_list}))
+
             template_values = {
                 'request': request,
-                'attr_counts': results['count'] if 'count' in results else [],
-                'data_type_counts': results['data_counts'] if 'data_counts' in results else [],
-                'total_samples': int(results['total']),
-                'clin_attr': clin_attr,
+                'attr_counts': attr_counts,
+                'total_samples': int(results['samples']),
+                'clin_attr': case_sample_attr,
                 'molecular_attr': molecular_attr,
                 'molecular_attr_builds': molecular_attr_builds,
                 'data_types': data_types,

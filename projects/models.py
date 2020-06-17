@@ -123,13 +123,21 @@ class DataVersion(models.Model):
     CLINICAL_DATA = 'C'
     BIOSPECIMEN_DATA = 'B'
     MUTATION_DATA = 'M'
+    TYPE_AVAILABILITY_DATA = 'D'
     DATA_TYPES = (
         (FILE_DATA, 'File Data'),
         (IMAGE_DATA, 'Image Data'),
         (CLINICAL_DATA, 'Clinical Data'),
         (BIOSPECIMEN_DATA, 'Biospecimen Data'),
         (MUTATION_DATA, 'Mutation Data'),
+        (TYPE_AVAILABILITY_DATA, 'File Data Availability')
     )
+    SET_TYPES = {
+        CLINICAL_DATA: 'case_data',
+        BIOSPECIMEN_DATA: 'case_data',
+        TYPE_AVAILABILITY_DATA: 'data_type_data',
+        MUTATION_DATA: 'molecular_data'
+    }
     version = models.CharField(max_length=16, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
     name = models.CharField(max_length=128, null=False, blank=False)
@@ -153,7 +161,7 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['sources'] = {}
 
         for ds in self.select_related('version').all():
-            attr_set = ds.attribute_set.filter(default_ui_display=for_ui, active=True) if for_ui is not None else ds.attribute_set.all()
+            attr_set = ds.attribute_set.filter(default_ui_display=for_ui, active=True) if for_ui is not None else ds.attribute_set.filter(active=True)
             attr_set = attr_set.filter(name__in=named_set) if named_set else attr_set
 
             if for_faceting:
@@ -210,6 +218,9 @@ class DataSource(models.Model):
     shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     objects = DataSourceManager()
+
+    def get_set_type(self):
+        return DataVersion.SET_TYPES[self.version.data_type]
 
     def get_source_attr(self, for_faceting=True, for_ui=False):
         if for_faceting:
@@ -456,8 +467,11 @@ class Attribute(models.Model):
 
         return result
 
-    def get_data_sources(self):
-        return self.data_sources.all().filter(active=True).values_list('name', flat=True)
+    def get_data_sources(self, source_type=None):
+        sources = self.data_sources.select_related('version').all().filter(version__active=True)
+        if source_type:
+            return sources.filter(source_type=source_type).values_list('name', flat=True)
+        return sources.values_list('name', flat=True)
 
     def __str__(self):
         return "{} ({}), Type: {}".format(
@@ -476,6 +490,19 @@ class Attribute_Display_Values(models.Model):
 
     def __str__(self):
         return "{} - {}".format(self.raw_value, self.display_value)
+    
+# Attributes with tooltips for their values can use this model to record them
+class Attribute_Tooltips(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    value = models.CharField(max_length=256, null=False, blank=False)
+    tooltip = models.CharField(max_length=256, null=False, blank=False)
+
+    class Meta(object):
+        unique_together = (("value", "attribute"),)
+
+    def __str__(self):
+        return "{} - {}".format(self.value, self.display_value)
 
 
 # Attributes which should have faceted counting performed in buckets of ranges can record those buckets
