@@ -736,7 +736,7 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
                     query_str += ' %s IS NULL' % key
                 else:
                     query_str += ' (' + sql_year_by_ranges(value) + ') '
-            elif key == 'event_free_survival' or key == 'days_to_death' or key == 'days_to_last_known_alive' or key == 'days_to_last_followup':
+            elif key == 'event_free_survival' or key == 'days_to_birth' or key == 'days_to_death' or key == 'days_to_last_known_alive' or key == 'days_to_last_followup':
                 if value == 'None':
                     query_str += ' %s IS NULL' % key
                 else:
