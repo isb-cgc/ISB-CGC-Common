@@ -302,9 +302,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
         for key in inc_filters:
-            if 'data_type' in key:
-                data_type_filters[key.split(':')[-1]] = inc_filters[key]
-            elif 'MUT:' in key:
+            if 'MUT:' in key or 'data_type' in key:
                     filters[key] = inc_filters[key]
             else:
                 filters[key.split(':')[-1]] = inc_filters[key]
@@ -429,12 +427,13 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                 # object which is relevant to this
                                 obj = DataSource.objects.get(name=source).get_source_attr().get(name=attr)
                             dvals = obj.get_display_values()
-                            facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'display_name': obj.display_name}
+                            facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
                             for val in vals:
                                 facets[set][attr]['values'][val] = {
                                     'name': val,
-                                    'diplay_value': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
-                                    'diplay_name': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
+                                    'value': val,
+                                    'displ_value': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
+                                    'displ_name': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
                                     'count': vals[val],
                                     # Supports #2018. This value object is the only information that gets used to
                                     # stock cohort checkboxes in the template. To support clicking on a treemap to
