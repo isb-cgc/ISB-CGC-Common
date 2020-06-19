@@ -529,8 +529,10 @@ class Attribute_Ranges(models.Model):
     # The beginning and end of the range
     first = models.CharField(max_length=128, null=False, blank=False, default="10")
     last = models.CharField(max_length=128, null=False, blank=False, default="80")
-    # The bucket's range. If gap == 0, this can be assumed to be a single range bucket
+    # Value to separate sequential buckets. If gap == 0, this can be assumed to be a single range bucket
     gap = models.CharField(max_length=128, null=False, blank=False, default="10")
+    # Value to determine display in include upper/lower situations
+    unit = models.CharField(max_length=128, null=False, blank=False, default="1")
     # Optional, for UI display purposes
     label = models.CharField(max_length=256, null=True, blank=True)
 

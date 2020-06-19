@@ -180,6 +180,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                 else:
                     # Iterated range
                     cast = int if attr_range.type == Attribute_Ranges.INT else float
+                    unit = cast(attr_range.unit)
                     gap = cast(attr_range.gap)
                     last = cast(attr_range.last)
                     lower = cast(attr_range.first)
@@ -190,7 +191,9 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                         lower = "*"
 
                     while lower == "*" or lower < last:
-                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, str(lower), str(upper))
+                        upper_display = str(upper-(0 if attr_range.include_upper else unit))
+                        lower_display = lower if lower == "*" else str(lower+(0 if attr_range.include_lower else unit))
+                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, lower_display, upper_display)
                         facets[facet_name] = {
                             'type': facet_type,
                             'field': attr.name,
@@ -206,7 +209,8 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
                     # If we stopped *at* the end, we need to add one last bucket.
                     if attr_range.unbounded:
-                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, str(attr_range.last), "*")
+                        last_display = str(last+(unit if attr_range.include_upper else 0))
+                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, last_display, "*")
                         facets[facet_name] = {
                             'type': facet_type,
                             'field': attr.name,
