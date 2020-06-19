@@ -3,7 +3,7 @@ from django.conf import settings
 import requests
 import logging
 import json
-from projects.models import DataSource, Attribute_Ranges
+from projects.models import DataSource, Attribute_Ranges, Attribute
 import re
 
 from metadata_utils import MOLECULAR_CATEGORIES
@@ -358,8 +358,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                     query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
                 else:
                     query_str += "+({})".format(clause)
-            elif attr[:attr.rfind('_')] in RANGE_FIELDS:
-                attr_name = attr[:attr.rfind('_')]
+            elif attr in RANGE_FIELDS or attr[:attr.rfind('_')] in RANGE_FIELDS:
+                print(values)
+                attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
                 clause = ""
                 if len(values) > 1 and type(values[0]) is list:
                     clause = " {} ".format(comb_with).join(
@@ -367,7 +368,13 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 elif len(values) > 1 :
                     clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
                 else:
-                    clause = "{}:{}".format(attr_name, values[0])
+                    if re.search('_[gl]t[e]|_btw',attr):
+                        clause = "{}:{}".format(attr_name, values[0])
+                    else:
+                        attr_range = Attribute.objects.get(name=attr_name,data_type=Attribute.CONTINUOUS_NUMERIC,active=True).get_ranges().first()
+                        u_boundary = "]" if attr_range.include_upper else "}"
+                        l_boundary = "[" if attr_range.include_lower else "{"
+                        clause = "{}:{}{}{}".format(attr_name, l_boundary, values[0].upper(), u_boundary)
 
                 if 'None' in values:
                     values.remove('None')

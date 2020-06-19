@@ -475,6 +475,9 @@ class Attribute(models.Model):
             return sources.filter(source_type=source_type).values_list('name', flat=True)
         return sources.values_list('name', flat=True)
 
+    def get_ranges(self):
+        return self.attribute_ranges_set.all()
+
     def __str__(self):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
