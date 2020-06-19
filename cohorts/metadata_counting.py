@@ -25,10 +25,13 @@ import django
 import re
 from .metadata_helpers import *
 from metadata_utils import *
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables
+from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, DataSource, DataVersion, Attribute, Attribute_Display_Values
+from cohorts.models import Cohort
+from django.contrib.auth.models import User
 from google_helpers.bigquery.service import authorize_credentials_with_Google
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+from solr_helpers import build_solr_facets, build_solr_query
 
 BQ_ATTEMPT_MAX = 10
 
@@ -280,653 +283,176 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
         if db and db.open: db.close()
 
 
-# Tally counts for metadata filters of public programs
-def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19', comb_mut_filters='OR'):
+def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_id=None, versions=None, source_type=DataSource.SOLR, comb_mut_filters='OR'):
+
     comb_mut_filters = comb_mut_filters.upper()
     user_id = 0
     if user:
         user_id = user.id
 
-    counts_and_total = {
-        'counts': [],
-        'data_counts': [],
-        'data_avail_items': []
-    }
-
     mutation_filters = None
-    data_type_where_clause = None
     filters = {}
     data_type_filters = {}
+    solr_cohort_filter = None
 
-    cohort_query = """
-        SELECT sample_barcode cs_sample_barcode
-        FROM cohorts_samples
-        WHERE cohort_id = %s
-    """
-
-    data_avail_sample_query = """
-        SELECT DISTINCT sample_barcode da_sample_barcode
-        FROM %s
-    """
-
-    # returns an object or None
-    program_tables = Public_Metadata_Tables.objects.filter(program_id=program_id).first()
-
-    base_table = program_tables.samples_table
-    data_avail_table = program_tables.sample_data_availability_table
-    data_type_table = program_tables.sample_data_type_availability_table
-
-    # Fetch the possible value set of all non-continuous attr columns
-    # (also fetches the display strings for all attributes and values which have them)
-    metadata_attr_values = fetch_metadata_value_set(program_id)
-
-    # Fetch the possible value set of all data types
-    metadata_data_type_values = fetch_program_data_types(program_id)
-
-    # Divide our filters into 'mutation' and 'non-mutation' sets
-    for key in inc_filters:
-        if 'MUT:' in key:
-            if not mutation_filters:
-                mutation_filters = {}
-            mutation_filters[key] = inc_filters[key]['values']
-        elif 'data_type' in key:
-            data_type_filters[key.split(':')[-1]] = inc_filters[key]
-        else:
-            filters[key.split(':')[-1]] = inc_filters[key]
-
-    data_avail_sample_subquery = None
-
-    if len(data_type_filters) > 0:
-        data_type_where_clause = build_where_clause(data_type_filters)
-        data_avail_sample_subquery = (data_avail_sample_query % data_avail_table) + ' WHERE '+data_type_where_clause['query_str']
-
-    db = None
-    cursor = None
+    results = { 'programs': {} }
 
     try:
-        params_tuple = ()
-        counts = {}
-        data_counts = {}
-        data_avail_items = []
-
-        db = get_sql_connection()
-        db.autocommit(True)
-        cursor = db.cursor()
-
-        # We need to perform 2 sets of queries: one with each filter excluded from the others, against the full
-        # metadata_samples/cohort JOIN, and one where all filters are applied to create a temporary table, and
-        # attributes *outside* that set are counted
-
-        unfiltered_attr = []
-        exclusionary_filter = {}
-        where_clause = None
-
-        for attr in metadata_attr_values:
-            if attr not in filters:
-                unfiltered_attr.append(attr)
-
-        # construct the WHERE clauses needed
-        if len(filters) > 0:
-            filter_copy = copy.deepcopy(filters)
-            where_clause = build_where_clause(filter_copy, program=program_id)
-            for filter_key in filters:
-                filter_copy = copy.deepcopy(filters)
-                del filter_copy[filter_key]
-
-                if len(filter_copy) <= 0:
-                    ex_where_clause = {'query_str': None, 'value_tuple': None}
-                else:
-                    ex_where_clause = build_where_clause(filter_copy, program=program_id)
-
-                exclusionary_filter[filter_key] = ex_where_clause
-
-        filter_table = None
-        tmp_mut_table = None
-        tmp_filter_table = None
-
-        # If there is a mutation filter, make a temporary table from the sample barcodes that this query
-        # returns
-        if mutation_filters:
-            build_queries = {}
-
-            # Split the filters into 'not any' and 'all other filters'
-            for mut_filt in mutation_filters:
-                build = mut_filt.split(':')[1]
-
-                if build not in build_queries:
-                    build_queries[build] = {
-                        'raw_filters': {},
-                        'filter_str_params': [],
-                        'queries': [],
-                        'not_any': None
-                    }
-
-                if 'NOT:' in mut_filt and 'category' in mut_filt and 'any' in mutation_filters[mut_filt]:
-                    if not build_queries[build]['not_any']:
-                        build_queries[build]['not_any'] = {}
-                    build_queries[build]['not_any'][mut_filt] = mutation_filters[mut_filt]
-                else:
-                    build_queries[build]['raw_filters'][mut_filt] = mutation_filters[mut_filt]
-
-            # If the combination is with AND, further split the 'not-not-any' filters, because they must be
-            # queried separately and JOIN'd. OR is done with UNION DISINCT and all of one build can go into
-            # a single query.
-            for build in build_queries:
-                if comb_mut_filters == 'AND':
-                    filter_num = 0
-                    for filter in build_queries[build]['raw_filters']:
-                        # Individual selection filters need to be broken out if we're ANDing
-                        if ':specific' in filter:
-                            for indiv_selex in build_queries[build]['raw_filters'][filter]:
-                                this_filter = {}
-                                this_filter[filter] = [indiv_selex,]
-                                build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
-                                    this_filter, comb_mut_filters, build + '_{}'.format(str(filter_num))
-                                ))
-                                filter_num += 1
-                        else:
-                            this_filter = {}
-                            this_filter[filter] = build_queries[build]['raw_filters'][filter]
-                            build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
-                                this_filter, comb_mut_filters, build+'_{}'.format(str(filter_num))
-                            ))
-                            filter_num += 1
-                elif comb_mut_filters == 'OR':
-                    if len(build_queries[build]['raw_filters']):
-                        build_queries[build]['filter_str_params'].append(BigQuerySupport.build_bq_filter_and_params(
-                            build_queries[build]['raw_filters'], comb_mut_filters, build
-                        ))
-
-            # Create the queries and their parameters
-            for build in build_queries:
-                bq_table_info = BQ_MOLECULAR_ATTR_TABLES[Program.objects.get(id=program_id).name][build]
-                sample_barcode_col = bq_table_info['sample_barcode_col']
-                bq_dataset = bq_table_info['dataset']
-                bq_table = bq_table_info['table']
-                bq_data_project_id = settings.BIGQUERY_DATA_PROJECT_ID
-
-                # Build the query for any filter which *isn't* a not-any query.
-                query_template = \
-                    ("SELECT {barcode_col}"
-                     " FROM `{data_project_id}.{dataset_name}.{table_name}`"
-                     " WHERE {where_clause}"
-                     " GROUP BY {barcode_col} ")
-
-                for filter_str_param in build_queries[build]['filter_str_params']:
-                    build_queries[build]['queries'].append(
-                        query_template.format(dataset_name=bq_dataset, data_project_id=bq_data_project_id,
-                                              table_name=bq_table, barcode_col=sample_barcode_col,
-                                              where_clause=filter_str_param['filter_string']))
-
-                # Here we build not-any queries
-                if build_queries[build]['not_any']:
-                    query_template = """
-                        SELECT {barcode_col}
-                        FROM `{data_project_id}.{dataset_name}.{table_name}`
-                        WHERE {barcode_col} NOT IN (
-                          SELECT {barcode_col}
-                          FROM `{data_project_id}.{dataset_name}.{table_name}`
-                          WHERE {where_clause}
-                          GROUP BY {barcode_col})
-                        GROUP BY {barcode_col}
-                    """
-
-                    any_count = 0
-                    for not_any in build_queries[build]['not_any']:
-                        filter = not_any.replace("NOT:", "")
-                        any_filter = {}
-                        any_filter[filter] = build_queries[build]['not_any'][not_any]
-                        any_filter_str_param = BigQuerySupport.build_bq_filter_and_params(
-                            any_filter,param_suffix=build+'_any_{}'.format(any_count)
-                        )
-
-                        build_queries[build]['filter_str_params'].append(any_filter_str_param)
-
-                        any_count += 1
-
-                        build_queries[build]['queries'].append(query_template.format(
-                            dataset_name=bq_dataset, data_project_id=bq_data_project_id, table_name=bq_table,
-                            barcode_col=sample_barcode_col, where_clause=any_filter_str_param['filter_string']))
-
-            query = None
-            # Collect the queries for chaining below with UNION or JOIN
-            queries = [q for build in build_queries for q in build_queries[build]['queries']]
-            # Because our parameters are uniquely named, they can be combined into a single list
-            params = [z for build in build_queries for y in build_queries[build]['filter_str_params'] for z in y['parameters']]
-
-            if len(queries) > 1:
-                if comb_mut_filters == 'OR':
-                    query = """ UNION DISTINCT """.join(queries)
-                else:
-                    query_template = """
-                        SELECT q0.sample_barcode_tumor
-                        FROM ({query1}) q0
-                        {join_clauses}
-                    """
-
-                    join_template = """
-                        JOIN ({query}) q{ct}
-                        ON q{ct}.sample_barcode_tumor = q0.sample_barcode_tumor
-                    """
-
-                    joins = []
-
-                    for i,val in enumerate(queries[1:]):
-                        joins.append(join_template.format(query=val, ct=str(i+1)))
-
-                    query = query_template.format(query1=queries[0], join_clauses=" ".join(joins))
-            else:
-                query = queries[0]
-
-            barcodes = []
-
-            start = time.time()
-            results = BigQuerySupport.execute_query_and_fetch_results(query, params)
-            stop = time.time()
-
-            logger.debug('[BENCHMARKING] Time to query BQ for mutation data: '+str(stop - start))
-
-            if len(results) > 0:
-                for barcode in results:
-                    barcodes.append(str(barcode['f'][0]['v']))
-
-            else:
-                logger.info("Mutation filter result was empty!")
-                # Put in one 'not found' entry to zero out the rest of the queries
-                barcodes = ['NONE_FOUND', ]
-
-            tmp_mut_table = 'bq_res_table_' + str(user_id) + "_" + make_id(6)
-
-            make_tmp_mut_table_str = """
-                CREATE TEMPORARY TABLE %s (
-                  tumor_sample_id VARCHAR(100)
-               );
-            """ % tmp_mut_table
-
-            cursor.execute(make_tmp_mut_table_str)
-
-            insert_tmp_table_str = """
-                INSERT INTO %s (tumor_sample_id) VALUES
-            """ % tmp_mut_table
-
-            param_vals = ()
-            first = True
-
-            for barcode in barcodes:
-                param_vals += (barcode,)
-                if first:
-                    insert_tmp_table_str += '(%s)'
-                    first = False
-                else:
-                    insert_tmp_table_str += ',(%s)'
-
-            insert_tmp_table_str += ';'
-
-            cursor.execute(insert_tmp_table_str, param_vals)
-            db.commit()
-
         start = time.time()
 
-        # If there are filters, create a temporary table filtered off the base table
-        if len(filters) > 0:
-            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
-            filter_table = tmp_filter_table
-
-            make_tmp_table_str = """
-              CREATE TEMPORARY TABLE %s
-              (INDEX (sample_barcode))
-              SELECT ms.*
-              FROM %s ms
-            """ % (tmp_filter_table, base_table,)
-
-            if len(data_type_filters) > 0:
-                make_tmp_table_str += (' JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode ' % data_avail_sample_subquery)
-                params_tuple += data_type_where_clause['value_tuple']
-
-            if tmp_mut_table:
-                make_tmp_table_str += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
-
-            if cohort_id:
-                make_tmp_table_str += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
-                params_tuple += (cohort_id,)
-
-            make_tmp_table_str += ' WHERE %s ' % where_clause['query_str'] + ';'
-            params_tuple += where_clause['value_tuple']
-
-            cursor.execute(make_tmp_table_str, params_tuple)
-
-        elif tmp_mut_table:
-            tmp_filter_table = "filtered_samples_tmp_" + str(user_id) + "_" + make_id(6)
-            filter_table = tmp_filter_table
-
-            make_tmp_table_str = """
-                CREATE TEMPORARY TABLE %s
-                (INDEX (sample_barcode))
-                SELECT ms.*
-                FROM %s ms
-                JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode
-            """ % (tmp_filter_table, base_table, tmp_mut_table,)
-
-            if len(data_type_filters) > 0:
-                make_tmp_table_str += (' JOIN (%s) da ON da.da_sample_barcode = ms.sample_barcode' % data_avail_sample_subquery)
-                params_tuple += data_type_where_clause['value_tuple']
-
-            if cohort_id:
-                make_tmp_table_str += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
-                params_tuple += (cohort_id,)
-
-            make_tmp_table_str += ';'
-
-            if len(params_tuple) > 0:
-                cursor.execute(make_tmp_table_str, params_tuple)
+        # Divide our filters into 'mutation' and 'non-mutation' sets
+        for key in inc_filters:
+            if 'MUT:' in key or 'data_type' in key:
+                    filters[key] = inc_filters[key]
             else:
-                cursor.execute(make_tmp_table_str)
-        else:
-            # base table and filter table are equivalent
-            filter_table = base_table
+                filters[key.split(':')[-1]] = inc_filters[key]
 
+        versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
+            active=True)
 
-        stop = time.time()
+        programs = Program.objects.filter(active=1,is_public=1,owner=User.objects.get(is_superuser=1,is_active=1,is_staff=1))
 
-        logger.debug('[BENCHMARKING] Time to create temporary filter/cohort tables in count_metadata: '+str(stop - start))
+        if program_id:
+            programs = programs.filter(id=program_id)
 
-        count_query_set = []
+        if cohort_id:
+            if not program_id:
+                programs = programs.filter(id__in=Cohort.objects.get(id=cohort_id).get_programs())
 
-        for col_name in metadata_attr_values:
-            if col_name in unfiltered_attr:
-                count_params = ()
-                count_query = 'SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s' % (col_name, filter_table,)
-                if filter_table == base_table:
-                    if cohort_id and program_id:
-                        count_query += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
-                        count_params += (cohort_id,)
-                    if len(data_type_filters) > 0:
-                        count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
-                        count_params += data_type_where_clause['value_tuple']
+        for prog in programs:
+            results['programs'][prog.id] = {
+                'sets': {},
+                'totals': {}
+            }
+            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA, DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA])
+            sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
+            # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
+            # filter one program as a time.
+            prog_filters = filters
+            attrs = sources.get_source_attrs(for_ui=True)
+            count_attrs = sources.filter(
+                version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
+            ).get_source_attrs(for_ui=False,for_faceting=False, named_set=['sample_barcode', 'case_barcode'])
 
-                count_query += ' GROUP BY %s;' % col_name
+            for source in sources:
+                solr_query = build_solr_query(prog_filters, with_tags_for_ex=True, subq_join_field=source.shared_id_col) if prog_filters else None
+                total_counts = None
+                if source.id in count_attrs['sources']:
+                    total_counts = count_attrs['sources'][source.id]['list']
+                solr_facets = build_solr_facets(
+                    attrs['sources'][source.id]['attrs'],
+                    filter_tags=solr_query['filter_tags'] if solr_query else None, unique='case_barcode',
+                    total_facets=total_counts
+                )
+                query_set = []
 
-                count_query_set.append({'query_str': count_query, 'params': None if len(count_params)<=0 else count_params, })
-            else:
-                subquery = base_table
-                excl_params_tuple = ()
-
-                if tmp_mut_table:
-                    subquery += (' JOIN %s ON tumor_sample_id = sample_barcode ' % tmp_mut_table)
+                if solr_query:
+                    for attr in solr_query['queries']:
+                        attr_name = 'Variant_Classification' if 'MUT:' in attr else re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
+                        # If an attribute is not in this program's attribute listing, then it's ignored
+                        if attr_name in attrs['list']:
+                            # If the attribute is from this source, just add the query
+                            mutation_filter_matches_source = ((source.version.data_type != DataVersion.MUTATION_DATA) or (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower())))
+                            if attr_name in attrs['sources'][source.id]['list'] and mutation_filter_matches_source:
+                                query_set.append(solr_query['queries'][attr])
+                            # If it's in another source for this program, we need to join on that source
+                            else:
+                                for ds in sources:
+                                    mutation_filter_matches_source = (
+                                        (ds.version.data_type != DataVersion.MUTATION_DATA) or (
+                                           attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), ds.name.lower())
+                                        )
+                                    )
+                                    if ds.id != source.id and attr_name in attrs['sources'][ds.id]['list'] and mutation_filter_matches_source:
+                                        query_set.append(("{!join %s}" % "from={} fromIndex={} to={}".format(
+                                            ds.shared_id_col, ds.name, source.shared_id_col
+                                        )) + solr_query['queries'][attr])
+                        else:
+                            logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
                 if cohort_id:
-                    subquery += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
-                    excl_params_tuple += (cohort_id,)
+                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
-                if len(data_type_filters) > 0:
-                    subquery += (' JOIN (%s) da ON da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
-                    excl_params_tuple += data_type_where_clause['value_tuple']
+                solr_result = query_solr_and_format_result({
+                    'collection': source.name,
+                    'facets': solr_facets,
+                    'fqs': query_set,
+                    'unique': source.shared_id_col
+                })
 
-                if exclusionary_filter[col_name]['query_str']:
-                    subquery += ' WHERE ' + exclusionary_filter[col_name]['query_str']
-                    excl_params_tuple += exclusionary_filter[col_name]['value_tuple']
+                set_type = source.get_set_type()
 
-                count_query_set.append({'query_str':("""
-                    SELECT DISTINCT %s, COUNT(DISTINCT sample_barcode) as count FROM %s GROUP BY %s
-                  """) % (col_name, subquery, col_name,),
-                'params': excl_params_tuple})
-
-        start = time.time()
-        for query in count_query_set:
-            if 'params' in query and query['params'] is not None:
-                cursor.execute(query['query_str'], query['params'])
-            else:
-                cursor.execute(query['query_str'])
-
-            colset = cursor.description
-            col_headers = []
-            if colset is not None:
-                col_headers = [i[0] for i in cursor.description]
-            if not col_headers[0] in counts:
-                # If this is a categorical attribute, fetch its list of possible values (so we can know what didn't come
-                # back in the query)
-                values = { k: 0 for k in list(metadata_attr_values[col_headers[0]]['values'].keys()) } if metadata_attr_values[col_headers[0]]['type'] == 'C' else {}
-                counts[col_headers[0]] = {
-                    'counts': values,
-                    'total': 0,
-                }
-            for row in cursor.fetchall():
-                counts[col_headers[0]]['counts'][str(row[0])] = int(row[1])
-                counts[col_headers[0]]['total'] += int(row[1])
-
-        # Query the data type counts
-        if len(list(metadata_data_type_values.keys())) > 0:
-            data_avail_query = None
-            params = ()
-            # If no proper filter table was built, or, it was but without data filters, we can use the 'filter table'
-            if (len(filters) <= 0 and not mutation_filters) or len(data_type_filters) <= 0:
-
-                cohort_join = ''
-
-                if cohort_id and program_id and base_table == filter_table:
-                    cohort_join = (' JOIN (%s) cs ON cs_sample_barcode = ms.sample_barcode' % cohort_query)
-                    params += (cohort_id,)
-
-                count_query = """
-                    SELECT DISTINCT da.metadata_data_type_availability_id data_type, dt.isb_label, COUNT(DISTINCT ms.sample_barcode) count
-                    FROM %s ms
-                    JOIN %s da ON da.sample_barcode = ms.sample_barcode
-                    JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
-                    %s
-                    GROUP BY data_type;
-                """ % (filter_table, data_avail_table, data_type_table, cohort_join)
-
-                data_avail_query = """
-                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,'; ',COALESCE(dt.genomic_build,'Avail.')))
-                    FROM %s ms
-                    JOIN %s da ON da.sample_barcode = ms.sample_barcode
-                    JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
-                    %s
-                    GROUP BY ms.sample_barcode;
-                """ % (filter_table, data_avail_table, data_type_table, cohort_join)
-
-                if len(params) <= 0:
-                    cursor.execute(count_query)
-                else:
-                    cursor.execute(count_query,params)
-            # otherwise, we have to use the base table, or we'll be ANDing our data types
-            else:
-                no_dt_filter_stmt = """
-                    SELECT DISTINCT da.metadata_data_type_availability_id data_type, dt.isb_label, COUNT(DISTINCT ms.sample_barcode) count
-                    FROM %s ms
-                    JOIN %s da ON da.sample_barcode = ms.sample_barcode
-                    JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
-                """ % (base_table, data_avail_table, data_type_table,)
-
-                data_avail_query = """
-                    SELECT DISTINCT ms.sample_barcode, GROUP_CONCAT(CONCAT(dt.isb_label,'; ',COALESCE(dt.genomic_build,'Avail.')))
-                    FROM %s ms
-                    JOIN %s da ON da.sample_barcode = ms.sample_barcode
-                    JOIN %s dt ON dt.metadata_data_type_availability_id = da.metadata_data_type_availability_id
-                """ % (base_table, data_avail_table, data_type_table,)
-
-                # Cohorts are baked into the mutation table, so we only need to add the cohort suubquery in if there
-                # isn't a mutation table
-                if tmp_mut_table:
-                    no_dt_filter_stmt += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
-                    data_avail_query += (' JOIN %s sc ON sc.tumor_sample_id = ms.sample_barcode' % tmp_mut_table)
-                elif cohort_id:
-                    no_dt_filter_stmt += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
-                    data_avail_query += (' JOIN (%s) cs ON cs.cs_sample_barcode = ms.sample_barcode' % cohort_query)
-                    params += (cohort_id,)
-
-                if len(filters) > 0:
-                    no_dt_filter_stmt += (' WHERE %s ' % where_clause['query_str'])
-                    data_avail_query += (' WHERE %s ' % where_clause['query_str'])
-                    params += where_clause['value_tuple']
-
-                no_dt_filter_stmt += ' GROUP BY data_type;'
-                data_avail_query += ' GROUP BY ms.sample_barcode;'
-
-                if len(params) > 0:
-                    cursor.execute(no_dt_filter_stmt, params)
-                else:
-                    cursor.execute(no_dt_filter_stmt)
-
-            for row in cursor.fetchall():
-                if not row[1] in data_counts:
-                    values = {int(k): 0 for k in list(metadata_data_type_values[row[1]]['values'].keys())}
-                    data_counts[row[1]] = {
-                        'counts': values,
-                        'total': 0,
-                    }
-                data_counts[row[1]]['counts'][int(row[0])] = int(row[2])
-                data_counts[row[1]]['total'] += int(row[2])
-
-            # Make sure GROUP_CONCAT has enough space--it can get big
-            cursor.execute("""
-                SET SESSION group_concat_max_len = 1000000;
-            """)
-
-            if len(params) > 0:
-                cursor.execute(data_avail_query, params)
-            else:
-                cursor.execute(data_avail_query)
-
-            sample_data_set = {}
-            for row in cursor.fetchall():
-                data_types = row[1].split(',')
-                item = {}
-                for type_build in data_types:
-                    type = type_build.split('; ')[0]
-                    build = type_build.split('; ')[1]
-                    if type in METADATA_DATA_AVAIL_PLOT_MAP:
-                        if METADATA_DATA_AVAIL_PLOT_MAP[type] not in item:
-                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]] = {}
-                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type] = [build, ]
-                        elif type not in item[METADATA_DATA_AVAIL_PLOT_MAP[type]]:
-                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type] = [build, ]
-                        elif build not in item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type]:
-                            item[METADATA_DATA_AVAIL_PLOT_MAP[type]][type].append(build)
-                for type in list(METADATA_DATA_AVAIL_PLOT_MAP.values()):
-                    if type not in item:
-                        item[type] = 'None'
-
-                data_avail_items.append(item)
-
-        for item in data_avail_items:
-            for type in item:
-                if item[type] == 'None':
-                    continue
-                avail_set = item[type]
-                item[type] = ''
-                for subtype in avail_set:
-                    item[type] += ((subtype + ': ') + ', '.join(avail_set[subtype]) + '; ')
-                item[type] = item[type][:-2]
+                if set_type not in results['programs'][prog.id]['sets']:
+                    results['programs'][prog.id]['sets'][set_type] = {}
+                results['programs'][prog.id]['sets'][set_type][source.name] = solr_result
+                for attr in count_attrs['list']:
+                    if "{}_count".format(attr) in solr_result and "{}_count".format(attr) not in results['programs'][prog.id]['totals']:
+                        results['programs'][prog.id]['totals']["{}_count".format(attr)] = solr_result["{}_count".format(attr)]
 
         stop = time.time()
-        logger.debug('[BENCHMARKING] Time to query filter count set in metadata_counts:'+str(stop - start))
 
-        # query sample and case counts
-        count_query = 'SELECT COUNT(DISTINCT %s) FROM %s'
-        sample_count_query = count_query % ('sample_barcode', filter_table,)
-        case_count_query = count_query % ('case_barcode', filter_table,)
+        results['elapsed_time'] = "{}s".format(str(stop-start))
 
-        count_params = ()
+    except Exception as e:
+        logger.error("[ERROR] While trying to fetch Solr metadata:")
+        logger.exception(e)
 
-        # If no filter table was built, we need to add cohorts and data type filters
-        if len(filters) <= 0 and not mutation_filters:
-            if len(data_type_filters) > 0:
-                sample_count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
-                case_count_query += (' JOIN (%s) da ON da.da_sample_barcode = sample_barcode' % data_avail_sample_subquery)
-                count_params += data_type_where_clause['value_tuple']
-            if cohort_id and program_id:
-                case_count_query += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
-                sample_count_query += (' JOIN (%s) cs ON cs_sample_barcode = sample_barcode' % cohort_query)
-                count_params += (cohort_id,)
+    return results
 
 
-        if len(count_params) > 0:
-            cursor.execute(sample_count_query, count_params)
-            counts_and_total['total'] = cursor.fetchall()[0][0]
-            cursor.execute(case_count_query, count_params)
-            counts_and_total['cases'] = cursor.fetchall()[0][0]
-        else:
-            cursor.execute(sample_count_query)
-            counts_and_total['total'] = cursor.fetchall()[0][0]
-            cursor.execute(case_count_query)
-            counts_and_total['cases'] = cursor.fetchall()[0][0]
+# Tally counts for metadata filters of public programs
+def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 
-        # Drop the temporary tables
-        if tmp_filter_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_filter_table)
-        if tmp_mut_table is not None: cursor.execute(("DROP TEMPORARY TABLE IF EXISTS %s") % tmp_mut_table)
+    try:
+        solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
 
-        for attr in metadata_attr_values:
-            if attr in counts:
-                value_list = []
-                feature = {
-                    'values': counts[attr]['counts'],
-                    'total': counts[attr]['total'],
-                }
+        facets = {}
+        sample_count = 0
+        case_count = 0
 
-                # Special case for age ranges
-                if attr == 'age_at_diagnosis':
-                    feature['values'] = normalize_ages(counts[attr]['counts'], Program.objects.get(id=program_id).name == 'TARGET')
-                elif attr == 'bmi':
-                    feature['values'] = normalize_bmi(counts[attr]['counts'])
-                elif attr == 'year_of_diagnosis':
-                    feature['values'] = normalize_years(counts[attr]['counts'])
-                elif attr == 'event_free_survival' or attr == 'days_to_death' or attr == 'overall_survival' \
-                        or attr == 'days_to_last_known_alive' or attr == 'days_to_last_followup':
-                    feature['values'] = normalize_simple_days(counts[attr]['counts'])
-                elif attr == 'days_to_birth':
-                    feature['values'] = normalize_negative_days(counts[attr]['counts'])
-                elif attr == 'wbc_at_diagnosis':
-                    feature['values'] = normalize_by_200(counts[attr]['counts'])
+        for prog, prog_result in solr_res['programs'].items():
+            metadata_attr_values = fetch_metadata_value_set(prog)
+            sample_count = prog_result['totals']['sample_barcode_count']
+            case_count = prog_result['totals']['case_barcode_count']
+            for set, set_result in prog_result['sets'].items():
+                facets[set] = {}
+                for source, source_result in set_result.items():
+                    if 'facets' in source_result:
+                        for attr, vals in source_result['facets'].items():
+                            try:
+                                obj = Attribute.objects.get(name=attr)
+                            except MultipleObjectsReturned:
+                                # In the (admittedly) rare case of an attribute name collision, be sure that we pull the Attribute
+                                # object which is relevant to this
+                                obj = DataSource.objects.get(name=source).get_source_attr().get(name=attr)
+                            dvals = obj.get_display_values()
+                            facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
+                            for val in vals:
+                                facets[set][attr]['values'][val] = {
+                                    'name': val,
+                                    'value': val,
+                                    'displ_value': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
+                                    'displ_name': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
+                                    'count': vals[val],
+                                    # Supports #2018. This value object is the only information that gets used to
+                                    # stock cohort checkboxes in the template. To support clicking on a treemap to
+                                    # trigger the checkbox, we need have an id that glues the attribute name to the
+                                    # value in a standard manner, and we really don't want to have to construct this
+                                    # with a unwieldy template statement. So we do it here:
+                                    'full_id': (re.sub('\s+', '_', (attr + "-" + str(val)))).upper()
+                                }
+                                # TODO: to be replaced with use of the Attribute_Tooltip class
+                                if attr in metadata_attr_values and val in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][val] is not None \
+                                        and len(metadata_attr_values[attr]['values'][val]) > 0:
+                                    if 'tooltip' in metadata_attr_values[attr]['values'][val]:
+                                        facets[set][attr]['values'][val]['tooltip'] = metadata_attr_values[attr]['values'][val]['tooltip']
 
-                for value, count in list(feature['values'].items()):
-                    # Supports #2018. This value object is the only information that gets used to
-                    # stock cohort checkboxes in the template. To support clicking on a treemap to
-                    # trigger the checkbox, we need have an id that glues the attribute name to the
-                    # value in a standard manner, and we really don't want to have to construct this
-                    # with a unwieldy template statement. So we do it here:
-                    fully_qual = (re.sub('\s+', '_', (attr + "-" + str(value)))).upper()
-                    val_obj = {'value': str(value), 'count': count, 'full_id': fully_qual}
-
-                    if value in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][value] is not None \
-                            and len(metadata_attr_values[attr]['values'][value]) > 0:
-                        val_obj['displ_name'] = metadata_attr_values[attr]['values'][value]['displ_value']
-                        if 'tooltip' in metadata_attr_values[attr]['values'][value]:
-                            val_obj['tooltip'] = metadata_attr_values[attr]['values'][value]['tooltip']
-
-                    value_list.append(val_obj)
-
-                counts_and_total['counts'].append({'name': attr, 'values': value_list, 'id': attr, 'total': feature['total']})
-
-        for data_type in metadata_data_type_values:
-            if data_type in data_counts:
-                value_list = []
-                feature = {
-                    'values': data_counts[data_type]['counts'],
-                    'total': data_counts[data_type]['total'],
-                }
-
-                for value, count in list(feature['values'].items()):
-
-                    val_obj = {'value': value, 'count': count, }
-
-                    if int(value) in metadata_data_type_values[data_type]['values'] and metadata_data_type_values[data_type]['values'][int(value)] and len(metadata_data_type_values[data_type]['values'][int(value)]) > 0:
-                        val_obj['displ_name'] = metadata_data_type_values[data_type]['values'][int(value)]
-
-                    value_list.append(val_obj)
-
-                counts_and_total['data_counts'].append({'name': data_type, 'values': value_list, 'id': data_type, 'total': feature['total']})
-
-        counts_and_total['data_avail_items'] = data_avail_items
-
-        return counts_and_total
+        return {'counts': facets, 'samples': sample_count, 'cases': case_count}
 
     except Exception as e:
         logger.error("[ERROR] While counting public metadata: ")
         logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None, comb_mut_filters='OR'):
@@ -949,7 +475,6 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None,
 
     start = time.time()
     counts_and_total = count_public_metadata(user, cohort_id, filters, program_id, comb_mut_filters=comb_mut_filters)
-    # parsets_items = build_data_avail_plot_data(user, cohort_id, filters, program_id)
 
     stop = time.time()
     logger.debug(
@@ -960,15 +485,7 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None,
         + ": {}".format(str((stop - start)))
     )
 
-    return_vals = {
-        'data_avail': counts_and_total['data_avail_items'],
-        'data_counts': counts_and_total['data_counts'],
-        'count': counts_and_total['counts'],
-        'cases': counts_and_total['cases'],
-        'total': counts_and_total['total']
-    }
-
-    return return_vals
+    return counts_and_total
 
 
 def user_metadata_counts(user, user_data_filters, cohort_id):
