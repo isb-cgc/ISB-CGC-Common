@@ -316,9 +316,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             programs = programs.filter(id=program_id)
 
         if cohort_id:
-            cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-            cohort_filter = {'case_barcode': cohort_cases}
-            solr_cohort_filter = build_solr_query(cohort_filter)
             if not program_id:
                 programs = programs.filter(id__in=Cohort.objects.get(id=cohort_id).get_programs())
 
@@ -373,12 +370,15 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         else:
                             logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
+                if cohort_id:
+                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+
                 solr_result = query_solr_and_format_result({
                     'collection': source.name,
                     'facets': solr_facets,
                     'fqs': query_set,
-                    'unique': source.shared_id_col,
-                    'query_string': solr_cohort_filter['full_query_str'] if solr_cohort_filter else None
+                    'unique': source.shared_id_col
                 })
 
                 set_type = source.get_set_type()

@@ -1676,7 +1676,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
             inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
                 request.POST.get('filters', '{}'))
             if request.GET.get('case_barcode', None):
-                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'),]
+                inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
             items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
 
@@ -1794,13 +1794,14 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
-            inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'), ]
+            inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
         result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_build_data_attr(build)
+            metadata_data_attr = fetch_build_data_attr(build, type=panel_type)
+            print(metadata_data_attr.keys())
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
                     for val in result['metadata_data_counts'][attr]:
@@ -1889,7 +1890,7 @@ def streaming_csv_view(request, cohort_id=0):
             logger.warn("[ERROR] Didn't receive a total--using MAX_FILE_LIST_ENTRIES.")
             total_expected = MAX_FILE_LIST_ENTRIES
 
-        limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
+        limit = total_expected+10 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
         file_list = None
 
@@ -1901,7 +1902,7 @@ def streaming_csv_view(request, cohort_id=0):
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
-            inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')), ]
+            inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
         items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit, build=build)
 
         if 'file_list' in items:

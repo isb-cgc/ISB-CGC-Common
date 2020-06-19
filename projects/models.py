@@ -222,18 +222,20 @@ class DataSource(models.Model):
     def get_set_type(self):
         return DataVersion.SET_TYPES[self.version.data_type]
 
-    def get_source_attr(self, for_faceting=True, for_ui=False):
+    def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None):
+
+        attr_set = self.attribute_set.filter(default_ui_display=for_ui,
+           active=True) if for_ui is not None else self.attribute_set.filter(active=True)
+
+        attr_set = attr_set.filter(name__in=named_set) if named_set else attr_set
+
         if for_faceting:
-            ranged_numerics = self.attribute_set.filter(
+            attr_set = attr_set.filter(data_type=Attribute.CATEGORICAL, active=True) | attr_set.filter(
                 id__in=Attribute_Ranges.objects.filter(
-                    attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                    attribute__in=self.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True)
                 ).values_list('attribute__id', flat=True)
             )
-            attr_set = self.attribute_set.filter(data_type=Attribute.CATEGORICAL, active=True) | ranged_numerics
-        else:
-            attr_set = self.attribute_set.filter(active=True)
-        if for_ui:
-            return attr_set.filter(default_ui_display=True)
+
         return attr_set
 
     @staticmethod
