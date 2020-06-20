@@ -15,8 +15,7 @@ SOLR_LOGIN = settings.SOLR_LOGIN
 SOLR_PASSWORD = settings.SOLR_PASSWORD
 SOLR_CERT = settings.SOLR_CERT
 
-
-RANGE_FIELDS = ['wbc_at_diagnosis', 'event_free_survival', 'days_to_death', 'days_to_last_known_alive', 'days_to_last_followup', 'age_at_diagnosis', 'year_of_diagnosis']
+RANGE_FIELDS = list(Attribute.objects.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True).values_list('name',flat=True))
 
 BMI_MAPPING = {
     'underweight': '[* TO 18.5}',
@@ -71,10 +70,11 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                         else:
                             # This is a query facet
                             facet_name = facet.split(":")[0]
-                            facet_range = facet.split(":")[-1]
+                            display_range = facet.split(":")[1]
+                            query_range = facet.split(":")[-1]
                             if facet_name not in formatted_query_result['facets']:
                                 formatted_query_result['facets'][facet_name] = {}
-                            formatted_query_result['facets'][facet_name][facet_range] = facet_counts['count']
+                            formatted_query_result['facets'][facet_name]["{}::{}".format(display_range,query_range)] = facet_counts['count']
                     else:
                         formatted_query_result[facet] = result['facets'][facet]
             else:
@@ -152,13 +152,11 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 # unique: If counts need to be calculated against a specific field, this is that field as a string (otherwise counts are document-wise)
 def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, total_facets=None):
     facets = {}
-
     for attr in attrs:
         facet_type = DataSource.get_facet_type(attr)
         if facet_type == "query":
             # We need to make a series of query buckets
             attr_ranges = Attribute_Ranges.objects.filter(attribute=attr)
-
             for attr_range in attr_ranges:
                 u_boundary = "]" if attr_range.include_upper else "}"
                 l_boundary = "[" if attr_range.include_lower else "{"
@@ -193,7 +191,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                     while lower == "*" or lower < last:
                         upper_display = str(upper-(0 if attr_range.include_upper else unit))
                         lower_display = lower if lower == "*" else str(lower+(0 if attr_range.include_lower else unit))
-                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, lower_display, upper_display)
+                        facet_name = "{}:{}".format(
+                            attr.name, attr_range.label
+                        ) if attr_range.label else "{}:{} to {}:{} to {}".format(
+                            attr.name, lower_display, upper_display, str(upper), str(lower)
+                        )
                         facets[facet_name] = {
                             'type': facet_type,
                             'field': attr.name,
@@ -210,7 +212,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                     # If we stopped *at* the end, we need to add one last bucket.
                     if attr_range.unbounded:
                         last_display = str(last+(unit if attr_range.include_upper else 0))
-                        facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, last_display, "*")
+                        facet_name = "{}:{}".format(
+                            attr.name, attr_range.label
+                        ) if attr_range.label else "{}:{} to {}:{} to {}".format(
+                            attr.name, last_display, "*", str(last), "*"
+                        )
                         facets[facet_name] = {
                             'type': facet_type,
                             'field': attr.name,
@@ -359,7 +365,6 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 else:
                     query_str += "+({})".format(clause)
             elif attr in RANGE_FIELDS or attr[:attr.rfind('_')] in RANGE_FIELDS:
-                print(values)
                 attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
                 clause = ""
                 if len(values) > 1 and type(values[0]) is list:
