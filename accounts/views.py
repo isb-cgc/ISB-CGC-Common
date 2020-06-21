@@ -54,7 +54,7 @@ GCP_REG_LOG_NAME = settings.GCP_ACTIVITY_LOG_NAME
 SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
-
+DCF_GOOGLE_SA_REGISTER_DATASETS_LIMIT = settings.DCF_GOOGLE_SA_REGISTER_DATASETS_LIMIT
 
 @login_required
 def extended_logout_view(request):
@@ -497,6 +497,7 @@ def register_sa(request, user_id):
                     projectId=gcp_id).execute()
                 context['gcp_id'] = gcp_id
                 context['default_sa_id'] = gcp['projectNumber']+'-compute@developer.gserviceaccount.com'
+                context['datasets_limit'] = DCF_GOOGLE_SA_REGISTER_DATASETS_LIMIT
 
             return render(request, template, context)
 
