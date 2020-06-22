@@ -15,8 +15,6 @@ SOLR_LOGIN = settings.SOLR_LOGIN
 SOLR_PASSWORD = settings.SOLR_PASSWORD
 SOLR_CERT = settings.SOLR_CERT
 
-RANGE_FIELDS = list(Attribute.objects.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True).values_list('name',flat=True))
-
 BMI_MAPPING = {
     'underweight': '[* TO 18.5}',
     'normal weight': '[18.5 TO 25}',
@@ -259,6 +257,8 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
 # Build a query string for Solr
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
+
+    RANGE_FIELDS = list(Attribute.objects.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True).values_list('name',flat=True))
 
     first = True
     full_query_str = ''
