@@ -258,7 +258,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 # Build a query string for Solr
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
 
-    RANGE_FIELDS = list(Attribute.objects.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True).values_list('name',flat=True))
+    ranged_attrs = Attribute.get_ranged_attrs()
 
     first = True
     full_query_str = ''
@@ -364,7 +364,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                     query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
                 else:
                     query_str += "+({})".format(clause)
-            elif attr in RANGE_FIELDS or attr[:attr.rfind('_')] in RANGE_FIELDS:
+            elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
                 attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
                 clause = ""
                 if len(values) > 1 and type(values[0]) is list:
