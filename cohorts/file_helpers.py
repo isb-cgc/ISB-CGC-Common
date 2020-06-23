@@ -21,6 +21,7 @@ import time
 import MySQLdb
 import copy
 
+from django.contrib.auth.models import User
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.conf import settings
 
@@ -44,6 +45,9 @@ FILTER_DATA_FORMAT = {
 
 
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, type=None, do_filter_count=True):
+
+    cohort_id = 2
+    user = User.objects.get(email='mtian@systemsbiology.org')
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
@@ -151,7 +155,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
         sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
 
-        query_set = [y for x, y in solr_query['queries'].items()]
+        query_set = []
+        if solr_query:
+            query_set = [y for x, y in solr_query['queries'].items()]
 
         query_params = {
             "collection": file_collection.name,

@@ -1749,6 +1749,95 @@ def filelist(request, panel_type=None):
         return redirect(reverse('cohort'))
 
 
+def filelist_ajax(request, cohort_id=0, panel_type=None):
+
+    cohort_id = 2
+    status = 200
+    try:
+        if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+        if cohort_id == 0:
+            response_str = '<div class="row">' \
+                        '<div class="col-lg-12">' \
+                        '<div class="alert alert-danger alert-dismissible">' \
+                        '<button type="button" class="close" data-dismiss="alert"><span aria-hidden="true">&times;</span><span class="sr-only">Close</span></button>' \
+                        'Cohort provided does not exist.' \
+                        '</div></div></div>'
+            return HttpResponse(response_str, status=500)
+
+        params = {}
+        do_filter_count = True
+        if request.GET.get('files_per_page', None) is not None:
+            files_per_page = int(request.GET.get('files_per_page'))
+            params['limit'] = files_per_page
+            if request.GET.get('page', None) is not None:
+                do_filter_count = False
+                page = int(request.GET.get('page'))
+                params['page'] = page
+                offset = (page - 1) * files_per_page
+                params['offset'] = offset
+        elif request.GET.get('limit', None) is not None:
+            limit = int(request.GET.get('limit'))
+            params['limit'] = limit
+
+        if request.GET.get('offset', None) is not None:
+            offset = int(request.GET.get('offset'))
+            params['offset'] = offset
+        if request.GET.get('sort_column', None) is not None:
+            sort_column = request.GET.get('sort_column')
+            params['sort_column'] = sort_column
+        if request.GET.get('sort_order', None) is not None:
+            sort_order = int(request.GET.get('sort_order'))
+            params['sort_order'] = sort_order
+
+        build = request.GET.get('build','HG19')
+
+        user = User.objects.get(email='mtian@systemsbiology.org');
+
+        has_access = auth_dataset_whitelists_for_user(user.id)
+
+        inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
+            request.POST.get('filters', '{}'))
+        if request.GET.get('case_barcode', None):
+            inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
+
+        result = cohort_files(cohort_id, user=user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
+
+        # If nothing was found, our  total file count will reflect that
+        if do_filter_count:
+            metadata_data_attr = fetch_build_data_attr(build, type=panel_type)
+            print(metadata_data_attr.keys())
+            if len(result['metadata_data_counts']):
+                for attr in result['metadata_data_counts']:
+                    for val in result['metadata_data_counts'][attr]:
+                        metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+            else:
+                for attr in metadata_data_attr:
+                    for val in metadata_data_attr[attr]['values']:
+                        metadata_data_attr[attr]['values'][val]['count'] = 0
+
+            # Any value which didn't come back in the main results still needs to have a count of zero.
+            for attr in metadata_data_attr:
+                for val in metadata_data_attr[attr]['values']:
+                    if 'count' not in metadata_data_attr[attr]['values'][val] or not metadata_data_attr[attr]['values'][val]['count']:
+                        metadata_data_attr[attr]['values'][val]['count'] = 0
+
+            for attr in metadata_data_attr:
+                metadata_data_attr[attr]['values'] = [metadata_data_attr[attr]['values'][x] for x in
+                                                      metadata_data_attr[attr]['values']]
+
+            del result['metadata_data_counts']
+            result['metadata_data_attr'] = [metadata_data_attr[x] for x in metadata_data_attr]
+
+    except Exception as e:
+        logger.error("[ERROR] While retrieving cohort file data for AJAX call:")
+        logger.exception(e)
+        status=500
+        result={'redirect': reverse('cohort_details', args=[cohort_id]), 'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+
+    return JsonResponse(result, status=status)
+
+
+
 @login_required
 @csrf_protect
 def cohort_filelist(request, cohort_id=0, panel_type=None):
