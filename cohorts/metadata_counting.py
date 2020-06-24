@@ -429,18 +429,28 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                             dvals = obj.get_display_values()
                             facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
                             for val in vals:
+                                val_name = val
+                                val_value = val
+                                displ_value = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
+                                displ_name = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
+                                count = vals[val]
+                                if "::" in val:
+                                    val_name = val.split("::")[0]
+                                    val_value = val.split("::")[-1]
+                                    displ_value = val_name if obj.preformatted_values else dvals.get(val,format_for_display(val_name))
+                                    displ_name = val_name if obj.preformatted_values else dvals.get(val, format_for_display(val_name))
                                 facets[set][attr]['values'][val] = {
-                                    'name': val,
-                                    'value': val,
-                                    'displ_value': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
-                                    'displ_name': val if obj.preformatted_values else dvals.get(val, format_for_display(val)),
-                                    'count': vals[val],
+                                    'name': val_name,
+                                    'value': val_value,
+                                    'displ_value': displ_value,
+                                    'displ_name': displ_name,
+                                    'count': count,
                                     # Supports #2018. This value object is the only information that gets used to
                                     # stock cohort checkboxes in the template. To support clicking on a treemap to
                                     # trigger the checkbox, we need have an id that glues the attribute name to the
                                     # value in a standard manner, and we really don't want to have to construct this
                                     # with a unwieldy template statement. So we do it here:
-                                    'full_id': (re.sub('\s+', '_', (attr + "-" + str(val)))).upper()
+                                    'full_id': (re.sub('\s+', '_', (attr + "-" + str(val_value)))).upper()
                                 }
                                 # TODO: to be replaced with use of the Attribute_Tooltip class
                                 if attr in metadata_attr_values and val in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][val] is not None \
