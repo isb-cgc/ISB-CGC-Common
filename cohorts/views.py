@@ -1647,12 +1647,14 @@ def save_cohort_from_plot(request):
     return HttpResponse(json.dumps(result), status=200)
 
 
-@login_required
 @csrf_protect
-def cohort_filelist(request, cohort_id=0, panel_type=None):
+def filelist(request, cohort_id=None, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+    if panel_type:
+        template = 'cohorts/cohort_filelist_{}.html'.format(panel_type)
+    else:
+        template = 'cohorts/cohort_filelist.html'
 
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
@@ -1668,7 +1670,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
 
         metadata_data_attr = metadata_data_attr_builds[build]
 
-        has_access = auth_dataset_whitelists_for_user(request.user.id)
+        has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
         items = None
 
@@ -1711,44 +1713,54 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                                                              metadata_data_attr_builds[attr_build][attr]['values']]
             metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
 
-        cohort = Cohort.objects.get(id=cohort_id, active=True)
-        cohort.perm = cohort.get_perm(request)
+        cohort = None
+        has_user_data = False
+        programs_this_cohort = []
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id, active=True)
+            cohort.perm = cohort.get_perm(request)
 
-        # Check if cohort contains user data samples - return info message if it does.
-        # Get user accessed projects
-        user_projects = Project.get_user_projects(request.user)
-        cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
-        if cohort_sample_list.count():
-            messages.info(
-                request,
-                "File listing is not available for cohort samples that come from a user uploaded project. " +
-                "This functionality is currently being worked on and will become available in a future release."
-            )
+            # Check if cohort contains user data samples - return info message if it does.
+            # Get user accessed projects
+            user_projects = Project.get_user_projects(request.user)
+            cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
+            if cohort_sample_list.count():
+                messages.info(
+                    request,
+                    "File listing is not available for cohort samples that come from a user uploaded project. " +
+                    "This functionality is currently being worked on and will become available in a future release."
+                )
+            has_user_data = bool(cohort_sample_list.count() > 0)
+            programs_this_cohort = cohort.get_program_names()
 
         logger.debug("[STATUS] Returning response from cohort_filelist")
 
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
-                                            'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                            'export_url': reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'}),
+                                            # 'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                            # 'export_url': reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'}),
+                                            'download_url': reverse('download_filelist', kwargs={'cohort_id': 0}),
+                                            'export_url': reverse('export_data', kwargs={'cohort_id': 0, 'export_type': 'file_manifest'}),
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'img_thumbs_url': settings.IMG_THUMBS_URL,
-                                            'has_user_data': bool(cohort_sample_list.count() > 0),
+                                            'has_user_data': has_user_data,
                                             'build': build,
-                                            'programs_this_cohort': cohort.get_program_names()})
+                                            'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
-        return redirect(reverse('cohort_details', args=[cohort_id]))
+        if cohort_id:
+            return redirect(reverse('cohort_details', args=[cohort_id]))
+        else:
+            return redirect(reverse('landing_page'))
 
 
-@login_required
-def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
+def filelist_ajax(request, cohort_id=None, panel_type=None):
 
     status = 200
     try:
@@ -1789,7 +1801,7 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
         build = request.GET.get('build','HG19')
 
-        has_access = auth_dataset_whitelists_for_user(request.user.id)
+        has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
@@ -1828,7 +1840,12 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         logger.error("[ERROR] While retrieving cohort file data for AJAX call:")
         logger.exception(e)
         status=500
-        result={'redirect': reverse('cohort_details', args=[cohort_id]), 'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+        if cohort_id:
+            result={'redirect': reverse('cohort_details', args=[cohort_id]),
+                    'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+        else:
+            result = {'redirect': reverse('landing_page', args=[]),
+                    'message': "Encountered an error while trying to fetch filelist--please contact the administrator."}
 
     return JsonResponse(result, status=status)
 
