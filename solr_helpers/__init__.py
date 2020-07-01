@@ -5,6 +5,7 @@ import logging
 import json
 import re
 import hashlib
+import time
 
 from idc_collections.models import Attribute, DataSource, Attribute_Ranges
 
@@ -16,8 +17,6 @@ SOLR_URI = settings.SOLR_URI
 SOLR_LOGIN = settings.SOLR_LOGIN
 SOLR_PASSWORD = settings.SOLR_PASSWORD
 SOLR_CERT = settings.SOLR_CERT
-
-RANGE_FIELDS = ['wbc_at_diagnosis', 'event_free_survival', 'days_to_death', 'days_to_last_known_alive', 'days_to_last_followup', 'age_at_diagnosis', 'year_of_diagnosis']
 
 BMI_MAPPING = {
     'underweight': '[* TO 18.5}',
@@ -126,7 +125,12 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     query_result = {}
 
     try:
+        start = time.time()
         query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD), verify=SOLR_CERT)
+        stop = time.time()
+
+        logger.info("[BENCHMARKING] Time to call Solr via POST to core {}: {}s".format(collection,str(stop-start)))
+
         if query_response.status_code != 200:
             msg = "Saw response code {} when querying solr collection {} with string {}\npayload: {}\nresponse text: {}".format(
                 str(query_response.status_code), collection, query_string, payload,
@@ -236,6 +240,8 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
 
 # Build a query string for Solr
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
+    
+    ranged_attrs = Attribute.get_ranged_attrs()
 
     first = True
     full_query_str = ''
@@ -343,7 +349,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                     query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
                 else:
                     query_str += "+({})".format(clause)
-            elif attr[:attr.rfind('_')] in RANGE_FIELDS:
+            elif attr[:attr.rfind('_')] in ranged_attrs:
                 attr_name = attr[:attr.rfind('_')]
                 clause = ""
                 if len(values) > 1 and type(values[0]) is list:

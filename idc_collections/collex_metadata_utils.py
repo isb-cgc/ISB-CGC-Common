@@ -58,7 +58,7 @@ def _build_attr_by_source(attrs, data_versions, source_type):
                     'alias': source.name.split(".")[-1].lower().replace("-", "_"),
                     'list': [attr.name],
                     'attrs': [attr],
-                    'data_type': source.version.data_type,
+                    'data_type': source.version.datasettype.get_set_data_type(),
                     'set_type': source.version.get_set_type()
                 }
             else:
@@ -113,7 +113,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 
     for attr_set in [filter_attr_by_bq, facet_attr_by_bq]:
         for source in attr_set['sources']:
-            if attr_set['sources'][source]['data_type'] == DataVersion.IMAGE_DATA:
+            if attr_set['sources'][source]['data_type'] == DataSetType.IMAGE_DATA:
                 image_tables[source] = 1
 
     table_info = {
@@ -277,7 +277,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True):
 
     if not data_versions and not sources_and_attrs:
-        data_versions = DataVersion.objects.filter(active=True)
+        data_versions = DataVersion.objects.selected_related('datasettype').filter(active=True)
 
     if not group_by:
         group_by = fields
@@ -317,7 +317,7 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
 
     for attr_set in [filter_attr_by_bq, field_attr_by_bq]:
         for source in attr_set['sources']:
-            if attr_set['sources'][source]['data_type'] == DataVersion.IMAGE_DATA:
+            if attr_set['sources'][source]['data_type'] == DataSetType.IMAGE_DATA:
                 image_tables[source] = 1
 
     table_info = {
@@ -544,7 +544,7 @@ def get_bq_string(filters, fields, data_versions, group_by=None, limit=0, offset
     for attr in field_attrs:
         bqtables = attr.data_sources.all().filter(version__in=data_versions, source_type=DataSource.BIGQUERY).distinct()
         for bqtable in bqtables:
-            if bqtable.version.data_type == DataVersion.IMAGE_DATA:
+            if bqtable.version.datasettype.get_set_data_type() == DataSetType.IMAGE_DATA:
                 image_tables[bqtable.name] = bqtable
             if bqtable.name not in field_attr_by_bq:
                 field_attr_by_bq[bqtable.name] = {}
