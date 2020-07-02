@@ -29,7 +29,7 @@ import logging
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from .models import Cohort, Cohort_Perms, Filters, Filter_Group
-from idc_collections.models import Program, Attribute, DataVersion
+from idc_collections.models import Program, Attribute, DataVersion, DataSourceJoin
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
@@ -213,8 +213,14 @@ def get_uuids_solr(filters_by_collex=None, fields_by_collex=None, comb_mut_filte
             filters_by_collex[solr_collex]['joins'] = {}
             for other_collex in filters_by_collex:
                 if other_collex != solr_collex:
+                    source_join = DataSourceJoin.objects.get(
+                        from_src__in=[filters_by_collex[other_collex]['source'].id, filters_by_collex[solr_collex]['source'].id],
+                        to_src__in=[filters_by_collex[other_collex]['source'].id, filters_by_collex[solr_collex]['source'].id]
+                    )
                     filters_by_collex[other_collex]['joins'][solr_collex] = "{!join %s}" % "from={} fromIndex={} to={}".format(
-                        filters_by_collex[other_collex]['source'].shared_id_col, filters_by_collex[other_collex]['source'].name, filters_by_collex[solr_collex]['source'].shared_id_col
+                        source_join.get_col(filters_by_collex[other_collex]['source'].name),
+                        filters_by_collex[other_collex]['source'].name,
+                        source_join.get_col(filters_by_collex[solr_collex]['source'].name)
                     )
 
         solr_result = {}
