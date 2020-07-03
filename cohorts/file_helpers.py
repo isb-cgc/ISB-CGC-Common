@@ -27,11 +27,12 @@ from django.conf import settings
 from .metadata_counting import count_public_data_type
 from .metadata_helpers import get_sql_connection, build_where_clause
 
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
+from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables, \
+    Attribute, Attribute_Ranges, Attribute_Display_Values, DataSource, DataVersion
 from cohorts.models import Cohort, Cohort_Perms
 
 from solr_helpers import *
-from google_helpers.bigquery.cohort_support import BigQuerySupport
+
 
 logger = logging.getLogger('main_logger')
 
@@ -56,6 +57,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
     user_id = user.id
     db = None
     cursor = None
+    facets = None
     limit_clause = ""
     offset_clause = ""
     file_list = []
@@ -65,240 +67,52 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        if type == 'dicom':
-            limit_clause = ""
-            offset_clause = ""
-
-            bq_cohort_table = settings.BIGQUERY_COHORT_TABLE_ID
-            bq_cohort_dataset = settings.BIGQUERY_COHORT_DATASET_ID
-            bq_cohort_project_id = settings.BIGQUERY_PROJECT_ID
-            data_project = settings.BIGQUERY_DATA_PROJECT_ID
-
-            built_clause = None
-
-            filter_conditions = ''
-            if len(inc_filters):
-                built_clause = BigQuerySupport.build_bq_filter_and_params(inc_filters, field_prefix='bc.')
-                filter_conditions = 'AND ' + built_clause['filter_string']
-
-            file_list_query_base = """
-                SELECT cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
-                FROM  `{cohort_project}.{cohort_dataset}.{cohort_table}` cs
-                JOIN `{data_project}.{tcga_img_dataset}.{dcf_data_table}` ds
-                ON cs.case_barcode = ds.PatientID
-                JOIN `{data_project}.{tcga_bioclin_dataset}.{tcga_clin_table}` bc
-                ON bc.case_barcode=cs.case_barcode
-                WHERE cs.cohort_id = {cohort} {filter_conditions}
-                GROUP BY cs.case_barcode, ds.StudyInstanceUID, ds.StudyDescription, bc.disease_code, bc.project_short_name
-            """
-            file_list_query_formatted = file_list_query_base.format(cohort_dataset=bq_cohort_dataset,
-                cohort_project=bq_cohort_project_id, cohort_table=bq_cohort_table, data_project=data_project,
-                dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
-                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id,
-                filter_conditions=filter_conditions
-            )
-
-            file_list_query_filter_count_formatted = file_list_query_base.format(
-                cohort_dataset=bq_cohort_dataset, cohort_project=bq_cohort_project_id,
-                cohort_table=bq_cohort_table, data_project=data_project,
-                dcf_data_table="TCGA_radiology_images", tcga_img_dataset="metadata",
-                tcga_bioclin_dataset="TCGA_bioclin_v0", tcga_clin_table="Clinical", cohort=cohort_id,
-                filter_conditions=""
-            )
-
-            file_list_query = """
-                #standardSQL
-                {select_clause}
-                {order_clause}
-                {limit_clause}
-                {offset_clause}
-            """
-
-            file_count_query = """
-                #standardSQL
-                SELECT COUNT(*)
-                FROM (
-                  {select_clause}
-                )
-            """
-
-            # col_map: used in the sql ORDER BY clause
-            # key: html column attribute 'columnId'
-            # value: db table column name
-            col_map = {
-                'col-program': 'bc.project_short_name',
-                'col-barcode': 'cs.case_barcode',
-                'col-diseasecode': 'bc.disease_code',
-                'col-projectname': 'bc.project_short_name',
-                'col-studydesc': 'ds.StudyDescription',
-                'col-studyuid': 'ds.StudyInstanceUID',
-                'col-filesize': 'ds.StudyInstanceUID'
-            }
-
-            # filtered_query_string = "*:*"
-            # fq_query_string = None
-            #
-            # if cohort_id:
-            #     cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-            #     fq_query_string = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
-            #
-            # if inc_filters:
-            #     filtered_query_string = build_solr_query(inc_filters, "TCGA")
-            #
-            # fiiltered_facets = build_solr_facets({"disease_code": []}, inc_filters)
-            #
-            # unfiltered_queries = {}
-            #
-            # fields = ["file_path", "case_barcode", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "disease_code", "project_short_name"]
-            # count_facets = {"disease_code": []}
-            #
-            # for filter in inc_filters:
-            #     if filter in count_facets:
-            #         unfiltered = copy.deepcopy(inc_filters)
-            #         del unfiltered[filter]
-            #         unfiltered_queries[filter] = {}
-            #         if len(unfiltered) <= 0:
-            #             unfiltered = None
-            #             unfiltered_queries[filter]['query'] = "*:*"
-            #         else:
-            #             unfiltered_queries[filter]['query'] = build_solr_query(unfiltered, "TCGA")
-            #         unfiltered_queries[filter]['facets'] = build_solr_facets(count_facets, unfiltered)
-            #
-            # # col_map: used in the sql ORDER BY clause
-            # # key: html column attribute 'columnId'
-            # # value: db table column name
-            # col_map = {
-            #     'col-program': 'project_short_name',
-            #     'col-barcode': 'case_barcode',
-            #     'col-diseasecode': 'disease_code',
-            #     'col-projectname': 'project_short_name',
-            #     'col-studydesc': 'StudyDescription',
-            #     'col-studyuid': 'StudyInstanceUID',
-            # }
-            #
-            # filter_counts = {}
-            #
-            # sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
-            #
-            # query_params = {
-            #     "collection": "tcia_images",
-            #     "fields": fields,
-            #     "query_string": filtered_query_string,
-            #     "fq_string": fq_query_string,
-            #     "facets": fiiltered_facets,
-            #     "sort": sort,
-            #     "offset": offset,
-            #     "limit": limit,
-            #     "counts_only": False,
-            #     "collapse_on": 'StudyInstanceUID'
-            # }
-            #
-            # file_query_result = query_solr_and_format_result(query_params)
-            #
-            # total_file_count = file_query_result['numFound']
-            #
-            # if 'docs' in file_query_result and len(file_query_result['docs']):
-            #     for entry in file_query_result['docs']:
-            #         file_list.append({
-            #             'case': entry['case_barcode'],
-            #             'study_uid': entry['StudyInstanceUID'],
-            #             'study_desc': entry.get('StudyDescription','N/A'),
-            #             'disease_code': entry['disease_code'],
-            #             'project_short_name': entry['project_short_name'],
-            #             'program': "TCGA",
-            #             'file_path': entry.get('file_path', 'N/A')
-            #         })
-            #
-            # if 'facets' in file_query_result:
-            #     filter_counts = file_query_result['facets']
-            #
-            # if do_filter_count:
-            #     for filter in unfiltered_queries:
-            #         query_params['query_string'] = unfiltered_queries[filter]['query']
-            #         query_params['counts_only'] = True
-            #         query_params['facets'] = unfiltered_queries[filter]['facets']
-            #         query_params['limit'] = 0
-            #         unfiltered_result = query_solr_and_format_result(query_params)
-            #         if 'facets' in unfiltered_result:
-            #             filter_counts = unfiltered_result['facets']
-
-            if limit > 0:
-                limit_clause = ' LIMIT {}'.format(str(limit))
-                # Offset is only valid when there is a limit
-                if offset > 0:
-                    offset_clause = ' OFFSET {}'.format(str(offset))
-
-            order_clause = "ORDER BY " + col_map[sort_column] + (" DESC" if sort_order == 1 else "")
-            counts = {}
-            if do_filter_count:
-                # Query the count
-                start = time.time()
-                results = BigQuerySupport.execute_query_and_fetch_results(
-                    file_count_query.format(select_clause=file_list_query_formatted),
-                    built_clause['parameters'] if built_clause else None
-                )
-                stop = time.time()
-                logger.debug('[BENCHMARKING] Time to query BQ for dicom count: ' + str(stop - start))
-                for entry in results:
-                    total_file_count = int(entry['f'][0]['v'])
-                cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-                counts = count_public_data_type(user, file_list_query_filter_count_formatted,
-                                            inc_filters, cohort_programs, (type is not None and type != 'all'),
-                                            build, type)
-            # Query the file list only if there was anything to find
-            if total_file_count > 0 and do_filter_count or not do_filter_count:
-                start = time.time()
-                results = BigQuerySupport.execute_query_and_fetch_results(
-                    file_list_query.format(
-                        select_clause=file_list_query_formatted, order_clause=order_clause, limit_clause=limit_clause,
-                        offset_clause=offset_clause
-                    ),
-                    built_clause['parameters'] if built_clause else None
-                )
-                stop = time.time()
-                logger.debug('[BENCHMARKING] Time to query BQ for dicom data: ' + str(stop - start))
-                if len(results) > 0:
-                    for entry in results:
-                        file_list.append({
-                            'case': entry['f'][0]['v'],
-                            'study_uid': entry['f'][1]['v'],
-                            'study_desc': entry['f'][2]['v'] or 'N/A',
-                            'disease_code': entry['f'][3]['v'],
-                            'project_short_name': entry['f'][4]['v'],
-                            'program': "TCGA"
-                        })
-            filter_counts = counts
-        else:
-            case_barcode = None
-            case_barcode_condition = ''
-            if 'case_barcode' in inc_filters:
-                case_barcode = ''.join(inc_filters['case_barcode'])
-                del inc_filters['case_barcode']
-                case_barcode_condition = " AND LOWER(cs.case_barcode) LIKE LOWER(%s)"
-
-            select_clause_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.disease_code, substring_index(md.file_name_key, '/', -1) as file_name, md.file_name_key,
-                  md.index_file_name_key, md.access, md.acl, md.platform, md.data_type, md.data_category, md.index_file_id,
-                  md.experimental_strategy, md.data_format, md.file_gdc_id, md.case_gdc_id, md.project_short_name, md.file_size
-                 FROM {metadata_table} md
-                 JOIN (
-                     SELECT DISTINCT case_barcode
-                     FROM cohorts_samples
-                     WHERE cohort_id = {cohort_id}
-                 ) cs
-                 ON cs.case_barcode = md.case_barcode
-                 WHERE TRUE {filter_conditions} {case_barcode_condition}
-            """
-
-            file_list_query = """
-                {select_clause}
-                {order_clause}
-                {limit_clause}
-                {offset_clause}
-            """
-            col_map = {
+        fields = ["case_barcode", "project_short_name", "disease_code"]
+        # col_map: used in the sql ORDER BY clause
+        # key: html column attribute 'columnId'
+        # value: db table column name
+        col_map = {
                 'col-program': 'project_short_name',
                 'col-barcode': 'case_barcode',
+                'col-diseasecode': 'disease_code'
+            }
+
+        facet_attr = None
+        file_collection = None
+        collapse = None
+
+        if type in ('igv', 'camic', 'pdf'):
+            if 'data_format' not in inc_filters:
+                inc_filters['data_format'] = []
+            inc_filters['data_format'].append(FILTER_DATA_FORMAT[type])
+
+        if type == 'dicom':
+            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
+
+            fields.extend(["file_path", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality"])
+
+            col_map.update({
+                'col-studydesc': 'StudyDescription',
+                'col-studyuid': 'StudyInstanceUID',
+                'col-projectname': 'project_short_name'
+            })
+
+            print("filter counts: {}".format(do_filter_count))
+            if do_filter_count:
+                facet_attr = Attribute.objects.filter(name__in=["disease_code", "Modality", "BodyPartExamined"])
+
+            print(facet_attr)
+            collapse = "StudyInstanceUID"
+            unique="StudyInstanceUID"
+
+        else:
+            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__active=True, version__data_type=DataVersion.FILE_DATA, name__contains=build.lower())
+            fields.extend(["sample_barcode", "file_name_key", "index_file_name_key", "access", "acl", "platform",
+                           "data_type", "data_category", "index_file_id", "experimental_strategy", "data_format",
+                           "file_gdc_id", "case_gdc_id", "file_size"
+                           ])
+
+            col_map.update({
                 'col-filename': 'file_name',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
@@ -307,124 +121,102 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-datatype': 'data_type',
                 'col-dataformat': 'data_format',
                 'col-filesize': 'file_size'
-            }
+            })
 
-            if type in ('igv', 'camic', 'pdf'):
-                if 'data_format' not in inc_filters:
-                    inc_filters['data_format'] = []
-                inc_filters['data_format'].append(FILTER_DATA_FORMAT[type])
-
-            db = get_sql_connection()
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-
-            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-            select_clause = ''
-            count_select_clause = ''
-            first_program = True
-            filelist_params = ()
-            for program in cohort_programs:
-                program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
-                if len(program_data_tables) <= 0:
-                    logger.debug("[STATUS] No metadata_data table for {}, build {}--skipping.".format(program.name,build))
-                    # This program has no metadata_data table for this build, or at all--skip
-                    continue
-                program_data_table = program_data_tables[0].data_table
-                filter_conditions = ''
-                if len(inc_filters):
-                    built_clause = build_where_clause(inc_filters, for_files=True)
-                    filter_conditions = 'AND ' + built_clause['query_str']
-                    filelist_params += built_clause['value_tuple']
-                if case_barcode:
-                    filelist_params += (case_barcode, )
-                union_template = (" UNION " if not first_program else "") + "(" + select_clause_base + ")"
-                select_clause += union_template.format(
-                    cohort_id=cohort_id,
-                    metadata_table=program_data_table,
-                    filter_conditions=filter_conditions,
-                    case_barcode_condition=case_barcode_condition)
-                if do_filter_count:
-                    count_select_clause += union_template.format(
-                        cohort_id=cohort_id,
-                        metadata_table=program_data_table,
-                        filter_conditions='',
-                        case_barcode_condition='')
-                first_program = False
-
-            # if first_program is still true, we found no programs with data tables for this build
-            if not first_program:
-                if limit > 0:
-                    limit_clause = ' LIMIT {}'.format(str(limit))
-                    # Offset is only valid when there is a limit
-                    if offset > 0:
-                        offset_clause = ' OFFSET {}'.format(str(offset))
-                order_clause = "ORDER BY "+col_map[sort_column]+(" DESC" if sort_order == 1 else "")
-
-                start = time.time()
-                query = file_list_query.format(select_clause=select_clause, order_clause=order_clause, limit_clause=limit_clause,
-                            offset_clause=offset_clause)
-                if len(filelist_params) > 0:
-                    cursor.execute(query, filelist_params)
+            if do_filter_count:
+                facet_names = ['data_format', 'disease_code']
+                if type == 'camic':
+                    facet_names.extend(['data_type'])
                 else:
-                    cursor.execute(query)
-                stop = time.time()
-                logger.info("[STATUS] Time to get filelist: {}s".format(str(stop - start)))
+                    facet_names.extend(['data_type', 'data_category', 'experimental_strategy','platform'])
 
-                counts = {}
-                if do_filter_count:
-                    start = time.time()
-                    if case_barcode:
-                        inc_filters['case_barcode'] = [case_barcode]
-                    counts = count_public_data_type(user, count_select_clause,
-                                        inc_filters, cohort_programs, (type is not None and type != 'all'), build, type)
-                    stop = time.time()
-                    logger.info("[STATUS] Time to count public data files: {}s".format(str((stop-start))))
+                facet_attr = Attribute.objects.filter(name__in=facet_names)
 
-                if cursor.rowcount > 0:
-                    for item in cursor.fetchall():
-                        whitelist_found = False
-                        # If this is a controlled-access entry, check for the user's access to it
-                        if item['access'] == 'controlled' and access:
-                            whitelists = item['acl'].split(';')
-                            for whitelist in whitelists:
-                                if whitelist in access:
-                                    whitelist_found = True
+            unique="file_gdc_id"
 
-                        file_list.append({
-                            'sample': item['sample_barcode'],
-                            'case': item['case_barcode'],
-                            'disease_code': item['disease_code'],
-                            'build': build.lower(),
-                            'cloudstorage_location': item['file_name_key'] or 'N/A',
-                            'index_name': item['index_file_name_key'] or 'N/A',
-                            'access': (item['access'] or 'N/A'),
-                            'user_access': str(item['access'] != 'controlled' or whitelist_found),
-                            'filename': item['file_name'] or 'N/A',
-                            'filesize': item['file_size'] or 'N/A',
-                            'exp_strat': item['experimental_strategy'] or 'N/A',
-                            'platform': item['platform'] or 'N/A',
-                            'datacat': item['data_category'] or 'N/A',
-                            'datatype': (item['data_type'] or 'N/A'),
-                            'dataformat': (item['data_format'] or 'N/A'),
-                            'program': item['project_short_name'].split("-")[0],
-                            'case_gdc_id': (item['case_gdc_id'] or 'N/A'),
-                            'file_gdc_id': (item['file_gdc_id'] or 'N/A'),
-                            'index_file_gdc_id': (item['index_file_id'] or 'N/A'),
-                            'project_short_name': (item['project_short_name'] or 'N/A'),
-                            'cohort_id': cohort_id
-                        })
-                filter_counts = counts
-                files_counted = False
-                # Add to the file total
-                if do_filter_count:
-                    for attr in filter_counts:
-                        if files_counted:
-                            continue
-                        for val in filter_counts[attr]:
-                            if not files_counted and (attr not in inc_filters or val in inc_filters[attr]):
-                                total_file_count += int(filter_counts[attr][val])
-                        files_counted = True
-            else:
-                filter_counts = {}
+        if 'case_barcode' in inc_filters:
+            inc_filters['case_barcode'] = ["*{}*".format(x) for x in inc_filters['case_barcode']]
+
+        solr_query = build_solr_query(inc_filters, with_tags_for_ex=do_filter_count) if inc_filters else None
+        if cohort_id:
+            cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+            if not solr_query:
+                solr_query = {'queries': {}}
+            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
+
+        if do_filter_count:
+            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique)
+
+        filter_counts = {}
+
+        sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
+
+        query_set = [y for x, y in solr_query['queries'].items()]
+
+        query_params = {
+            "collection": file_collection.name,
+            "fields": fields,
+            "fqs": query_set,
+            "facets": facets,
+            "sort": sort,
+            "offset": offset,
+            "limit": limit,
+            "counts_only": False,
+            "collapse_on": collapse
+        }
+
+        file_query_result = query_solr_and_format_result(query_params)
+
+        total_file_count = file_query_result['numFound']
+
+        if 'docs' in file_query_result and len(file_query_result['docs']):
+            for entry in file_query_result['docs']:
+                if type == 'dicom':
+                    file_list.append({
+                        'case': entry['case_barcode'],
+                        'study_uid': entry['StudyInstanceUID'],
+                        'study_desc': entry.get('StudyDescription','N/A'),
+                        'disease_code': entry['disease_code'],
+                        'project_short_name': entry['project_short_name'],
+                        'program': "TCGA",
+                        'file_path': entry.get('file_path', 'N/A')
+                    })
+                else:
+                    whitelist_found = False
+                    # If this is a controlled-access entry, check for the user's access to it
+                    if entry['access'] == 'controlled' and access:
+                        whitelists = entry['acl'].split(';')
+                        for whitelist in whitelists:
+                            if whitelist in access:
+                                whitelist_found = True
+
+                    file_list.append({
+                        'sample': entry.get('sample_barcode','N/A'),
+                        'case': entry['case_barcode'],
+                        'disease_code': entry.get('disease_code','N/A'),
+                        'build': build.lower(),
+                        'cloudstorage_location': entry.get('file_name_key','N/A'),
+                        'index_name': entry.get('index_file_name_key', 'N/A'),
+                        'access': entry.get('access','N/A'),
+                        'user_access': str(entry.get('access','N/A') != 'controlled' or whitelist_found),
+                        'filename': entry['file_name_key'].split("/")[-1] or 'N/A',
+                        'filesize': entry.get('file_size','N/A'),
+                        'exp_strat': entry.get('experimental_strategy', 'N/A'),
+                        'platform': entry.get('platform','N/A'),
+                        'datacat': entry.get('data_category','N/A'),
+                        'datatype': entry.get('data_type','N/A'),
+                        'dataformat': entry.get('data_format','N/A'),
+                        'program': entry.get('project_short_name','').split("-")[0],
+                        'case_gdc_id': entry.get('case_gdc_id','N/A'),
+                        'file_gdc_id': entry.get('file_gdc_id','N/A'),
+                        'index_file_gdc_id': (entry.get('index_file_id', 'N/A')),
+                        'project_short_name': entry.get('project_short_name','N/A'),
+                        'cohort_id': cohort_id
+                    })
+
+        if 'facets' in file_query_result:
+            filter_counts = file_query_result['facets']
+
         resp = {
             'total_file_count': total_file_count,
             'page': page,

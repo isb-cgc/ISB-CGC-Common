@@ -32,7 +32,7 @@ import string
 import time
 from time import sleep
 import re
-from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables
+from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables, DataSource, DataVersion
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
 from solr_helpers import query_solr_and_format_result, build_solr_facets
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -222,7 +222,7 @@ def fetch_build_data_attr(build, type=None):
     build = build.upper()
 
     if type == 'dicom':
-        metadata_data_attrs = ['disease_code', ]
+        metadata_data_attrs = ['disease_code', 'Modality', 'BodyPartExamined']
     elif type == 'pdf':
         metadata_data_attrs = ['data_format', 'disease_code', ]
     elif type == 'camic':
@@ -257,22 +257,53 @@ def fetch_build_data_attr(build, type=None):
                                 'name': attr,
                                 'values': {}
                             }
+                        if type == 'dicom':
+                            if len(program.get_data_sources(data_type=DataVersion.IMAGE_DATA)):
+                                tcia_images_source = DataSource.objects.select_related('version').get(
+                                    version__active=True,version__data_type=DataVersion.IMAGE_DATA,source_type=DataSource.SOLR
+                                )
+                                source_attrs = tcia_images_source.get_source_attr(named_set=[attr],for_faceting=False)
+                                METADATA_DATA_ATTR[build][attr]['displ_name'] = source_attrs.first().display_name
+                                facets = build_solr_facets(source_attrs)
+                                # We fetch the DICOM range from Solr
+                                result = query_solr_and_format_result({
+                                    "collection": tcia_images_source.name,
+                                    "query_string": "*:*",
+                                    "facets": facets,
+                                    "limit": 0,
+                                    "counts_only": True
+                                })
+                                for val in result['facets'][attr]:
+                                    if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                                        tooltip = ''
+                                        if attr == 'disease_code':
+                                            if val in disease_code_dict:
+                                                tooltip = disease_code_dict[val]['tooltip']
 
-                        query = """
-                            SELECT DISTINCT {attr}
-                            FROM {data_table};
-                        """.format(attr=attr,data_table=data_table)
-
-                        cursor.execute(query)
-
-                        for row in cursor.fetchall():
-                            val = "None" if not row[0] else row[0]
-                            if val not in METADATA_DATA_ATTR[build][attr]['values']:
-                                METADATA_DATA_ATTR[build][attr]['values'][val] = {
-                                    'displ_value': val,
-                                    'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                    'name': val
-                                }
+                                        METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                                            'displ_value': val,
+                                            'value': re.sub(r"[^A-Za-z0-9_\-]", "", re.sub(r"\s+", "-", val)),
+                                            'name': val,
+                                            'tooltip': tooltip
+                                        }
+                        else:
+                            query = """
+                                    SELECT DISTINCT {attr}
+                                    FROM {data_table};
+                                """.format(attr=attr, data_table=data_table)
+                            cursor.execute(query)
+                            for row in cursor.fetchall():
+                                val = "None" if not row[0] else row[0]
+                                tooltip = ''
+                                if attr == 'disease_code' and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
+                                    tooltip = disease_code_dict[val]['tooltip']
+                                if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                                    METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                                        'displ_value': val,
+                                        'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
+                                        'name': val,
+                                        'tooltip': tooltip
+                                    }
 
                         if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
                             METADATA_DATA_ATTR[build][attr]['values']['None'] = {
