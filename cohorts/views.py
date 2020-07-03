@@ -1676,9 +1676,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
             inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
                 request.POST.get('filters', '{}'))
             if request.GET.get('case_barcode', None):
-                inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')),]
-                ##  this is for dicom panel to work against solr
-                # inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'),]
+                inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
             items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
 
@@ -1796,14 +1794,14 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
-            inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')), ]
-            # inc_filters['case_barcode'] = [ "%{}%".format(request.GET.get('case_barcode')) if panel_type != 'dicom' else request.GET.get('case_barcode'), ]
+            inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
         result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_build_data_attr(build)
+            metadata_data_attr = fetch_build_data_attr(build, type=panel_type)
+            print(metadata_data_attr.keys())
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
                     for val in result['metadata_data_counts'][attr]:
@@ -1892,7 +1890,7 @@ def streaming_csv_view(request, cohort_id=0):
             logger.warn("[ERROR] Didn't receive a total--using MAX_FILE_LIST_ENTRIES.")
             total_expected = MAX_FILE_LIST_ENTRIES
 
-        limit = -1 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
+        limit = total_expected+10 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
         file_list = None
 
@@ -1904,7 +1902,7 @@ def streaming_csv_view(request, cohort_id=0):
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
-            inc_filters['case_barcode'] = ["%{}%".format(request.GET.get('case_barcode')), ]
+            inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
         items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit, build=build)
 
         if 'file_list' in items:
@@ -2018,7 +2016,7 @@ def get_metadata(request):
 
     program_id = int(program_id) if program_id is not None else None
 
-    if (request.user.is_authenticated):
+    if request.user.is_authenticated:
         user = Django_User.objects.get(id=request.user.id)
     else:
         user = AnonymousUser
@@ -2026,23 +2024,49 @@ def get_metadata(request):
     if program_id is not None and program_id > 0:
         results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit, comb_mut_filters=comb_mut_filters)
 
+        attr_counts = []
+        data_type_counts = {}
+        for set in results['counts']:
+            for attr in results['counts'][set]:
+                if attr == 'data_type':
+                    for id, val in results['counts'][set][attr]['values'].items():
+                        attr_name = val['displ_value'].split(' - ')[0]
+                        attr_val = val['displ_value'].split(' - ')[-1]
+                        if attr_name not in data_type_counts:
+                            data_type_counts[attr_name] = copy.deepcopy(results['counts'][set][attr])
+                            data_type_counts[attr_name]['name'] = attr_name.replace(" ", "_")
+                            data_type_counts[attr_name]['displ_name'] = attr_name
+                            data_type_counts[attr_name]['values'] = []
+                        val['displ_value'] = attr_val
+                        val['displ_name'] = attr_val
+                        data_type_counts[attr_name]['values'].append(val)
+                else:
+                    val_list = [y for x, y in results['counts'][set][attr]['values'].items()]
+                    results['counts'][set][attr].update({'values': val_list})
+                    attr_counts.append(results['counts'][set][attr])
+
+        if len(data_type_counts):
+            attr_counts.extend(y for x, y in data_type_counts.items())
+
+        results['counts'] = attr_counts
+
         # If there is an extent cohort, to get the cohort's new totals per applied filters
         # we have to check the unfiltered programs for their numbers and tally them in
         # This includes user data!
         if cohort:
-            results['cohort-total'] = results['total']
+            results['cohort-total'] = results['samples']
             results['cohort-cases'] = results['cases']
             cohort_pub_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct(), is_public=True)
             for prog in cohort_pub_progs:
                 if prog.id != program_id:
                     prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
-                    results['cohort-total'] += prog_res['total']
+                    results['cohort-total'] += prog_res['samples']
                     results['cohort-cases'] += prog_res['cases']
 
             cohort_user_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id', flat=True).distinct(), is_public=False)
             for prog in cohort_user_progs:
                 user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
-                results['cohort-total'] += user_prog_res['total']
+                results['cohort-total'] += user_prog_res['samples']
                 results['cohort-cases'] += user_prog_res['cases']
     else:
         results = user_metadata_counts(user, filters, cohort)
@@ -2061,7 +2085,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     try:
         # Check program ID against public programs
-        public_program = Program.objects.filter(id=program_id).first()
+        public_program = Program.objects.get(id=program_id)
         user = request.user
 
         if public_program:
@@ -2073,12 +2097,16 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 # Currently we do not select anything by default
                 filters = None
 
-            clin_attr = fetch_program_attr(program_id)
+            # case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
+            #     version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
+            # ).get_source_attrs(for_ui=True)
+            case_sample_attr = fetch_program_attr(program_id)
 
+            #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
             molecular_attr_builds = None
 
-            if public_program.name in BQ_MOLECULAR_ATTR_TABLES and BQ_MOLECULAR_ATTR_TABLES[public_program.name]:
+            if len(public_program.get_data_sources(data_type=DataVersion.MUTATION_DATA)):
                 molecular_attr = {
                     'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
                     'attrs': MOLECULAR_ATTR
@@ -2095,16 +2123,41 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                         if ma:
                             ma['category'] = cat['value']
 
+            #data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.TYPE_AVAILABILITY_DATA).get_source_attrs(for_ui=True)
             data_types = fetch_program_data_types(program_id)
 
             results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
 
+            # TODO: Eventually we will rewrite our template to not need this, but for now...
+            attr_counts = []
+            data_type_counts = {}
+            for set in results['counts']:
+                for attr in results['counts'][set]:
+                    if attr == 'data_type':
+                        for id,val in results['counts'][set][attr]['values'].items():
+                            attr_name = val['displ_value'].split(' - ')[0]
+                            attr_val = val['displ_value'].split(' - ')[-1]
+                            if attr_name not in data_type_counts:
+                                data_type_counts[attr_name] = copy.deepcopy(results['counts'][set][attr])
+                                data_type_counts[attr_name]['name'] = attr_name.replace(" ","_")
+                                data_type_counts[attr_name]['displ_name'] = attr_name
+                                data_type_counts[attr_name]['values'] = []
+                            val['displ_value'] = attr_val
+                            val['displ_name'] = attr_val
+                            data_type_counts[attr_name]['values'].append(val)
+                    else:
+                        val_list = [y for x, y in results['counts'][set][attr]['values'].items()]
+                        results['counts'][set][attr].update({'values': val_list})
+                        attr_counts.append(results['counts'][set][attr])
+
+            if len(data_type_counts):
+                attr_counts.extend(y for x, y in data_type_counts.items())
+
             template_values = {
                 'request': request,
-                'attr_counts': results['count'] if 'count' in results else [],
-                'data_type_counts': results['data_counts'] if 'data_counts' in results else [],
-                'total_samples': int(results['total']),
-                'clin_attr': clin_attr,
+                'attr_counts': attr_counts,
+                'total_samples': int(results['samples']),
+                'clin_attr': case_sample_attr,
                 'molecular_attr': molecular_attr,
                 'molecular_attr_builds': molecular_attr_builds,
                 'data_types': data_types,
@@ -2132,7 +2185,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             template_values = {
                 'request': request,
                 'attr_counts': results['count'],
-                'total_samples': int(results['total']),
+                'total_samples': int(results['samples']),
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
