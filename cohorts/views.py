@@ -1732,15 +1732,17 @@ def filelist(request, cohort_id=None, panel_type=None):
                 )
             has_user_data = bool(cohort_sample_list.count() > 0)
             programs_this_cohort = cohort.get_program_names()
+            download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
+        else:
+            download_url = reverse("download_filelist")
 
         logger.debug("[STATUS] Returning response from cohort_filelist")
 
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
-                                            # 'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
+                                            'download_url': download_url,
                                             # 'export_url': reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'}),
-                                            'download_url': reverse('download_filelist', kwargs={'cohort_id': 0}),
                                             'export_url': reverse('export_data', kwargs={'cohort_id': 0, 'export_type': 'file_manifest'}),
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
@@ -1761,7 +1763,6 @@ def filelist(request, cohort_id=None, panel_type=None):
 
 
 def filelist_ajax(request, cohort_id=None, panel_type=None):
-
     status = 200
     try:
         if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -1894,13 +1895,16 @@ class Echo(object):
         return value
 
 
-def streaming_csv_view(request, cohort_id=0):
+def streaming_csv_view(request, cohort_id=None):
     if cohort_id == 0:
         messages.error(request, 'Cohort {} does not exist.'.format(str(cohort_id)))
         return redirect('cohort_list')
 
     try:
-        cohort = Cohort.objects.get(id=cohort_id)
+        cohort = None
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+
         total_expected = int(request.GET.get('total', '0'))
 
         if total_expected == 0:
@@ -1929,18 +1933,25 @@ def streaming_csv_view(request, cohort_id=0):
                 messages.error(request, items['error']['message'])
             else:
                 messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
-            return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            if cohort_id:
+                return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            else:
+                return redirect(reverse('user_landing'))
 
         if len(file_list) < total_expected:
             messages.error(request, 'Only %d files found out of %d expected!' % (len(file_list), total_expected))
-            return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            if cohort_id:
+                return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            else:
+                return redirect(reverse('user_landing'))
 
         if len(file_list) > 0:
             """A view that streams a large CSV file."""
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
-            rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
+            cohort_string = "Cohort '{}', ".format(cohort.name) if cohort else ""
+            rows = (["File listing for {}Build {}".format(cohort_string, build)],)
             rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
                       "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
@@ -1952,7 +1963,9 @@ def streaming_csv_view(request, cohort_id=0):
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
                                              content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-            response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}_{}.csv"'.format(str(cohort_id),build,timestamp)
+            cohort_string = 'cohort_{}_'.format(str(cohort_id)) if cohort_id else ''
+            filename = 'file_list_{}build_{}_{}.csv'.format(cohort_string, build, timestamp)
+            response['Content-Disposition'] = 'attachment; filename=' + filename
             response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
 
@@ -1961,7 +1974,10 @@ def streaming_csv_view(request, cohort_id=0):
         logger.exception(e)
         messages.error(request,"There was an error while attempting to download your filelist--please contact the administrator.")
 
-    return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+    if cohort_id:
+        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+    else:
+        return redirect(reverse('filelist'))
 
 
 @login_required
