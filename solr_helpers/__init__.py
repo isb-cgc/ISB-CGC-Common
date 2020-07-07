@@ -248,12 +248,14 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                 facets[attr.name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
         if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []):
+            print("{} is derived data - adding filter query".format(attr.name))
             if not 'domain' in facets[facet_name]:
                 facets[facet_name]['domain'] = {}
             if attr.name in attr_cats:
-                not_nulls = ["{}:[* TO *]".format(x) for x in cat_attrs[attr_cats[attr.name]['cat_name']]]
+                not_nulls = ["{}:[* TO *]".format(x) for x in cat_attrs[attr_cats[attr.name]['cat_name']] if x != attr.name]
             facets[facet_name]['domain']['filter'] = "has_derived:True{}".format(
                 " AND ({})".format(" OR ".join(not_nulls) if len(not_nulls) else ""))
+            print(facets[facet_name]['domain']['filter'])
 
     return facets
 
@@ -261,6 +263,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
     
     ranged_attrs = Attribute.get_ranged_attrs()
+    derived_attrs = Attribute.get_attrs_of_type(set_type=DataSetType.DERIVED_DATA)
 
     first = True
     full_query_str = ''
@@ -269,13 +272,30 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     count = 0
     mutation_filters = {}
     main_filters = {}
+    derived_filters = {}
+    attr_cats = None
 
     # Because mutation filters can have their operation specified, split them out separately:
     for attr, values in list(filters.items()):
         if 'MUT:' in attr:
             mutation_filters[attr] = values
+        elif attr in derived_attrs['names']:
+            derived_filters[attr] = values
         else:
             main_filters[attr] = values
+
+    if len(derived_filters):
+        attr_cats = derived_attrs['query_set'].get_attr_cats()
+
+    # Derived filters
+    for attr, values in list(derived_filters.items()):
+        # Segmentations and the other derived data are at different record levels, so we need to subquery
+        # between these levels of derived data
+
+
+
+        pass
+
 
     # Mutation filters
     for attr, values in list(mutation_filters.items()):
