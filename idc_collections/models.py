@@ -93,11 +93,9 @@ class DataSetTypeQuerySet(models.QuerySet):
                 sources = sources | dst.datasource_set.all()
         return sources
 
-
 class DataSetTypeManager(models.Manager):
     def get_queryset(self):
         return DataSetTypeQuerySet(self.model, using=self._db)
-
 
 class DataSetType(models.Model):
     IMAGE_DATA = 'I'
@@ -187,6 +185,7 @@ class Collection(models.Model):
             str(self.program.all())
         )
 
+
 class DataSourceQuerySet(models.QuerySet):
     def to_dicts(self):
         return [{
@@ -269,7 +268,6 @@ class DataSourceManager(models.Manager):
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
-
 class DataSource(models.Model):
     QUERY = 'query'
     TERMS = 'terms'
@@ -333,7 +331,6 @@ class DataSource(models.Model):
 
     class Meta(object):
         unique_together = (("name", "source_type"),)
-
 
 class DataSourceJoin(models.Model):
     from_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="from_data_source")
@@ -415,11 +412,8 @@ class Attribute(models.Model):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
 
-
 # This model allows for breaking Attributes up beyond the strict DataSource->DataSetType heirarchy,
 # since an attribute might be found in a DataSource housing more than one set type.
-
-
 class Attribute_Set_TypeQuerySet(models.QuerySet):
     def get_attr_set_types(self):
         attrs_by_set = {}
@@ -441,7 +435,6 @@ class Attribute_Set_Type(models.Model):
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)
-
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):
@@ -514,7 +507,6 @@ class User_Feature_Definitions(models.Model):
     bq_map_id = models.CharField(max_length=200)
     is_numeric = models.BooleanField(default=False)
     shared_map_id = models.CharField(max_length=128, null=True, blank=True)
-
 
 class User_Feature_Counts(models.Model):
     feature = models.ForeignKey(User_Feature_Definitions, null=False, on_delete=models.CASCADE)

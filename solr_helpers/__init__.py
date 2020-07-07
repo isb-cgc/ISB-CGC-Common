@@ -162,6 +162,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
 
     for attr in attrs:
         facet_type = DataSource.get_facet_type(attr)
+        facet_name = attr.name
         if facet_type == "query":
             # We need to make a series of query buckets
             attr_ranges = Attribute_Ranges.objects.filter(attribute=attr)
@@ -235,13 +236,6 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                 'limit': -1
             }
 
-            if DataSetType.DERIVED_DATA in attr_sets.get(attr.name,[]):
-                if not 'domain' in facets[attr.name]:
-                    facets[attr.name]['domain'] = {}
-                if attr.name in attr_cats:
-                    not_nulls = ["{}:[* TO *]".format(x) for x in cat_attrs[attr_cats[attr.name]['cat_name']]]
-                facets[attr.name]['domain']['filter'] = "has_derived:True{}".format(" AND ({})".format(" OR ".join(not_nulls) if len(not_nulls) else ""))
-
             if filter_tags and attr.name in filter_tags:
                 if not 'domain' in facets[attr.name]:
                     facets[attr.name]['domain'] = {}
@@ -252,6 +246,14 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
 
             if unique:
                 facets[attr.name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
+        if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []):
+            if not 'domain' in facets[facet_name]:
+                facets[facet_name]['domain'] = {}
+            if attr.name in attr_cats:
+                not_nulls = ["{}:[* TO *]".format(x) for x in cat_attrs[attr_cats[attr.name]['cat_name']]]
+            facets[facet_name]['domain']['filter'] = "has_derived:True{}".format(
+                " AND ({})".format(" OR ".join(not_nulls) if len(not_nulls) else ""))
 
     return facets
 
