@@ -7,7 +7,7 @@ import re
 import hashlib
 import time
 
-from idc_collections.models import Attribute, DataSource, Attribute_Ranges
+from idc_collections.models import Attribute, DataSource, Attribute_Ranges, DataSetType
 
 from metadata.query_helpers import MOLECULAR_CATEGORIES
 
@@ -150,6 +150,16 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
     facets = {}
 
+    attr_sets = attrs.get_attr_sets()
+    attr_cats = attrs.get_attr_cats()
+    cat_attrs = {}
+    for attr in attr_cats:
+        cat = attr_cats[attr]
+        if cat['cat_name'] not in cat_attrs:
+            cat_attrs[cat['cat_name']] = []
+        if attr not in cat_attrs[cat['cat_name']]:
+            cat_attrs[cat['cat_name']].append(attr)
+
     for attr in attrs:
         facet_type = DataSource.get_facet_type(attr)
         if facet_type == "query":
@@ -171,9 +181,9 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                         'q': "{}:{}{} TO {}{}".format(attr.name, l_boundary, str(lower), str(upper), u_boundary)
                     }
                     if filter_tags and attr.name in filter_tags:
-                        facets[facet_name]['domain'] = {
-                            "excludeTags": filter_tags[attr.name]
-                        }
+                        if not 'domain' in facets[attr.name]:
+                            facets[facet_name]['domain'] = {}
+                        facets[facet_name]['domain']["excludeTags"] = filter_tags[attr.name]
                 else:
                     # Iterated range
                     cast = int if attr_range.type == Attribute_Ranges.INT else float
@@ -225,10 +235,17 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                 'limit': -1
             }
 
+            if DataSetType.DERIVED_DATA in attr_sets.get(attr.name,[]):
+                if not 'domain' in facets[attr.name]:
+                    facets[attr.name]['domain'] = {}
+                if attr.name in attr_cats:
+                    not_nulls = ["{}:[* TO *]".format(x) for x in cat_attrs[attr_cats[attr.name]['cat_name']]]
+                facets[attr.name]['domain']['filter'] = "has_derived:True{}".format(" AND ({})".format(" OR ".join(not_nulls) if len(not_nulls) else ""))
+
             if filter_tags and attr.name in filter_tags:
-                facets[attr.name]['domain'] = {
-                    "excludeTags": filter_tags[attr.name]
-                }
+                if not 'domain' in facets[attr.name]:
+                    facets[attr.name]['domain'] = {}
+                facets[attr.name]['domain']["excludeTags"] =  filter_tags[attr.name]
 
             if include_nulls:
                 facets[attr.name]['missing'] = True

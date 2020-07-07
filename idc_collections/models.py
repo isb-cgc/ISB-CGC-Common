@@ -356,6 +356,14 @@ class AttributeQuerySet(models.QuerySet):
             categories[cat.attribute.name] = {'cat_name': cat.category, 'cat_display_name': cat.category_display_name}
         return categories
 
+    def get_attr_sets(self):
+        sets = {}
+        for set_type in Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all()):
+            if set_type.attribute.name not in sets:
+                sets[set_type.attribute.name] = []
+            sets[set_type.attribute.name].append(set_type.datasettype.data_type)
+        return sets
+
 class AttributeManager(models.Manager):
     def get_queryset(self):
         return AttributeQuerySet(self.model, using=self._db)
