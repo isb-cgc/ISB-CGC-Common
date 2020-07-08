@@ -74,7 +74,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                             facet_range = facet.split(":")[-1]
                             if facet_name not in formatted_query_result['facets']:
                                 formatted_query_result['facets'][facet_name] = {}
-                            formatted_query_result['facets'][facet_name][facet_range] = facet_counts['count']
+                            formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
             else:
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
@@ -181,8 +181,17 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                         'limit': -1,
                         'q': "{}:{}{} TO {}{}".format(attr.name, l_boundary, str(lower), str(upper), u_boundary)
                     }
+                    if unique:
+                        facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
+                    if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []) and attr.name in attr_cats:
+                        if not 'domain' in facets[facet_name]:
+                            facets[facet_name]['domain'] = {}
+                        facets[facet_name]['domain']['filter'] = "has_{}:True".format(
+                            attr_cats[attr.name]['cat_name'].lower())
+
                     if filter_tags and attr.name in filter_tags:
-                        if not 'domain' in facets[attr.name]:
+                        if not 'domain' in facets[facet_name]:
                             facets[facet_name]['domain'] = {}
                         facets[facet_name]['domain']["excludeTags"] = filter_tags[attr.name]
                 else:
@@ -212,6 +221,20 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                         lower = upper
                         upper = lower+gap
 
+                        if unique:
+                            facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
+                        if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []) and attr.name in attr_cats:
+                            if not 'domain' in facets[facet_name]:
+                                facets[facet_name]['domain'] = {}
+                            facets[facet_name]['domain']['filter'] = "has_{}:True".format(
+                                attr_cats[attr.name]['cat_name'].lower())
+
+                        if filter_tags and attr.name in filter_tags:
+                            if not 'domain' in facets[facet_name]:
+                                facets[facet_name]['domain'] = {}
+                            facets[facet_name]['domain']["excludeTags"] = filter_tags[attr.name]
+
                     # If we stopped *at* the end, we need to add one last bucket.
                     if attr_range.unbounded:
                         facet_name = "{}:{}".format(attr.name, attr_range.label) if attr_range.label else "{}:{} to {}".format(attr.name, str(attr_range.last), "*")
@@ -221,14 +244,38 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                             'limit': -1,
                             'q': "{}:{}{} TO {}]".format(attr.name, l_boundary, str(attr_range.last), "*")
                         }
+                        if unique:
+                            facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
-                    if include_nulls:
-                        facets["{}:None".format(attr.name)] = {
-                            'type': facet_type,
-                            'field': attr.name,
-                            'limit': -1,
-                            'q': '-{}:[* TO *]'.format(attr.name)
-                        }
+                        if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []) and attr.name in attr_cats:
+                            if not 'domain' in facets[facet_name]:
+                                facets[facet_name]['domain'] = {}
+                            facets[facet_name]['domain']['filter'] = "has_{}:True".format(
+                                attr_cats[attr.name]['cat_name'].lower())
+
+                        if filter_tags and attr.name in filter_tags:
+                            if not 'domain' in facets[facet_name]:
+                                facets[facet_name]['domain'] = {}
+                            facets[facet_name]['domain']["excludeTags"] = filter_tags[attr.name]
+
+
+            if include_nulls:
+                none_facet_name = "{}:None".format(attr.name)
+                facets[none_facet_name] = {
+                    'type': facet_type,
+                    'field': attr.name,
+                    'limit': -1,
+                    'q': '-{}:[* TO *]'.format(attr.name)
+                }
+
+                if unique:
+                    facets[none_facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
+                if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []) and attr.name in attr_cats:
+                    if not 'domain' in facets[none_facet_name]:
+                        facets[none_facet_name]['domain'] = {}
+                    facets[none_facet_name]['domain']['filter'] = "has_{}:True".format(attr_cats[attr.name]['cat_name'].lower())
+
         else:
             facets[attr.name] = {
                 'type': facet_type,
@@ -247,15 +294,10 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
             if unique:
                 facets[attr.name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
-        if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []):
-            print("{} is derived data - adding filter query".format(attr.name))
-            if not 'domain' in facets[facet_name]:
-                facets[facet_name]['domain'] = {}
-            if attr.name in attr_cats:
-                not_nulls = ["{}:[* TO *]".format(x) for x in cat_attrs[attr_cats[attr.name]['cat_name']] if x != attr.name]
-            facets[facet_name]['domain']['filter'] = "has_derived:True{}".format(
-                " AND ({})".format(" OR ".join(not_nulls) if len(not_nulls) else ""))
-            print(facets[facet_name]['domain']['filter'])
+            if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []) and attr.name in attr_cats:
+                if not 'domain' in facets[facet_name]:
+                    facets[facet_name]['domain'] = {}
+                facets[facet_name]['domain']['filter'] = "has_{}:True".format(attr_cats[attr.name]['cat_name'].lower())
 
     return facets
 
@@ -263,7 +305,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
     
     ranged_attrs = Attribute.get_ranged_attrs()
-    derived_attrs = Attribute.get_attrs_of_type(set_type=DataSetType.DERIVED_DATA)
+    derived_attrs = Attribute.get_attrs_of_type(set_type=DataSetType.DERIVED_SET)
 
     first = True
     full_query_str = ''
@@ -273,29 +315,15 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     mutation_filters = {}
     main_filters = {}
     derived_filters = {}
-    attr_cats = None
 
     # Because mutation filters can have their operation specified, split them out separately:
     for attr, values in list(filters.items()):
         if 'MUT:' in attr:
             mutation_filters[attr] = values
-        elif attr in derived_attrs['names']:
-            derived_filters[attr] = values
         else:
+            if attr in derived_attrs['names']:
+                derived_filters[attr] = values
             main_filters[attr] = values
-
-    if len(derived_filters):
-        attr_cats = derived_attrs['query_set'].get_attr_cats()
-
-    # Derived filters
-    for attr, values in list(derived_filters.items()):
-        # Segmentations and the other derived data are at different record levels, so we need to subquery
-        # between these levels of derived data
-
-
-
-        pass
-
 
     # Mutation filters
     for attr, values in list(mutation_filters.items()):
@@ -373,46 +401,51 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             if not with_tags_for_ex:
                 full_query_str += ' AND '
 
-        # Mutation filter
-        if 'MUT:' in attr:
-            continue
-        else:
-            # If it's looking for a single None value
-            if len(values) == 1 and values[0] == 'None':
-                query_str += '(-%s:{* TO *})' % attr
-            # If it's a ranged value, calculate the bins
-            elif attr == 'bmi':
-                clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
-                if 'None' in values:
-                    values.remove('None')
-                    query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
-                else:
-                    query_str += "+({})".format(clause)
-            elif attr[:attr.rfind('_')] in ranged_attrs:
-                attr_name = attr[:attr.rfind('_')]
-                clause = ""
-                if len(values) > 1 and type(values[0]) is list:
-                    clause = " {} ".format(comb_with).join(
-                        ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
-                elif len(values) > 1 :
-                    clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
-                else:
-                    clause = "{}:{}".format(attr_name, values[0])
-
-                if 'None' in values:
-                    values.remove('None')
-                    query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
-                else:
-                    query_str += "+({})".format(clause)
+        # If it's looking for a single None value
+        if len(values) == 1 and values[0] == 'None':
+            query_str += '(-%s:{* TO *})' % attr
+        # If it's a ranged value, calculate the bins
+        elif attr == 'bmi':
+            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
             else:
-                if 'None' in values:
-                    values.remove('None')
-                    query_str += '-(-(%s:("%s")) +(%s:{* TO *}))' % (attr,"\" \"".join(values), attr)
-                else:
-                    query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
+                query_str += "+({})".format(clause)
+        elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
+            clause = ""
+            if len(values) == 1 and re.match(r'\d+ [tT][oO] \d+', values[0]):
+                values = values[0].lower().split(" to ")
+            if len(values) > 1 and type(values[0]) is list:
+                clause = " {} ".format(comb_with).join(
+                    ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
+            elif len(values) > 1 :
+                clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
+            else:
+                clause = "{}:{}".format(attr_name, values[0])
+
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
+            else:
+                query_str += "+({})".format(clause)
+            print(query_str)
+        else:
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s:("%s")) +(%s:{* TO *}))' % (attr,"\" \"".join(values), attr)
+            else:
+                query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
+
+        print(query_str)
 
         query_set = query_set or {}
         full_query_str += query_str
+
+        if attr in derived_filters:
+            query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr,
+                "{!join to=%s from=%s}%s" % ("StudyInstanceUID", "StudyInstanceUID", query_str.replace("\"", "\\\"")))
 
         if with_tags_for_ex:
             filter_tags = filter_tags or {}
