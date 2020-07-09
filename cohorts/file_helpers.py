@@ -127,8 +127,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 if type == 'camic':
                     facet_names.extend(['data_type'])
                 else:
-                    facet_names.extend(['data_type', 'data_category', 'experimental_strategy','platform'])
-
+                    if cohort_id:
+                        facet_names.extend(['data_type', 'data_category', 'experimental_strategy','platform'])
+                    else:
+                        facet_names.extend(['program_name', 'data_type', 'data_category', 'experimental_strategy', 'platform'])
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
             unique="file_gdc_id"

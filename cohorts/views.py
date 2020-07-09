@@ -1662,8 +1662,8 @@ def filelist(request, cohort_id=None, panel_type=None):
 
     try:
         metadata_data_attr_builds = {
-            'HG19': fetch_build_data_attr('HG19', panel_type),
-            'HG38': fetch_build_data_attr('HG38', panel_type)
+            'HG19': fetch_build_data_attr('HG19', panel_type, cohort_id is None),
+            'HG38': fetch_build_data_attr('HG38', panel_type, cohort_id is None)
         }
 
         build = request.GET.get('build', 'HG19')
@@ -1813,7 +1813,7 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_build_data_attr(build, type=panel_type)
+            metadata_data_attr = fetch_build_data_attr(build, panel_type, cohort_id is None)
             print(metadata_data_attr.keys())
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:

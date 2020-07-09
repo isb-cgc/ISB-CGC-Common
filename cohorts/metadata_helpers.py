@@ -214,7 +214,7 @@ def get_sql_connection():
         if db and db.open: db.close()
 
 
-def fetch_build_data_attr(build, type=None):
+def fetch_build_data_attr(build, type=None, add_program_name=False):
     db = None
     cursor = None
 
@@ -228,7 +228,12 @@ def fetch_build_data_attr(build, type=None):
     elif type == 'camic':
         metadata_data_attrs = ['data_type', 'data_format', 'disease_code', ]
     else:
-        metadata_data_attrs = ['data_type', 'data_category','experimental_strategy','data_format','platform', 'disease_code',]
+        if add_program_name:
+            metadata_data_attrs = ['program_name', 'data_type', 'data_category', 'experimental_strategy', 'data_format',
+                                   'platform', 'disease_code', ]
+        else:
+            metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform', 'disease_code',]
+
     try:
         if len(METADATA_DATA_ATTR[build]) != len(metadata_data_attrs):
             METADATA_DATA_ATTR[build]={}
