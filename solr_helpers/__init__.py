@@ -258,7 +258,6 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                                 facets[facet_name]['domain'] = {}
                             facets[facet_name]['domain']["excludeTags"] = filter_tags[attr.name]
 
-
             if include_nulls:
                 none_facet_name = "{}:None".format(attr.name)
                 facets[none_facet_name] = {
@@ -271,10 +270,14 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                 if unique:
                     facets[none_facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
+                # We need to make domain filters to exclude anything from outside this category or we'll get a bunch of NULLs from
+                # other categories' records
                 if DataSetType.DERIVED_DATA in attr_sets.get(attr.name, []) and attr.name in attr_cats:
                     if not 'domain' in facets[none_facet_name]:
                         facets[none_facet_name]['domain'] = {}
-                    facets[none_facet_name]['domain']['filter'] = "has_{}:True".format(attr_cats[attr.name]['cat_name'].lower())
+                    if 'filter' not in facets[none_facet_name]['domain']:
+                        facets[none_facet_name]['domain']['filter'] = ""
+                    facets[none_facet_name]['domain']['filter'] += "has_{}:True".format(attr_cats[attr.name]['cat_name'].lower())
 
         else:
             facets[attr.name] = {
@@ -302,10 +305,9 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
     return facets
 
 # Build a query string for Solr
-def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
+def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None, search_child_records_by=None):
     
     ranged_attrs = Attribute.get_ranged_attrs()
-    derived_attrs = Attribute.get_attrs_of_type(set_type=DataSetType.DERIVED_SET)
 
     first = True
     full_query_str = ''
@@ -314,15 +316,12 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     count = 0
     mutation_filters = {}
     main_filters = {}
-    derived_filters = {}
 
     # Because mutation filters can have their operation specified, split them out separately:
     for attr, values in list(filters.items()):
         if 'MUT:' in attr:
             mutation_filters[attr] = values
         else:
-            if attr in derived_attrs['names']:
-                derived_filters[attr] = values
             main_filters[attr] = values
 
     # Mutation filters
@@ -383,6 +382,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
     # All other filters
     for attr, values in list(main_filters.items()):
+        attr_name = attr
         query_str = ''
 
         if type(values) is dict and 'values' in values:
@@ -427,22 +427,24 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
             if 'None' in values:
                 values.remove('None')
-                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
+                query_str += '(-(-(%s) +(%s:{* TO *})))' % (clause, attr_name)
             else:
-                query_str += "+({})".format(clause)
+                query_str += "(+({}))".format(clause)
         else:
             if 'None' in values:
                 values.remove('None')
-                query_str += '-(-(%s:("%s")) +(%s:{* TO *}))' % (attr,"\" \"".join(values), attr)
+                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr,"\" \"".join(values), attr)
             else:
                 query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
 
         query_set = query_set or {}
-        full_query_str += query_str
 
-        if attr in derived_filters:
-            query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr,
-                "{!join to=%s from=%s}%s" % ("StudyInstanceUID", "StudyInstanceUID", query_str.replace("\"", "\\\"")))
+        if search_child_records_by:
+            # Records from the same study will often not have all the values filled out; we need to subquery to find those
+            query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr_name,
+                    "{!join to=%s from=%s}%s" % (search_child_records_by, search_child_records_by, query_str.replace("\"", "\\\"")))
+
+        full_query_str += query_str
 
         if with_tags_for_ex:
             filter_tags = filter_tags or {}
