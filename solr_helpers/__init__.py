@@ -173,6 +173,9 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                         facets[facet_name]['domain'] = {
                             "excludeTags": filter_tags[attr.name]
                         }
+
+                    if unique:
+                        facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
                 else:
                     # Iterated range
                     cast = int if attr_range.type == Attribute_Ranges.INT else float
@@ -204,6 +207,9 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             facets[facet_name]['domain'] = {
                                 "excludeTags": filter_tags[attr.name]
                             }
+                        if unique:
+                            facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
                         lower = upper
                         upper = lower+gap
 
@@ -222,13 +228,20 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'q': "{}:{}{} TO {}]".format(attr.name, l_boundary, str(attr_range.last), "*")
                         }
 
+                        if unique:
+                            facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
                     if include_nulls:
-                        facets["{}:None".format(attr.name)] = {
+                        none_facet_name = "{}:None".format(attr.name)
+                        facets[none_facet_name] = {
                             'type': facet_type,
                             'field': attr.name,
                             'limit': -1,
                             'q': '-{}:[* TO *]'.format(attr.name)
                         }
+
+                        if unique:
+                            facets[none_facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
         else:
             facets[attr.name] = {
                 'type': facet_type,
@@ -363,7 +376,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                     values.remove('None')
                     query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
                 else:
-                    query_str += "+({})".format(clause)
+                    query_str += "(+({}))".format(clause)
             elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
                 attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
                 clause = ""
@@ -385,11 +398,11 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                     values.remove('None')
                     query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
                 else:
-                    query_str += "+({})".format(clause)
+                    query_str += "(+({}))".format(clause)
             else:
                 if 'None' in values:
                     values.remove('None')
-                    query_str += '-(-(%s:("%s")) +(%s:{* TO *}))' % (attr,"\" \"".join([str(y) for y in values]), attr)
+                    query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr,"\" \"".join([str(y) for y in values]), attr)
                 else:
                     query_str += '(+%s:(%s))' % (attr, " ".join(["{}{}{}".format('"' if "*" not in y else '',str(y),'"' if "*" not in y else '') for y in values]))
 
