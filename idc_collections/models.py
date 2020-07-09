@@ -405,6 +405,25 @@ class Attribute(models.Model):
     def get_ranged_attrs(cls):
         return list(cls.objects.filter(data_type=cls.CONTINUOUS_NUMERIC, active=True).values_list('name', flat=True))
 
+    @classmethod
+    def get_attrs_of_type(cls, set_type=None, data_type=None):
+        if set_type is None and data_type is None:
+            raise Exception("Must supply either an attribute set type or data type to this method!")
+
+        q_objs = Q(attribute__in=cls.objects.filter(active=True))
+
+        if set_type:
+            q_objs &= Q(datasettype__set_type=set_type)
+        if data_type:
+            q_objs &= Q(attribute__data_type=data_type)
+
+        attrs_this_type = Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(q_objs)
+
+        return {
+            'query_set': attrs_this_type,
+            'names': list(attrs_this_type.values_list('attribute__name',flat=True))
+        }
+
     def get_data_sources(self):
         return self.data_sources.all().filter(active=True).values_list('name', flat=True)
 
