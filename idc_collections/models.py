@@ -93,11 +93,9 @@ class DataSetTypeQuerySet(models.QuerySet):
                 sources = sources | dst.datasource_set.all()
         return sources
 
-
 class DataSetTypeManager(models.Manager):
     def get_queryset(self):
         return DataSetTypeQuerySet(self.model, using=self._db)
-
 
 class DataSetType(models.Model):
     IMAGE_DATA = 'I'
@@ -187,6 +185,7 @@ class Collection(models.Model):
             str(self.program.all())
         )
 
+
 class DataSourceQuerySet(models.QuerySet):
     def to_dicts(self):
         return [{
@@ -269,7 +268,6 @@ class DataSourceManager(models.Manager):
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
-
 class DataSource(models.Model):
     QUERY = 'query'
     TERMS = 'terms'
@@ -334,7 +332,6 @@ class DataSource(models.Model):
     class Meta(object):
         unique_together = (("name", "source_type"),)
 
-
 class DataSourceJoin(models.Model):
     from_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="from_data_source")
     from_src_col = models.CharField(max_length=64, null=False, blank=False)
@@ -355,6 +352,14 @@ class AttributeQuerySet(models.QuerySet):
         for cat in Attribute_Display_Category.objects.select_related('attribute').filter(attribute__in=self.all()):
             categories[cat.attribute.name] = {'cat_name': cat.category, 'cat_display_name': cat.category_display_name}
         return categories
+
+    def get_attr_sets(self):
+        sets = {}
+        for set_type in Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all()):
+            if set_type.attribute.name not in sets:
+                sets[set_type.attribute.name] = []
+            sets[set_type.attribute.name].append(set_type.datasettype.data_type)
+        return sets
 
 class AttributeManager(models.Manager):
     def get_queryset(self):
@@ -400,6 +405,25 @@ class Attribute(models.Model):
     def get_ranged_attrs(cls):
         return list(cls.objects.filter(data_type=cls.CONTINUOUS_NUMERIC, active=True).values_list('name', flat=True))
 
+    @classmethod
+    def get_attrs_of_type(cls, set_type=None, data_type=None):
+        if set_type is None and data_type is None:
+            raise Exception("Must supply either an attribute set type or data type to this method!")
+
+        q_objs = Q(attribute__in=cls.objects.filter(active=True))
+
+        if set_type:
+            q_objs &= Q(datasettype__set_type=set_type)
+        if data_type:
+            q_objs &= Q(attribute__data_type=data_type)
+
+        attrs_this_type = Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(q_objs)
+
+        return {
+            'query_set': attrs_this_type,
+            'names': list(attrs_this_type.values_list('attribute__name',flat=True))
+        }
+
     def get_data_sources(self):
         return self.data_sources.all().filter(active=True).values_list('name', flat=True)
 
@@ -407,11 +431,8 @@ class Attribute(models.Model):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
 
-
 # This model allows for breaking Attributes up beyond the strict DataSource->DataSetType heirarchy,
 # since an attribute might be found in a DataSource housing more than one set type.
-
-
 class Attribute_Set_TypeQuerySet(models.QuerySet):
     def get_attr_set_types(self):
         attrs_by_set = {}
@@ -433,7 +454,6 @@ class Attribute_Set_Type(models.Model):
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)
-
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):
@@ -506,7 +526,6 @@ class User_Feature_Definitions(models.Model):
     bq_map_id = models.CharField(max_length=200)
     is_numeric = models.BooleanField(default=False)
     shared_map_id = models.CharField(max_length=128, null=True, blank=True)
-
 
 class User_Feature_Counts(models.Model):
     feature = models.ForeignKey(User_Feature_Definitions, null=False, on_delete=models.CASCADE)
