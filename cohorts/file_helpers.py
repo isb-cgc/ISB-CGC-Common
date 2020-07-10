@@ -132,7 +132,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
-            unique="file_gdc_id"
+            unique="file_name_key"
 
         if 'case_barcode' in inc_filters:
             inc_filters['case_barcode'] = ["*{}*".format(x) for x in inc_filters['case_barcode']]
