@@ -17,7 +17,7 @@ SOLR_CERT = settings.SOLR_CERT
 
 BMI_MAPPING = {
     'underweight': '[* TO 18.5}',
-    'normal weight': '[18.5 TO 25}',
+    'normal': '[18.5 TO 25}',
     'overweight': '[25 TO 30}',
     'obese': '[30 TO *]'
 }
@@ -176,6 +176,16 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
                     if unique:
                         facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
+                    null_facet_name = "{}:{}".format(attr.name,"None")
+                    if include_nulls and null_facet_name not in facets:
+                        facets[null_facet_name] = {
+                            'type': facet_type,
+                            'field': attr.name,
+                            'limit': -1,
+                            'q': '-(+(%s:{* TO *}))' % attr.name
+                        }
+
                 else:
                     # Iterated range
                     cast = int if attr_range.type == Attribute_Ranges.INT else float

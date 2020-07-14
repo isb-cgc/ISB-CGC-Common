@@ -437,7 +437,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                 if "::" in val:
                                     val_name = val.split("::")[0]
                                     val_value = val.split("::")[-1]
-                                    displ_value = val_value if obj.preformatted_values else dvals.get(val_value,format_for_display(val_value))
+                                    displ_value = val_name if obj.preformatted_values else dvals.get(val_name,format_for_display(val_name))
                                     displ_name = val_name if obj.preformatted_values else dvals.get(val_name, format_for_display(val_name))
                                 facets[set][attr]['values'][val] = {
                                     'name': val_name,
