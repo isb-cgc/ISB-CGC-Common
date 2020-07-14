@@ -17,8 +17,8 @@ SOLR_CERT = settings.SOLR_CERT
 
 BMI_MAPPING = {
     'underweight': '[* TO 18.5}',
-    'normal weight': '[18.5 TO 25}',
-    'overweight': '[25 TO 30)',
+    'normal': '[18.5 TO 25}',
+    'overweight': '[25 TO 30}',
     'obese': '[30 TO *]'
 }
 
@@ -176,6 +176,16 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
                     if unique:
                         facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
+
+                    null_facet_name = "{}:{}".format(attr.name,"None")
+                    if include_nulls and null_facet_name not in facets:
+                        facets[null_facet_name] = {
+                            'type': facet_type,
+                            'field': attr.name,
+                            'limit': -1,
+                            'q': '-(+(%s:{* TO *}))' % attr.name
+                        }
+
                 else:
                     # Iterated range
                     cast = int if attr_range.type == Attribute_Ranges.INT else float
@@ -362,49 +372,45 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             if not with_tags_for_ex:
                 full_query_str += ' AND '
 
-        # Mutation filter
-        if 'MUT:' in attr:
-            continue
-        else:
-            # If it's looking for a single None value
-            if len(values) == 1 and values[0] == 'None':
-                query_str += '(-%s:{* TO *})' % attr
-            # If it's a ranged value, calculate the bins
-            elif attr == 'bmi':
-                clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
-                if 'None' in values:
-                    values.remove('None')
-                    query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
-                else:
-                    query_str += "(+({}))".format(clause)
-            elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
-                attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
-                clause = ""
-                if len(values) > 1 and type(values[0]) is list:
-                    clause = " {} ".format(comb_with).join(
-                        ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
-                elif len(values) > 1 :
-                    clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
-                else:
-                    if re.search('_[gl]t[e]|_btw',attr):
-                        clause = "{}:{}".format(attr_name, values[0])
-                    else:
-                        attr_range = Attribute.objects.get(name=attr_name,data_type=Attribute.CONTINUOUS_NUMERIC,active=True).get_ranges().first()
-                        u_boundary = "]" if attr_range.include_upper else "}"
-                        l_boundary = "[" if attr_range.include_lower else "{"
-                        clause = "{}:{}{}{}".format(attr_name, l_boundary, values[0].upper(), u_boundary)
-
-                if 'None' in values:
-                    values.remove('None')
-                    query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
-                else:
-                    query_str += "(+({}))".format(clause)
+        # If it's looking for a single None value
+        if len(values) == 1 and values[0] == 'None':
+            query_str += '(-%s:{* TO *})' % attr
+        # If it's a ranged value, calculate the bins
+        elif attr == 'bmi':
+            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
             else:
-                if 'None' in values:
-                    values.remove('None')
-                    query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr,"\" \"".join([str(y) for y in values]), attr)
+                query_str += "(+({}))".format(clause)
+        elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
+            clause = ""
+            if len(values) > 1 and type(values[0]) is list:
+                clause = " {} ".format(comb_with).join(
+                    ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
+            elif len(values) > 1 :
+                clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
+            else:
+                if re.search('_[gl]t[e]|_btw',attr):
+                    clause = "{}:{}".format(attr_name, values[0])
                 else:
-                    query_str += '(+%s:(%s))' % (attr, " ".join(["{}{}{}".format('"' if "*" not in y else '',str(y),'"' if "*" not in y else '') for y in values]))
+                    attr_range = Attribute.objects.get(name=attr_name,data_type=Attribute.CONTINUOUS_NUMERIC,active=True).get_ranges().first()
+                    u_boundary = "]" if attr_range.include_upper else "}"
+                    l_boundary = "[" if attr_range.include_lower else "{"
+                    clause = "{}:{}{}{}".format(attr_name, l_boundary, values[0].upper(), u_boundary)
+
+            if 'None' in values:
+                values.remove('None')
+                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
+            else:
+                query_str += "(+({}))".format(clause)
+        else:
+            if 'None' in values:
+                values.remove('None')
+                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr,"\" \"".join([str(y) for y in values]), attr)
+            else:
+                query_str += '(+%s:(%s))' % (attr, " ".join(["{}{}{}".format('"' if "*" not in str(y) else '',str(y),'"' if "*" not in str(y) else '') for y in values]))
 
         query_set = query_set or {}
         full_query_str += query_str
