@@ -445,6 +445,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                     'displ_value': displ_value,
                                     'displ_name': displ_name,
                                     'count': count,
+                                    'id': val_value,
                                     # Supports #2018. This value object is the only information that gets used to
                                     # stock cohort checkboxes in the template. To support clicking on a treemap to
                                     # trigger the checkbox, we need have an id that glues the attribute name to the
