@@ -1320,7 +1320,8 @@ def set_operation(request):
     try:
 
         if request.POST:
-            name = request.POST.get('name').encode('utf8')
+            name = request.POST.get('name')
+            # name = request.POST.get('name').encode('utf8')
             cohorts = []
             base_cohort = None
             subtracted_cohorts = []
