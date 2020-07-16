@@ -1801,11 +1801,11 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
             metadata_data_attr = fetch_build_data_attr(build, type=panel_type)
-            print(metadata_data_attr.keys())
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
-                    for val in result['metadata_data_counts'][attr]:
-                        metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+                    if attr in metadata_data_attr:
+                        for val in result['metadata_data_counts'][attr]:
+                            metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
             else:
                 for attr in metadata_data_attr:
                     for val in metadata_data_attr[attr]['values']:
