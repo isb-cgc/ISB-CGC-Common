@@ -205,7 +205,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                         facet_name = "{}:{}".format(
                             attr.name, attr_range.label
                         ) if attr_range.label else "{}:{} to {}:{} to {}".format(
-                            attr.name, lower_display, upper_display, str(upper), str(lower)
+                            attr.name, lower_display, upper_display, str(lower), str(upper)
                         )
                         facets[facet_name] = {
                             'type': facet_type,
