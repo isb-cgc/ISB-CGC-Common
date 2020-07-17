@@ -122,9 +122,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             if do_filter_count:
                 facet_names = ['disease_code',]
-                if not type or type == 'all':
+                if not type or type in ['all', 'igv']:
                     facet_names.extend(['data_format', 'data_category','experimental_strategy','platform'])
-                if not type or type in ['camic', 'all']:
+                if not type or type in ['camic', 'all', 'igv']:
                     facet_names.extend(['data_type'])
                 if not type or type != 'dicom':
                     facet_names.extend(['project_short_name'])
