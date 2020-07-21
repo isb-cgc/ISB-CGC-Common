@@ -387,9 +387,9 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     results['programs'][prog.id]['sets'][set_type] = {}
                 results['programs'][prog.id]['sets'][set_type][source.name] = solr_result
                 for attr in count_attrs['list']:
-                    if "{}_count".format(attr) in solr_result and "{}_count".format(attr) not in results['programs'][prog.id]['totals']:
-                        results['programs'][prog.id]['totals']["{}_count".format(attr)] = solr_result["{}_count".format(attr)]
-
+                    prog_totals = results['programs'][prog.id]['totals']
+                    if "{}_count".format(attr) not in prog_totals or prog_totals["{}_count".format(attr)] == 0:
+                        prog_totals["{}_count".format(attr)] = solr_result["{}_count".format(attr)] if "{}_count".format(attr) in solr_result else 0
         stop = time.time()
 
         results['elapsed_time'] = "{}s".format(str(stop-start))
@@ -424,7 +424,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                 obj = Attribute.objects.get(name=attr)
                             except MultipleObjectsReturned:
                                 # In the (admittedly) rare case of an attribute name collision, be sure that we pull the Attribute
-                                # object which is relevant to this
+                                # object which is relevant to this Data Source
                                 obj = DataSource.objects.get(name=source).get_source_attr().get(name=attr)
                             dvals = obj.get_display_values()
                             facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
@@ -437,14 +437,15 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                 if "::" in val:
                                     val_name = val.split("::")[0]
                                     val_value = val.split("::")[-1]
-                                    displ_value = val_name if obj.preformatted_values else dvals.get(val,format_for_display(val_name))
-                                    displ_name = val_name if obj.preformatted_values else dvals.get(val, format_for_display(val_name))
+                                    displ_value = val_name if obj.preformatted_values else dvals.get(val_name,format_for_display(val_name))
+                                    displ_name = val_name if obj.preformatted_values else dvals.get(val_name, format_for_display(val_name))
                                 facets[set][attr]['values'][val] = {
                                     'name': val_name,
                                     'value': val_value,
                                     'displ_value': displ_value,
                                     'displ_name': displ_name,
                                     'count': count,
+                                    'id': val_value,
                                     # Supports #2018. This value object is the only information that gets used to
                                     # stock cohort checkboxes in the template. To support clicking on a treemap to
                                     # trigger the checkbox, we need have an id that glues the attribute name to the
