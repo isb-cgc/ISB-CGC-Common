@@ -87,12 +87,8 @@ def get_cases_by_cohort(cohort_id):
         print("TODO: get_cases_by_cohort")
 
         return set(cases)
-
     except (Exception) as e:
         logger.exception(e)
-
-
-
 
 @login_required
 def public_cohort_list(request):
