@@ -353,6 +353,9 @@ class AttributeQuerySet(models.QuerySet):
             categories[cat.attribute.name] = {'cat_name': cat.category, 'cat_display_name': cat.category_display_name}
         return categories
 
+    def get_attr_set_types(self):
+        return Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all())
+
     def get_attr_sets(self):
         sets = {}
         for set_type in Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all()):
@@ -442,6 +445,12 @@ class Attribute_Set_TypeQuerySet(models.QuerySet):
             attrs_by_set[set_type.datasettype.id].append(set_type.attribute.id)
         return attrs_by_set
 
+    def get_child_record_searches(self, data_type):
+        attr_child_record_search = {}
+        for attr_set_type in self.select_related('attribute', 'datasettype').filter(datasettype__in=DataSetType.objects.filter(data_type=data_type)):
+            attr_child_record_search[attr_set_type.attribute.name] = attr_set_type.child_record_search
+        return attr_child_record_search
+
 class Attribute_Set_TypeMananger(models.Manager):
     def get_queryset(self):
         return Attribute_Set_TypeQuerySet(self.model, using=self._db)
@@ -451,6 +460,7 @@ class Attribute_Set_Type(models.Model):
     objects = Attribute_Set_TypeMananger()
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     datasettype = models.ForeignKey(DataSetType, null=False, blank=False, on_delete=models.CASCADE)
+    child_record_search = models.CharField(max_length=256,null=True,blank=True)
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)

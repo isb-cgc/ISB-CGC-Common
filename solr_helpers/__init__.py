@@ -133,13 +133,13 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
         if query_response.status_code != 200:
             msg = "Saw response code {} when querying solr collection {} with string {}\npayload: {}\nresponse text: {}".format(
-                str(query_response.status_code), collection, query_string, payload,
+                str(query_response.status_code), collection, payload['query'], payload,
                 query_response.text
             )
             raise Exception(msg)
         query_result = query_response.json()
     except Exception as e:
-        logger.error("[ERROR] While querying solr collection {}:".format(collection, query_string))
+        logger.error("[ERROR] While querying solr collection {}:".format(collection, payload['query']))
         logger.exception(e)
 
     return query_result
@@ -305,6 +305,24 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
     return facets
 
 # Build a query string for Solr
+#
+# filters: simple filter dict of the form:
+# {
+#    <attribute name>: [<value1>,[<value2>...]],
+# }
+#
+# comb_with: Simple toggle to determine filter combination behavior (Solr default is OR between values, AND between fields)
+#
+# with_tags_for_ex: Boolean toggle for the creation and tracking dict of filter exclusion tags to be used in faceting
+#
+# subq_join_field: If inverted filters are present, subq_join_field determines the field used to {!join} the inverted
+# subquery to the main query
+#
+# search_child_records_by: a dict indicating what field, if any, should be used in subquerying 'child' or related records.
+# This allows for searching on 'related records' which are being filtered out based on lack of a filter value, but which
+# satisfy another criteria - eg., records from the same study may not all have the same fields pulled out, but you may
+# still want those records when filtering on this attribute.
+#
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None, search_child_records_by=None):
     
     ranged_attrs = Attribute.get_ranged_attrs()
@@ -316,6 +334,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     count = 0
     mutation_filters = {}
     main_filters = {}
+    search_child_records_by = search_child_records_by or {}
 
     # Because mutation filters can have their operation specified, split them out separately:
     for attr, values in list(filters.items()):
@@ -439,10 +458,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
         query_set = query_set or {}
 
-        if search_child_records_by:
-            # Records from the same study will often not have all the values filled out; we need to subquery to find those
+        if search_child_records_by.get(attr, None):
             query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr_name,
-                    "{!join to=%s from=%s}%s" % (search_child_records_by, search_child_records_by, query_str.replace("\"", "\\\"")))
+                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr], search_child_records_by[attr], query_str.replace("\"", "\\\"")))
 
         full_query_str += query_str
 

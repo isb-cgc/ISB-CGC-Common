@@ -25,6 +25,7 @@ import re
 import time
 from time import sleep
 import logging
+import datetime
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
@@ -71,13 +72,16 @@ def _delete_cohort(user, cohort_id):
     return cohort_info
 
 
-def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, versions=None, case_insens=True):
+def _save_cohort(user, filters=None, name=None, cohort_id=None, versions=None, desc=None, case_insens=True):
     cohort_info = {}
 
     try:
-        if not filters and not name:
+        if not filters or not len(filters):
             # Can't save/edit a cohort when nothing is being changed!
-            return { 'message': "Can't save a cohort with no information to save! (Name and filters not provided.)" }
+            return { 'message': "Filters not received - cannot save cohort!" }
+
+        if not name:
+            name = "Cohort created on {}".format(datetime.datetime.now().strftime('%d-%m-%Y %H:%M'))
     
         if name or desc:
             blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
@@ -120,10 +124,11 @@ def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, versi
         for v in versions:
             grouping.data_versions.add(v)
 
-        for attr in attributes:
-            filter_values = attributes[attr]
-            attr_id = Attribute.objects.get(name=attr)
-            Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
+        filter_attr = Attribute.objects.filter(id__in=filters.keys())
+
+        for attr in filter_attr:
+            filter_values = filters[str(attr.id)]
+            Filters.objects.create(resulting_cohort=cohort, attribute=attr, value=",".join(filter_values), filter_group=grouping).save()
 
         cohort_info = {
             'cohort_id': cohort.id,
