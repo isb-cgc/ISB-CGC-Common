@@ -279,7 +279,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
 
 # Build a query string for Solr
-def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None):
+def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset=0, subq_join_field=None):
 
     ranged_attrs = Attribute.get_ranged_attrs()
 
@@ -287,7 +287,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     full_query_str = ''
     query_set = None
     filter_tags = None
-    count = 0
+    count = 0+tag_offset
     mutation_filters = {}
     main_filters = {}
 
@@ -308,7 +308,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             else:
                 values = [values]
 
-        # If it's first in the list, don't append an "and"
+        # If it's first in the list, don't append your combinator
         if first:
             first = False
         else:
@@ -327,7 +327,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 values_filter = "*"
             else:
                 for val in values:
-                    values_filter += ("(\"" + "\" \"".join(MOLECULAR_CATEGORIES[val]) + "\")")
+                    values_filter += ("(\"" + "\" \"".join(MOLECULAR_CATEGORIES[val]['attrs']) + "\")")
         else:
             values_filter += ("(\"" + "\" \"".join(values) + "\")")
 
@@ -337,7 +337,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             inverted_query = "{!join to=%s from=%s}%s" % (
                 subq_join_field, subq_join_field, query.replace("\"", "\\\"")
             )
-            query_str = ' (-_query_:"{}")'.format(inverted_query)
+            query_str = ' (*:* -_query_:"{}")'.format(inverted_query)
         else:
             query_str = query
 
@@ -427,5 +427,6 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     return {
         'queries': query_set,
         'full_query_str': full_query_str,
-        'filter_tags': filter_tags
+        'filter_tags': filter_tags,
+        'tag_count': count
     }
