@@ -34,8 +34,9 @@ from time import sleep
 import re
 from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables, DataSource, DataVersion
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
-from solr_helpers import query_solr_and_format_result, build_solr_facets
+from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
+from django.contrib.auth.models import User
 
 from uuid import uuid4
 from django.conf import settings
@@ -1233,7 +1234,6 @@ def get_sample_metadata(barcode):
         if db and db.open: db.close()
 
     return result
-
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 

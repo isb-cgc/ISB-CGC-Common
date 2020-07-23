@@ -293,7 +293,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
     mutation_filters = None
     filters = {}
     data_type_filters = {}
-    solr_cohort_filter = None
+    mutation_build = None
 
     results = { 'programs': {} }
 
@@ -302,8 +302,14 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
         for key in inc_filters:
-            if 'MUT:' in key or 'data_type' in key:
+            if 'data_type' in key:
                     filters[key] = inc_filters[key]
+            elif 'MUT:' in key:
+                if not mutation_filters:
+                    mutation_filters = {}
+                if not mutation_build:
+                    mutation_build = key.split(":")[1]
+                mutation_filters[key] = inc_filters[key]
             else:
                 filters[key.split(':')[-1]] = inc_filters[key]
 
@@ -329,6 +335,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
             # filter one program as a time.
             prog_filters = filters
+            prog_mut_filters = mutation_filters
             attrs = sources.get_source_attrs(for_ui=True)
             count_attrs = sources.filter(
                 version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
@@ -336,12 +343,26 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
             for source in sources:
                 solr_query = build_solr_query(prog_filters, with_tags_for_ex=True, subq_join_field=source.shared_id_col) if prog_filters else None
+                solr_mut_query = build_solr_query(
+                    prog_mut_filters, with_tags_for_ex=False, subq_join_field=source.shared_id_col,
+                    comb_with=comb_mut_filters
+                ) if prog_mut_filters else None
+                if solr_mut_query:
+                    if comb_mut_filters == 'OR':
+                        if not solr_query:
+                            solr_query = {'queries': {}}
+                        solr_query['queries']['MUT:{}:Variant_Classification'.format(mutation_build)] = solr_mut_query['full_query_str']
+                    else:
+                        if solr_query:
+                            solr_query['queries'].update(solr_mut_query['queries'])
+                        else:
+                            solr_query = solr_mut_query
                 total_counts = None
                 if source.id in count_attrs['sources']:
                     total_counts = count_attrs['sources'][source.id]['list']
                 solr_facets = build_solr_facets(
                     attrs['sources'][source.id]['attrs'],
-                    filter_tags=solr_query['filter_tags'] if solr_query else None, unique='case_barcode',
+                    filter_tags=solr_query.get('filter_tags', None) if solr_query else None, unique='case_barcode',
                     total_facets=total_counts
                 )
                 query_set = []
@@ -352,7 +373,10 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         # If an attribute is not in this program's attribute listing, then it's ignored
                         if attr_name in attrs['list']:
                             # If the attribute is from this source, just add the query
-                            mutation_filter_matches_source = ((source.version.data_type != DataVersion.MUTATION_DATA) or (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower())))
+                            mutation_filter_matches_source = (
+                                    (source.version.data_type != DataVersion.MUTATION_DATA) or
+                                    (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower()))
+                            )
                             if attr_name in attrs['sources'][source.id]['list'] and mutation_filter_matches_source:
                                 query_set.append(solr_query['queries'][attr])
                             # If it's in another source for this program, we need to join on that source
