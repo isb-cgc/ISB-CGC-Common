@@ -80,11 +80,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         facet_attr = None
         file_collection = None
         collapse = None
+        format_filter = None
 
         if type in ('igv', 'camic', 'pdf'):
-            if 'data_format' not in inc_filters:
-                inc_filters['data_format'] = []
-            inc_filters['data_format'].append(FILTER_DATA_FORMAT[type])
+            format_filter = {'data_format': FILTER_DATA_FORMAT[type]}
 
         if type == 'dicom':
             file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
@@ -97,11 +96,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-projectname': 'project_short_name'
             })
 
-            print("filter counts: {}".format(do_filter_count))
             if do_filter_count:
                 facet_attr = Attribute.objects.filter(name__in=["disease_code", "Modality", "BodyPartExamined"])
 
-            print(facet_attr)
             collapse = "StudyInstanceUID"
             unique="StudyInstanceUID"
 
@@ -124,11 +121,13 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
 
             if do_filter_count:
-                facet_names = ['data_format', 'disease_code']
-                if type == 'camic':
+                facet_names = ['disease_code',]
+                if not type or type in ['all', 'igv']:
+                    facet_names.extend(['data_format', 'data_category','experimental_strategy','platform'])
+                if not type or type in ['camic', 'all', 'igv']:
                     facet_names.extend(['data_type'])
-                else:
-                    facet_names.extend(['data_type', 'data_category', 'experimental_strategy','platform'])
+                if not type or type != 'dicom':
+                    facet_names.extend(['project_short_name'])
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
@@ -136,13 +135,19 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
         if 'case_barcode' in inc_filters:
             inc_filters['case_barcode'] = ["*{}*".format(x) for x in inc_filters['case_barcode']]
-
         solr_query = build_solr_query(inc_filters, with_tags_for_ex=do_filter_count) if inc_filters else None
+
         if cohort_id:
             cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
             if not solr_query:
                 solr_query = {'queries': {}}
             solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
+
+        if format_filter:
+            format_query = build_solr_query(format_filter, with_tags_for_ex=False)
+            if not solr_query:
+                solr_query = {'queries': {}}
+            solr_query['queries']['data_format'] = format_query['queries']['data_format']
 
         if do_filter_count:
             facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique)

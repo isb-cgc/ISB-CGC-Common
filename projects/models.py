@@ -266,6 +266,16 @@ class Project(models.Model):
     extends = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE)
 
     @classmethod
+    def get_public_projects(cls, by_name=False):
+        proj_list = {} if by_name else []
+        for proj in cls.objects.select_related('program').filter(active=True, program__is_public=True, owner=User.objects.get(username="isb", is_staff=True, is_active=True, is_superuser=True)):
+            if by_name:
+                proj_list["{}-{}".format(proj.program.name,proj.name)] = {'name': "{}-{}".format(proj.program.name,proj.name), 'id': proj.id, 'program_name': proj.program.name}
+            else:
+                proj_list.append({'name': "{}-{}".format(proj.program.name,proj.name), 'id': proj.id, 'program_name': proj.program.name})
+        return proj_list
+
+    @classmethod
     def get_user_projects(cls, user, includeShared=True):
         programs = user.program_set.filter(active=True)
         if includeShared:
