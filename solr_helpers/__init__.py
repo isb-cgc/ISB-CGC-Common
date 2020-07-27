@@ -416,7 +416,6 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
             else:
                 query_str += '(+%s:(%s))' % (attr, " ".join(["{}{}{}".format('"' if "*" not in str(y) else '',str(y),'"' if "*" not in str(y) else '') for y in values]))
 
-        print(query_str)
         query_set = query_set or {}
         full_query_str += query_str
 
