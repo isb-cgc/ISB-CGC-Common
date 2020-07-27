@@ -1420,6 +1420,7 @@ def filelist(request, cohort_id=None, panel_type=None):
         cohort = None
         has_user_data = False
         programs_this_cohort = []
+        export_cohort_id = cohort_id
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             cohort.perm = cohort.get_perm(request)
@@ -1439,6 +1440,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
         else:
             download_url = reverse("download_filelist")
+            export_cohort_id = 0
 
         logger.debug("[STATUS] Returning response from cohort_filelist")
 
@@ -1446,8 +1448,7 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
-                                            # 'export_url': reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'}),
-                                            'export_url': reverse('export_data', kwargs={'cohort_id': 0, 'export_type': 'file_manifest'}),
+                                            'export_url': reverse('export_data', kwargs={'cohort_id': export_cohort_id, 'export_type': 'file_manifest'}),
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
