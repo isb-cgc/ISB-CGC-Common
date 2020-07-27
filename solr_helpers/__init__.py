@@ -389,8 +389,12 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
             if len(values) > 1 and type(values[0]) is list:
                 clause = " {} ".format(comb_with).join(
                     ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
-            elif len(values) > 1 :
-                clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
+            elif len(values) > 1:
+                if type(values[0] is str) and re.search(" [Tt][Oo] ",values[0]):
+                    clause = " {} ".format(comb_with).join(
+                        ["{}:[{}]".format(attr_name, x.upper()) for x in values])
+                else:
+                    clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
             else:
                 if re.search('_[gl]t[e]|_btw',attr):
                     clause = "{}:{}".format(attr_name, values[0])
@@ -412,6 +416,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
             else:
                 query_str += '(+%s:(%s))' % (attr, " ".join(["{}{}{}".format('"' if "*" not in str(y) else '',str(y),'"' if "*" not in str(y) else '') for y in values]))
 
+        print(query_str)
         query_set = query_set or {}
         full_query_str += query_str
 
