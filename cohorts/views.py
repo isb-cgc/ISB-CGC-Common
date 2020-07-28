@@ -1420,7 +1420,6 @@ def filelist(request, cohort_id=None, panel_type=None):
         cohort = None
         has_user_data = False
         programs_this_cohort = []
-        export_cohort_id = cohort_id
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             cohort.perm = cohort.get_perm(request)
@@ -1438,9 +1437,10 @@ def filelist(request, cohort_id=None, panel_type=None):
             has_user_data = bool(cohort_sample_list.count() > 0)
             programs_this_cohort = cohort.get_program_names()
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
+            export_url = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
         else:
             download_url = reverse("download_filelist")
-            export_cohort_id = 0
+            export_url = reverse('export_data', kwargs={'export_type': 'file_manifest'})
 
         logger.debug("[STATUS] Returning response from cohort_filelist")
 
@@ -1448,7 +1448,7 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
-                                            'export_url': reverse('export_data', kwargs={'cohort_id': export_cohort_id, 'export_type': 'file_manifest'}),
+                                            'export_url': export_url,
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
@@ -1940,10 +1940,10 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 # Master method for exporting data types to BQ, GCS, etc.
 @login_required
 @csrf_protect
-def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
+def export_data(request, cohort_id=None, export_type=None, export_sub_type=None):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
-    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
+    redirect_url = reverse('filelist') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
 
     status = 200
     result = None
@@ -1958,17 +1958,15 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         dataset = None
         bq_proj_id = None
 
-        if not cohort_id:
-            messages.error(request, "You must provide a valid cohort ID in order to export its information.")
-            return redirect(redirect_url)
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
 
-        cohort = Cohort.objects.get(id=cohort_id)
-
-        try:
-            Cohort_Perms.objects.get(user=req_user, cohort=cohort)
-        except ObjectDoesNotExist as e:
-            messages.error(request, "You must be the owner of a cohort, or have been granted access by the owner, in order to export its data.")
-            return redirect(redirect_url)
+            try:
+                Cohort_Perms.objects.get(user=req_user, cohort=cohort)
+            except ObjectDoesNotExist as e:
+                messages.error(request, "You must be the owner of a cohort, or have been granted access by the owner, "
+                               + "in order to export its data.")
+                return redirect(redirect_url)
 
         # If destination is GCS
         file_format = request.POST.get('file-format', 'CSV')
@@ -1983,14 +1981,12 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
             proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
             if not len(dataset):
-                messages.error(request, "You must provide a Google Cloud Platform dataset to which your cohort's "
-                    + "data can be exported.")
+                messages.error(request, "You must provide a Google Cloud Platform dataset to which your data can be exported.")
                 return redirect(redirect_url)
 
             gcp = None
             if not len(proj_id):
-                messages.error(request, "You must provide a Google Cloud Project to which your cohort's data "
-                    + "can be exported.")
+                messages.error(request, "You must provide a Google Cloud Project to which your data can be exported.")
                 return redirect(redirect_url)
             else:
                 try:
@@ -2030,8 +2026,11 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     return redirect(redirect_url)
 
         if not table:
-            table = "isb_cgc_cohort_files_{}_{}_{}".format(
-                cohort_id,
+            table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
+            cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
+            table = "{}{}_{}_{}".format(
+                table_str_start,
+                cohort_id_str,
                 re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
                 datetime.datetime.now().strftime("%Y%m%d_%H%M")
             )
@@ -2046,12 +2045,22 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
             raise Exception("Invalid build supplied")
 
         filter_conditions = ""
-        cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
         union_queries = []
         inc_filters = json.loads(request.POST.get('filters', '{}'))
         if inc_filters.get('case_barcode'):
             case_barcode = inc_filters.get('case_barcode')
             inc_filters['case_barcode'] = ["%{}%".format(case_barcode),]
+
+        if cohort_id:
+            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+        else:
+            # for general file list without cohort, "program name can be passed in
+            if inc_filters.get('program_name'):
+                program_name_list = inc_filters.get('program_name')
+                cohort_programs = Program.objects.filter(name__in=program_name_list)
+                del inc_filters['program_name']
+            else:
+                cohort_programs = Program.objects.all()
 
         filter_params = None
         if len(inc_filters):
@@ -2067,27 +2076,44 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
 
         if export_type == 'file_manifest':
-            query_string_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
-                  md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                  md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                  {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
-                  md.index_file_id as index_file_gdc_uuid,
-                  PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
-                 FROM `{metadata_table}` md
-                 JOIN (SELECT case_barcode, sample_barcode
-                     FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
-                     WHERE cohort_id = {cohort_id}
-                     GROUP BY case_barcode, sample_barcode
-                 ) cs
-                 ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
-                 WHERE TRUE {filter_conditions}
-                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
-                  md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
-                  md.index_file_name_key, md.index_file_id
-                 ORDER BY md.sample_barcode
-            """
+            if cohort_id:
+                query_string_base = """
+                     SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
+                      md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                      md.index_file_id as index_file_gdc_uuid,
+                      PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                     FROM `{metadata_table}` md
+                     JOIN (SELECT case_barcode, sample_barcode
+                         FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
+                         WHERE cohort_id = {cohort_id}
+                         GROUP BY case_barcode, sample_barcode
+                     ) cs
+                     ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
+                     WHERE TRUE {filter_conditions}
+                     GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
+                      md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      md.index_file_name_key, md.index_file_id
+                     ORDER BY md.sample_barcode
+                """
+            else:
+                query_string_base = """
+                     SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
+                      md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                      md.index_file_id as index_file_gdc_uuid,
+                      PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                     FROM `{metadata_table}` md
+                     WHERE TRUE {filter_conditions}
+                     GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
+                      md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      md.index_file_name_key, md.index_file_id
+                     ORDER BY md.sample_barcode
+                """
 
             for program in cohort_programs:
                 try:
@@ -2105,6 +2131,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     program_bq_tables.data_table.lower(),
                 )
 
+                cohort_id_str = cohort_id if cohort_id else 0
                 union_queries.append(
                     query_string_base.format(
                         metadata_table=metadata_table,
@@ -2112,12 +2139,13 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
-                        cohort_id=cohort_id,
+                        cohort_id=cohort_id_str,
                         date_added=date_added,
                         build=build,
                         tz=settings.TIME_ZONE
                     )
                 )
+
             if len(union_queries) > 1:
                 query_string = ") UNION ALL (".join(union_queries)
                 query_string = '(' + query_string + ')'
@@ -2198,25 +2226,32 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
             else:
                 raise Exception("Cohort export destination not recognized.")
 
+        if cohort_id:
+            if export_type == 'file_manifest':
+                msg_cohort_str = "cohort {}'s file manifest".format(cohort_id)
+            else:
+                msg_cohort_str = "cohort {}".format(cohort_id)
+        else:
+            msg_cohort_str = "file manifest"
+
         # If export fails, we warn the user
         if result['status'] == 'error':
             status = 400
             if 'message' not in result:
-                result['message'] = "We were unable to export Cohort {}--please contact the administrator.".format(
-                    str(cohort_id) + (
-                        "'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""
-                    ))
+                result['message'] = "We were unable to export {}--please contact the administrator.".format(
+                    msg_cohort_str)
+
         else:
             # If the export is taking a while, inform the user
             if result['status'] == 'long_running':
-                result['message'] = "The export of cohort {} to {} ".format(
-                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                result['message'] = "The export of {} to {} ".format(
+                    msg_cohort_str,
                     "table {}:{}.{}".format(bq_proj_id, dataset, table)
                     if export_dest == 'table' else "GCS file gs://{}/{}".format(gcs_bucket, file_name)
                 ) + "is underway; check your {} in 1-2 minutes for the results.".format("BQ dataset" if export_dest == 'table' else "GCS bucket")
             else:
-                result['message'] = "Cohort {} was successfully exported to {}.".format(
-                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                result['message'] = "{} was successfully exported to {}.".format(
+                    msg_cohort_str,
                     "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
                     if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
                         gcs_bucket, file_name, result['message']
@@ -2224,9 +2259,15 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                 )
 
     except Exception as e:
-        logger.error("[ERROR] While trying to export Cohort {}:".format(
-            str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else "")
-        ))
+        if cohort_id:
+            if export_type == 'file_manifest':
+                cohort_error_str = "cohort {}'s file manifest".format(cohort_id)
+            else:
+                cohort_error_str = "cohort {}".format(cohort_id)
+        else:
+            cohort_error_str = "file manifest"
+
+        logger.error("[ERROR] While trying to export {}:".format(cohort_error_str))
         logger.exception(e)
         status = 500
         result = {
