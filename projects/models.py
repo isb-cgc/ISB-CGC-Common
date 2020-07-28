@@ -471,9 +471,11 @@ class Attribute(models.Model):
     data_sources = models.ManyToManyField(DataSource)
 
     @classmethod
-    def get_ranged_attrs(cls):
-        return list(cls.objects.filter(data_type=cls.CONTINUOUS_NUMERIC, active=True).values_list('name',
-                                                                                                       flat=True))
+    def get_ranged_attrs(cls, as_list=True):
+        ranged = cls.objects.filter(data_type=cls.CONTINUOUS_NUMERIC, active=True)
+        if as_list:
+            return list(ranged.values_list('name',flat=True))
+        return ranged
 
     def get_display_values(self):
         display_vals = self.attribute_display_values_set.all()
