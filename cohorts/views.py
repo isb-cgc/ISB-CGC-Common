@@ -526,7 +526,7 @@ def cohort_detail(request, cohort_id):
         template_values['total_cases'] = cohort.case_size()
         template_values['shared_with_users'] = shared_with_users
         template_values['cohort_programs'] = cohort_programs
-        template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
+        template_values['export_url'] = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
