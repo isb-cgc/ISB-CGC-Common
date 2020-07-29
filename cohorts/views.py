@@ -522,11 +522,8 @@ def cohort_detail(request, cohort_id):
 
         template = 'cohorts/cohort_details.html'
         template_values['cohort'] = cohort
-        start = time.time()
         template_values['total_samples'] = cohort.sample_size()
         template_values['total_cases'] = cohort.case_size()
-        stop = time.time()
-        logger.info("[STATUS] Time to count cohort size: {}s".format(str(stop-start)))
         template_values['shared_with_users'] = shared_with_users
         template_values['cohort_programs'] = cohort_programs
         template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})

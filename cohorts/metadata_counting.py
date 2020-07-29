@@ -429,11 +429,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 
     try:
-        logger.info("[STATUS] Beginning metadata count:")
-        start = time.time()
         solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
-        stop = time.time()
-        logger.info("[STATUS] Time to count: {}s".format(stop-start))
         facets = {}
         sample_count = 0
         case_count = 0
@@ -445,14 +441,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             for set, set_result in prog_result['sets'].items():
                 facets[set] = {}
                 for source, source_result in set_result.items():
+                    source_attr = DataSource.objects.get(name=source).get_source_attr()
                     if 'facets' in source_result:
                         for attr, vals in source_result['facets'].items():
-                            try:
-                                obj = Attribute.objects.get(name=attr)
-                            except MultipleObjectsReturned:
-                                # In the (admittedly) rare case of an attribute name collision, be sure that we pull the Attribute
-                                # object which is relevant to this Data Source
-                                obj = DataSource.objects.get(name=source).get_source_attr().get(name=attr)
+                            obj = source_attr.get(name=attr)
                             dvals = obj.get_display_values()
                             facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
                             for val in vals:
