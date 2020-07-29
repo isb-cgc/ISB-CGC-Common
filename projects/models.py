@@ -161,15 +161,17 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['sources'] = {}
 
         for ds in self.select_related('version').all():
-            attr_set = ds.attribute_set.filter(default_ui_display=for_ui, active=True) if for_ui is not None else ds.attribute_set.filter(active=True)
-            attr_set = attr_set.filter(name__in=named_set) if named_set else attr_set
-
+            q_objects = Q(active=True)
+            if for_ui:
+                q_objects &= Q(default_ui_display=for_ui)
+            if named_set:
+                q_objects &= Q(name__in=named_set)
             if for_faceting:
-                attr_set = attr_set.filter(data_type=Attribute.CATEGORICAL, active=True) | attr_set.filter(
-                    id__in=Attribute_Ranges.objects.filter(
+                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
                         attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
-                    ).values_list('attribute__id', flat=True)
-                )
+                    ).values_list('attribute__id', flat=True)))
+
+            attr_set = ds.attribute_set.filter(q_objects)
 
             if by_source:
                 attrs['sources'][ds.id] = {
@@ -223,18 +225,18 @@ class DataSource(models.Model):
         return DataVersion.SET_TYPES[self.version.data_type]
 
     def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None):
+        q_objects = Q(active=True)
 
-        attr_set = self.attribute_set.filter(default_ui_display=for_ui,
-           active=True) if for_ui is not None else self.attribute_set.filter(active=True)
-
-        attr_set = attr_set.filter(name__in=named_set) if named_set else attr_set
-
+        if for_ui:
+            q_objects &= Q(default_ui_display=True)
+        if named_set:
+            q_objects &= Q(name__in=named_set)
         if for_faceting:
-            attr_set = attr_set.filter(data_type=Attribute.CATEGORICAL, active=True) | attr_set.filter(
-                id__in=Attribute_Ranges.objects.filter(
-                    attribute__in=self.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True)
-                ).values_list('attribute__id', flat=True)
-            )
+            q_objects &= (Q(id__in=Attribute_Ranges.objects.filter(
+                attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True)
+            ).values_list('attribute', flat=True)) | Q(data_type=Attribute.CATEGORICAL))
+
+        attr_set = self.attribute_set.filter(q_objects)
 
         return attr_set
 

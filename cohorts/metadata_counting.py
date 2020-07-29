@@ -430,7 +430,6 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
     try:
         solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
-
         facets = {}
         sample_count = 0
         case_count = 0
@@ -442,14 +441,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             for set, set_result in prog_result['sets'].items():
                 facets[set] = {}
                 for source, source_result in set_result.items():
+                    source_attr = DataSource.objects.get(name=source).get_source_attr()
                     if 'facets' in source_result:
                         for attr, vals in source_result['facets'].items():
-                            try:
-                                obj = Attribute.objects.get(name=attr)
-                            except MultipleObjectsReturned:
-                                # In the (admittedly) rare case of an attribute name collision, be sure that we pull the Attribute
-                                # object which is relevant to this Data Source
-                                obj = DataSource.objects.get(name=source).get_source_attr().get(name=attr)
+                            obj = source_attr.get(name=attr)
                             dvals = obj.get_display_values()
                             facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
                             for val in vals:
@@ -513,7 +508,7 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None,
 
     stop = time.time()
     logger.info(
-        "[BENCHMARKING] Time to call metadata_counts "
+        "[BENCHMARKING] Time to call metadata_counts"
         + (" for cohort {}".format(cohort_id if cohort_id is not None else ""))
         + (" and" if cohort_id is not None and len(filters) > 0 else "")
         + (" filters {}".format(str(filters) if len(filters) > 0 else ""))
