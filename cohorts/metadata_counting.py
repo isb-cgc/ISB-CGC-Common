@@ -434,6 +434,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         sample_count = 0
         case_count = 0
 
+        start = time.time()
         for prog, prog_result in solr_res['programs'].items():
             metadata_attr_values = fetch_metadata_value_set(prog)
             sample_count = prog_result['totals']['sample_barcode_count']
@@ -477,6 +478,8 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                         and len(metadata_attr_values[attr]['values'][val]) > 0:
                                     if 'tooltip' in metadata_attr_values[attr]['values'][val]:
                                         facets[set][attr]['values'][val]['tooltip'] = metadata_attr_values[attr]['values'][val]['tooltip']
+        stop = time.time()
+        logger.info("[STATUS] Time to build attr and count dict: {}s".format(str(stop-start)))
 
         return {'counts': facets, 'samples': sample_count, 'cases': case_count}
 
