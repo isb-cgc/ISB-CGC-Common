@@ -429,8 +429,11 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 
     try:
+        logger.info("[STATUS] Beginning metadata count:")
+        start = time.time()
         solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
-
+        stop = time.time()
+        logger.info("[STATUS] Time to count: {}s".format(stop-start))
         facets = {}
         sample_count = 0
         case_count = 0
