@@ -487,6 +487,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
 def cohort_detail(request, cohort_id):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
+    logger.info("[STATUS] Called cohort_detail")
     try:
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
@@ -511,7 +512,7 @@ def cohort_detail(request, cohort_id):
 
         cohort.mark_viewed(request)
 
-        cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
+        cohort_progs = cohort.get_programs()
 
         cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
@@ -527,6 +528,15 @@ def cohort_detail(request, cohort_id):
         template_values['shared_with_users'] = shared_with_users
         template_values['cohort_programs'] = cohort_programs
         template_values['export_url'] = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
+        template_values['programs_this_cohort'] = [x['id'] for x in cohort_programs]
+        template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
+        template_values['creation_filters'] = cohort.get_creation_filters()
+        template_values['current_filters'] = cohort.get_current_filters()
+        template_values['revision_history'] = cohort.get_revision_history()
+        template_values['only_user_data'] = cohort.only_user_data()
+        template_values['has_user_data'] = cohort.has_user_data()
+
+        logger.info("[STATUS] Completed cohort_detail")
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
@@ -1760,7 +1770,9 @@ def get_metadata(request):
         user = AnonymousUser
 
     if program_id is not None and program_id > 0:
+        logger.info("[STATUS] Getting metadata counts from get_metadata...")
         results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit, comb_mut_filters=comb_mut_filters)
+        logger.info("[STATUS] ...done.")
 
         attr_counts = []
         data_type_counts = {}
@@ -1794,18 +1806,18 @@ def get_metadata(request):
         if cohort:
             results['cohort-total'] = results['samples']
             results['cohort-cases'] = results['cases']
-            cohort_pub_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct(), is_public=True)
-            for prog in cohort_pub_progs:
-                if prog.id != program_id:
-                    prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
-                    results['cohort-total'] += prog_res['samples']
-                    results['cohort-cases'] += prog_res['cases']
+            cohort_progs = cohort.get_programs()
+            for prog in cohort_progs:
+                if not prog.is_public:
+                    user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
+                    results['cohort-total'] += user_prog_res['samples']
+                    results['cohort-cases'] += user_prog_res['cases']
+                else:
+                    if prog.id != program_id:
+                        prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
+                        results['cohort-total'] += prog_res['samples']
+                        results['cohort-cases'] += prog_res['cases']
 
-            cohort_user_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id', flat=True).distinct(), is_public=False)
-            for prog in cohort_user_progs:
-                user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
-                results['cohort-total'] += user_prog_res['samples']
-                results['cohort-cases'] += user_prog_res['cases']
     else:
         results = user_metadata_counts(user, filters, cohort)
 
