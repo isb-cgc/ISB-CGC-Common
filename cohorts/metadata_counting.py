@@ -285,6 +285,7 @@ def count_public_data_type(user, data_query, inc_filters, program_list, filter_f
 
 def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_id=None, versions=None, source_type=DataSource.SOLR, comb_mut_filters='OR'):
 
+    logger.info("[STATUS] Entering Solr metadata counter")
     comb_mut_filters = comb_mut_filters.upper()
     user_id = 0
     if user:
@@ -417,6 +418,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         stop = time.time()
 
         results['elapsed_time'] = "{}s".format(str(stop-start))
+
+        logger.info("[STATUS] Exiting Solr metadata counter")
 
     except Exception as e:
         logger.error("[ERROR] While trying to fetch Solr metadata:")
