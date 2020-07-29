@@ -22,6 +22,7 @@ import operator
 import string
 import sys
 import logging
+import time
 from django.db import models
 from django.db.models import Count
 from django.contrib.auth.models import User
@@ -66,20 +67,23 @@ class Cohort(models.Model):
         return self.samples_set.all().count()
 
     def get_cohort_cases(self):
+        start = time.time()
         samples = self.samples_set.all()
         cases = samples.values('case_barcode').distinct().values_list('case_barcode', flat=True)
+        stop = time.time()
+        logger.info("[STATUS] Time to get case list: {}s".format(str(stop-start)))
         return list(cases)
 
     def case_size(self):
         return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
 
     def get_programs(self):
-        projects = self.samples_set.values_list('project_id', flat=True).distinct()
-        return Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct()
+        programs = self.samples_set.select_related('project__program').values_list('project__program__id', flat=True).distinct()
+        return Program.objects.filter(active=True, id__in=programs).distinct()
 
     def get_program_names(self):
-        projects = self.samples_set.values_list('project_id', flat=True).distinct()
-        names = Program.objects.filter(active=True, id__in=Project.objects.filter(id__in=projects).values_list('program_id', flat=True)).distinct().values_list('name',flat=True)
+        programs = self.samples_set.select_related('project__program').values_list('project__program__id', flat=True).distinct()
+        names = Program.objects.filter(active=True, id__in=programs).distinct().values_list('name',flat=True)
         return [str(x) for x in names]
 
     def only_user_data(self):
