@@ -511,7 +511,7 @@ def cohort_detail(request, cohort_id):
 
         cohort.mark_viewed(request)
 
-        cohort_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
+        cohort_progs = cohort.get_programs()
 
         cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
 
