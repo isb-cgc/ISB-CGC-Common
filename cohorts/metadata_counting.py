@@ -512,8 +512,8 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None,
     counts_and_total = count_public_metadata(user, cohort_id, filters, program_id, comb_mut_filters=comb_mut_filters)
 
     stop = time.time()
-    logger.debug(
-        "[BENCHMARKING] Time to call metadata_counts from view metadata_counts_platform_list"
+    logger.info(
+        "[BENCHMARKING] Time to call metadata_counts "
         + (" for cohort {}".format(cohort_id if cohort_id is not None else ""))
         + (" and" if cohort_id is not None and len(filters) > 0 else "")
         + (" filters {}".format(str(filters) if len(filters) > 0 else ""))
