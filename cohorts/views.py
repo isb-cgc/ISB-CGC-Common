@@ -529,7 +529,6 @@ def cohort_detail(request, cohort_id):
         template_values['cohort_programs'] = cohort_programs
         template_values['export_url'] = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
         template_values['programs_this_cohort'] = [x['id'] for x in cohort_programs]
-        template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
         template_values['creation_filters'] = cohort.get_creation_filters()
         template_values['current_filters'] = cohort.get_current_filters()
         template_values['revision_history'] = cohort.get_revision_history()
