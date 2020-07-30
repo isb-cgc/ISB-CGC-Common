@@ -487,6 +487,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
 def cohort_detail(request, cohort_id):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
+    logger.info("[STATUS] Called cohort_detail")
     try:
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
@@ -527,6 +528,14 @@ def cohort_detail(request, cohort_id):
         template_values['shared_with_users'] = shared_with_users
         template_values['cohort_programs'] = cohort_programs
         template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
+        template_values['programs_this_cohort'] = [x['id'] for x in cohort_programs]
+        template_values['creation_filters'] = cohort.get_creation_filters()
+        template_values['current_filters'] = cohort.get_current_filters()
+        template_values['revision_history'] = cohort.get_revision_history()
+        template_values['only_user_data'] = cohort.only_user_data()
+        template_values['has_user_data'] = cohort.has_user_data()
+
+        logger.info("[STATUS] Completed cohort_detail")
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')

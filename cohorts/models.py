@@ -77,9 +77,12 @@ class Cohort(models.Model):
     def case_size(self):
         return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
 
-    def get_programs(self):
-        programs = self.samples_set.select_related('project__program').values_list('project__program__id', flat=True).distinct()
-        return Program.objects.filter(active=True, id__in=programs).distinct()
+    def get_programs(self, is_public=None):
+        programs = self.samples_set.select_related('project__program', 'owner').values_list('project__program__id', flat=True).distinct()
+        q_obj = Q(active=True,id__in=programs)
+        if is_public is not None:
+            q_obj &= Q(is_public=is_public)
+        return Program.objects.filter(q_obj).distinct()
 
     def get_program_names(self):
         programs = self.samples_set.select_related('project__program').values_list('project__program__id', flat=True).distinct()
@@ -88,6 +91,9 @@ class Cohort(models.Model):
 
     def only_user_data(self):
         return bool(Program.objects.filter(id__in=self.get_programs(), is_public=True).count() <= 0)
+
+    def has_user_data(self):
+        return bool(Program.objects.filter(id__in=self.get_programs(), is_public=False).count() > 0)
 
     '''
     Sets the last viewed time for a cohort
@@ -110,7 +116,7 @@ class Cohort(models.Model):
     Returns the highest level of permission the user has.
     '''
     def get_perm(self, request):
-        perm = self.cohort_perms_set.filter(user_id=request.user.id).order_by('perm')
+        perm = self.cohort_perms_set.select_related('user').filter(user__id=request.user.id).order_by('perm')
 
         if perm.count() > 0:
             return perm[0]
@@ -118,11 +124,11 @@ class Cohort(models.Model):
             return None
 
     def get_owner(self):
-        return self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user
+        return self.cohort_perms_set.select_related('user').filter(perm=Cohort_Perms.OWNER)[0].user
 
     def is_public(self):
         isbuser = User.objects.get(is_staff=True, is_superuser=True, is_active=True)
-        return (self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user_id == isbuser.id)
+        return (self.cohort_perms_set.select_related('user').filter(perm=Cohort_Perms.OWNER)[0].user.id == isbuser.id)
 
 
     '''
@@ -185,7 +191,7 @@ class Cohort(models.Model):
         cohort = self
         # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
         while cohort:
-            for filter in Filters.objects.filter(resulting_cohort=cohort):
+            for filter in Filters.objects.select_related('program').filter(resulting_cohort=cohort):
                 prog_name = filter.program.name
                 if prog_name not in filters:
                     filters[prog_name] = {}
@@ -193,6 +199,8 @@ class Cohort(models.Model):
                 if filter.name not in prog_filters:
                     prog_filters[filter.name] = {
                         'id': cohort.id,
+                        'program_obj': filter.program,
+                        'program_id': filter.program.id,
                         'values': []
                     }
                 prog_filter = prog_filters[filter.name]
@@ -216,7 +224,9 @@ class Cohort(models.Model):
                     current_filters[prog].append({
                         'name': str(filter),
                         'value': str(value),
-                        'program': prog
+                        'program': prog,
+                        'program_obj': prog_filters[filter]['program_obj'],
+                        'program_id': prog_filters[filter]['program_id']
                     })
 
             if not unformatted:
@@ -236,11 +246,11 @@ class Cohort(models.Model):
         cohort = self
         # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
         while cohort:
-            filter_list = Filters.objects.filter(resulting_cohort=cohort)
-            sources = Source.objects.filter(cohort=cohort)
+            sources = Source.objects.select_related('parent').filter(cohort=cohort)
             if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
                 cohort = sources[0].parent
             else:
+                filter_list = Filters.objects.select_related('program').filter(resulting_cohort=cohort)
                 cohort = None
 
         filters = {}
@@ -252,7 +262,9 @@ class Cohort(models.Model):
             filters[filter.program.name].append({
                 'name': str(filter.name),
                 'value': str(filter.value),
-                'program': filter.program.name
+                'program': filter.program.name,
+                'program_obj': filter.program,
+                'program_id': filter.program.id
             })
             
         for prog in filters:
@@ -277,13 +289,15 @@ class Cohort(models.Model):
                 if source.type == Source.FILTERS:
                     if filter_history is None:
                         filter_history = {}
-                    source_filters = Filters.objects.filter(resulting_cohort=source.cohort)
+                    source_filters = Filters.objects.select_related('program').filter(resulting_cohort=source.cohort)
                     filters = []
                     for source_filter in source_filters:
                         filters.append({
                             'name': source_filter.name,
                             'value': source_filter.value,
-                            'program': source_filter.program.name
+                            'program': source_filter.program.name,
+                            'program_id': source_filter.program.id,
+                            'program_obj': source_filter.program,
                         })
                     filter_history[source.cohort.id] = filters
             else:
@@ -300,7 +314,7 @@ class Cohort(models.Model):
     '''
     def get_revision_history(self):
         revision_list = []
-        sources = Source.objects.filter(cohort=self)
+        sources = Source.objects.select_related('parent', 'cohort').filter(cohort=self)
         source_filters = None
 
         while sources:
@@ -353,19 +367,15 @@ class Cohort(models.Model):
         prog_data_types = None
 
         for cohort_filter in filters:
-            prog = None
-            prog_id = None
-            is_private = False
-            try:
-                prog_id = Program.objects.get(name=cohort_filter['program'], is_public=True, active=True).id
-            except ObjectDoesNotExist:
-                is_private = True
+            prog = cohort_filter['program_obj']
+            prog_id = cohort_filter['program_id']
+            is_private = bool(not prog.is_public)
 
             if not is_private:
                 if prog_id not in prog_vals:
-                    prog_vals[prog_id] = fetch_metadata_value_set(prog_id)
+                    prog_vals[prog_id] = fetch_metadata_value_set(prog)
                 if prog_id not in prog_dts:
-                    prog_dts[prog_id] = fetch_program_data_types(prog_id, True)
+                    prog_dts[prog_id] = fetch_program_data_types(prog, True)
 
                 prog_values = prog_vals[prog_id]
                 prog_data_types = prog_dts[prog_id]
