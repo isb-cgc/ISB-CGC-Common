@@ -164,12 +164,22 @@ class DataVersion(models.Model):
 
 class Collection(models.Model):
     id = models.AutoField(primary_key=True)
-    # Eg. BRCA
-    short_name = models.CharField(max_length=40, null=False, blank=False)
-    name = models.CharField(max_length=255, null=True)
-    description = models.TextField(null=True, blank=True)
-    active = models.BooleanField(default=True)
-    is_public = models.BooleanField(default=False)
+    tcia_collection_id = models.CharField(max_length=255, null=True, blank=False)
+    nbia_collection_id = models.CharField(max_length=255, null=True)
+    collection_id = models.CharField(max_length=255, null=True, blank=False)
+    description = models.TextField(null=True, blank=False)
+    date_updated = models.DateField(null=True, blank=False)
+    status = models.CharField(max_length=40, null=True, blank=False)
+    access = models.CharField(max_length=40, null=True, blank=False)
+    subject_count = models.IntegerField(default=0, null=True, blank=False)
+    image_types = models.CharField(max_length=255, null=True, blank=False)
+    cancer_type = models.CharField(max_length=128, null=True, blank=False)
+    doi = models.CharField(max_length=255, null=True, blank=False)
+    supporting_data = models.CharField(max_length=255, null=True, blank=False)
+    species = models.CharField(max_length=64, null=True, blank=False)
+    location = models.CharField(max_length=255, null=True, blank=False)
+    active = models.BooleanField(default=True, null=False, blank=False)
+    is_public = models.BooleanField(default=False, null=False, blank=False)
     objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     data_versions = models.ManyToManyField(DataVersion)
@@ -201,6 +211,16 @@ class DataSourceQuerySet(models.QuerySet):
         for ds in self.all():
             versions[ds.id] = ds.versions.filter(active=active) if active is not None else ds.versions.all()
         return versions
+
+    def get_source_data_types(self):
+        data_types = {}
+        for ds in self.all():
+            data_set_types = ds.data_sets.all()
+            for data_set_type in data_set_types:
+                if ds.id not in data_types:
+                    data_types[ds.id] = []
+                data_types[ds.id].append(data_set_type.data_type)
+        return data_types
 
     def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False):
         start = time.time()
@@ -363,6 +383,23 @@ class AttributeQuerySet(models.QuerySet):
                 sets[set_type.attribute.name] = []
             sets[set_type.attribute.name].append(set_type.datasettype.data_type)
         return sets
+
+    def get_attr_ranges(self, as_dict=False):
+        if as_dict:
+            ranges = {}
+            for range in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()):
+                if range.attribute.id not in ranges:
+                    ranges[range.attribute.id] = []
+                ranges[range.attribute.id].append(range)
+            return ranges
+        return Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all())
+
+    def get_facet_types(self):
+        facet_types = {}
+        attr_with_ranges = {x[0]: x[1] for x in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()).values_list('attribute__id','attribute__data_type')}
+        for attr in self.all():
+            facet_types[attr.id] = DataSource.QUERY if attr.data_type == Attribute.CONTINUOUS_NUMERIC and attr.id in attr_with_ranges else DataSource.TERMS
+        return facet_types
 
 class AttributeManager(models.Manager):
     def get_queryset(self):
