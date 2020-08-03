@@ -281,7 +281,9 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 # Build a query string for Solr
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset=0, subq_join_field=None):
 
-    ranged_attrs = Attribute.get_ranged_attrs()
+    continuous_num = Attribute.get_ranged_attrs(False)
+    continuous_num_list = list(continuous_num.values_list('name',flat=True))
+    attr_ranges = Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=continuous_num)
 
     first = True
     full_query_str = ''
@@ -383,21 +385,26 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
                 query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
             else:
                 query_str += "(+({}))".format(clause)
-        elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
+        elif attr in continuous_num_list or attr[:attr.rfind('_')] in continuous_num_list:
             attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
+            # We need to check the include upper/lower settings to make sure we filter our set right
+            first_range = attr_ranges.filter(attribute__name=attr_name).first()
+            l_boundary = "[" if first_range.include_lower else "{"
+            u_boundary = "]" if first_range.include_upper else "}"
             clause = ""
             if len(values) > 1 and type(values[0]) is list:
                 clause = " {} ".format(comb_with).join(
-                    ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
-            elif len(values) > 1 :
-                clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
+                    ["{}:[{}{} TO {}{}]".format(attr_name, l_boundary, str(x[0]), str(x[1]), u_boundary) for x in values])
+            elif len(values) > 1:
+                if type(values[0] is str) and re.search(" [Tt][Oo] ",values[0]):
+                    clause = " {} ".format(comb_with).join(
+                        ["{}:{}{}{}".format(attr_name, l_boundary, x.upper(), u_boundary) for x in values])
+                else:
+                    clause = "{}:{}{} TO {}{}".format(attr_name, l_boundary, values[0], values[1], u_boundary)
             else:
-                if re.search('_[gl]t[e]|_btw',attr):
+                if re.search('_[gl]t[e]',attr):
                     clause = "{}:{}".format(attr_name, values[0])
                 else:
-                    attr_range = Attribute.objects.get(name=attr_name,data_type=Attribute.CONTINUOUS_NUMERIC,active=True).get_ranges().first()
-                    u_boundary = "]" if attr_range.include_upper else "}"
-                    l_boundary = "[" if attr_range.include_lower else "{"
                     clause = "{}:{}{}{}".format(attr_name, l_boundary, values[0].upper(), u_boundary)
 
             if 'None' in values:
