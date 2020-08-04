@@ -47,14 +47,12 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
-    if not cohort_id:
-        raise Exception("A cohort ID must be supplied to view a its files.")
 
     if not inc_filters:
         inc_filters = {}
 
-    user_email = user.email
-    user_id = user.id
+    user_email = "" if user.is_anonymous else user.email
+    user_id = "" if user.is_anonymous else user.id
     db = None
     cursor = None
     facets = None
@@ -65,7 +63,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
-        Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
+        if cohort_id:
+            Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
         fields = ["case_barcode", "project_short_name", "disease_code"]
         # col_map: used in the sql ORDER BY clause
@@ -129,6 +128,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 if not type or type != 'dicom':
                     facet_names.extend(['project_short_name'])
 
+                if (not type or type != 'camic') and not cohort_id:
+                    facet_names.extend(['program_name'])
+
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
             unique="file_name_key"
@@ -156,7 +158,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
         sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
 
-        query_set = [y for x, y in solr_query['queries'].items()]
+        query_set = []
+        if solr_query:
+            query_set = [y for x, y in solr_query['queries'].items()]
 
         query_params = {
             "collection": file_collection.name,
