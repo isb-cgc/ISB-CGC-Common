@@ -26,21 +26,6 @@ class ProgramManager(models.Manager):
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
-
-class CollectionManager(models.Manager):
-    def search(self, search_terms):
-        terms = [term.strip() for term in search_terms.split()]
-        q_objects = []
-        for term in terms:
-            q_objects.append(Q(name__icontains=term))
-
-        # Start with a bare QuerySet
-        qs = self.get_queryset()
-
-        # Use operator's or_ to string together all of your Q objects.
-        return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
-
-
 class Program(models.Model):
     id = models.AutoField(primary_key=True)
     # Eg. TCGA
@@ -162,7 +147,25 @@ class DataVersion(models.Model):
         return "{} ({})".format(self.name, self.version)
 
 
+class CollectionQuerySet(models.QuerySet):
+    def get_tooltips(self):
+        tips = {}
+        for collex in self.all():
+            tips[collex.collection_id] = collex.description
+        return tips
+
+class CollectionManager(models.Manager):
+    def get_queryset(self):
+        return CollectionQuerySet(self.model, using=self._db)
+
 class Collection(models.Model):
+    ANALYSIS_COLLEX = 'A'
+    ORIGINAL_COLLEX = 'O'
+    COLLEX_TYPES = (
+        (ANALYSIS_COLLEX, 'Analysis'),
+        (ORIGINAL_COLLEX, 'Original')
+    )
+
     id = models.AutoField(primary_key=True)
     tcia_collection_id = models.CharField(max_length=255, null=True, blank=False)
     nbia_collection_id = models.CharField(max_length=255, null=True)
@@ -180,6 +183,7 @@ class Collection(models.Model):
     location = models.CharField(max_length=255, null=True, blank=False)
     active = models.BooleanField(default=True, null=False, blank=False)
     is_public = models.BooleanField(default=False, null=False, blank=False)
+    collection_type = models.CharField(max_length=1, blank=False, null=False, choices=COLLEX_TYPES, default=ORIGINAL_COLLEX)
     objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     data_versions = models.ManyToManyField(DataVersion)
