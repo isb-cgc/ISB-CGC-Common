@@ -155,6 +155,8 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
     attr_sets = attrs.get_attr_sets()
     attr_cats = attrs.get_attr_cats()
+    attr_facets = attrs.get_facet_types()
+    attr_ranges = attrs.get_attr_ranges(True)
     cat_attrs = {}
     for attr in attr_cats:
         cat = attr_cats[attr]
@@ -164,13 +166,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
             cat_attrs[cat['cat_name']].append(attr)
 
     for attr in attrs:
-        facet_type = DataSource.get_facet_type(attr)
+        facet_type = attr_facets[attr.id]
         facet_name = attr.name
         if facet_type == "query":
             # We need to make a series of query buckets
-            attr_ranges = Attribute_Ranges.objects.filter(attribute=attr)
-
-            for attr_range in attr_ranges:
+            for attr_range in attr_ranges[attr.id]:
                 u_boundary = "]" if attr_range.include_upper else "}"
                 l_boundary = "[" if attr_range.include_lower else "{"
                 if attr_range.gap == "0":

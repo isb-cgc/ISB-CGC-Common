@@ -33,8 +33,8 @@ class Program_Admin(admin.ModelAdmin):
 
 class Collection_Admin(admin.ModelAdmin):
     list_display = (
-        'name',
-        'short_name',
+        'collection_id',
+        'tcia_collection_id',
         'description',
         'active',
         'owner',
