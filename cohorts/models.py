@@ -95,7 +95,7 @@ class Cohort(models.Model):
     # If a Cohort is owned by the IDC Superuser, it's considered public; this checks for the owner and returns a bool
     # based on that determination
     def is_public(self):
-        idc_su = User.objects.get(username='isb', is_superuser=True)
+        idc_su = User.objects.get(username='idc', is_superuser=True)
         return (self.cohort_perms_set.get(perm=Cohort_Perms.OWNER).user_id == idc_su.id)
 
     # Returns the data versions identified in the filter groups for this cohort
