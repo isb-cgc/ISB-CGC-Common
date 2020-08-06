@@ -62,7 +62,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                     if facet != 'count' and facet != 'unique_count':
                         facet_counts = result['facets'][facet]
                         if 'buckets' in facet_counts:
-                            # This is a standard term facet
+                            # This is a term facet
                             formatted_query_result['facets'][facet] = {}
                             if 'missing' in facet_counts:
                                 formatted_query_result['facets'][facet]['None'] = facet_counts['missing']['unique_count'] if 'unique_count' in facet_counts['missing'] else facet_counts['missing']['count']
@@ -74,7 +74,10 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                             facet_range = facet.split(":")[-1]
                             if facet_name not in formatted_query_result['facets']:
                                 formatted_query_result['facets'][facet_name] = {}
-                            formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
+                            if facet_range == 'min_max':
+                                formatted_query_result['facets'][facet_name][facet_range] = facet_counts
+                            else:
+                                formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
             else:
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
@@ -133,13 +136,13 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
         if query_response.status_code != 200:
             msg = "Saw response code {} when querying solr collection {} with string {}\npayload: {}\nresponse text: {}".format(
-                str(query_response.status_code), collection, query_string, payload,
+                str(query_response.status_code), collection, payload['query'], payload,
                 query_response.text
             )
             raise Exception(msg)
         query_result = query_response.json()
     except Exception as e:
-        logger.error("[ERROR] While querying solr collection {}:".format(collection, query_string))
+        logger.error("[ERROR] While querying solr collection {}:".format(collection, payload['query']))
         logger.exception(e)
 
     return query_result
@@ -147,11 +150,13 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
 # Solr facets are the bucket counting; optionally provide a set of filters to *not* be counted for purposes of
 # providing counts on the query filters
-def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
+def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, min_max=False):
     facets = {}
 
     attr_sets = attrs.get_attr_sets()
     attr_cats = attrs.get_attr_cats()
+    attr_facets = attrs.get_facet_types()
+    attr_ranges = attrs.get_attr_ranges(True)
     cat_attrs = {}
     for attr in attr_cats:
         cat = attr_cats[attr]
@@ -161,13 +166,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
             cat_attrs[cat['cat_name']].append(attr)
 
     for attr in attrs:
-        facet_type = DataSource.get_facet_type(attr)
+        facet_type = attr_facets[attr.id]
         facet_name = attr.name
         if facet_type == "query":
             # We need to make a series of query buckets
-            attr_ranges = Attribute_Ranges.objects.filter(attribute=attr)
-
-            for attr_range in attr_ranges:
+            for attr_range in attr_ranges[attr.id]:
                 u_boundary = "]" if attr_range.include_upper else "}"
                 l_boundary = "[" if attr_range.include_lower else "{"
                 if attr_range.gap == "0":
@@ -279,6 +282,17 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
                         facets[none_facet_name]['domain']['filter'] = ""
                     facets[none_facet_name]['domain']['filter'] += "has_{}:True".format(attr_cats[attr.name]['cat_name'].lower())
 
+            if min_max:
+                facets["{}:min_max".format(attr.name)] = {
+                    'type': facet_type,
+                    'field': attr.name,
+                    'limit': -1,
+                    'q': "*:*",
+                    'facet': {
+                        'min': "min({})".format(attr.name),
+                        'max': "max({})".format(attr.name),
+                    }
+                }
         else:
             facets[attr.name] = {
                 'type': facet_type,
@@ -305,6 +319,24 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None):
     return facets
 
 # Build a query string for Solr
+#
+# filters: simple filter dict of the form:
+# {
+#    <attribute name>: [<value1>,[<value2>...]],
+# }
+#
+# comb_with: Simple toggle to determine filter combination behavior (Solr default is OR between values, AND between fields)
+#
+# with_tags_for_ex: Boolean toggle for the creation and tracking dict of filter exclusion tags to be used in faceting
+#
+# subq_join_field: If inverted filters are present, subq_join_field determines the field used to {!join} the inverted
+# subquery to the main query
+#
+# search_child_records_by: a dict indicating what field, if any, should be used in subquerying 'child' or related records.
+# This allows for searching on 'related records' which are being filtered out based on lack of a filter value, but which
+# satisfy another criteria - eg., records from the same study may not all have the same fields pulled out, but you may
+# still want those records when filtering on this attribute.
+#
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None, search_child_records_by=None):
     
     ranged_attrs = Attribute.get_ranged_attrs()
@@ -316,6 +348,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     count = 0
     mutation_filters = {}
     main_filters = {}
+    search_child_records_by = search_child_records_by or {}
 
     # Because mutation filters can have their operation specified, split them out separately:
     for attr, values in list(filters.items()):
@@ -439,10 +472,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
         query_set = query_set or {}
 
-        if search_child_records_by:
-            # Records from the same study will often not have all the values filled out; we need to subquery to find those
+        if search_child_records_by.get(attr, None):
             query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr_name,
-                    "{!join to=%s from=%s}%s" % (search_child_records_by, search_child_records_by, query_str.replace("\"", "\\\"")))
+                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr], search_child_records_by[attr], query_str.replace("\"", "\\\"")))
 
         full_query_str += query_str
 

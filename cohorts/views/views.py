@@ -53,7 +53,7 @@ from django.utils.html import escape
 
 from cohorts.models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids
-from idc_collections.models import Program, Collection
+from idc_collections.models import Program, Collection, DataSetType, DataVersion
 
 BQ_ATTEMPT_MAX = 10
 
@@ -87,12 +87,8 @@ def get_cases_by_cohort(cohort_id):
         print("TODO: get_cases_by_cohort")
 
         return set(cases)
-
     except (Exception) as e:
         logger.exception(e)
-
-
-
 
 @login_required
 def public_cohort_list(request):
@@ -150,15 +146,10 @@ def cohort_detail(request, cohort_id):
     try:
         shared_with_users = []
 
-        idc_user = Django_User.objects.filter(username='idc').first()
-        program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
-
         template_values = {
             'request': request,
             'base_url': settings.BASE_URL,
-            'base_api_url': settings.BASE_API_URL,
-            'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'base_api_url': settings.BASE_API_URL
         }
 
         cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -169,10 +160,6 @@ def cohort_detail(request, cohort_id):
             messages.error(request, 'You do not have permission to view that cohort.')
             return redirect('cohort_list')
 
-        cohort_progs = Program.objects.filter(id__in=Collection.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
-
-        cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('idc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
-
         # Do not show shared users for public cohorts
         if not cohort.is_public():
             shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
@@ -180,13 +167,13 @@ def cohort_detail(request, cohort_id):
 
         template = 'cohorts/cohort_details.html'
         template_values['cohort'] = cohort
-        template_values['total_samples'] = cohort.sample_size()
-        template_values['total_cases'] = cohort.case_size()
+        template_values['total_samples'] = 0
+        template_values['total_cases'] = 0
         template_values['shared_with_users'] = shared_with_users
-        template_values['cohort_programs'] = cohort_programs
         template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
 
-    except ObjectDoesNotExist:
+    except ObjectDoesNotExist as e:
+        logger.exception(e)
         messages.error(request, 'The cohort you were looking for does not exist.')
         return redirect('cohort_list')
     except Exception as e:
@@ -208,13 +195,14 @@ def save_cohort(request):
     try:
         if request.POST:
             name = request.POST.get('name')
-            filters = request.POST.getlist('filters')
+            desc = request.POST.get('desc', None)
+            filters = json.loads(request.POST.get('selected-filters','{}'))
             cohort_id = request.POST.get('cohort_id', None)
-            req_versions = json.loads(req.get('versions', '[]'))
+            req_versions = json.loads(request.POST.get('versions', '[]'))
 
             versions = DataVersion.objects.filter(name__in=req_versions) if len(req_versions) else DataVersion.objects.filter(active=True)
 
-            result = _save_cohort(request.user, filters, name, cohort_id, versions)
+            result = _save_cohort(request.user, filters, name, cohort_id, versions, desc=desc)
 
             if 'message' not in result:
                 redirect_url = reverse('cohort_details', args=[result['cohort_id']])
