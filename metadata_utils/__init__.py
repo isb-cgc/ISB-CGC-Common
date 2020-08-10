@@ -63,8 +63,6 @@ def normalize_bmi(bmis):
                     bmi_list['obese'] += int(count)
             else:
                 bmi_list['None'] += int(count)
-
-    print("Incoming BMI counts: {}".format(bmi_list))
     return bmi_list
 
 

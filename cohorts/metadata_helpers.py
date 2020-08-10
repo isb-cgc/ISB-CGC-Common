@@ -32,10 +32,11 @@ import string
 import time
 from time import sleep
 import re
-from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables
+from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables, DataSource, DataVersion
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
-from solr_helpers import query_solr_and_format_result, build_solr_facets
+from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
+from django.contrib.auth.models import User
 
 from uuid import uuid4
 from django.conf import settings
@@ -222,11 +223,11 @@ def fetch_build_data_attr(build, type=None):
     build = build.upper()
 
     if type == 'dicom':
-        metadata_data_attrs = ['disease_code', ]
+        metadata_data_attrs = ['disease_code', 'Modality', 'BodyPartExamined']
     elif type == 'pdf':
-        metadata_data_attrs = ['data_format', 'disease_code', ]
+        metadata_data_attrs = ['disease_code', 'project_short_name', ]
     elif type == 'camic':
-        metadata_data_attrs = ['data_type', 'data_format', 'disease_code', ]
+        metadata_data_attrs = ['data_type', 'disease_code', 'project_short_name',]
     else:
         metadata_data_attrs = ['data_type', 'data_category','experimental_strategy','data_format','platform', 'disease_code',]
     try:
@@ -237,7 +238,7 @@ def fetch_build_data_attr(build, type=None):
             cursor = db.cursor()
 
             for program in Program.objects.filter(is_public=True,active=True):
-                program_metadata = fetch_metadata_value_set(program.id)
+                program_metadata = fetch_metadata_value_set(program)
                 disease_code_dict = None
 
                 if program_metadata and 'disease_code' in program_metadata and 'values' in program_metadata['disease_code']:
@@ -257,26 +258,53 @@ def fetch_build_data_attr(build, type=None):
                                 'name': attr,
                                 'values': {}
                             }
+                        if type == 'dicom':
+                            if len(program.get_data_sources(data_type=DataVersion.IMAGE_DATA)):
+                                tcia_images_source = DataSource.objects.select_related('version').get(
+                                    version__active=True,version__data_type=DataVersion.IMAGE_DATA,source_type=DataSource.SOLR
+                                )
+                                source_attrs = tcia_images_source.get_source_attr(named_set=[attr],for_faceting=False)
+                                METADATA_DATA_ATTR[build][attr]['displ_name'] = source_attrs.first().display_name
+                                facets = build_solr_facets(source_attrs)
+                                # We fetch the DICOM range from Solr
+                                result = query_solr_and_format_result({
+                                    "collection": tcia_images_source.name,
+                                    "query_string": "*:*",
+                                    "facets": facets,
+                                    "limit": 0,
+                                    "counts_only": True
+                                })
+                                for val in result['facets'][attr]:
+                                    if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                                        tooltip = ''
+                                        if attr == 'disease_code':
+                                            if val in disease_code_dict:
+                                                tooltip = disease_code_dict[val]['tooltip']
 
-                        query = """
-                            SELECT DISTINCT {attr}
-                            FROM {data_table};
-                        """.format(attr=attr,data_table=data_table)
-
-                        cursor.execute(query)
-
-                        for row in cursor.fetchall():
-                            val = "None" if not row[0] else row[0]
-                            tooltip = ''
-                            if attr == 'disease_code' and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
-                                tooltip = disease_code_dict[val]['tooltip']
-                            if val not in METADATA_DATA_ATTR[build][attr]['values']:
-                                METADATA_DATA_ATTR[build][attr]['values'][val] = {
-                                    'displ_value': val,
-                                    'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                    'name': val,
-                                    'tooltip': tooltip
-                                }
+                                        METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                                            'displ_value': val,
+                                            'value': re.sub(r"[^A-Za-z0-9_\-]", "", re.sub(r"\s+", "-", val)),
+                                            'name': val,
+                                            'tooltip': tooltip
+                                        }
+                        else:
+                            query = """
+                                    SELECT DISTINCT {attr}
+                                    FROM {data_table};
+                                """.format(attr=attr, data_table=data_table)
+                            cursor.execute(query)
+                            for row in cursor.fetchall():
+                                val = "None" if not row[0] else row[0]
+                                tooltip = ''
+                                if attr == 'disease_code' and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
+                                    tooltip = disease_code_dict[val]['tooltip']
+                                if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                                    METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                                        'displ_value': val,
+                                        'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
+                                        'name': val,
+                                        'tooltip': tooltip
+                                    }
 
                         if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
                             METADATA_DATA_ATTR[build][attr]['values']['None'] = {
@@ -302,39 +330,44 @@ def fetch_program_data_types(program, for_display=False):
     try:
 
         if not program:
-            program = get_public_program_id('TCGA')
+            program = Program.objects.get(name="TCGA")
+        else:
+            if type(program) is str:
+                program = int(program)
+            if type(program) is int:
+                program = Program.objects.get(id=program)
 
-        if program not in METADATA_DATA_TYPES or len(METADATA_DATA_TYPES[program]) <= 0:
+        if program.id not in METADATA_DATA_TYPES or len(METADATA_DATA_TYPES[program.id]) <= 0:
 
-            METADATA_DATA_TYPES[program] = {}
-            METADATA_DATA_TYPES_DISPLAY[program] = {}
+            METADATA_DATA_TYPES[program.id] = {}
+            METADATA_DATA_TYPES_DISPLAY[program.id] = {}
 
-            preformatted_attr = get_preformatted_attr(program)
+            preformatted_attr = get_preformatted_attr(program.id)
 
             db = get_sql_connection()
             cursor = db.cursor()
-            cursor.callproc('get_program_datatypes', (program,))
+            cursor.callproc('get_program_datatypes', (program.id,))
             for row in cursor.fetchall():
-                if not row[2] in METADATA_DATA_TYPES[program]:
-                    METADATA_DATA_TYPES[program][row[2]] = {'name': row[2], 'displ_name': format_for_display(row[2]) if row[2] not in preformatted_attr else row[2], 'values': {}}
-                METADATA_DATA_TYPES[program][row[2]]['values'][int(row[0])] = ('Available' if row[1] is None else row[1])
+                if not row[2] in METADATA_DATA_TYPES[program.id]:
+                    METADATA_DATA_TYPES[program.id][row[2]] = {'name': row[2], 'displ_name': format_for_display(row[2]) if row[2] not in preformatted_attr else row[2], 'values': {}}
+                METADATA_DATA_TYPES[program.id][row[2]]['values'][int(row[0])] = ('Available' if row[1] is None else row[1])
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program,))
+            cursor.callproc('get_program_display_strings', (program.id,))
 
             for row in cursor.fetchall():
-                if row['value_name'] is None and row['attr_name'] in METADATA_DATA_TYPES[program]:
-                    METADATA_DATA_TYPES[program][row['attr_name']]['displ_name'] = row['display_string']
+                if row['value_name'] is None and row['attr_name'] in METADATA_DATA_TYPES[program.id]:
+                    METADATA_DATA_TYPES[program.id][row['attr_name']]['displ_name'] = row['display_string']
 
-            for data_type in METADATA_DATA_TYPES[program]:
-                for value in METADATA_DATA_TYPES[program][data_type]['values']:
-                    if not str(value) in METADATA_DATA_TYPES_DISPLAY[program]:
-                        METADATA_DATA_TYPES_DISPLAY[program][str(value)] = METADATA_DATA_TYPES[program][data_type]['displ_name'] + ', ' + METADATA_DATA_TYPES[program][data_type]['values'][value]
+            for data_type in METADATA_DATA_TYPES[program.id]:
+                for value in METADATA_DATA_TYPES[program.id][data_type]['values']:
+                    if not str(value) in METADATA_DATA_TYPES_DISPLAY[program.id]:
+                        METADATA_DATA_TYPES_DISPLAY[program.id][str(value)] = METADATA_DATA_TYPES[program.id][data_type]['displ_name'] + ', ' + METADATA_DATA_TYPES[program.id][data_type]['values'][value]
 
         if for_display:
-            return copy.deepcopy(METADATA_DATA_TYPES_DISPLAY[program])
-        return copy.deepcopy(METADATA_DATA_TYPES[program])
+            return copy.deepcopy(METADATA_DATA_TYPES_DISPLAY[program.id])
+        return copy.deepcopy(METADATA_DATA_TYPES[program.id])
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get data types for program #%s:' % str(program))
@@ -354,29 +387,34 @@ def fetch_program_attr(program):
     try:
 
         if not program:
-            program = get_public_program_id('TCGA')
+            program = Program.objects.get(name="TCGA")
+        else:
+            if type(program) is str:
+                program = int(program)
+            if type(program) is int:
+                program = Program.objects.get(id=program)
 
-        if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
+        if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
 
-            METADATA_ATTR[program] = {}
+            METADATA_ATTR[program.id] = {}
 
-            preformatted_attr = get_preformatted_attr(program)
+            preformatted_attr = get_preformatted_attr(program.id)
 
             db = get_sql_connection()
             cursor = db.cursor()
-            cursor.callproc('get_program_attr', (program,))
+            cursor.callproc('get_program_attr', (program.id,))
             for row in cursor.fetchall():
-                METADATA_ATTR[program][row[0]] = {'name': row[0], 'displ_name': format_for_display(row[0]) if row[0] not in preformatted_attr else row[0], 'values': {}, 'type': row[1]}
+                METADATA_ATTR[program.id][row[0]] = {'name': row[0], 'displ_name': format_for_display(row[0]) if row[0] not in preformatted_attr else row[0], 'values': {}, 'type': row[1]}
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program,))
+            cursor.callproc('get_program_display_strings', (program.id,))
 
             for row in cursor.fetchall():
-                if row['value_name'] is None and row['attr_name'] in METADATA_ATTR[program]:
-                    METADATA_ATTR[program][row['attr_name']]['displ_name'] = row['display_string']
+                if row['value_name'] is None and row['attr_name'] in METADATA_ATTR[program.id]:
+                    METADATA_ATTR[program.id][row['attr_name']]['displ_name'] = row['display_string']
 
-        return copy.deepcopy(METADATA_ATTR[program])
+        return copy.deepcopy(METADATA_ATTR[program.id])
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
@@ -462,62 +500,67 @@ def fetch_metadata_value_set(program=None):
 
     try:
         if not program:
-            program = get_public_program_id('TCGA')
+            program = Program.objects.get(name="TCGA")
+        else:
+            if type(program) is str:
+                program = int(program)
+            if type(program) is int:
+                program = Program.objects.get(id=program)
 
         # This is only valid for public programs
-        if not Program.objects.get(id=program).is_public:
+        if not program.is_public:
             return {}
 
-        if program not in METADATA_ATTR or len(METADATA_ATTR[program]) <= 0:
+        if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
             fetch_program_attr(program)
 
-        preformatted_values = get_preformatted_values(program)
+        preformatted_values = get_preformatted_values(program.id)
 
-        if len(METADATA_ATTR[program][list(METADATA_ATTR[program].keys())[0]]['values']) <= 0:
+        if len(METADATA_ATTR[program.id][list(METADATA_ATTR[program.id].keys())[0]]['values']) <= 0:
             db = get_sql_connection()
             cursor = db.cursor()
 
-            cursor.callproc('get_metadata_values', (program,))
+            cursor.callproc('get_metadata_values', (program.id,))
 
             for row in cursor.fetchall():
-                METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = {
+                METADATA_ATTR[program.id][cursor.description[0][0]]['values'][str(row[0])] = {
                     'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
                 }
 
             while (cursor.nextset() and cursor.description is not None):
                 for row in cursor.fetchall():
-                    METADATA_ATTR[program][cursor.description[0][0]]['values'][str(row[0])] = {
+                    METADATA_ATTR[program.id][cursor.description[0][0]]['values'][str(row[0])] = {
                         'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
                     }
 
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program,))
+            cursor.callproc('get_program_display_strings', (program.id,))
 
             for row in cursor.fetchall():
-                if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program]:
-                    if row['value_name'] in METADATA_ATTR[program][row['attr_name']]['values']:
-                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = {
+                if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program.id]:
+                    if row['value_name'] in METADATA_ATTR[program.id][row['attr_name']]['values']:
+                        METADATA_ATTR[program.id][row['attr_name']]['values'][row['value_name']] = {
                             'displ_value': row['display_string'],
                         }
                     # Bucketed continuous numerics like BMI will not already have values in, since the bucketing is done in post-process
-                    elif METADATA_ATTR[program][row['attr_name']]['type'] == 'N':
-                        METADATA_ATTR[program][row['attr_name']]['values'][row['value_name']] = {
+                    elif METADATA_ATTR[program.id][row['attr_name']]['type'] == 'N':
+                        METADATA_ATTR[program.id][row['attr_name']]['values'][row['value_name']] = {
                             'displ_value': row['display_string'],
                         }
 
             # Fetch the tooltip strings for Disease Codes
             cursor.close()
             cursor = db.cursor()
-            cursor.callproc('get_project_tooltips', (program,))
+            cursor.callproc('get_project_tooltips', (program.id,))
 
             for row in cursor.fetchall():
-                if 'disease_code' in METADATA_ATTR[program] and row[0] in METADATA_ATTR[program]['disease_code']['values']:
-                    METADATA_ATTR[program]['disease_code']['values'][row[0]]['tooltip'] = row[2]
-                if 'project_short_name' in METADATA_ATTR[program] and row[1] in METADATA_ATTR[program]['project_short_name']['values']:
-                    METADATA_ATTR[program]['project_short_name']['values'][row[1]]['tooltip'] = row[2]
+                if 'disease_code' in METADATA_ATTR[program.id] and row[0] in METADATA_ATTR[program.id]['disease_code']['values']:
+                    METADATA_ATTR[program.id]['disease_code']['values'][row[0]]['tooltip'] = row[2]
+                if 'project_short_name' in METADATA_ATTR[program.id] and row[1] in METADATA_ATTR[program.id]['project_short_name']['values']:
+                    METADATA_ATTR[program.id]['project_short_name']['values'][row[1]]['tooltip'] = row[2]
 
-        return copy.deepcopy(METADATA_ATTR[program])
+        return copy.deepcopy(METADATA_ATTR[program.id   ])
 
     except Exception as e:
         logger.error('[ERROR] Exception when fetching the metadata value set:')
@@ -1206,7 +1249,6 @@ def get_sample_metadata(barcode):
         if db and db.open: db.close()
 
     return result
-
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 
