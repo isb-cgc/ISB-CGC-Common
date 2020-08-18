@@ -415,7 +415,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
     # All other filters
     for attr, values in list(main_filters.items()):
-        attr_name = attr
+        attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
         query_str = ''
 
         if type(values) is dict and 'values' in values:
@@ -446,7 +446,6 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             else:
                 query_str += "+({})".format(clause)
         elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
-            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
             clause = ""
             if len(values) == 1 and re.match(r'\d+ [tT][oO] \d+', values[0]):
                 values = values[0].lower().split(" to ")
@@ -472,9 +471,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
         query_set = query_set or {}
 
-        if search_child_records_by.get(attr, None):
+        if search_child_records_by.get(attr_name, None):
             query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr_name,
-                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr], search_child_records_by[attr], query_str.replace("\"", "\\\"")))
+                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr_name], search_child_records_by[attr_name], query_str.replace("\"", "\\\"")))
 
         full_query_str += query_str
 
