@@ -264,7 +264,7 @@ class DataSourceQuerySet(models.QuerySet):
                 for data_set in attrs['sources'][ds.id]['data_sets']:
                     attrs['sources'][ds.id]['attr_sets'][data_set.id] = attrs['sources'][ds.id]['attrs'].filter(
                         id__in=Attribute_Set_Type.objects.select_related('datasettype').filter(
-                            datasettype=data_set, display_set=True
+                            datasettype=data_set
                         ).values_list('attribute',flat=True)
                     )
 
@@ -504,7 +504,6 @@ class Attribute_Set_Type(models.Model):
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     datasettype = models.ForeignKey(DataSetType, null=False, blank=False, on_delete=models.CASCADE)
     child_record_search = models.CharField(max_length=256,null=True,blank=True)
-    display_set = models.BooleanField(default=True)
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)

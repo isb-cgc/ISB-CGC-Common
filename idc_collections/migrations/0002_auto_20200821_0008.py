@@ -20,11 +20,6 @@ class Migration(migrations.Migration):
             name='short_name',
         ),
         migrations.AddField(
-            model_name='attribute_set_type',
-            name='display_set',
-            field=models.BooleanField(default=True),
-        ),
-        migrations.AddField(
             model_name='collection',
             name='access',
             field=models.CharField(max_length=40, null=True),
