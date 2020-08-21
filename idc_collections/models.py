@@ -491,7 +491,6 @@ class Attribute_Set_TypeQuerySet(models.QuerySet):
         attr_set_types = self.select_related('attribute', 'datasettype').filter(datasettype__in=DataSetType.objects.filter(data_type=data_type)) if data_type else self.select_related('attribute').all()
         for attr_set_type in attr_set_types:
             attr_child_record_search[attr_set_type.attribute.name] = attr_set_type.child_record_search
-        print(attr_child_record_search)
         return attr_child_record_search
 
 class Attribute_Set_TypeMananger(models.Manager):
