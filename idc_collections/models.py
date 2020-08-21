@@ -568,7 +568,7 @@ class Attribute_Ranges(models.Model):
     label = models.CharField(max_length=256, null=True, blank=True)
 
     def __str__(self):
-        return "{}: {} to {} by {}".format(self.attribute.name, str(self.start), str(self.last), str(self.gap))
+        return "{}: {} to {} by {}".format(self.attribute.name, str(self.first), str(self.last), str(self.gap))
 
 
 class User_Feature_Definitions(models.Model):
