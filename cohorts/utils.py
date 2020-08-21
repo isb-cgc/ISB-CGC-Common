@@ -25,11 +25,12 @@ import re
 import time
 from time import sleep
 import logging
+import datetime
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from .models import Cohort, Cohort_Perms, Filters, Filter_Group
-from idc_collections.models import Program, Attribute, DataVersion
+from idc_collections.models import Program, Attribute, DataVersion, DataSourceJoin
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
@@ -48,37 +49,39 @@ def _delete_cohort(user, cohort_id):
         cohort_info = {
             'message': "A cohort with the ID {} was not found!".format(cohort_id),
         }
-    else:
+    try:
+        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
+    except ObjectDoesNotExist:
+        cohort_info = {
+            'message': "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id),
+            'delete_permission': False
+        }
+    if not cohort_info:
         try:
-            Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
+            cohort = Cohort.objects.get(id=cohort_id, active=True)
+            cohort.active = False
+            cohort.save()
+            cohort_info = {
+                'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
+                'data': {'filters': cohort.get_filters_as_dict()},
+            }
         except ObjectDoesNotExist:
             cohort_info = {
-                'message': "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id),
-                'delete_permission': False
+                'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
             }
-        else:
-            try:
-                cohort = Cohort.objects.get(id=cohort_id, active=True)
-                cohort.active = False
-                cohort.save()
-                cohort_info = {
-                    'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
-                    'data': {'filters': cohort.get_filters_as_dict()},
-                }
-            except ObjectDoesNotExist:
-                cohort_info = {
-                    'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
-                }
     return cohort_info
 
 
-def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_insens=True):
+def _save_cohort(user, filters=None, name=None, cohort_id=None, versions=None, desc=None, case_insens=True):
     cohort_info = {}
 
     try:
-        if not filters and not name:
+        if not filters or not len(filters):
             # Can't save/edit a cohort when nothing is being changed!
-            return { 'message': "Can't save a cohort with no information to save! (Name and filters not provided.)" }
+            return { 'message': "Filters not received - cannot save cohort!" }
+
+        if not name:
+            name = "Cohort created on {}".format(datetime.datetime.now().strftime('%d-%m-%Y %H:%M'))
     
         if name or desc:
             blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
@@ -102,7 +105,9 @@ def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_
             return {'cohort_id': cohort.id}
     
         # Make and save cohort
-        cohort = Cohort.objects.create(name=name, description=desc)
+        cohort = Cohort.objects.create(name=name)
+        if desc:
+            cohort.description = desc
         cohort.save()
     
         # Set permission for user to be owner
@@ -112,25 +117,18 @@ def _save_cohort(user, filters=None, name=None, desc=None, cohort_id=None, case_
         # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
         # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
         grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
-    
-        # Get versions of datasets to be filtered, and link to filter group
-        imaging_version = 'imaging_version' in filters and \
-                          len(DataVersion.objects.filter(name='TCIA Image Data', version=filters['imaging_version'])) == 1 and \
-                          DataVersion.objects.get(name='TCIA Image Data', version=filters['imaging_version']) or \
-                          DataVersion.objects.get(active=True, name='TCIA Image Data')
-        grouping.data_versions.add(imaging_version)
-    
-        bioclin_version = 'bioclin_version' in filters and \
-                          len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filters['bioclin_version'])) == 1 and \
-                          DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filters['bioclin_version']) or \
-                          DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
-        grouping.data_versions.add(bioclin_version)
-    
-        attributes = filters["attributes"]
-        for attr in attributes:
-            filter_values = attributes[attr]
-            attr_id = Attribute.objects.get(name=attr)
-            Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
+
+        # If versions aren't specified, assume active versions
+        versions = versions or DataVersion.objects.filter(active=True)
+
+        for v in versions:
+            grouping.data_versions.add(v)
+
+        filter_attr = Attribute.objects.filter(id__in=filters.keys())
+
+        for attr in filter_attr:
+            filter_values = filters[str(attr.id)]
+            Filters.objects.create(resulting_cohort=cohort, attribute=attr, value=",".join(filter_values), filter_group=grouping).save()
 
         cohort_info = {
             'cohort_id': cohort.id,
@@ -220,8 +218,14 @@ def get_uuids_solr(filters_by_collex=None, fields_by_collex=None, comb_mut_filte
             filters_by_collex[solr_collex]['joins'] = {}
             for other_collex in filters_by_collex:
                 if other_collex != solr_collex:
+                    source_join = DataSourceJoin.objects.get(
+                        from_src__in=[filters_by_collex[other_collex]['source'].id, filters_by_collex[solr_collex]['source'].id],
+                        to_src__in=[filters_by_collex[other_collex]['source'].id, filters_by_collex[solr_collex]['source'].id]
+                    )
                     filters_by_collex[other_collex]['joins'][solr_collex] = "{!join %s}" % "from={} fromIndex={} to={}".format(
-                        filters_by_collex[other_collex]['source'].shared_id_col, filters_by_collex[other_collex]['source'].name, filters_by_collex[solr_collex]['source'].shared_id_col
+                        source_join.get_col(filters_by_collex[other_collex]['source'].name),
+                        filters_by_collex[other_collex]['source'].name,
+                        source_join.get_col(filters_by_collex[solr_collex]['source'].name)
                     )
 
         solr_result = {}

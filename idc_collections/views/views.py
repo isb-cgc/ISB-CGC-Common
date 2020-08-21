@@ -51,9 +51,39 @@ def public_program_list(request):
     return program_list(request, is_public=True)
 
 
+def collection_list(request):
+    template = 'collections/collections_list.html'
+
+    active_collections = Collection.objects.filter(active=True)
+    inactive_collections = Collection.objects.filter(active=False)
+    descs = {x.collection_id: x.description for x in active_collections}
+
+    context = {
+        'active_collections': active_collections,
+        'inactive_collections': inactive_collections,
+        'active_collection_descs': descs
+    }
+
+    return render(request, template, context)
+
+
+def collection_detail(request):
+    template = 'collections/collection_detail.html'
+
+    active_collections = Collection.objects.filter(active=True)
+    inactive_collections = Collection.objects.filter(active=False)
+
+    context = {
+        'active_collex': active_collections,
+        'inactive_collex': inactive_collections
+    }
+
+    return render(request, template, context)
+
+
 @login_required
 def program_list(request, is_public=False, is_API=False):
-    template = 'idc_collections/program_list.html'
+    template = 'collections/program_list.html'
 
     ownedPrograms = request.user.program_set.filter(active=True)
     sharedPrograms = Program.objects.filter(shared__matched_user=request.user, shared__active=True, active=True)

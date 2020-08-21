@@ -53,7 +53,7 @@ from django.utils.html import escape
 
 from cohorts.models import Cohort, Cohort_Perms, Source, Filters, Filter_Group, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids
-from idc_collections.models import Program, Collection
+from idc_collections.models import Program, Collection, DataSetType, DataVersion
 
 BQ_ATTEMPT_MAX = 10
 
@@ -83,78 +83,20 @@ def get_cases_by_cohort(cohort_id):
 
     cases = []
 
-    db = get_sql_connection()
-    cursor = None
-
     try:
-        projects = {}
-
-        cursor = db.cursor()
-
-        cursor.execute("""
-            SELECT DISTINCT cs.project_id,udt.metadata_samples_table,au.username,au.is_superuser
-            FROM cohorts_samples cs
-                    LEFT JOIN projects_user_data_tables udt
-                    ON udt.project_id = cs.project_id
-                    JOIN auth_user au
-                    ON au.id = udt.user_id
-            WHERE cohort_id = %s;
-        """,(cohort_id,))
-
-        for row in cursor.fetchall():
-            projects[row[1]] = row[2] + (":su" if row[3] == 1 else ":user")
-
-        case_fetch = """
-            SELECT ms.%s
-            FROM cohorts_samples cs
-            JOIN %s ms
-            ON cs.sample_barcode = ms.%s
-        """
-
-        for project_table in projects:
-            case_col = 'case_barcode'
-            sample_col = 'sample_barcode'
-
-            # If the owner of this projects_project entry is ISB-CGC, use the ISB-CGC column identifiers
-            # if projects[project_table] == 'isb:su':
-            #     case_col = 'case_col'
-            #     sample_col = 'sample_barcode'
-
-            query_str = case_fetch % (case_col,project_table,sample_col,)
-            query_str += ' WHERE cs.cohort_id = %s;'
-
-            cursor.execute(query_str,(cohort_id,))
-
-            for row in cursor.fetchall():
-                cases.append(row[0])
+        print("TODO: get_cases_by_cohort")
 
         return set(cases)
-
     except (Exception) as e:
         logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-
-
 
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
 
 @login_required
-def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=False):
+def cohorts_list(request, is_public=False):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-
-    # check to see if user has read access to 'All TCGA Data' cohort
-    idc_superuser = User.objects.get(username='idc')
-    superuser_perm = Cohort_Perms.objects.get(user=idc_superuser)
-    user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
-    if not user_all_data_perm:
-        Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
-
-    # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
 
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
@@ -197,119 +139,41 @@ def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create
                                                         'previously_selected_cohort_ids' : previously_selected_cohort_ids
                                                         })
 
-
 @login_required
-def validate_barcodes(request):
-    if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
-
-    try:
-        body_unicode = request.body.decode('utf-8')
-        body = json.loads(body_unicode)
-        barcodes = body['barcodes']
-
-        status = 500
-
-        valid_entries = []
-        invalid_entries = []
-        entries_to_check = []
-        valid_counts = None
-        messages = None
-
-        for entry in barcodes:
-            entry_split = entry.split('{}')
-            barcode_entry = {'case': entry_split[0], 'sample': entry_split[1], 'program': entry_split[2]}
-            if (barcode_entry['sample'] == '' and barcode_entry['case'] == '') or barcode_entry['program'] == '':
-                # Case barcode is required - this entry isn't valid
-                invalid_entries.append(barcode_entry)
-            else:
-                entries_to_check.append(barcode_entry)
-
-        if len(entries_to_check):
-            result = validate_and_count_barcodes(entries_to_check,request.user.id)
-            if len(result['valid_barcodes']):
-                valid_entries = result['valid_barcodes']
-                valid_counts = result['counts']
-
-            if len(result['invalid_barcodes']):
-                invalid_entries.extend(result['invalid_barcodes'])
-
-            if len(result['messages']):
-                messages = result['messages']
-
-        # If there were any valid entries, we can call it 200, otherwise we send back 500
-        if len(valid_entries):
-            status = 200
-
-    except Exception as e:
-        logger.error("[ERROR] While validating barcodes: ")
-        logger.exception(e)
-
-    return JsonResponse({
-        'valid_entries': valid_entries,
-        'invalid_entries': invalid_entries,
-        'counts': valid_counts,
-        'messages': messages
-    }, status=status)
-
-
-@login_required
-def cohort_detail(request, cohort_id=0, workbook_id=0, worksheet_id=0, create_workbook=False):
+def cohort_detail(request, cohort_id):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
         shared_with_users = []
 
-        isb_user = Django_User.objects.filter(username='isb').first()
-        program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
-
         template_values = {
             'request': request,
             'base_url': settings.BASE_URL,
-            'base_api_url': settings.BASE_API_URL,
-            'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'base_api_url': settings.BASE_API_URL
         }
 
-        if workbook_id and worksheet_id :
-            template_values['workbook']  = Workbook.objects.get(id=workbook_id)
-            template_values['worksheet'] = Worksheet.objects.get(id=worksheet_id)
-        elif create_workbook:
-            template_values['create_workbook'] = True
+        cohort = Cohort.objects.get(id=cohort_id, active=True)
+        cohort.perm = cohort.get_perm(request)
+        cohort.owner = cohort.get_owner()
 
-        template = 'cohorts/new_cohort.html'
+        if not cohort.perm:
+            messages.error(request, 'You do not have permission to view that cohort.')
+            return redirect('cohort_list')
 
-        if '/new_cohort/barcodes/' in request.path or 'create_cohort_and_create_workbook/barcodes/' in request.path or '/create/barcodes' in request.path:
-            template = 'cohorts/new_cohort_barcodes.html'
+        # Do not show shared users for public cohorts
+        if not cohort.is_public():
+            shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
+            shared_with_users = User.objects.filter(id__in=shared_with_ids)
 
-        if cohort_id != 0:
-            cohort = Cohort.objects.get(id=cohort_id, active=True)
-            cohort.perm = cohort.get_perm(request)
-            cohort.owner = cohort.get_owner()
+        template = 'cohorts/cohort_details.html'
+        template_values['cohort'] = cohort
+        template_values['total_samples'] = 0
+        template_values['total_cases'] = 0
+        template_values['shared_with_users'] = shared_with_users
+        template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
 
-            if not cohort.perm:
-                messages.error(request, 'You do not have permission to view that cohort.')
-                return redirect('cohort_list')
-
-            cohort.mark_viewed(request)
-
-            cohort_progs = Program.objects.filter(id__in=Collection.objects.filter(id__in=Samples.objects.filter(cohort=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct())
-
-            cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
-
-            # Do not show shared users for public cohorts
-            if not cohort.is_public():
-                shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
-                shared_with_users = User.objects.filter(id__in=shared_with_ids)
-
-            template = 'cohorts/cohort_details.html'
-            template_values['cohort'] = cohort
-            template_values['total_samples'] = cohort.sample_size()
-            template_values['total_cases'] = cohort.case_size()
-            template_values['shared_with_users'] = shared_with_users
-            template_values['cohort_programs'] = cohort_programs
-            template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
-
-    except ObjectDoesNotExist:
+    except ObjectDoesNotExist as e:
+        logger.exception(e)
         messages.error(request, 'The cohort you were looking for does not exist.')
         return redirect('cohort_list')
     except Exception as e:
@@ -331,10 +195,14 @@ def save_cohort(request):
     try:
         if request.POST:
             name = request.POST.get('name')
-            filters = request.POST.getlist('filters')
+            desc = request.POST.get('desc', None)
+            filters = json.loads(request.POST.get('selected-filters','{}'))
             cohort_id = request.POST.get('cohort_id', None)
+            req_versions = json.loads(request.POST.get('versions', '[]'))
 
-            result = _save_cohort(request.user, filters, name, cohort_id)
+            versions = DataVersion.objects.filter(name__in=req_versions) if len(req_versions) else DataVersion.objects.filter(active=True)
+
+            result = _save_cohort(request.user, filters, name, cohort_id, versions, desc=desc)
 
             if 'message' not in result:
                 redirect_url = reverse('cohort_details', args=[result['cohort_id']])
