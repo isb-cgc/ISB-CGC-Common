@@ -264,7 +264,7 @@ class DataSourceQuerySet(models.QuerySet):
                 for data_set in attrs['sources'][ds.id]['data_sets']:
                     attrs['sources'][ds.id]['attr_sets'][data_set.id] = attrs['sources'][ds.id]['attrs'].filter(
                         id__in=Attribute_Set_Type.objects.select_related('datasettype').filter(
-                            datasettype=data_set
+                            datasettype=data_set, display_set=True
                         ).values_list('attribute',flat=True)
                     )
 
@@ -486,10 +486,12 @@ class Attribute_Set_TypeQuerySet(models.QuerySet):
             attrs_by_set[set_type.datasettype.id].append(set_type.attribute.id)
         return attrs_by_set
 
-    def get_child_record_searches(self, data_type):
+    def get_child_record_searches(self, data_type=None):
         attr_child_record_search = {}
-        for attr_set_type in self.select_related('attribute', 'datasettype').filter(datasettype__in=DataSetType.objects.filter(data_type=data_type)):
+        attr_set_types = self.select_related('attribute', 'datasettype').filter(datasettype__in=DataSetType.objects.filter(data_type=data_type)) if data_type else self.select_related('attribute').all()
+        for attr_set_type in attr_set_types:
             attr_child_record_search[attr_set_type.attribute.name] = attr_set_type.child_record_search
+        print(attr_child_record_search)
         return attr_child_record_search
 
 class Attribute_Set_TypeMananger(models.Manager):
@@ -502,6 +504,7 @@ class Attribute_Set_Type(models.Model):
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     datasettype = models.ForeignKey(DataSetType, null=False, blank=False, on_delete=models.CASCADE)
     child_record_search = models.CharField(max_length=256,null=True,blank=True)
+    display_set = models.BooleanField(default=True)
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)
