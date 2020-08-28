@@ -497,7 +497,6 @@ def register_sa(request, user_id):
                     projectId=gcp_id).execute()
                 context['gcp_id'] = gcp_id
                 context['default_sa_id'] = gcp['projectNumber']+'-compute@developer.gserviceaccount.com'
-                context['datasets_limit'] = DCF_GOOGLE_SA_REGISTER_DATASETS_LIMIT
 
             return render(request, template, context)
 
@@ -513,6 +512,23 @@ def register_sa(request, user_id):
             is_refresh = bool(request.POST.get('is_refresh') == 'true')
             is_adjust = bool(request.POST.get('is_adjust') == 'true')
             remove_all = bool(request.POST.get('remove_all') == 'true')
+
+            # The total number of registered datasets need to be less than max specified by DCF
+            service_account = ServiceAccount.objects.filter(service_account=user_sa)
+            if not service_account:
+                messages.error(request, "The service account {} is not found".format(user_sa))
+                return redirect('user_gcp_list', user_id=user_id)
+            else:
+                auth_datasets = service_account.get_auth_datasets()
+                num_authorized = len(auth_datasets)
+                num_requesting = len(datasets)
+                max_datasets = DCF_GOOGLE_SA_REGISTER_DATASETS_LIMIT
+                if num_authorized + num_requesting > max_datasets:
+                    messages.error(request, "The service account {} is already registered to {} datasets."
+                                            "Requesting {} more datasets is not allowed, as it will exceed the maximum number"
+                                            " of {} datasets.".format(user_sa, num_authorized, num_requesting, max_datasets))
+                    return redirect('user_gcp_list', user_id=user_id)
+
             err_msgs = register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust, remove_all)
 
             for msg_tuple in err_msgs:
