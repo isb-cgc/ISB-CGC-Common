@@ -338,7 +338,6 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 # still want those records when filtering on this attribute.
 #
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None, search_child_records_by=None):
-    
     ranged_attrs = Attribute.get_ranged_attrs()
 
     first = True
@@ -439,14 +438,20 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             query_str += '(-%s:{* TO *})' % attr
         # If it's a ranged value, calculate the bins
         elif attr == 'bmi':
-            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+            with_none = False
             if 'None' in values:
                 values.remove('None')
-                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
-            else:
-                query_str += "+({})".format(clause)
+                with_none = True
+            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+            query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
+
         elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
             clause = ""
+            with_none = False
+            if 'None' in values:
+                values.remove('None')
+                with_none = True
+
             if len(values) == 1 and re.match(r'\d+ [tT][oO] \d+', values[0]):
                 values = values[0].lower().split(" to ")
             if len(values) > 1 and type(values[0]) is list:
@@ -457,11 +462,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             else:
                 clause = "{}:{}".format(attr_name, values[0])
 
-            if 'None' in values:
-                values.remove('None')
-                query_str += '(-(-(%s) +(%s:{* TO *})))' % (clause, attr_name)
-            else:
-                query_str += "(+({}))".format(clause)
+            query_str += (('(-(-(%s) +(%s:{* TO *})))' % (clause, attr_name)) if with_none else "(+({}))".format(clause))
+
         else:
             if 'None' in values:
                 values.remove('None')
