@@ -265,6 +265,9 @@ class Filter_Group(models.Model):
     operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
     data_versions = models.ManyToManyField(DataVersion)
 
+    def get_filter_set(self):
+        return self.filter_set.all().get_filter_set()
+
     @classmethod
     def get_op(cls, op_string):
         if op_string.lower() == 'and':
@@ -273,15 +276,57 @@ class Filter_Group(models.Model):
             return Filter_Group.OR
         else:
             return None
-    
 
-class Filters(models.Model):
+
+class FilterQuerySet(models.QuerySet):
+    def get_filter_set(self):
+        filters = {}
+        for fltr in self.select_related('attribute').all():
+            filter_name = "{}{}".format(fltr.name.lower(),fltr.numeric_op) if fltr.numeric_op else fltr.attribute.name
+            filters[filter_name] = fltr.value.split(fltr.value_delimiter)
+        return filters
+
+class FilterManager(models.Manager):
+    def get_queryset(self):
+        return FilterQuerySet(self.model, using=self._db)
+
+class Filter(models.Model):
+    BTW = 'B'
+    GTE = 'GE'
+    LTE = 'LE'
+    GT = 'G'
+    LT = 'L'
+    NUMERIC_OPS = (
+        (BTW, '_btw'),
+        (GTE, '_gte'),
+        (LTE, '_lte'),
+        (GT, '_gt'),
+        (LT, '_lt')
+    )
+    objects = FilterManager()
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     value = models.CharField(max_length=256, null=False, blank=False)
     filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
+    numeric_op = models.CharField(max_length=4, null=True, blank=True, choices=NUMERIC_OPS)
+    value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=',')
 
+    def get_numeric_filter(self):
+        if self.numeric_op:
+            return "{}{}".format(self.attribute.name.lower(),self.numeric_op)
+        return None
+
+    def get_filter(self):
+        return {
+            "()".format(self.attribute.name if not self.numeric_op else self.get_numeric_filter()): self.value.split(self.value_delimiter)
+        }
+
+    def __repr__(self):
+        return "{ \"%s\": [%s] }" % self.attribute.name if not self.numeric_op else self.get_numeric_filter(), self.value
+
+    def __str__(self):
+        return self.__repr__()
 
 class Cohort_Comments(models.Model):
     cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment', on_delete=models.CASCADE)

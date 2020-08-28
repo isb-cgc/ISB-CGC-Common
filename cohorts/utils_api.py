@@ -21,7 +21,7 @@ import logging
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
-from .models import Cohort, Cohort_Perms, Filters, Filter_Group
+from .models import Cohort, Cohort_Perms, Filter, Filter_Group
 from idc_collections.models import Attribute, DataVersion
 
 
@@ -253,7 +253,7 @@ def _save_cohort_api(user, name, data, case_insens=True):
     for attr in attributes:
         filter_values = attributes[attr]
         attr_id = Attribute.objects.get(name=attr)
-        Filters.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
+        Filter.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
 
     cohort_info = {
         "id": cohort.id,
