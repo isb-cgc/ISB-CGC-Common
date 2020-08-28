@@ -23,6 +23,7 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from .models import Cohort, Cohort_Perms, Filter, Filter_Group
 from idc_collections.models import Attribute, DataVersion
+from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
 
 
 logger = logging.getLogger('main_logger')
@@ -35,7 +36,7 @@ def build_collections(objects, dois, urls):
         patients = build_patients(collection, objects[collection], dois, urls)
         collections.append(
             {
-                "collection_id":collection,
+                "id":collection,
             }
         )
         if len(patients) > 0:
@@ -48,7 +49,7 @@ def build_patients(collection,collection_patients, dois, urls):
     for patient in collection_patients:
         studies = build_studies(collection, patient, collection_patients[patient], dois, urls)
         patients.append({
-                "patientID":patient,
+                "id":patient,
             }
         )
         if len(studies) > 0:
@@ -62,7 +63,7 @@ def build_studies(collection, patient, patient_studies, dois, urls):
         series = build_series(collection, patient, study, patient_studies[study], dois, urls)
         studies.append(
             {
-                "StudyInstanceUID": study
+                "id": study
             })
         if dois:
             studies[-1]["GUID"] = ""
@@ -86,7 +87,7 @@ def build_series(collection, patient, study, patient_studies, dois, urls):
         instances = build_instances(collection, patient, study, aseries, patient_studies[aseries], dois, urls)
         series.append(
             {
-                "SeriesInstanceUID": aseries
+                "id": aseries
             })
         if dois:
             series[-1]["GUID"] = ""
@@ -110,7 +111,7 @@ def build_instances(collection, patient, study, series, study_series, dois, urls
     for instance in study_series:
         instances.append(
             {
-                "SOPInstanceUID": instance
+                "id": instance
             })
         if dois:
             instances[-1]["GUID"] = ""
@@ -169,98 +170,149 @@ def get_filterSet_api(cohort):
 
     return filterset
 
-def _delete_cohort_api(user, cohort_id):
-    cohort_info = None
+def get_cohort_objects(request, filters, data_versions, cohort_info):
 
-    try:
-        cohort = Cohort.objects.get(id=cohort_id)
-    except ObjectDoesNotExist:
-        cohort_info = "A cohort with the ID {} was not found!".format(cohort_id)
-    else:
-        try:
-            Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
-        except ObjectDoesNotExist:
-            cohort_info = "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id)
+    levels = {'Instance': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID'],
+              'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
+              'Study': ['collection_id', 'PatientID', 'StudyInstanceUID'],
+              'Patient': ['collection_id', 'PatientID'],
+              'Collection': ['collection_id']
+              }
+
+    rows_left = fetch_count = int(request.GET['fetch_count'])
+    page = int(request.GET['page'])
+    return_level = request.GET['return_level']
+    select = levels[return_level]
+    offset = int(request.GET['offset']) + (fetch_count * (page - 1))
+    objects = {}
+    totalReturned = 0
+    all_rows = []
+    sql = ""
+
+    # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
+    while rows_left > 0:
+        # Accumulate the SQL for each call
+        if request.GET['return_sql'] in [True, 'True']:
+            sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
+                filters=filters, fields=select, data_versions=data_versions,
+                limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+                order_by=select[-1:]))
+
+        results = get_bq_metadata(
+            filters=filters, fields=select, data_versions=data_versions,
+            limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+            order_by=select[-1:])
+        if results['totalFound'] == None:
+            # If there are not as many rows as asked for, we're done with BQ
+            break
+
+        # returned has the number of rows actually returned by the query
+        returned = len(results["results"])
+
+        totalReturned += returned
+        fetch_count -= returned
+
+        # Create a list of the fields in the returned schema
+        fields = [field['name'] for field in results['schema']['fields']]
+        # Build a list of indices into fields that tells build_hierarchy how to reorder
+        reorder = [fields.index(x) for x in select]
+
+        # rows holds the actual data
+        rows = results['results']
+        all_rows.extend(rows)
+
+        # unFound is the number of rows we haven't yet obtained from BQ
+        unFound = rows_left - returned
+        if unFound >= 0:
+            #  We need to add all the rows just received from BQ to the hierarchy
+            objects = build_hierarchy(
+                objects=objects,
+                rows=rows,
+                reorder=reorder,
+                return_level=return_level)
+            rows_left -= returned
+            offset += returned
+        elif unFound == 0:
+            # We have all we need
+            objects = build_hierarchy(
+                objects=objects,
+                rows=rows,
+                reorder=reorder,
+                return_level=return_level)
+            break
         else:
-            try:
-                cohort = Cohort.objects.get(id=cohort_id, active=True)
-                cohort.active = False
-                cohort.save()
-                cohort_info = 'Cohort ID {} has been deleted.'.format(cohort_id)
-            except ObjectDoesNotExist:
-                cohort_info = 'Cohort ID {} was previously deleted.'.format(cohort_id)
+            # If we got more than requested by user, trim the list of rows received from BQ
+            objects = build_hierarchy(
+                objects=objects,
+                rows=rows[:unFound],
+                reorder=reorder,
+                return_level=return_level)
+            break
+
+    # Then we add the details such as DOI, URL, etc. about each object
+    dois = request.GET['return_DOIs'] in ['True', True]
+    urls = request.GET['return_URLs'] in ['True', True]
+    collections = build_collections(objects, dois, urls)
+
+    cohort_info['cohort']["cohortObjects"] = {
+        "totalRowsInCohort": totalReturned,
+        "collections": collections,
+        "sql": sql,
+        # "rows": schema_rows if request.GET["return_rows"] in ['True', True] else []
+    }
+
     return cohort_info
 
+def _cohort_detail_api(request, cohort, cohort_info):
 
-def _save_cohort_api(user, name, data, case_insens=True):
+    filter_group = cohort.filter_group_set.get()
+    filters = {}
+    for filter in filter_group.filters_set.all():
+        filters[filter.attribute.name] = filter.value.split(",")
+        if filter.attribute.name == 'collection_id':
+            collections = []
+            for collection in filters['collection_id']:
+                collections.append(collection.lower().replace('-', '_'))
+            filters['collection_id'] = collections
 
-    description = data['description']
-    filterset = data['filterSet']
-    attributes = filterset["attributes"]
-    cohort_id = 'cohort_id' in data and data['cohort_id'] or None
+    data_versions = filter_group.data_versions.all()
 
+    cohort_info = get_cohort_objects(request, filters, data_versions, cohort_info)
 
-    if not filterset or not name:
-        # Can't save/edit a cohort when nothing is being changed!
-        return {
-            "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
-            "code": 400
-            }
+    return cohort_info
 
-    blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
-    match = blacklist.search(str(name))
-    if match:
-        # XSS risk, log and fail this cohort save
-        match = blacklist.findall(str(name))
-        logger.error('[ERROR] While saving a cohort, saw a malformed name: ' + name + ', characters: ' + str(match))
-        return {
-            'message': "Your cohort's name contains invalid characters; please choose another name.",
-            "code": 400
-            }
+# Extract dataversions from filterset and fill in active version, if version is not specified
+def get_dataversions(filterset):
 
-    # If we're only changing the name, just edit the cohort and update it
-    if cohort_id:
-        cohort = Cohort.objects.get(id=cohort_id)
-        cohort.name = name
-        cohort.save()
-        return {'cohort_id': cohort.id}
-
-    # Make and save cohort
-    cohort = Cohort.objects.create(name=name, description=description)
-    cohort.save()
-
-    perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
-    perm.save()
-
-    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
-    # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
-    grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND)
-
-    # Get versions of datasets to be filtered, and link to filter group
     imaging_version = 'imaging_version' in filterset and \
                       len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
                       DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
                       DataVersion.objects.get(active=True, name='TCIA Image Data')
-    grouping.data_versions.add(imaging_version)
 
     bioclin_version = 'bioclin_version' in filterset and \
                       len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
                       DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
                       DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
-    grouping.data_versions.add(bioclin_version)
 
+    return (imaging_version, bioclin_version)
 
-    for attr in attributes:
-        filter_values = attributes[attr]
-        attr_id = Attribute.objects.get(name=attr)
-        Filter.objects.create(resulting_cohort=cohort, attribute=attr_id, value=",".join(filter_values), filter_group=grouping).save()
+def _cohort_preview_api(request, data, cohort_info):
+    filterset = data['filterSet']['attributes']
 
-    cohort_info = {
-        "id": cohort.id,
-        "name": cohort.name,
-        "description": cohort.description,
-        "filterSet": get_filterSet_api(cohort)
-    }
+    if not filterset:
+        # Can't save/edit a cohort when nothing is being changed!
+        return {
+            "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
+            "code": 400
+            }
+    if 'collection_id' in filterset:
+        filterset['collection_id'] = [collection.lower().replace('-', '_') for collection in filterset['collection_id']]
+
+    # Get versions of datasets to be filtered, and link to filter group
+    data_versions = get_dataversions(filterset)
+
+    cohort_info = get_cohort_objects(request, filterset, data_versions, cohort_info)
+
     return cohort_info
 
 

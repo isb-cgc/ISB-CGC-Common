@@ -26,7 +26,7 @@ from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from idc_collections.models import Collection, Attribute, User_Feature_Definitions, DataVersion
+from idc_collections.models import Collection, Attribute, User_Feature_Definitions, DataVersion, DataSource
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
@@ -127,14 +127,14 @@ class Cohort(models.Model):
         for attr in attributes:
             for source in DataSource.SOURCE_TYPES:
                 if not source_type or source_type == source[0]:
-                    data_sources = attr.data_sources.all().filter(data_version__in=data_versions, source_type=source[0]).distinct()
+                    data_sources = attr.data_sources.all().filter(version__in=data_versions, source_type=source[0]).distinct()
                     for data_source in data_sources:
                         if source[0] not in result:
                             result[source[0]] = {data_source.id: data_source}
                         else:
                             if data_source.id not in result[source[0]]:
                                 result[source[0]][data_source.id] = data_source
-        return reesult
+        return result
 
     # Returns the set of filters defining this cohort as a dict organized by data source
     def get_filters_by_data_source(self, source_type=None):
@@ -160,7 +160,7 @@ class Cohort(models.Model):
         filter_groups = self.filter_group_set.all()
 
         for fg in filter_groups:
-            dvs = group.data_versions_set.all()
+            dvs = fg.data_versions.all()
             group = {
                 'id': fg.id,
                 'data_versions': [x.name for x in dvs],
@@ -172,7 +172,7 @@ class Cohort(models.Model):
                 group['filters'].append({
                     'id': attr.id,
                     'name': attr.name,
-                    'values': filters.filter(attribute=attr).value.split(",")
+                    'values': filters.get(attribute=attr).value.split(",")
                 })
 
         return result
@@ -215,7 +215,7 @@ class Cohort(models.Model):
             attribute_display_vals = {}
             for fg in cohort_filters:
                 for filter in fg['filters']:
-                    attr = Attributes.objects.get(filter['id'])
+                    attr = Attribute.objects.get(filter['id'])
                     if attr.id not in attribute_display_vals:
                         attribute_display_vals[attr.id] = attr.get_display_values()
                     values = filter['values']
