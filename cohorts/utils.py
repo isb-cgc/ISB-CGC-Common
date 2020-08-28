@@ -29,7 +29,7 @@ import datetime
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
-from .models import Cohort, Cohort_Perms, Filters, Filter_Group
+from .models import Cohort, Cohort_Perms, Filter, Filter_Group
 from idc_collections.models import Program, Attribute, DataVersion, DataSourceJoin
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -126,14 +126,19 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, versions=None, d
 
         filter_attr = Attribute.objects.filter(id__in=filters.keys())
 
+        filter_set = []
+
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
-            Filters.objects.create(resulting_cohort=cohort, attribute=attr, value=",".join(filter_values), filter_group=grouping).save()
+            filter_set.append(Filter(resulting_cohort=cohort, attribute=attr, value=",".join(filter_values), filter_group=grouping))
+
+        Filter.objects.bulk_create(filter_set)
 
         cohort_info = {
             'cohort_id': cohort.id,
             "name": cohort.name,
-            "description": cohort.description
+            "description": cohort.description,
+            "filters": grouping.get_filter_set()
         }
     except Exception as e:
         logger.error("[ERROR] While saving a cohort: ")

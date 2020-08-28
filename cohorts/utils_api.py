@@ -21,7 +21,7 @@ import logging
 
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
-from .models import Cohort, Cohort_Perms, Filters, Filter_Group
+from .models import Cohort, Cohort_Perms, Filter, Filter_Group
 from idc_collections.models import Attribute, DataVersion
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
 
@@ -319,7 +319,5 @@ def _cohort_preview_api(request, data, cohort_info):
     cohort_info = get_cohort_objects(request, filterset, data_versions, cohort_info)
 
     return cohort_info
-
-
 
 
