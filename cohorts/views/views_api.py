@@ -33,6 +33,7 @@ from django.views.decorators.http import require_http_methods
 # from rest_framework.permissions import IsAuthenticated
 from ..decorators import api_auth
 
+from idc_collections.models import Attribute
 from cohorts.models import Cohort, Cohort_Perms
 from cohorts.utils_api import get_filterSet_api, _cohort_detail_api, _cohort_preview_api
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
@@ -126,9 +127,15 @@ def save_cohort_api(request):
         name = data['name']
         description = data['description']
         filterset = data['filterSet']
-        response = _save_cohort(user, filterset, name, description)
-        cohort = Cohort.objects.get(id=response["cohort_id"])
-        response["filterSet"] = get_filterSet_api(cohort)
+        version = filterset['idc_version']
+        filters = filterset['filters']
+        filters_by_id = {}
+        for attr in Attribute.objects.filter(name__in=list(filters.keys())).values('id', 'name'):
+            filters_by_id[str(attr['id'])] = filters[attr['name']]
+        # ***Temporarily don't pass a version, which will result in defaulting to the active version***
+        response = _save_cohort(user, filters=filters_by_id, name=name, desc=description)
+        cohort_id = Cohort.objects.get(id=response["cohort_id"])
+        response["filterSet"] = get_filterSet_api(cohort_id)
 
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")

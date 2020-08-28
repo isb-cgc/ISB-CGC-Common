@@ -156,19 +156,19 @@ def build_hierarchy(objects, rows, return_level, reorder):
     return objects
 
 def get_filterSet_api(cohort):
-    attributes = {}
-    filter_group = cohort.filter_group_set.get()
-    filters = filter_group.filters_set.all()
-    for filter in filters:
-        attributes[filter.attribute.name] = filter.value.split(",")
+    # attributes = {}
+    # filter_group = cohort.filter_group_set.get()
+    # filters = filter_group.filters_set.all()
+    # for filter in filters:
+    #     attributes[filter.attribute.name] = filter.value.split(",")
+    version = cohort.get_data_versions()
+    filtersets = cohort.get_filters_as_dict()
 
-    filterset = {
-        "bioclin_version": filter_group.data_versions.get(name='TCGA Clinical and Biospecimen Data').version,
-        "imaging_version": filter_group.data_versions.get(name='TCIA Image Data').version,
-        "attributes": attributes
-    }
-
-    return filterset
+    for filterset in filtersets:
+        filterset.pop('data_versions')
+        filterset.pop('id')
+        filterset['idc_version'] = "1"
+    return filtersets
 
 def get_cohort_objects(request, filters, data_versions, cohort_info):
 
@@ -284,17 +284,22 @@ def _cohort_detail_api(request, cohort, cohort_info):
 # Extract dataversions from filterset and fill in active version, if version is not specified
 def get_dataversions(filterset):
 
-    imaging_version = 'imaging_version' in filterset and \
-                      len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
-                      DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
-                      DataVersion.objects.get(active=True, name='TCIA Image Data')
+    #### Temporary while IDC version changes to a single values ####
+    data_versions = DataVersion.objects.filter(active=True)
 
-    bioclin_version = 'bioclin_version' in filterset and \
-                      len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
-                      DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
-                      DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
+    return data_versions
 
-    return (imaging_version, bioclin_version)
+    # imaging_version = 'imaging_version' in filterset and \
+    #                   len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
+    #                   DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
+    #                   DataVersion.objects.get(active=True, name='TCIA Image Data')
+    #
+    # bioclin_version = 'bioclin_version' in filterset and \
+    #                   len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
+    #                   DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
+    #                   DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
+    #
+    # return (imaging_version, bioclin_version)
 
 def _cohort_preview_api(request, data, cohort_info):
     filterset = data['filterSet']['attributes']

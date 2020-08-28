@@ -16,8 +16,9 @@
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
+from idc_collections.models import Program, Collection, DataVersion, Attribute, Attribute_Ranges
 from django.views.decorators.http import require_http_methods
-from idc_collections.models import Program, Collection
+
 from solr_helpers import *
 
 import logging
@@ -26,18 +27,90 @@ logger = logging.getLogger('main_logger')
 
 BLACKLIST_RE = settings.BLACKLIST_RE
 
+# Return a list of defined IDC versions
+# **** Currently the version is a tuple of (name, version), that identifies the version of ancillary, original and
+# **** derived data. We assume that eventually the IDC version will be a single identifier, and which maps to such a
+# **** tuple. For continuity, we currently return a single IDC version, "1", and the underlying tuple.
+@require_http_methods(["GET"])
+def versions_list_api(request):
+
+    versions = DataVersion.objects.get_queryset()
+
+    versions_info = {"versions":
+        [
+            {
+                "version_id": "1",
+                "components":
+                [
+                    {
+                        "name": version.name,
+                        "version": version.version,
+                    }
+                    for version in versions
+                ]
+            }
+        ]
+    }
+
+    return JsonResponse(versions_info)
+
+
+@require_http_methods(["GET"])
+def attributes_list_api(request):
+
+    attributes = Attribute.objects.all()
+
+    attributes_info = {'attributes':
+        [
+            {
+            "id": attribute.id,
+            "name": attribute.name,
+            "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
+            "active": attribute.active,
+            "is_cross_collex": attribute.is_cross_collex,
+            "preformatted_values": attribute.preformatted_values,
+            "units": attribute.units,
+            "range": [
+                {
+                    "id": range.id,
+                    "type": dict(Attribute_Ranges.RANGE_TYPES)[range.type],
+                    "include_lower": range.include_lower,
+                    "include_upper": range.include_upper,
+                    "unbounded": range.unbounded,
+                    "first": range.first,
+                    "last": range.last,
+                    "gap": range.gap
+                }
+                for range in attribute.attribute_ranges_set.all()
+            ],
+            "dataSetTypes":
+                [{
+                    'id': attribute_set_type.datasettype.id,
+                    'data_type': dict(DataSetType.DATA_TYPES)[attribute_set_type.datasettype.data_type],
+                    'set_type': dict(DataSetType.SET_TYPE_NAMES)[attribute_set_type.datasettype.set_type]
+                }
+                for attribute_set_type in attribute.attribute_set_type_set.all()],
+            "IDCVersion": [1]
+            }
+            for attribute in attributes
+        ]
+    }
+
+    return JsonResponse(attributes_info)
+
+
 @require_http_methods(["GET"])
 def public_program_list_api(request):
 
-    programs = Program.objects.filter(is_public=True)
+    programs = Program.get_public_programs()
 
     programs_info = {"programs": [{
                 "name": program.name,
                 "short_name": program.short_name,
-                "description": program.description,
-                "active": program.active} for program in programs]}
+                "description": program.description} for program in programs]}
 
     return JsonResponse(programs_info)
+#    return HttpResponse(programs_info,  content_type='application/json')
 
 
 @require_http_methods(["GET"])
@@ -54,13 +127,23 @@ def program_detail_api(request, program_name=None ):
         for collection in collections:
             dvs = collection.data_versions.all()
             data = {
-                "name": collection.name,
-                "short_name": collection.short_name,
+                "collection_id": collection.collection_id,
                 "description": collection.description,
+                "date_updated": collection.date_updated,
+                "status": collection.status,
+                "access": collection.access,
+                "subject_count": collection.subject_count,
+                "image_types": collection.image_types,
+                "cancer_type": collection.cancer_type,
+                "doi": collection.doi,
+                "supporting_data": collection.supporting_data,
+                "species": collection.species,
+                "location": collection.location,
                 "active": collection.active,
-                "is_public": collection.is_public,
+                "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
                 "owner_id": collection.owner_id,
-                "data_version": [{"name":dv.name,"data_type":dv.data_type, "version":dv.version} for dv in dvs] }
+                "IDC_versions": [{"name": dv.name, "version": dv.version, "active": dv.active} for dv in
+                                 collection.data_versions.all()]}
             collections_list.append(data)
 
         collections_info = {"collections": collections_list}
