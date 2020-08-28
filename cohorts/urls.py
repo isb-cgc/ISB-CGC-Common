@@ -23,10 +23,9 @@ from . import views
 urlpatterns = [
     url(r'^$', views.cohorts_list, name='cohort_list'),
     url(r'^api/$', views.cohort_list_api, name='cohort_list_api'),
-#    url(r'^api/preview$',                           views.cohorts_preview_api, name='cohort_preview_api'),
+    url(r'^api/preview/$', views.cohort_preview_api, name='cohort_preview_api'),
     url(r'^(?P<cohort_id>\d+)/$', views.cohort_detail, name='cohort_details'),
     url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
-    url(r'^api/objects/(?P<cohort_id>\d+)/$', views.cohort_objects_api, name='cohort_objects_api'),
     url(r'^filelist/(?P<cohort_id>\d+)/$', views.cohort_filelist, name='cohort_filelist'),
     url(r'^filelist/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
         views.cohort_filelist, name='cohort_filelist_panel'),

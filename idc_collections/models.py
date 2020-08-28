@@ -167,8 +167,9 @@ class Collection(models.Model):
     )
 
     id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=255, null=True, blank=False)
     tcia_collection_id = models.CharField(max_length=255, null=True, blank=False)
-    nbia_collection_id = models.CharField(max_length=255, null=True)
+    nbia_collection_id = models.CharField(max_length=255, null=True, blank=False)
     collection_id = models.CharField(max_length=255, null=True, blank=False)
     description = models.TextField(null=True, blank=False)
     date_updated = models.DateField(null=True, blank=False)
@@ -179,6 +180,7 @@ class Collection(models.Model):
     cancer_type = models.CharField(max_length=128, null=True, blank=False)
     doi = models.CharField(max_length=255, null=True, blank=False)
     supporting_data = models.CharField(max_length=255, null=True, blank=False)
+    analysis_artifacts = models.CharField(max_length=255, null=True, blank=False)
     species = models.CharField(max_length=64, null=True, blank=False)
     location = models.CharField(max_length=255, null=True, blank=False)
     active = models.BooleanField(default=True, null=False, blank=False)
@@ -186,6 +188,7 @@ class Collection(models.Model):
     collection_type = models.CharField(max_length=1, blank=False, null=False, choices=COLLEX_TYPES, default=ORIGINAL_COLLEX)
     objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
     # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ManyToManyField(Program)
@@ -486,9 +489,10 @@ class Attribute_Set_TypeQuerySet(models.QuerySet):
             attrs_by_set[set_type.datasettype.id].append(set_type.attribute.id)
         return attrs_by_set
 
-    def get_child_record_searches(self, data_type):
+    def get_child_record_searches(self, data_type=None):
         attr_child_record_search = {}
-        for attr_set_type in self.select_related('attribute', 'datasettype').filter(datasettype__in=DataSetType.objects.filter(data_type=data_type)):
+        attr_set_types = self.select_related('attribute', 'datasettype').filter(datasettype__in=DataSetType.objects.filter(data_type=data_type)) if data_type else self.select_related('attribute').all()
+        for attr_set_type in attr_set_types:
             attr_child_record_search[attr_set_type.attribute.name] = attr_set_type.child_record_search
         return attr_child_record_search
 
@@ -568,7 +572,7 @@ class Attribute_Ranges(models.Model):
     label = models.CharField(max_length=256, null=True, blank=True)
 
     def __str__(self):
-        return "{}: {} to {} by {}".format(self.attribute.name, str(self.start), str(self.last), str(self.gap))
+        return "{}: {} to {} by {}".format(self.attribute.name, str(self.first), str(self.last), str(self.gap))
 
 
 class User_Feature_Definitions(models.Model):
