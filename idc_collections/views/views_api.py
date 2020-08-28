@@ -16,6 +16,7 @@
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
+from django.views.decorators.http import require_http_methods
 from idc_collections.models import Program, Collection
 from solr_helpers import *
 
@@ -25,6 +26,7 @@ logger = logging.getLogger('main_logger')
 
 BLACKLIST_RE = settings.BLACKLIST_RE
 
+@require_http_methods(["GET"])
 def public_program_list_api(request):
 
     programs = Program.objects.filter(is_public=True)
@@ -36,36 +38,52 @@ def public_program_list_api(request):
                 "active": program.active} for program in programs]}
 
     return JsonResponse(programs_info)
-#    return HttpResponse(programs_info,  content_type='application/json')
 
 
+@require_http_methods(["GET"])
 def program_detail_api(request, program_name=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
-    collections_info = {}
 
-    programs = Program.objects.filter(is_public=True, active=True).distinct()
-    program = programs.get(short_name__iexact=program_name)
+    try:
 
-    collections = program.collection_set.all()
+        program = Program.objects.get(is_public=True, active=True, short_name__iexact=program_name)
 
-    collections_list = []
-    for collection in collections:
-        dvs = collection.data_versions.all()
-        data = {
-            "name": collection.name,
-            "short_name": collection.short_name,
-            "description": collection.description,
-            "active": collection.active,
-            "is_public": collection.is_public,
-            "owner_id": collection.owner_id,
-            "data_version": [{"name":dv.name.replace(' ','_'),"data_type":dv.data_type, "version":dv.version} for dv in dvs] }
-        collections_list.append(data)
+        collections = program.collection_set.all()
 
-    collections_info = {"collections": collections_list}
+        collections_list = []
+        for collection in collections:
+            dvs = collection.data_versions.all()
+            data = {
+                "name": collection.name,
+                "short_name": collection.short_name,
+                "description": collection.description,
+                "active": collection.active,
+                "is_public": collection.is_public,
+                "owner_id": collection.owner_id,
+                "data_version": [{"name":dv.name,"data_type":dv.data_type, "version":dv.version} for dv in dvs] }
+            collections_list.append(data)
+
+        collections_info = {"collections": collections_list}
+
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Specified program does not exist")
+        logger.exception(e)
+        collections_info = {
+            "message": "Specified program does not exist",
+            "code": 400
+        }
+    except Exception as e:
+        logger.error("[ERROR] While trying to retrieve program details")
+        logger.exception(e)
+        collections_info = {
+            "message": "Error while trying to retrieve program details.",
+            "code": 400
+        }
 
     return JsonResponse(collections_info)
 
 
+@require_http_methods(["GET"])
 def collection_detail_api(request, program_name, collection_name):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
 
@@ -77,25 +95,23 @@ def collection_detail_api(request, program_name, collection_name):
         collection_info = {
             "message": "Collection {} does not exist".format(collection_name),
             "code": "",
-            "not_found": []
         }
     else:
 
-        attribute_group = request.GET['attribute_group']
+        attribute_type = request.GET['attribute_type']
         version = ""
         try:
             if 'version' in request.GET:
                 version = request.GET["version"]
-                dataVersion = collection.data_versions.get(name=attribute_group, version=request.GET["version"])
+                dataVersion = collection.data_versions.get(data_type=attribute_type, version=request.GET["version"])
             else:
-                dataVersion = collection.data_versions.get(name=attribute_group, active=True)
+                dataVersion = collection.data_versions.get(data_type=attribute_type, active=True)
                 version = dataVersion.version
         except ObjectDoesNotExist as e:
             collection_info = {
-                "message": "Attribute group/version {}/{} does not exist".format(attribute_group, version),
+                "message": "Attribute type/version {}/{} does not exist".format(attribute_type, version),
                 "code": "",
-                "not_found": []
-            }
+             }
         else:
             try:
                 bq_tables = dataVersion.datasource_set.filter(source_type='B')
@@ -117,7 +133,7 @@ def collection_detail_api(request, program_name, collection_name):
 
                 collection_info = {"collection":{
                     "collection_name": collection_name,
-                    "attribute_group": attribute_group,
+                    "attribute_type": attribute_type,
                     "version": version,
                     "active": dataVersion.active,
                     "fields": fields
@@ -127,10 +143,8 @@ def collection_detail_api(request, program_name, collection_name):
                 collection_info = {
                     "message": "Program/collection {}/{} does not exist".format(program_name, collection_name),
                     "code": 400,
-                    "not_found": []
                 }
 
-    # return HttpResponse(collection_info, content_type='application/json')
     return JsonResponse(collection_info)
 
 
