@@ -174,6 +174,7 @@ class Cohort(models.Model):
                     'name': attr.name,
                     'values': filters.get(attribute=attr).value.split(",")
                 })
+        result.append(group)
 
         return result
 
