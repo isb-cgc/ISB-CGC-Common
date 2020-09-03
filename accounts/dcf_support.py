@@ -741,8 +741,11 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map, sa_
     #
     # Call DCF to see if there would be problems with the service account registration.
     #
+    logger.info('full_url: "{}"'.format(full_url))
+    logger.info('use_mode: "{}"'.format(use_mode))
 
     try:
+
         # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
         headers = {'Content-Type': 'application/json'}
         logger.info("[INFO] DCF verification request: {} {}".format(json_dumps(sa_data), service_account_id))
