@@ -197,8 +197,8 @@ class Collection(models.Model):
         return self.program.all()
 
     def __str__(self):
-        return "{} ({}), {}, Programs: {}".format(
-            self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
+        return "{}, {}, Programs: {}".format(
+            self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
             str(self.program.all())
         )
 

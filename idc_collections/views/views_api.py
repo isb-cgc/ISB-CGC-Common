@@ -130,8 +130,6 @@ def program_detail_api(request, program_name=None ):
                 "collection_id": collection.collection_id,
                 "description": collection.description,
                 "date_updated": collection.date_updated,
-                "status": collection.status,
-                "access": collection.access,
                 "subject_count": collection.subject_count,
                 "image_types": collection.image_types,
                 "cancer_type": collection.cancer_type,
@@ -142,8 +140,7 @@ def program_detail_api(request, program_name=None ):
                 "active": collection.active,
                 "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
                 "owner_id": collection.owner_id,
-                "IDC_versions": [{"name": dv.name, "version": dv.version, "active": dv.active} for dv in
-                                 collection.data_versions.all()]}
+                "IDC_versions": ["1"]}
             collections_list.append(data)
 
         collections_info = {"collections": collections_list}

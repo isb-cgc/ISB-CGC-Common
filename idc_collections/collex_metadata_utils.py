@@ -46,24 +46,28 @@ logger = logging.getLogger('main_logger')
 #     }
 # }
 def _build_attr_by_source(attrs, data_versions, source_type):
-    attr_by_src = {}
+    attr_by_src = {'sources': {}}
     attr_objs = Attribute.objects.filter(active=True, name__in=attrs)
 
     for attr in attr_objs:
-        sources = attr.data_sources.all().select_related('version').filter(version__in=data_versions, source_type=source_type).distinct()
+        # sources = attr.data_sources.all().select_related('version').filter(version__in=data_versions, source_type=source_type).distinct()
+        sources = attr.data_sources.all().filter(versions__in=data_versions, source_type=source_type).distinct()
         for source in sources:
-            if source.name not in attr_by_src:
-                attr_by_src[source.name] = {
+            if source.name not in attr_by_src["sources"]:
+                attr_by_src["sources"][source.name] = {
+                    'name': source.name,
                     'id': source.id,
                     'alias': source.name.split(".")[-1].lower().replace("-", "_"),
                     'list': [attr.name],
                     'attrs': [attr],
-                    'data_type': source.version.datasettype.get_set_data_type(),
-                    'set_type': source.version.get_set_type()
+                    # 'data_type': source.version.datasettype.get_set_data_type(),
+                    # 'set_type': source.version.get_set_type()
+                    'data_type': source.data_sets.get().data_type,
+                    'set_type': source.data_sets.get().set_type
                 }
             else:
-                attr_by_src[source.name]['list'].append(attr.name)
-                attr_by_src[source.name]['attrs'].append(attr)
+                attr_by_src["sources"][source.name]['list'].append(attr.name)
+                attr_by_src["sources"][source.name]['attrs'].append(attr)
 
     return attr_by_src
 
@@ -341,8 +345,9 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
     if order_by:
         new_order = []
         for order in order_by:
-            order_table = Attribute.objects.get(active=True, name=order).data_sources.all().filter(version__in=data_versions, source_type=DataSource.BIGQUERY).distinct().first()
-            new_order.append("{}.{}".format(table_info[order_table.id]['alias'],order))
+            order_table = Attribute.objects.get(active=True, name=order).data_sources.all().filter(versions__in=data_versions, source_type=DataSource.BIGQUERY).distinct().first()
+            # new_order.append("{}.{}".format(table_info[order_table.id]['alias'],order))
+            new_order.append("{}.{}".format(table_info[order_table.name]['alias'], order))
         order_by = new_order
 
     if group_by:
@@ -354,9 +359,12 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
                 source_set.extend(list(sources_and_attrs['fields']['sources'].keys()))
                 group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(id__in=set(source_set)).distinct().first()
             else:
-                group_table = Attribute.objects.get(active=True, name=grouping).data_sources.select_related('version').all().filter(version__in=data_versions,
-                                                                                                      source_type=DataSource.BIGQUERY).distinct().first()
-            new_groups.append("{}.{}".format(table_info[group_table.id]['alias'], grouping))
+                # group_table = Attribute.objects.get(active=True, name=grouping).data_sources.select_related('version').all().filter(version__in=data_versions,
+                #                                                                                       source_type=DataSource.BIGQUERY).distinct().first()
+                group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(versions__in=data_versions,
+                                            source_type=DataSource.BIGQUERY).distinct().first()
+            # new_groups.append("{}.{}".format(table_info[group_table.id]['alias'], grouping))
+            new_groups.append("{}.{}".format(table_info[group_table.name]['alias'], grouping))
         group_by = new_groups
 
     # We join image tables to corresponding ancillary tables, and union between image tables

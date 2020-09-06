@@ -155,20 +155,18 @@ def build_hierarchy(objects, rows, return_level, reorder):
             objects[row[0]][row[1]][row[2]][row[3]].append(row[4])
     return objects
 
+# Get the filterSet of a cohort
+# get_filters_as_dict returns an array of filter groups, but can currently only define
+# a filter of one group. So take just the first group and also delete the attribute id
 def get_filterSet_api(cohort):
-    # attributes = {}
-    # filter_group = cohort.filter_group_set.get()
-    # filters = filter_group.filters_set.all()
-    # for filter in filters:
-    #     attributes[filter.attribute.name] = filter.value.split(",")
+    
     version = cohort.get_data_versions()
-    filtersets = cohort.get_filters_as_dict()
+    filter_group = cohort.get_filters_as_dict()[0]
 
-    for filterset in filtersets:
-        filterset.pop('data_versions')
-        filterset.pop('id')
-        filterset['idc_version'] = "1"
-    return filtersets
+    filterSet = {'idc_version': "1"}
+    filters = {filter['name']: filter['values'] for filter in filter_group['filters']}
+    filterSet['filters'] = filters
+    return filterSet
 
 def get_cohort_objects(request, filters, data_versions, cohort_info):
 
@@ -266,10 +264,16 @@ def get_cohort_objects(request, filters, data_versions, cohort_info):
 def _cohort_detail_api(request, cohort, cohort_info):
 
     filter_group = cohort.filter_group_set.get()
-    filters = {}
-    for filter in filter_group.filters_set.all():
-        filters[filter.attribute.name] = filter.value.split(",")
-        if filter.attribute.name == 'collection_id':
+    filters = filter_group.get_filter_set()
+    # for filter in filter_group.filters_set.all():
+    for filter in filters:
+        # filters[filter.attribute.name] = filter.value.split(",")
+        # if filter.attribute.name == 'collection_id':
+        #     collections = []
+        #     for collection in filters['collection_id']:
+        #         collections.append(collection.lower().replace('-', '_'))
+        #     filters['collection_id'] = collections
+        if filter == 'collection_id':
             collections = []
             for collection in filters['collection_id']:
                 collections.append(collection.lower().replace('-', '_'))
@@ -302,21 +306,22 @@ def get_dataversions(filterset):
     # return (imaging_version, bioclin_version)
 
 def _cohort_preview_api(request, data, cohort_info):
-    filterset = data['filterSet']['attributes']
+    # filterset = data['filterSet']['attributes']
+    filters = data['filterSet']['filters']
 
-    if not filterset:
+    if not filters:
         # Can't save/edit a cohort when nothing is being changed!
         return {
             "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
             "code": 400
             }
-    if 'collection_id' in filterset:
-        filterset['collection_id'] = [collection.lower().replace('-', '_') for collection in filterset['collection_id']]
+    if 'collection_id' in filters:
+        filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
 
     # Get versions of datasets to be filtered, and link to filter group
-    data_versions = get_dataversions(filterset)
+    data_versions = get_dataversions(filters)
 
-    cohort_info = get_cohort_objects(request, filterset, data_versions, cohort_info)
+    cohort_info = get_cohort_objects(request, filters, data_versions, cohort_info)
 
     return cohort_info
 
