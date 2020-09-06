@@ -166,13 +166,13 @@ class Cohort(models.Model):
                 'data_versions': [x.name for x in dvs],
                 'filters': []
             }
-            filters = fg.filters_set.all()
-            attributes = Attribute.objects.filter(id__in=filters.values_list('attribute', flat=True))
+            filters = fg.get_filter_set()
+            attributes = Attribute.objects.filter(name__in=list(filters.keys()))
             for attr in attributes:
                 group['filters'].append({
                     'id': attr.id,
                     'name': attr.name,
-                    'values': filters.get(attribute=attr).value.split(",")
+                    'values': filters[attr.name]
                 })
             result.append(group)
 
