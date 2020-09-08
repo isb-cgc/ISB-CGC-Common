@@ -29,14 +29,11 @@ from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render, redirect
 from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.views.decorators.http import require_http_methods
-# from rest_framework.authentication import TokenAuthentication
-# from rest_framework.permissions import IsAuthenticated
 from ..decorators import api_auth
 
 from idc_collections.models import Attribute
 from cohorts.models import Cohort, Cohort_Perms
-from cohorts.utils_api import get_filterSet_api, _cohort_detail_api, _cohort_preview_api
-from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
+from cohorts.utils_api import get_filterSet_api, _cohort_detail_api, _cohort_preview_api, _cohort_manifest_api
 from ..views.views import _save_cohort,_delete_cohort
 
 BQ_ATTEMPT_MAX = 10
@@ -50,7 +47,6 @@ logger = logging.getLogger('main_logger')
 
 USER_DATA_ON = settings.USER_DATA_ON
 
-# ****Refactor this function****
 @csrf_exempt
 @api_auth
 @require_http_methods(["GET"])
@@ -115,6 +111,67 @@ def cohort_detail_api(request, cohort_id=0):
 
 @csrf_exempt
 @api_auth
+@require_http_methods(["GET"])
+def cohort_manifest_api(request, cohort_id=0):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
+    # template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+
+    if cohort_id == 0:
+        messages.error(request, 'Cohort requested does not exist.')
+        return redirect('/user_landing')
+
+    print(request.GET.get('email', ''))
+    try:
+        cohort = Cohort.objects.get(id=cohort_id)
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] A cohort with the ID {} was not found: ".format(cohort_id))
+        logger.exception(e)
+        cohort_info = {
+            "message": "A cohort with the ID {} was not found.".format(cohort_id),
+            "code": 400
+        }
+        return JsonResponse(cohort_info)
+
+    try:
+        user = User.objects.get(email=request.GET.get('email', ''))
+        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
+    except Exception as e:
+        logger.error("[ERROR] {} isn't the owner of cohort ID {} and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
+        logger.exception(e)
+        cohort_info = {
+            "message": "{} isn't the owner of cohort ID {} and so cannot delete it.".format(request.GET.get('email', ''), cohort_id),
+            "code": 403
+        }
+        return JsonResponse(cohort_info)
+
+    try:
+        cohort_info = {
+            "manifest": {
+                "cohort_id": int(cohort_id),
+                "name": cohort.name,
+                "description": cohort.description,
+            }
+        }
+
+        cohort_info = _cohort_manifest_api(request, cohort, cohort_info)
+
+        # if request.GET['return_filter'] == 'True':
+        #     cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to obtain cohort objects: ")
+        logger.exception(e)
+        cohort_info = {
+            "message": "Error while trying to obtain cohort objects.",
+            "code": 400
+        }
+
+    return JsonResponse(cohort_info)
+
+
+@csrf_exempt
+@api_auth
 @require_http_methods(["POST"])
 def save_cohort_api(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -135,8 +192,9 @@ def save_cohort_api(request):
         # ***Temporarily don't pass a version to _save_cohorts. This will result in defaulting to the active version***
         response = _save_cohort(user, filters=filters_by_id, name=name, desc=description)
 
-        if request.GET['return_filter'] == 'True':
-            response["filterSet"] =  get_filterSet_api(cohort)
+        # if request.GET['return_filter'] == 'True':
+        #     response["filterSet"] =  get_filterSet_api(cohort)
+        # response["filterSet"] =  get_filterSet_api(cohort)
 
         response['filterSet'] = {'idc_version': '1', 'filters': response.pop('filters')}
 

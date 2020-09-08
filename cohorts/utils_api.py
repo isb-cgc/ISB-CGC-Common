@@ -230,6 +230,9 @@ def get_cohort_objects(request, filters, data_versions, cohort_info):
                 return_level=return_level)
             rows_left -= returned
             offset += returned
+            if returned < min(fetch_count, settings.MAX_BQ_RECORD_RESULT):
+                # We got all there is to get
+                break
         elif unFound == 0:
             # We have all we need
             objects = build_hierarchy(
@@ -265,14 +268,7 @@ def _cohort_detail_api(request, cohort, cohort_info):
 
     filter_group = cohort.filter_group_set.get()
     filters = filter_group.get_filter_set()
-    # for filter in filter_group.filters_set.all():
     for filter in filters:
-        # filters[filter.attribute.name] = filter.value.split(",")
-        # if filter.attribute.name == 'collection_id':
-        #     collections = []
-        #     for collection in filters['collection_id']:
-        #         collections.append(collection.lower().replace('-', '_'))
-        #     filters['collection_id'] = collections
         if filter == 'collection_id':
             collections = []
             for collection in filters['collection_id']:
@@ -282,6 +278,105 @@ def _cohort_detail_api(request, cohort, cohort_info):
     data_versions = filter_group.data_versions.all()
 
     cohort_info = get_cohort_objects(request, filters, data_versions, cohort_info)
+
+    return cohort_info
+
+def form_urls(rows, reorder):
+    urls = []
+    for row in rows:
+        url = 'gs://{}/{}/{}'.format(
+            row['f'][reorder[0]]['v'],
+            row['f'][reorder[1]]['v'],
+            row['f'][reorder[2]]['v'])
+        urls.append(url)
+    return urls
+
+# This is a temporary implementation that constructs a gs://xxx url from study, series, and instance UIDs
+# in dicom_all. dicom_all needs to be extended by adding that data from the auxilliary_dicom_metadata table.
+
+def get_cohort_instances(request, filters, data_versions, cohort_info):
+
+    rows_left = fetch_count = int(request.GET['fetch_count'])
+    page = int(request.GET['page'])
+    # return_level = request.GET['return_level']
+    # select = levels[return_level]
+    select = ['StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID']
+    offset = int(request.GET['offset']) + (fetch_count * (page - 1))
+    objects = {}
+    totalReturned = 0
+    all_rows = []
+    sql = ""
+
+    # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
+    while rows_left > 0:
+        # Accumulate the SQL for each call
+        # sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
+        #     filters=filters, fields=select, data_versions=data_versions,
+        #     limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+        #     order_by=select[-1:]))
+
+        results = get_bq_metadata(
+            filters=filters, fields=select, data_versions=data_versions,
+            limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+            order_by=select[-1:])
+        if results['totalFound'] == None:
+            # If there are not as many rows as asked for, we're done with BQ
+            break
+
+        # returned has the number of rows actually returned by the query
+        returned = len(results["results"])
+
+        totalReturned += returned
+        fetch_count -= returned
+
+        # Create a list of the fields in the returned schema
+        fields = [field['name'] for field in results['schema']['fields']]
+        # Build a list of indices into fields that tells build_hierarchy how to reorder
+        reorder = [fields.index(x) for x in select]
+
+        # rows holds the actual data
+        rows = results['results']
+        urls = form_urls(rows, reorder)
+
+        # unFound is the number of rows we haven't yet obtained from BQ
+        unFound = rows_left - returned
+        if unFound >= 0:
+            rows_left -= returned
+            offset += returned
+            all_rows.extend(urls)
+            if returned < min(fetch_count, settings.MAX_BQ_RECORD_RESULT):
+                # We got all there is to get
+                break
+        elif unFound == 0:
+            break
+        else:
+            # If we got more than requested by user, trim the list of rows received from BQ
+            all_rows.extend(urls[:unFound])
+            break
+
+    cohort_info["manifest"]["accessMethods"] = {
+                "type": "gs",
+                "region": "us",
+                "urls": all_rows,
+            }
+
+
+    return cohort_info
+
+def _cohort_manifest_api(request, cohort, cohort_info):
+
+    filter_group = cohort.filter_group_set.get()
+    filters = filter_group.get_filter_set()
+    for filter in filters:
+        if filter == 'collection_id':
+            collections = []
+            for collection in filters['collection_id']:
+                collections.append(collection.lower().replace('-', '_'))
+            filters['collection_id'] = collections
+
+    data_versions = filter_group.data_versions.all()
+
+    cohort_info = get_cohort_instances(request, filters, data_versions, cohort_info)
 
     return cohort_info
 

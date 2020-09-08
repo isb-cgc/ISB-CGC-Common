@@ -26,6 +26,7 @@ urlpatterns = [
     url(r'^api/preview/$', views.cohort_preview_api, name='cohort_preview_api'),
     url(r'^(?P<cohort_id>\d+)/$', views.cohort_detail, name='cohort_details'),
     url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
+    url(r'^api/(?P<cohort_id>\d+)/manifest/$', views.cohort_manifest_api, name='cohort_manifest_api'),
     url(r'^filelist/(?P<cohort_id>\d+)/$', views.cohort_filelist, name='cohort_filelist'),
     url(r'^filelist/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
         views.cohort_filelist, name='cohort_filelist_panel'),
@@ -36,7 +37,7 @@ urlpatterns = [
     url(r'^api/save_cohort/', views.save_cohort_api, name='save_cohort_api'),
     url(r'^export/(?P<cohort_id>\d+)/(?P<export_type>cohort|file_manifest)/$',
         views.export_data, name='export_data'),
-    
+
     url(r'^delete_cohort/', views.delete_cohort, name='delete_cohort'),
     url(r'^api/delete_cohort/', views.delete_cohort_api, name='delete_cohort_api'),
     url(r'^clone_cohort/(?P<cohort_id>\d+)/', views.clone_cohort, name='clone_cohort'),
