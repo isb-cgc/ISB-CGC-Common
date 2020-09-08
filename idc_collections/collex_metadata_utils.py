@@ -78,8 +78,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     try:
         context['collection_tooltips'] = Collection.objects.filter(active=True).get_tooltips()
 
-        versions = DataVersion.objects.filter(name__in=versions) if len(versions) else DataVersion.objects.filter(
-            active=True)
+        versions = versions or DataVersion.objects.filter(active=True)
 
         data_types = [DataSetType.IMAGE_DATA, ]
         with_related and data_types.extend(DataSetType.ANCILLARY_DATA)
