@@ -46,28 +46,33 @@ logger = logging.getLogger('main_logger')
 #     }
 # }
 def _build_attr_by_source(attrs, data_versions, source_type):
-    attr_by_src = {'sources': {}}
-    attr_objs = Attribute.objects.filter(active=True, name__in=attrs)
 
-    for attr in attr_objs:
-        # sources = attr.data_sources.all().select_related('version').filter(version__in=data_versions, source_type=source_type).distinct()
-        sources = attr.data_sources.all().filter(versions__in=data_versions, source_type=source_type).distinct()
+    attr_by_src = {'sources': {}}
+
+    for attr in attrs:
+        stripped_attr = attr if (not '_' in attr) else \
+            attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte', 'btw', 'lte', 'lt'] else \
+            attr.rsplit('_', 1)[0]
+
+        attribute = Attribute.objects.get(active=True, name=stripped_attr)
+        sources = attribute.data_sources.all().filter(versions__in=data_versions, source_type=source_type).distinct()
         for source in sources:
             if source.name not in attr_by_src["sources"]:
                 attr_by_src["sources"][source.name] = {
                     'name': source.name,
                     'id': source.id,
                     'alias': source.name.split(".")[-1].lower().replace("-", "_"),
-                    'list': [attr.name],
-                    'attrs': [attr],
+                    'list': [attr],
+                    'attrs': [attribute],
                     # 'data_type': source.version.datasettype.get_set_data_type(),
                     # 'set_type': source.version.get_set_type()
                     'data_type': source.data_sets.get().data_type,
                     'set_type': source.data_sets.get().set_type
                 }
             else:
-                attr_by_src["sources"][source.name]['list'].append(attr.name)
-                attr_by_src["sources"][source.name]['attrs'].append(attr)
+                attr_by_src["sources"][source.name]['list'].append(attr)
+                attr_by_src["sources"][source.name]['attrs'].append(attribute)
+
 
     return attr_by_src
 
