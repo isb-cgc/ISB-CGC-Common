@@ -60,43 +60,36 @@ def attributes_list_api(request):
 
     attributes = Attribute.objects.all()
 
-    attributes_info = {'attributes':
-        [
-            {
-            "id": attribute.id,
+    attributes_info = []
+    for attribute in attributes:
+        attribute_info = {
             "name": attribute.name,
             "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
             "active": attribute.active,
-            "is_cross_collex": attribute.is_cross_collex,
-            "preformatted_values": attribute.preformatted_values,
             "units": attribute.units,
-            "range": [
-                {
-                    "id": range.id,
-                    "type": dict(Attribute_Ranges.RANGE_TYPES)[range.type],
-                    "include_lower": range.include_lower,
-                    "include_upper": range.include_upper,
-                    "unbounded": range.unbounded,
-                    "first": range.first,
-                    "last": range.last,
-                    "gap": range.gap
-                }
-                for range in attribute.attribute_ranges_set.all()
-            ],
             "dataSetTypes":
-                [{
-                    'id': attribute_set_type.datasettype.id,
-                    'data_type': dict(DataSetType.DATA_TYPES)[attribute_set_type.datasettype.data_type],
-                    'set_type': dict(DataSetType.SET_TYPE_NAMES)[attribute_set_type.datasettype.set_type]
-                }
-                for attribute_set_type in attribute.attribute_set_type_set.all()],
-            "IDCVersion": [1]
-            }
-            for attribute in attributes
-        ]
-    }
+                [
+                    dict(DataSetType.DATA_TYPES)[attribute_set_type.datasettype.data_type]
+                    # {
+                    # 'id': attribute_set_type.datasettype.id,
+                    # 'data_type': dict(DataSetType.DATA_TYPES)[attribute_set_type.datasettype.data_type],
+                    # 'set_type': dict(DataSetType.SET_TYPE_NAMES)[attribute_set_type.datasettype.set_type]
+                    # }
+                    for attribute_set_type in attribute.attribute_set_type_set.all()
+                ],
+            "idc_versions": [1]
+        }
+        attributes_info.append(attribute_info)
+        if attribute_info['data_type'] == 'Continuous Numeric':
+            for suffix in ['lt', 'lte', 'btw', 'gte', 'gt']:
+                attribute_info_copy = dict(attribute_info)
+                attribute_info_copy['name'] = '{}_{}'.format(attribute.name, suffix)
+                attributes_info.append(attribute_info_copy)
 
-    return JsonResponse(attributes_info)
+    response = {'attributes': attributes_info}
+
+
+    return JsonResponse(response)
 
 
 @require_http_methods(["GET"])
