@@ -102,24 +102,21 @@ class Cohort(models.Model):
     # Returns a DataVersion QuerySet
     def get_data_versions(self):
 
-        versions = []
+        data_versions = None
 
         groups = self.filter_group_set.all()
 
         for group in groups:
-            data_versions = group.data_versions.all()
-            for dv in data_versions:
-                if dv.id not in versions:
-                    versions.append(dv.id)
+            data_versions = (data_versions | group.data_versions.all()) if data_versions else group.data_versions.all()
 
-        return DataVersion.objects.filter(id__in=versions)
+        return data_versions
 
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     # Return values can be
     def get_data_sources(self, source_type=None):
         result = {}
 
-        cohort_filters = Filters.objects.select_related('attribute').filter(resulting_cohort=self)
+        cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
         attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
 
         data_versions = self.get_data_versions()
@@ -139,7 +136,7 @@ class Cohort(models.Model):
     # Returns the set of filters defining this cohort as a dict organized by data source
     def get_filters_by_data_source(self, source_type=None):
 
-        cohort_filters = Filters.objects.select_related('attribute').filter(resulting_cohort=self)
+        cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
         result = self.get_data_sources(source_type)
 
         for source in DataSource.SOURCE_TYPES:
@@ -161,20 +158,11 @@ class Cohort(models.Model):
 
         for fg in filter_groups:
             dvs = fg.data_versions.all()
-            group = {
+            result.append({
                 'id': fg.id,
                 'data_versions': [x.name for x in dvs],
-                'filters': []
-            }
-            filters = fg.filters_set.all()
-            attributes = Attribute.objects.filter(id__in=filters.values_list('attribute', flat=True))
-            for attr in attributes:
-                group['filters'].append({
-                    'id': attr.id,
-                    'name': attr.name,
-                    'values': filters.get(attribute=attr).value.split(",")
-                })
-
+                'filters': fg.filter_set.all().get_filter_set_array()
+            })
         return result
 
     # Produce a BigQuery filter WHERE clause for this cohort's filters that can be used in the BQ console
@@ -282,8 +270,18 @@ class FilterQuerySet(models.QuerySet):
     def get_filter_set(self):
         filters = {}
         for fltr in self.select_related('attribute').all():
-            filter_name = "{}{}".format(fltr.name.lower(),fltr.numeric_op) if fltr.numeric_op else fltr.attribute.name
+            filter_name = ("{}{}".format(fltr.name.lower(),fltr.numeric_op)) if fltr.numeric_op else fltr.attribute.name
             filters[filter_name] = fltr.value.split(fltr.value_delimiter)
+        return filters
+
+    def get_filter_set_array(self):
+        filters = []
+        for fltr in self.select_related('attribute').all():
+            filters.append({
+                'id': fltr.attribute.id,
+                'name': ("{}{}".format(fltr.name.lower(),fltr.numeric_op)) if fltr.numeric_op else fltr.attribute.name,
+                'values': fltr.value.split(fltr.value_delimiter)
+            })
         return filters
 
 class FilterManager(models.Manager):

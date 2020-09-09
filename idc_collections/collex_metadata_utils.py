@@ -17,9 +17,9 @@
 import logging
 import time
 import copy
+import re
 from time import sleep
-
-from idc_collections.models import DataVersion, DataSource, DataSourceJoin
+from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from django.conf import settings
@@ -66,6 +66,429 @@ def _build_attr_by_source(attrs, data_versions, source_type):
                 attr_by_src[source.name]['attrs'].append(attr)
 
     return attr_by_src
+
+
+# Build data exploration context/response
+def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
+                           with_derived, collapse_on, is_json):
+    attr_by_source = {}
+    attr_sets = {}
+    context = {}
+
+    try:
+        context['collection_tooltips'] = Collection.objects.filter(active=True).get_tooltips()
+
+        versions = versions or DataVersion.objects.filter(active=True)
+
+        data_types = [DataSetType.IMAGE_DATA, ]
+        with_related and data_types.extend(DataSetType.ANCILLARY_DATA)
+        with_derived and data_types.extend(DataSetType.DERIVED_DATA)
+        data_sets = DataSetType.objects.filter(data_type__in=data_types)
+        sources = data_sets.get_data_sources().filter(source_type=source, id__in=versions.get_data_sources().filter(
+            source_type=source).values_list("id", flat=True)).distinct()
+
+        source_attrs = sources.get_source_attrs(for_ui=True, with_set_map=True)
+
+        # For now we're only allowing TCGA+ispy1+lidc-idri+qin_headneck
+        # TODO: REMOVE THIS ONCE WE'RE ALLOWING MORE
+        tcga_in_tcia = Program.objects.get(short_name="TCGA").collection_set.all()
+        collectionFilterList = [collex.collection_id for collex in tcga_in_tcia] + ['ispy1', 'lidc_idri',
+                                                                                    'qin_headneck', 'nsclc_radiomics']
+        if not 'collection_id' in filters:
+            filters['collection_id'] = collectionFilterList
+
+        source_data_types = sources.get_source_data_types()
+
+        for source in sources:
+            is_origin = DataSetType.IMAGE_DATA in source_data_types[source.id]
+            # If a field list wasn't provided, work from a default set
+            if is_origin and not len(fields):
+                fields = source.get_attr(for_faceting=False).filter(default_ui_display=True).values_list('name',
+                                                                                                         flat=True)
+
+            for dataset in data_sets:
+                if dataset.data_type in source_data_types[source.id]:
+                    set_type = dataset.get_set_name()
+                    if set_type not in attr_by_source:
+                        attr_by_source[set_type] = {}
+                    attrs = source_attrs['sources'][source.id]['attr_sets'][dataset.id]
+                    if 'attributes' not in attr_by_source[set_type]:
+                        attr_by_source[set_type]['attributes'] = {}
+                        attr_sets[set_type] = attrs
+                    else:
+                        attr_sets[set_type] = attr_sets[set_type] | attrs
+
+                    attr_by_source[set_type]['attributes'].update(
+                        {attr.name: {'source': source.id, 'obj': attr, 'vals': None, 'id': attr.id} for attr in attrs}
+                    )
+
+        start = time.time()
+        source_metadata = get_collex_metadata(
+            filters, fields, record_limit=1000, counts_only=counts_only, with_ancillary=with_related,
+            collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions
+        )
+        stop = time.time()
+        logger.debug("[STATUS] Benchmarking: Time to collect metadata for source type {}: {}s".format(
+            "BigQuery" if sources.first().source_type == DataSource.BIGQUERY else "Solr",
+            str((stop - start))
+        ))
+
+        for source in source_metadata['facets']:
+            source_name = ":".join(source.split(":")[0:2])
+            facet_set = source_metadata['facets'][source]['facets']
+            for dataset in data_sets:
+                if dataset.data_type in source_data_types[int(source.split(":")[-1])]:
+                    set_name = dataset.get_set_name()
+                    if dataset.data_type in data_types and set_name in attr_sets:
+                        attr_display_vals = Attribute_Display_Values.objects.filter(
+                            attribute__id__in=attr_sets[set_name]).to_dict()
+                        if dataset.data_type == DataSetType.DERIVED_DATA:
+                            attr_cats = attr_sets[set_name].get_attr_cats()
+                            for attr in facet_set:
+                                if attr in attr_by_source[set_name]['attributes']:
+                                    source_name = "{}:{}".format(source_name.split(":")[0], attr_cats[attr]['cat_name'])
+                                    if source_name not in attr_by_source[set_name]:
+                                        attr_by_source[set_name][source_name] = {'attributes': {}}
+                                    attr_by_source[set_name][source_name]['attributes'][attr] = \
+                                        attr_by_source[set_name]['attributes'][attr]
+                                    this_attr = attr_by_source[set_name]['attributes'][attr]['obj']
+                                    values = []
+                                    for val in facet_set[attr]:
+                                        if val == 'min_max':
+                                            attr_by_source[set_name][source_name]['attributes'][attr][val] = \
+                                            facet_set[attr][val]
+                                        else:
+                                            displ_val = val if this_attr.preformatted_values else attr_display_vals.get(
+                                                this_attr.id, {}).get(val, None)
+                                            values.append({
+                                                'value': val,
+                                                'display_value': displ_val,
+                                                'units': this_attr.units,
+                                                'count': facet_set[attr][val] if val in facet_set[attr] else 0
+                                            })
+                                    attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values,
+                                                                                                               key=lambda
+                                                                                                                   x: x[
+                                                                                                                   'value'])
+                        else:
+                            attr_by_source[set_name]['All'] = {'attributes': attr_by_source[set_name]['attributes']}
+                            for attr in facet_set:
+                                if attr in attr_by_source[set_name]['attributes']:
+                                    this_attr = attr_by_source[set_name]['attributes'][attr]['obj']
+                                    values = []
+                                    for val in source_metadata['facets'][source]['facets'][attr]:
+                                        if val == 'min_max':
+                                            attr_by_source[set_name]['All']['attributes'][attr][val] = facet_set[attr][
+                                                val]
+                                        else:
+                                            displ_val = val if this_attr.preformatted_values else attr_display_vals.get(
+                                                this_attr.id, {}).get(val, None)
+                                            values.append({
+                                                'value': val,
+                                                'display_value': displ_val,
+                                                'count': facet_set[attr][val] if val in facet_set[attr] else 0
+                                            })
+                                    if attr == 'bmi':
+                                        sortDic = {'underweight': 0, 'normal weight': 1, 'overweight': 2, 'obese': 3,
+                                                   'None': 4}
+                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values,
+                                                                                                             key=lambda
+                                                                                                                 x:
+                                                                                                             sortDic[x[
+                                                                                                                 'value']])
+                                    else:
+                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values,
+                                                                                                             key=lambda
+                                                                                                                 x: x[
+                                                                                                                 'value'])
+
+        for set in attr_by_source:
+            for source in attr_by_source[set]:
+                if source == 'attributes':
+                    continue
+                if is_dicofdic:
+                    for x in list(attr_by_source[set][source]['attributes'].keys()):
+                        if (isinstance(attr_by_source[set][source]['attributes'][x]['vals'], list) and (
+                                len(attr_by_source[set][source]['attributes'][x]['vals']) > 0)):
+                            attr_by_source[set][source]['attributes'][x] = {y['value']: {
+                                'display_value': y['display_value'], 'count': y['count']
+                            } for y in attr_by_source[set][source]['attributes'][x]['vals']}
+                        else:
+                            attr_by_source[set][source]['attributes'][x] = {}
+
+                    if set == 'origin_set':
+                        context['collections'] = {
+                        a: attr_by_source[set][source]['attributes']['collection_id'][a]['count'] for a in
+                        attr_by_source[set][source]['attributes']['collection_id']}
+                        context['collections']['All'] = source_metadata['total']
+                else:
+                    if set == 'origin_set':
+                        collex = attr_by_source[set][source]['attributes']['collection_id']
+                        if collex['vals']:
+                            context['collections'] = {a['value']: a['count'] for a in collex['vals'] if
+                                                      a['value'] in collectionFilterList}
+                        else:
+                            context['collections'] = {a.name: 0 for a in Collection.objects.filter(active=True,
+                                                                                                   name__in=collectionFilterList)}
+                        context['collections']['All'] = source_metadata['total']
+
+                    attr_by_source[set][source]['attributes'] = [{
+                        'name': x,
+                        'id': attr_by_source[set][source]['attributes'][x]['obj'].id,
+                        'display_name': attr_by_source[set][source]['attributes'][x]['obj'].display_name,
+                        'values': attr_by_source[set][source]['attributes'][x]['vals'],
+                        'units': attr_by_source[set][source]['attributes'][x]['obj'].units,
+                        'min_max': attr_by_source[set][source]['attributes'][x].get('min_max', None)
+                    } for x, val in sorted(attr_by_source[set][source]['attributes'].items())]
+
+            if not counts_only:
+                attr_by_source[set]['docs'] = source_metadata['docs']
+
+        for key, source_set in attr_by_source.items():
+            sources = list(source_set.keys())
+            for key in sources:
+                if key == 'attributes':
+                    source_set.pop(key)
+
+        attr_by_source['total'] = source_metadata['total']
+
+        context['set_attributes'] = attr_by_source
+        context['filters'] = filters
+
+        programs = [x.lower() for x in list(Program.get_public_programs().values_list('short_name', flat=True))]
+        programSet = {}
+        for collection in context['collections']:
+            pref = collection.split('_')[0]
+            if pref in programs:
+                if not pref in programSet:
+                    programSet[pref] = {
+                        'projects': {},
+                        'val': 0
+                    }
+                programSet[pref]['projects'][collection] = context['collections'][collection]
+                programSet[pref]['val'] += context['collections'][collection]
+            else:
+                programSet[collection] = {'val': context['collections'][collection]}
+
+        if with_related:
+            context['tcga_collections'] = tcga_in_tcia
+
+        context['programs'] = programSet
+        # context['derived_list'] = [{'segmentations:TCIA Segmentation Analysis':'Segmentation'}, {'qualitative_measurements:TCIA Qualitative Analysis': 'Qualitative Analysis'}, {'quantitative_measurements:TCIA Quantitative Analysis':'Quantitative Analysis'}]
+
+        if 'derived_set' in context['set_attributes']:
+            if 'dicom_derived_all:segmentation' in context['set_attributes']['derived_set']:
+                context['set_attributes']['derived_set']['dicom_derived_all:segmentation'].update(
+                    {'display_name': 'Segmentation', 'name': 'segmentation'})
+            if 'dicom_derived_all:qualitative' in context['set_attributes']['derived_set']:
+                context['set_attributes']['derived_set']['dicom_derived_all:qualitative'].update(
+                    {'display_name': 'Qualitative Analysis', 'name': 'qualitative'})
+            if 'dicom_derived_all:quantitative' in context['set_attributes']['derived_set']:
+                context['set_attributes']['derived_set']['dicom_derived_all:quantitative'].update(
+                    {'display_name': 'Quantitative Analysis', 'name': 'quantitative'})
+
+        if is_json:
+            attr_by_source['programs'] = programSet
+            return attr_by_source
+        else:
+            context['order'] = {}
+            context['order']['derived_set'] = ['dicom_derived_all:segmentation', 'dicom_derived_all:qualitative',
+                                               'dicom_derived_all:quantitative']
+        return context
+
+    except Exception as e:
+        logger.error("[ERROR] While attempting to load the search page:")
+        logger.exception(e)
+
+    return None
+
+
+# Based on the provided settings, fetch faceted counts and/or records from the desired data source type
+#
+# filters: dict, {<attribute name>: [<val1>, ...]}
+# fields: string of fields to include for record returns (ignored if counts_only=True)
+# with_ancillary: include anillcary data types in filtering and faceted counting
+# with_derived: include derived data types in filtering and faceted counting
+# collapse_on: the field used to specify unique counts
+# order_docs: custom array-as-string for ordering documents
+# sources (optional): List of data sources to query; all active sources will be used if not provided
+# versions (optional): List of data versions to query; all active data versions will be used if not provided
+# facets: array of strings, attributes to faceted count as a list of attribute names; if not provided not faceted counts will be performed
+def get_collex_metadata(filters, fields, record_limit=1000, counts_only=False, with_ancillary = True,
+                        collapse_on = 'PatientID', order_docs='[]', sources = None, versions = None, with_derived=True,
+                        facets=None):
+
+    try:
+        source_type = sources.first().source_type if sources else DataSource.SOLR
+
+        if not versions:
+            versions = DataVersion.objects.filter(active=True)
+        if not versions.first().active and not sources:
+            source_type = DataSource.BIGQUERY
+
+        data_types = [DataSetType.IMAGE_DATA,]
+        with_ancillary and data_types.extend(DataSetType.ANCILLARY_DATA)
+        with_derived and data_types.extend(DataSetType.DERIVED_DATA)
+        data_sets = DataSetType.objects.filter(data_type__in=data_types)
+
+        sources = data_sets.get_data_sources().filter(source_type=source_type, id__in=versions.get_data_sources().filter(
+            source_type=source_type).values_list("id", flat=True)).distinct() if not sources else sources
+
+        # Only active data is available in Solr, not archived
+        if len(versions.filter(active=False)) and len(sources.filter(source_type=DataSource.SOLR)):
+            raise Exception("[ERROR] Can't request archived data from Solr, only BigQuery.")
+
+        if source_type == DataSource.BIGQUERY:
+            results = get_metadata_bq(filters, fields, {
+                'filters': sources.get_source_attrs(for_ui=True, for_faceting=False, with_set_map=False),
+                'facets': sources.get_source_attrs(for_ui=True, with_set_map=False),
+                'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
+            }, counts_only, collapse_on, record_limit)
+        elif source_type == DataSource.SOLR:
+            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets)
+
+        for source in results['facets']:
+            facets = results['facets'][source]['facets']
+            if 'BodyPartExamined' in facets:
+                if 'Kidney' in facets['BodyPartExamined']:
+                    if 'KIDNEY' in facets['BodyPartExamined']:
+                        facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
+                    else:
+                        facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
+                    del facets['BodyPartExamined']['Kidney']
+
+        if not counts_only:
+            if 'SeriesNumber' in fields:
+                for res in results['docs']:
+                    res['SeriesNumber'] = res['SeriesNumber'][0] if 'SeriesNumber' in res else 'None'
+            if len(order_docs):
+                results['docs'] = sorted(results['docs'], key=lambda x: tuple([x[item] for item in order_docs]))
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching metadata:")
+        logger.exception(e)
+
+    return results
+
+# Use solr to fetch faceted counts and/or records
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None):
+    filters = filters or {}
+    results = {'docs': None, 'facets': {}}
+
+    source_versions = sources.get_source_versions()
+    filter_attrs = sources.get_source_attrs(for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]t[e]|_btw',x) else x for x in filters.keys()], with_set_map=False)
+    attrs_for_faceting = sources.get_source_attrs(for_ui=True, with_set_map=False) if not facets else sources.get_source_attrs(for_ui=True, with_set_map=False, named_set=facets)
+    all_ui_attrs = sources.get_source_attrs(for_ui=True, for_faceting=False, with_set_map=False)
+
+    # Eventually this will need to go per program
+    for source in sources:
+        start = time.time()
+        search_child_records = None
+        if source.has_data_type(DataSetType.DERIVED_DATA):
+            search_child_records = filter_attrs['sources'][source.id]['attrs'].get_attr_set_types().get_child_record_searches()
+        joined_origin = False
+        solr_query = build_solr_query(
+            copy.deepcopy(filters),
+            with_tags_for_ex=True,
+            search_child_records_by=search_child_records
+        ) if filters else None
+        solr_facets = build_solr_facets(attrs_for_faceting['sources'][source.id]['attrs'],
+                                        filter_tags=solr_query['filter_tags'] if solr_query else None,
+                                        unique=source.count_col, min_max=True)
+
+        query_set = []
+
+        if solr_query:
+            for attr in solr_query['queries']:
+                attr_name = re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
+                # If an attribute from the filters isn't in the attribute listing, just warn and continue
+                if attr_name in all_ui_attrs['list']:
+                    # If the attribute is from this source, just add the query
+                    if attr_name in all_ui_attrs['sources'][source.id]['list']:
+                        query_set.append(solr_query['queries'][attr])
+                    # If it's in another source for this program, we need to join on that source
+                    else:
+                        for ds in sources:
+                            if ds.name != source.name and attr_name in all_ui_attrs['sources'][ds.id]['list']:
+                                if source.has_data_type(DataSetType.IMAGE_DATA) or ds.has_data_type(DataSetType.IMAGE_DATA):
+                                    joined_origin = True
+                                # DataSource join pairs are unique, so, this should only produce a single record
+                                source_join = DataSourceJoin.objects.get(from_src__in=[ds.id,source.id], to_src__in=[ds.id,source.id])
+                                joined_query = ("{!join %s}" % "from={} fromIndex={} to={}".format(
+                                    source_join.get_col(ds.name), ds.name, source_join.get_col(source.name)
+                                )) + solr_query['queries'][attr]
+                                if ds.has_data_type(DataSetType.ANCILLARY_DATA) and not source.has_data_type(DataSetType.ANCILLARY_DATA):
+                                    joined_query = 'has_related:"False" OR _query_:"%s"' % joined_query.replace("\"","\\\"")
+                                query_set.append(joined_query)
+                else:
+                    logger.warning("[WARNING] Attribute {} not found in data sources {}".format(attr_name, ", ".join(list(sources.values_list('name',flat=True)))))
+
+        if not joined_origin and not source.has_data_type(DataSetType.IMAGE_DATA):
+            ds = sources.filter(id__in=DataSetType.objects.get(data_type=DataSetType.IMAGE_DATA).datasource_set.all()).first()
+            source_join = DataSourceJoin.objects.get(from_src__in=[ds.id, source.id], to_src__in=[ds.id, source.id])
+            query_set.append(("{!join %s}" % "from={} fromIndex={} to={}".format(
+                source_join.get_col(ds.name), ds.name, source_join.get_col(source.name)
+            ))+"*:*")
+
+        solr_result = query_solr_and_format_result({
+            'collection': source.name,
+            'facets': solr_facets,
+            'fqs': query_set,
+            'query_string': None,
+            'limit': 0,
+            'counts_only': True,
+            'fields': None
+        })
+        stop = time.time()
+        logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
+
+        results['total'] = solr_result['numFound']
+
+        results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
+            'facets': solr_result['facets']
+        }
+
+        if source.has_data_type(DataSetType.IMAGE_DATA) and not counts_only:
+            solr_result = query_solr_and_format_result({
+                'collection': source.name,
+                'fields': list(fields),
+                'fqs': query_set,
+                'query_string': None,
+                'collapse_on': collapse_on,
+                'counts_only': counts_only,
+                'limit': record_limit
+            })
+            results['docs'] = solr_result['docs']
+
+    return results
+
+# Use BigQuery to fetch the faceted counts and/or records
+def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on, record_limit):
+    results = {'docs': None, 'facets': {}}
+
+    try:
+        res = get_bq_facet_counts(filters, None, None, sources_and_attrs)
+        results['facets'] = res['facets']
+        results['total'] = res['facets']['total']
+
+        if not counts_only:
+            docs = get_bq_metadata(filters, fields, None, sources_and_attrs, [collapse_on], record_limit)
+            doc_result_schema = {i: x['name'] for i,x in enumerate(docs['schema']['fields'])}
+
+            results['docs'] = [{
+                doc_result_schema[i]: y['v'] for i,y in enumerate(x['f'])
+            } for x in docs['results'] ]
+
+    except Exception as e:
+        logger.error("[ERROR] During BQ facet and doc fetching:")
+        logger.exception(e)
+    return results
+
+
+###################
+# BigQuery Metods
+###################
+#
 
 # Faceted counting for an arbitrary set of filters and facets.
 # filters and facets can be provided as lists of names (in which case _build_attr_by_source is used to convert them
