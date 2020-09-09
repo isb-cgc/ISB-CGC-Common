@@ -158,7 +158,7 @@ def build_hierarchy(objects, rows, return_level, reorder):
 def get_filterSet_api(cohort):
     attributes = {}
     filter_group = cohort.filter_group_set.get()
-    filters = filter_group.filters_set.all()
+    filters = filter_group.filter_set.all()
     for filter in filters:
         attributes[filter.attribute.name] = filter.value.split(",")
 
@@ -267,7 +267,7 @@ def _cohort_detail_api(request, cohort, cohort_info):
 
     filter_group = cohort.filter_group_set.get()
     filters = {}
-    for filter in filter_group.filters_set.all():
+    for filter in filter_group.filter_set.all():
         filters[filter.attribute.name] = filter.value.split(",")
         if filter.attribute.name == 'collection_id':
             collections = []
