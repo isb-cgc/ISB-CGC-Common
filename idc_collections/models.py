@@ -374,6 +374,20 @@ class DataSourceJoin(models.Model):
 
 
 class AttributeQuerySet(models.QuerySet):
+
+    def get_data_sources(self, versions=None, source_type=None, active=True):
+        q_objects = Q()
+        if versions:
+            q_objects &= Q(id__in=versions.get_data_sources())
+        if source_type:
+            q_objects &= Q(source_type=source_type)
+
+        data_sources = None
+        for attr in self.all():
+            data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
+
+        return data_sources.distinct()
+
     def get_attr_cats(self):
         categories = {}
         for cat in Attribute_Display_Category.objects.select_related('attribute').filter(attribute__in=self.all()):

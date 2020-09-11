@@ -770,8 +770,10 @@ class BigQuerySupport(BigQueryABC):
     @staticmethod
     def build_bq_where_clause(filters, comb_with='AND', field_prefix=None, type_schema=None):
 
-        if field_prefix[-1] != ".":
+        if field_prefix and field_prefix[-1] != ".":
             field_prefix += "."
+        else:
+            field_prefix = ""
 
         filter_set = []
 
