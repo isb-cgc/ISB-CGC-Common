@@ -52,9 +52,11 @@ from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.utils.html import escape
 
 from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Filter_Group, Cohort_Comments
-from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids
+from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, cohort_manifest
 from idc_collections.models import Program, Collection, DataSource, DataVersion
 from idc_collections.collex_metadata_utils import build_explorer_context
+
+MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
 BQ_ATTEMPT_MAX = 10
 
@@ -906,6 +908,71 @@ class Echo(object):
     def write(self, value):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
+
+def download_cohort_manifest(request, cohort_id):
+    if not cohort_id:
+        messages.error(request, "A cohort ID was not provided.")
+        return redirect('cohort_list')
+
+    try:
+        cohort = Cohort.objects.get(id=cohort_id)
+        Cohort_Perms.objects.get(cohort=cohort, user=request.user)
+
+        manifest = None
+
+        # Fields we need to fetch
+        field_list = ["PatientID", "collection_id", "Program", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_generation", "gcs_bucket",]
+
+        # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
+        csv_cols = ["PatientID", "collection_id", "Program", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_path"]
+
+        items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES)
+
+        if 'docs' in items:
+            manifest = items['docs']
+        else:
+            if 'error' in items:
+                messages.error(request, items['error']['message'])
+            else:
+                messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
+            return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+
+        if len(manifest) > 0:
+            rows = (["Manifest for cohort '{}'".format(cohort.name)],)
+            rows += (["User: {}".format(request.user.email)],)
+            rows += (["Filters: {}".format(cohort.get_bq_filter_string())],)
+            rows += (["Date generated: {}".format(datetime.datetime.fromtimestamp(time.time()).strftime('%m/%d/%Y %H:%M'))],)
+            rows += (["Total records found: {}".format(str(items['total']))],)
+            if items['total'] > MAX_FILE_LIST_ENTRIES:
+                rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(str(MAX_FILE_LIST_ENTRIES))
+                          + " Your cohort's total entries exceeded this number. The first {} entries have been ".format(str(MAX_FILE_LIST_ENTRIES))
+                          + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
+            column_order = [x for x in csv_cols if x in manifest[0].keys()]
+            rows += (csv_cols,)
+            for row in manifest:
+                this_row = [row[x] for x in column_order]
+                this_row.append("{}{}/dicom/{}/{}/{}#{}".format(
+                    "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
+                    row['SOPInstanceUID'],row['gcs_generation'])
+                )
+                rows += (this_row,)
+            pseudo_buffer = Echo()
+            writer = csv.writer(pseudo_buffer)
+            response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
+            timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+            response['Content-Disposition'] = 'attachment; filename="manifest_cohort_{}_{}.csv"'.format(str(cohort_id),timestamp)
+            response.set_cookie("downloadToken", request.GET.get('downloadToken'))
+            return response
+    except ObjectDoesNotExist:
+        logger.error("[ERROR] User ID {} attempted to access cohort {}, which they do not have permission to view.".format(request.user.id,cohort.id))
+        messages.error(request,"You don't have permission to view that cohort.")
+
+    except Exception as e:
+        logger.error("[ERROR] While downloading the cohort manifest for user {}:".format(str(request.user.id)))
+        logger.exception(e)
+        messages.error(request,"There was an error while attempting to download your cohort manifest--please contact the administrator.")
+
+    return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
 
 
 def streaming_csv_view(request, cohort_id=0):

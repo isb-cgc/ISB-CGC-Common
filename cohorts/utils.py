@@ -33,7 +33,7 @@ from .models import Cohort, Cohort_Perms, Filter, Filter_Group
 from idc_collections.models import Program, Attribute, DataVersion, DataSourceJoin
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
-
+from idc_collections.collex_metadata_utils import get_collex_metadata
 
 logger = logging.getLogger('main_logger')
 BLACKLIST_RE = settings.BLACKLIST_RE
@@ -146,6 +146,21 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, versions=None, d
     
     return cohort_info
 
+def cohort_manifest(cohort, user, fields, limit):
+    try:
+        sources = cohort.get_data_sources()
+        versions = cohort.get_data_versions()
+
+        group_filters = cohort.get_filters_as_dict()
+
+        filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
+
+        cohort_records = get_collex_metadata(filters, fields, limit, sources=sources, versions=versions, counts_only=False, collapse_on='SeriesInstanceUID', records_only=True)
+        
+        return cohort_records
+        
+    except Exception as e:
+        logger.exception(e)
 
 
 # Get the various UUIDs for a given cohort

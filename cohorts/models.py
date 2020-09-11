@@ -113,25 +113,16 @@ class Cohort(models.Model):
 
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     # Return values can be
-    def get_data_sources(self, source_type=None):
-        result = {}
+    def get_data_sources(self, source_type=DataSource.SOLR):
 
         cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
         attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
 
         data_versions = self.get_data_versions()
 
-        for attr in attributes:
-            for source in DataSource.SOURCE_TYPES:
-                if not source_type or source_type == source[0]:
-                    data_sources = attr.data_sources.all().filter(version__in=data_versions, source_type=source[0]).distinct()
-                    for data_source in data_sources:
-                        if source[0] not in result:
-                            result[source[0]] = {data_source.id: data_source}
-                        else:
-                            if data_source.id not in result[source[0]]:
-                                result[source[0]][data_source.id] = data_source
-        return result
+        sources = attributes.get_data_sources(data_versions, source_type)
+
+        return sources
 
     # Returns the set of filters defining this cohort as a dict organized by data source
     def get_filters_by_data_source(self, source_type=None):
@@ -173,11 +164,12 @@ class Cohort(models.Model):
         group_filter_dict = self.get_filters_as_dict()
 
         for group in group_filter_dict:
+            group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
-                group_filter_dict[group], field_prefix=prefix
+                group_filters, field_prefix=prefix
             ))
 
-        return filter_sets
+        return " AND ".join(filter_sets)
 
     # Produce a BigQuery filter clause and parameters; this is for *programmatic* use of BQ, NOT copy-paste into
     # the console
@@ -188,10 +180,11 @@ class Cohort(models.Model):
         group_filter_dict = self.get_filters_as_dict()
 
         for group in group_filter_dict:
+            group_filters = {x: [y for y in x['values']] for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
-                group_filter_dict[group], field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
+                group_filters, field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
                 type_schema=schema
-                  ))
+             ))
 
         return filter_sets
 
