@@ -951,7 +951,7 @@ def download_cohort_manifest(request, cohort_id):
             rows += (csv_cols,)
             for row in manifest:
                 this_row = [row[x] for x in column_order]
-                this_row.append("{}{}/dicom/{}/{}/{}#{}".format(
+                this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
                     "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
                     row['SOPInstanceUID'],row['gcs_generation'])
                 )
