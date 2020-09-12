@@ -161,9 +161,13 @@ class CollectionManager(models.Manager):
 class Collection(models.Model):
     ANALYSIS_COLLEX = 'A'
     ORIGINAL_COLLEX = 'O'
+    COLLEX_DISPLAY = {
+        ANALYSIS_COLLEX: 'Analysis',
+        ORIGINAL_COLLEX: 'Original'
+    }
     COLLEX_TYPES = (
-        (ANALYSIS_COLLEX, 'Analysis'),
-        (ORIGINAL_COLLEX, 'Original')
+        (ANALYSIS_COLLEX, COLLEX_DISPLAY[ANALYSIS_COLLEX]),
+        (ORIGINAL_COLLEX, COLLEX_DISPLAY[ORIGINAL_COLLEX])
     )
 
     id = models.AutoField(primary_key=True)
@@ -201,6 +205,9 @@ class Collection(models.Model):
             self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
             str(self.program.all())
         )
+
+    def get_collection_type(self):
+        return self.COLLEX_DISPLAY[self.collection_type]
 
 
 class DataSourceQuerySet(models.QuerySet):
