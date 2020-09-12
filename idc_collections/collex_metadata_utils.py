@@ -76,7 +76,10 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     context = {}
 
     try:
-        context['collection_tooltips'] = Collection.objects.filter(active=True).get_tooltips()
+        if not is_json:
+            context['collection_tooltips'] = Collection.objects.filter(active=True).get_tooltips()
+
+        collectionsList = Collection.objects.filter(active=True).values_list('collection_id',flat=True)
 
         versions = versions or DataVersion.objects.filter(active=True)
 
@@ -88,14 +91,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             source_type=source).values_list("id", flat=True)).distinct()
 
         source_attrs = sources.get_source_attrs(for_ui=True, with_set_map=True)
-
-        # For now we're only allowing TCGA+ispy1+lidc-idri+qin_headneck
-        # TODO: REMOVE THIS ONCE WE'RE ALLOWING MORE
-        tcga_in_tcia = Program.objects.get(short_name="TCGA").collection_set.all()
-        collectionFilterList = [collex.collection_id for collex in tcga_in_tcia] + ['ispy1', 'lidc_idri',
-                                                                                    'qin_headneck', 'nsclc_radiomics']
-        if not 'collection_id' in filters:
-            filters['collection_id'] = collectionFilterList
 
         source_data_types = sources.get_source_data_types()
 
@@ -166,10 +161,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                                 'units': this_attr.units,
                                                 'count': facet_set[attr][val] if val in facet_set[attr] else 0
                                             })
-                                    attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values,
-                                                                                                               key=lambda
-                                                                                                                   x: x[
-                                                                                                                   'value'])
+                                    attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
                         else:
                             attr_by_source[set_name]['All'] = {'attributes': attr_by_source[set_name]['attributes']}
                             for attr in facet_set:
@@ -191,16 +183,9 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                     if attr == 'bmi':
                                         sortDic = {'underweight': 0, 'normal weight': 1, 'overweight': 2, 'obese': 3,
                                                    'None': 4}
-                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values,
-                                                                                                             key=lambda
-                                                                                                                 x:
-                                                                                                             sortDic[x[
-                                                                                                                 'value']])
+                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortDic[x['value']])
                                     else:
-                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values,
-                                                                                                             key=lambda
-                                                                                                                 x: x[
-                                                                                                                 'value'])
+                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
 
         for set in attr_by_source:
             for source in attr_by_source[set]:
@@ -226,10 +211,9 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         collex = attr_by_source[set][source]['attributes']['collection_id']
                         if collex['vals']:
                             context['collections'] = {a['value']: a['count'] for a in collex['vals'] if
-                                                      a['value'] in collectionFilterList}
+                                                      a['value'] in collectionsList}
                         else:
-                            context['collections'] = {a.name: 0 for a in Collection.objects.filter(active=True,
-                                                                                                   name__in=collectionFilterList)}
+                            context['collections'] = {a.name: 0 for a in Collection.objects.filter(active=True, collection_id__in=collectionsList)}
                         context['collections']['All'] = source_metadata['total']
 
                     attr_by_source[set][source]['attributes'] = [{
@@ -271,7 +255,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 programSet[collection] = {'val': context['collections'][collection]}
 
         if with_related:
-            context['tcga_collections'] = tcga_in_tcia
+            context['tcga_collections'] = Program.objects.get(short_name="TCGA").collection_set.all()
 
         context['programs'] = programSet
         # context['derived_list'] = [{'segmentations:TCIA Segmentation Analysis':'Segmentation'}, {'qualitative_measurements:TCIA Qualitative Analysis': 'Qualitative Analysis'}, {'quantitative_measurements:TCIA Quantitative Analysis':'Quantitative Analysis'}]
@@ -291,9 +275,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             attr_by_source['programs'] = programSet
             return attr_by_source
         else:
-            context['order'] = {}
-            context['order']['derived_set'] = ['dicom_derived_all:segmentation', 'dicom_derived_all:qualitative',
-                                               'dicom_derived_all:quantitative']
+            context['order'] = {'derived_set': ['dicom_derived_all:segmentation', 'dicom_derived_all:qualitative',
+                                               'dicom_derived_all:quantitative']}
         return context
 
     except Exception as e:

@@ -156,7 +156,6 @@ def cohort_detail(request, cohort_id):
         with_related = (req.get('with_clinical', "True").lower() == "true")
         with_derived = (req.get('with_derived', "True").lower() == "true")
         collapse_on = req.get('collapse_on', 'SeriesInstanceUID')
-        is_json = (req.get('is_json', "False").lower() == "true")
 
         cohort = Cohort.objects.get(id=cohort_id, active=True)
         cohort.perm = cohort.get_perm(request)
@@ -173,7 +172,7 @@ def cohort_detail(request, cohort_id):
         cohort_versions = cohort.get_data_versions()
         initial_filters = {}
 
-        template_values = build_explorer_context(is_dicofdic, source, cohort_versions, initial_filters, fields, order_docs, counts_only, with_related, with_derived, collapse_on, is_json)
+        template_values = build_explorer_context(is_dicofdic, source, cohort_versions, initial_filters, fields, order_docs, counts_only, with_related, with_derived, collapse_on, False)
 
         template_values.update({
             'request': request,
