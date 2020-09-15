@@ -244,14 +244,14 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 
         programSet = {}
         for collection in Collection.objects.select_related('program').filter(active=True):
-            if collection.program:
-                if not collection.program.short_name in programSet:
-                    programSet[collection.program.short_name] = {
-                        'projects': {},
-                        'val': 0,
-                        'prog_attr_id': prog_attr_id,
-                        'collex_attr_id': collex_attr_id
-                    }
+            if collection.program and collection.program.short_name not in programSet:
+                programSet[collection.program.short_name] = {
+                    'projects': {},
+                    'val': 0,
+                    'prog_attr_id': prog_attr_id,
+                    'collex_attr_id': collex_attr_id
+                }
+            if collection.collection_id in context['collections']:
                 programSet[collection.program.short_name]['projects'][collection.collection_id] = context['collections'][collection.collection_id]
                 programSet[collection.program.short_name]['val'] += context['collections'][collection.collection_id]
 
