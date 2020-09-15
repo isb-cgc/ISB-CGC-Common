@@ -13,7 +13,17 @@ from functools import reduce
 logger = logging.getLogger('main_logger')
 
 
+class ProgramQuerySet(models.QuerySet):
+    def get_collections(self):
+        collections = None
+        for prog in self.all():
+            collections = prog.collection_set.all() if not collections else collections | prog.collection_set.all()
+        return collections.distinct()
+
 class ProgramManager(models.Manager):
+    def get_queryset(self):
+        return ProgramQuerySet(self.model, using=self._db)
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -161,9 +171,13 @@ class CollectionManager(models.Manager):
 class Collection(models.Model):
     ANALYSIS_COLLEX = 'A'
     ORIGINAL_COLLEX = 'O'
+    COLLEX_DISPLAY = {
+        ANALYSIS_COLLEX: 'Analysis',
+        ORIGINAL_COLLEX: 'Original'
+    }
     COLLEX_TYPES = (
-        (ANALYSIS_COLLEX, 'Analysis'),
-        (ORIGINAL_COLLEX, 'Original')
+        (ANALYSIS_COLLEX, COLLEX_DISPLAY[ANALYSIS_COLLEX]),
+        (ORIGINAL_COLLEX, COLLEX_DISPLAY[ORIGINAL_COLLEX])
     )
 
     id = models.AutoField(primary_key=True)
@@ -191,7 +205,7 @@ class Collection(models.Model):
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
     # We make this many to many in case a collection is part of one program, though it may not be
-    program = models.ManyToManyField(Program)
+    program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
         return self.program.all()
@@ -201,6 +215,9 @@ class Collection(models.Model):
             self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
             str(self.program.all())
         )
+
+    def get_collection_type(self):
+        return self.COLLEX_DISPLAY[self.collection_type]
 
 
 class DataSourceQuerySet(models.QuerySet):

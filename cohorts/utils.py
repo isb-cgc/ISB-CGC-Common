@@ -142,6 +142,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, versions=None, d
     except Exception as e:
         logger.error("[ERROR] While saving a cohort: ")
         logger.exception(e)
+        cohort_info['message'] = "Failed to save cohort!"
     
     return cohort_info
 
