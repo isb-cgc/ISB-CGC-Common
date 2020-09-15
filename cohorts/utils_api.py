@@ -189,12 +189,13 @@ def get_cohort_objects(request, filters, data_versions, cohort_info):
 
     # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
     while rows_left > 0:
+        ### get_bq_string() currently broken
         # Accumulate the SQL for each call
-        if request.GET['return_sql'] in [True, 'True']:
-            sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
-                filters=filters, fields=select, data_versions=data_versions,
-                limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
-                order_by=select[-1:]))
+        # if request.GET['return_sql'] in [True, 'True']:
+        #     sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
+        #         filters=filters, fields=select, data_versions=data_versions,
+        #         limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+        #         order_by=select[-1:]))
 
         results = get_bq_metadata(
             filters=filters, fields=select, data_versions=data_versions,
@@ -256,7 +257,7 @@ def get_cohort_objects(request, filters, data_versions, cohort_info):
     collections = build_collections(objects, dois, urls)
 
     cohort_info['cohort']["cohortObjects"] = {
-        "totalRowsInCohort": totalReturned,
+        "rowsReturned": totalReturned,
         "collections": collections,
         "sql": sql,
         # "rows": schema_rows if request.GET["return_rows"] in ['True', True] else []
@@ -281,26 +282,23 @@ def _cohort_detail_api(request, cohort, cohort_info):
 
     return cohort_info
 
-def form_urls(rows, reorder):
-    urls = []
-    for row in rows:
-        url = 'gs://{}/{}/{}'.format(
-            row['f'][reorder[0]]['v'],
-            row['f'][reorder[1]]['v'],
-            row['f'][reorder[2]]['v'])
-        urls.append(url)
-    return urls
+def form_rows(data):
+    rows = []
+    for row in data:
+        if  row['f'][0]['v'] != None:
+           rows.append(row['f'][0]['v'])
+    return rows
 
-# This is a temporary implementation that constructs a gs://xxx url from study, series, and instance UIDs
-# in dicom_all. dicom_all needs to be extended by adding that data from the auxilliary_dicom_metadata table.
-
+# Get a list of GCS URLs or CRDC DOIs of the instances in the cohort
 def get_cohort_instances(request, filters, data_versions, cohort_info):
 
     rows_left = fetch_count = int(request.GET['fetch_count'])
     page = int(request.GET['page'])
+    access_method = request.GET['access_class']
     # return_level = request.GET['return_level']
     # select = levels[return_level]
-    select = ['StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID']
+
+    select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
     offset = int(request.GET['offset']) + (fetch_count * (page - 1))
     objects = {}
     totalReturned = 0
@@ -323,27 +321,21 @@ def get_cohort_instances(request, filters, data_versions, cohort_info):
             # If there are not as many rows as asked for, we're done with BQ
             break
 
+        # rows holds the actual data
+        rows = form_rows(results['results'])
         # returned has the number of rows actually returned by the query
-        returned = len(results["results"])
+        returned = len(rows)
 
         totalReturned += returned
         fetch_count -= returned
-
-        # Create a list of the fields in the returned schema
-        fields = [field['name'] for field in results['schema']['fields']]
-        # Build a list of indices into fields that tells build_hierarchy how to reorder
-        reorder = [fields.index(x) for x in select]
-
-        # rows holds the actual data
-        rows = results['results']
-        urls = form_urls(rows, reorder)
 
         # unFound is the number of rows we haven't yet obtained from BQ
         unFound = rows_left - returned
         if unFound >= 0:
             rows_left -= returned
             offset += returned
-            all_rows.extend(urls)
+            # all_rows.extend(urls)
+            all_rows.extend(rows)
             if returned < min(fetch_count, settings.MAX_BQ_RECORD_RESULT):
                 # We got all there is to get
                 break
@@ -351,15 +343,16 @@ def get_cohort_instances(request, filters, data_versions, cohort_info):
             break
         else:
             # If we got more than requested by user, trim the list of rows received from BQ
-            all_rows.extend(urls[:unFound])
+            # all_rows.extend(urls[:unFound])
+            all_rows.extend(rows[:unFound])
             break
 
-    cohort_info["manifest"]["accessMethods"] = {
-                "type": "gs",
-                "region": "us",
-                "urls": all_rows,
-            }
-
+    cohort_info["manifest"]["accessMethods"] = dict(
+                type = "gs",
+                region = "us",
+                urls = all_rows if access_method == 'url' else [],
+                dois = all_rows if access_method != 'url' else []
+    )
 
     return cohort_info
 
@@ -379,6 +372,27 @@ def _cohort_manifest_api(request, cohort, cohort_info):
     cohort_info = get_cohort_instances(request, filters, data_versions, cohort_info)
 
     return cohort_info
+
+
+def _cohort_preview_manifest_api(request, data, cohort_info):
+    filters = data['filterSet']['filters']
+
+    if not filters:
+        # Can't save/edit a cohort when nothing is being changed!
+        return {
+            "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
+            "code": 400
+            }
+    if 'collection_id' in filters:
+        filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
+
+    # Get versions of datasets to be filtered, and link to filter group
+    data_versions = get_dataversions(filters)
+
+    cohort_info = get_cohort_instances(request, filters, data_versions, cohort_info)
+
+    return cohort_info
+
 
 # Extract dataversions from filterset and fill in active version, if version is not specified
 def get_dataversions(filterset):

@@ -33,7 +33,7 @@ from ..decorators import api_auth
 
 from idc_collections.models import Attribute
 from cohorts.models import Cohort, Cohort_Perms
-from cohorts.utils_api import get_filterSet_api, _cohort_detail_api, _cohort_preview_api, _cohort_manifest_api
+from cohorts.utils_api import get_filterSet_api, _cohort_detail_api, _cohort_preview_api, _cohort_manifest_api, _cohort_preview_manifest_api
 from ..views.views import _save_cohort,_delete_cohort
 
 BQ_ATTEMPT_MAX = 10
@@ -252,6 +252,35 @@ def cohort_preview_api(request):
 
         if request.GET['return_objects'] in ['True', True]:
             cohort_info = _cohort_preview_api(request, data, cohort_info)
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to obtain cohort objects: ")
+        logger.exception(e)
+        cohort_info = {
+            "message": "Error while trying to obtain cohort objects.",
+            "code": 400
+        }
+
+    return JsonResponse(cohort_info)
+
+
+@csrf_exempt
+@api_auth
+@require_http_methods(["POST"])
+def cohort_preview_manifest_api(request):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+        data = body["request_data"]
+        cohort_info = {
+            "manifest": {
+                "name": data['name'],
+                "description": data['description'],
+            }
+        }
+
+        cohort_info = _cohort_preview_manifest_api(request, data, cohort_info)
 
     except Exception as e:
         logger.error("[ERROR] While trying to obtain cohort objects: ")
