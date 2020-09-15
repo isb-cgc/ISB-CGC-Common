@@ -239,20 +239,21 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         context['set_attributes'] = attr_by_source
         context['filters'] = filters
 
-        programs = [x.lower() for x in list(Program.get_public_programs().values_list('short_name', flat=True))]
+        prog_attr_id = Attribute.objects.get(name='program_name').id
+        collex_attr_id = Attribute.objects.get(name='collection_id').id
+
         programSet = {}
-        for collection in context['collections']:
-            pref = collection.split('_')[0]
-            if pref in programs:
-                if not pref in programSet:
-                    programSet[pref] = {
+        for collection in Collection.objects.select_related('program').filter(active=True):
+            if collection.program:
+                if not collection.program.short_name in programSet:
+                    programSet[collection.program.short_name] = {
                         'projects': {},
-                        'val': 0
+                        'val': 0,
+                        'prog_attr_id': prog_attr_id,
+                        'collex_attr_id': collex_attr_id
                     }
-                programSet[pref]['projects'][collection] = context['collections'][collection]
-                programSet[pref]['val'] += context['collections'][collection]
-            else:
-                programSet[collection] = {'val': context['collections'][collection]}
+                programSet[collection.program.short_name]['projects'][collection.collection_id] = context['collections'][collection.collection_id]
+                programSet[collection.program.short_name]['val'] += context['collections'][collection.collection_id]
 
         if with_related:
             context['tcga_collections'] = Program.objects.get(short_name="TCGA").collection_set.all()
