@@ -13,7 +13,17 @@ from functools import reduce
 logger = logging.getLogger('main_logger')
 
 
+class ProgramQuerySet(models.QuerySet):
+    def get_collections(self):
+        collections = None
+        for prog in self.all():
+            collections = prog.collection_set.all() if not collections else collections | prog.collection_set.all()
+        return collections.distinct()
+
 class ProgramManager(models.Manager):
+    def get_queryset(self):
+        return ProgramQuerySet(self.model, using=self._db)
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -195,7 +205,7 @@ class Collection(models.Model):
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
     # We make this many to many in case a collection is part of one program, though it may not be
-    program = models.ManyToManyField(Program)
+    program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
         return self.program.all()
