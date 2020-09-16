@@ -51,9 +51,9 @@ from django.utils import formats
 from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.utils.html import escape
 
-from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Filter_Group, Cohort_Comments
+from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, cohort_manifest
-from idc_collections.models import Program, Collection, DataSource, DataVersion
+from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion
 from idc_collections.collex_metadata_utils import build_explorer_context
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -212,11 +212,11 @@ def save_cohort(request):
             desc = request.POST.get('desc', None)
             filters = json.loads(request.POST.get('selected-filters','{}'))
             cohort_id = request.POST.get('cohort_id', None)
-            req_versions = json.loads(request.POST.get('versions', '[]'))
+            req_version = request.POST.get('version', None)
 
-            versions = DataVersion.objects.filter(name__in=req_versions) if len(req_versions) else DataVersion.objects.filter(active=True)
+            version = DataVersion.objects.get(version_number=req_version) if req_version else ImagingDataCommonsVersion.objects.get(active=True)
 
-            result = _save_cohort(request.user, filters, name, cohort_id, versions, desc=desc)
+            result = _save_cohort(request.user, filters, name, cohort_id, version, desc=desc)
 
             if 'message' not in result:
                 redirect_url = reverse('cohort_details', args=[result['cohort_id']])
