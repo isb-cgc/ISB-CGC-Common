@@ -1,5 +1,5 @@
 from django.template.defaulttags import register
-from idc_collections.models import Program
+from idc_collections.models import Program, ImagingDataCommonsVersion
 import string
 
 @register.simple_tag
@@ -15,3 +15,7 @@ def user_program_count(context):
     programs = userPrograms | sharedPrograms
 
     return programs.distinct().count()
+
+@register.filter
+def get_idc_version(reasons):
+    return ImagingDataCommonsVersion.objects.get(active=True)
