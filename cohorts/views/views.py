@@ -126,7 +126,7 @@ def cohorts_list(request, is_public=False):
     for cohort in cohort_id_names:
         cohort_listing.append({
             'value': int(cohort['id']),
-            'label': escape(cohort['name']).encode('utf8')
+            'label': escape(cohort['name'])
         })
         
     previously_selected_cohort_ids = []
@@ -179,7 +179,6 @@ def cohort_detail(request, cohort_id):
             'base_url': settings.BASE_URL,
             'cohort': cohort,
             'shared_with_users': shared_with_users,
-            'export_url': reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'}),
             'cohort_filters': cohort_filters
         })
 
