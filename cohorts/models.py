@@ -26,7 +26,7 @@ from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from idc_collections.models import Collection, Attribute, User_Feature_Definitions, DataVersion, DataSource
+from idc_collections.models import Collection, Attribute, User_Feature_Definitions, DataVersion, DataSource, ImagingDataCommonsVersion
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
@@ -102,14 +102,9 @@ class Cohort(models.Model):
     # Returns a DataVersion QuerySet
     def get_data_versions(self):
 
-        data_versions = None
+        data_versions = ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True))
 
-        groups = self.filter_group_set.all()
-
-        for group in groups:
-            data_versions = (data_versions | group.data_versions.all()) if data_versions else group.data_versions.all()
-
-        return data_versions
+        return data_versions.distinct()
 
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     # Return values can be
@@ -148,10 +143,9 @@ class Cohort(models.Model):
         filter_groups = self.filter_group_set.all()
 
         for fg in filter_groups:
-            dvs = fg.data_versions.all()
             result.append({
                 'id': fg.id,
-                'data_versions': [x.name for x in dvs],
+                'data_version': fg.data_version.get_display(),
                 'filters': fg.filter_set.all().get_filter_set_array()
             })
         return result
@@ -244,7 +238,7 @@ class Filter_Group(models.Model):
     id = models.AutoField(primary_key=True)
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
-    data_versions = models.ManyToManyField(DataVersion)
+    data_version = models.ForeignKey(ImagingDataCommonsVersion, on_delete=models.CASCADE, null=True)
 
     def get_filter_set(self):
         return self.filter_set.all().get_filter_set()
