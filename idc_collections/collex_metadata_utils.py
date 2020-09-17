@@ -19,7 +19,7 @@ import time
 import copy
 import re
 from time import sleep
-from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType
+from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from django.conf import settings
@@ -128,115 +128,127 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             str((stop - start))
         ))
 
-        for source in source_metadata['facets']:
-            source_name = ":".join(source.split(":")[0:2])
-            facet_set = source_metadata['facets'][source]['facets']
-            for dataset in data_sets:
-                if dataset.data_type in source_data_types[int(source.split(":")[-1])]:
-                    set_name = dataset.get_set_name()
-                    if dataset.data_type in data_types and set_name in attr_sets:
-                        attr_display_vals = Attribute_Display_Values.objects.filter(
-                            attribute__id__in=attr_sets[set_name]).to_dict()
-                        if dataset.data_type == DataSetType.DERIVED_DATA:
-                            attr_cats = attr_sets[set_name].get_attr_cats()
-                            for attr in facet_set:
-                                if attr in attr_by_source[set_name]['attributes']:
-                                    source_name = "{}:{}".format(source_name.split(":")[0], attr_cats[attr]['cat_name'])
-                                    if source_name not in attr_by_source[set_name]:
-                                        attr_by_source[set_name][source_name] = {'attributes': {}}
-                                    attr_by_source[set_name][source_name]['attributes'][attr] = \
-                                        attr_by_source[set_name]['attributes'][attr]
-                                    this_attr = attr_by_source[set_name]['attributes'][attr]['obj']
-                                    values = []
-                                    for val in facet_set[attr]:
-                                        if val == 'min_max':
-                                            attr_by_source[set_name][source_name]['attributes'][attr][val] = \
-                                            facet_set[attr][val]
+        filtered_attr_by_source = None
+
+        for counts in ['facets', 'filtered_facets']:
+            facet_counts = source_metadata.get(counts,{})
+            _attr_by_source = attr_by_source
+            if counts == 'filtered_facets' and facet_counts:
+                filtered_attr_by_source = copy.deepcopy(attr_by_source)
+                _attr_by_source = filtered_attr_by_source
+            else:
+                filtered_attr_by_source = {}
+            for source in facet_counts:
+                source_name = ":".join(source.split(":")[0:2])
+                facet_set = facet_counts[source]['facets']
+                for dataset in data_sets:
+                    if dataset.data_type in source_data_types[int(source.split(":")[-1])]:
+                        set_name = dataset.get_set_name()
+                        if dataset.data_type in data_types and set_name in attr_sets:
+                            attr_display_vals = Attribute_Display_Values.objects.filter(
+                                attribute__id__in=attr_sets[set_name]).to_dict()
+                            if dataset.data_type == DataSetType.DERIVED_DATA:
+                                attr_cats = attr_sets[set_name].get_attr_cats()
+                                for attr in facet_set:
+                                    if attr in _attr_by_source[set_name]['attributes']:
+                                        source_name = "{}:{}".format(source_name.split(":")[0], attr_cats[attr]['cat_name'])
+                                        if source_name not in _attr_by_source[set_name]:
+                                            _attr_by_source[set_name][source_name] = {'attributes': {}}
+                                        _attr_by_source[set_name][source_name]['attributes'][attr] = \
+                                            _attr_by_source[set_name]['attributes'][attr]
+                                        this_attr = _attr_by_source[set_name]['attributes'][attr]['obj']
+                                        values = []
+                                        for val in facet_set[attr]:
+                                            if val == 'min_max':
+                                                _attr_by_source[set_name][source_name]['attributes'][attr][val] = \
+                                                facet_set[attr][val]
+                                            else:
+                                                displ_val = val if this_attr.preformatted_values else attr_display_vals.get(
+                                                    this_attr.id, {}).get(val, None)
+                                                values.append({
+                                                    'value': val,
+                                                    'display_value': displ_val,
+                                                    'units': this_attr.units,
+                                                    'count': facet_set[attr][val] if val in facet_set[attr] else 0
+                                                })
+                                        _attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
+                            else:
+                                _attr_by_source[set_name]['All'] = {'attributes': _attr_by_source[set_name]['attributes']}
+                                for attr in facet_set:
+                                    if attr in _attr_by_source[set_name]['attributes']:
+                                        this_attr = _attr_by_source[set_name]['attributes'][attr]['obj']
+                                        values = []
+                                        for val in facet_counts[source]['facets'][attr]:
+                                            if val == 'min_max':
+                                                _attr_by_source[set_name]['All']['attributes'][attr][val] = facet_set[attr][
+                                                    val]
+                                            else:
+                                                displ_val = val if this_attr.preformatted_values else attr_display_vals.get(
+                                                    this_attr.id, {}).get(val, None)
+                                                values.append({
+                                                    'value': val,
+                                                    'display_value': displ_val,
+                                                    'count': facet_set[attr][val] if val in facet_set[attr] else 0
+                                                })
+                                        if attr == 'bmi':
+                                            sortDic = {'underweight': 0, 'normal weight': 1, 'overweight': 2, 'obese': 3,
+                                                       'None': 4}
+                                            _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortDic[x['value']])
                                         else:
-                                            displ_val = val if this_attr.preformatted_values else attr_display_vals.get(
-                                                this_attr.id, {}).get(val, None)
-                                            values.append({
-                                                'value': val,
-                                                'display_value': displ_val,
-                                                'units': this_attr.units,
-                                                'count': facet_set[attr][val] if val in facet_set[attr] else 0
-                                            })
-                                    attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
-                        else:
-                            attr_by_source[set_name]['All'] = {'attributes': attr_by_source[set_name]['attributes']}
-                            for attr in facet_set:
-                                if attr in attr_by_source[set_name]['attributes']:
-                                    this_attr = attr_by_source[set_name]['attributes'][attr]['obj']
-                                    values = []
-                                    for val in source_metadata['facets'][source]['facets'][attr]:
-                                        if val == 'min_max':
-                                            attr_by_source[set_name]['All']['attributes'][attr][val] = facet_set[attr][
-                                                val]
-                                        else:
-                                            displ_val = val if this_attr.preformatted_values else attr_display_vals.get(
-                                                this_attr.id, {}).get(val, None)
-                                            values.append({
-                                                'value': val,
-                                                'display_value': displ_val,
-                                                'count': facet_set[attr][val] if val in facet_set[attr] else 0
-                                            })
-                                    if attr == 'bmi':
-                                        sortDic = {'underweight': 0, 'normal weight': 1, 'overweight': 2, 'obese': 3,
-                                                   'None': 4}
-                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortDic[x['value']])
-                                    else:
-                                        attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
+                                            _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
 
-        for set in attr_by_source:
-            for source in attr_by_source[set]:
-                if source == 'attributes':
-                    continue
-                if is_dicofdic:
-                    for x in list(attr_by_source[set][source]['attributes'].keys()):
-                        if (isinstance(attr_by_source[set][source]['attributes'][x]['vals'], list) and (
-                                len(attr_by_source[set][source]['attributes'][x]['vals']) > 0)):
-                            attr_by_source[set][source]['attributes'][x] = {y['value']: {
-                                'display_value': y['display_value'], 'count': y['count']
-                            } for y in attr_by_source[set][source]['attributes'][x]['vals']}
-                        else:
-                            attr_by_source[set][source]['attributes'][x] = {}
+        for _attr_by_source in [filtered_attr_by_source, attr_by_source]:
+            for set in _attr_by_source:
+                for source in _attr_by_source[set]:
+                    if source == 'attributes':
+                        continue
+                    if is_dicofdic:
+                        for x in list(_attr_by_source[set][source]['attributes'].keys()):
+                            if (isinstance(_attr_by_source[set][source]['attributes'][x]['vals'], list) and (
+                                    len(_attr_by_source[set][source]['attributes'][x]['vals']) > 0)):
+                                _attr_by_source[set][source]['attributes'][x] = {y['value']: {
+                                    'display_value': y['display_value'], 'count': y['count']
+                                } for y in _attr_by_source[set][source]['attributes'][x]['vals']}
+                            else:
+                                _attr_by_source[set][source]['attributes'][x] = {}
 
-                    if set == 'origin_set':
-                        context['collections'] = {
-                        a: attr_by_source[set][source]['attributes']['collection_id'][a]['count'] for a in
-                        attr_by_source[set][source]['attributes']['collection_id']}
-                        context['collections']['All'] = source_metadata['total']
-                else:
-                    if set == 'origin_set':
-                        collex = attr_by_source[set][source]['attributes']['collection_id']
-                        if collex['vals']:
-                            context['collections'] = {a['value']: a['count'] for a in collex['vals'] if
-                                                      a['value'] in collectionsList}
-                        else:
-                            context['collections'] = {a.name: 0 for a in Collection.objects.filter(active=True, collection_id__in=collectionsList)}
-                        context['collections']['All'] = source_metadata['total']
+                        if set == 'origin_set':
+                            context['collections'] = {
+                            a: _attr_by_source[set][source]['attributes']['collection_id'][a]['count'] for a in
+                            _attr_by_source[set][source]['attributes']['collection_id']}
+                            context['collections']['All'] = source_metadata['total']
+                    else:
+                        if set == 'origin_set':
+                            collex = _attr_by_source[set][source]['attributes']['collection_id']
+                            if collex['vals']:
+                                context['collections'] = {a['value']: a['count'] for a in collex['vals'] if
+                                                          a['value'] in collectionsList}
+                            else:
+                                context['collections'] = {a.name: 0 for a in Collection.objects.filter(active=True, collection_id__in=collectionsList)}
+                            context['collections']['All'] = source_metadata['total']
 
-                    attr_by_source[set][source]['attributes'] = [{
-                        'name': x,
-                        'id': attr_by_source[set][source]['attributes'][x]['obj'].id,
-                        'display_name': attr_by_source[set][source]['attributes'][x]['obj'].display_name,
-                        'values': attr_by_source[set][source]['attributes'][x]['vals'],
-                        'units': attr_by_source[set][source]['attributes'][x]['obj'].units,
-                        'min_max': attr_by_source[set][source]['attributes'][x].get('min_max', None)
-                    } for x, val in sorted(attr_by_source[set][source]['attributes'].items())]
+                        _attr_by_source[set][source]['attributes'] = [{
+                            'name': x,
+                            'id': _attr_by_source[set][source]['attributes'][x]['obj'].id,
+                            'display_name': _attr_by_source[set][source]['attributes'][x]['obj'].display_name,
+                            'values': _attr_by_source[set][source]['attributes'][x]['vals'],
+                            'units': _attr_by_source[set][source]['attributes'][x]['obj'].units,
+                            'min_max': _attr_by_source[set][source]['attributes'][x].get('min_max', None)
+                        } for x, val in sorted(_attr_by_source[set][source]['attributes'].items())]
 
-            if not counts_only:
-                attr_by_source[set]['docs'] = source_metadata['docs']
+                if not counts_only:
+                    attr_by_source[set]['docs'] = source_metadata['docs']
 
-        for key, source_set in attr_by_source.items():
-            sources = list(source_set.keys())
-            for key in sources:
-                if key == 'attributes':
-                    source_set.pop(key)
+            for key, source_set in _attr_by_source.items():
+                sources = list(source_set.keys())
+                for key in sources:
+                    if key == 'attributes':
+                        source_set.pop(key)
 
         attr_by_source['total'] = source_metadata['total']
 
         context['set_attributes'] = attr_by_source
+        context['filtered_set_attributes'] =  filtered_attr_by_source
         context['filters'] = filters
 
         prog_attr_id = Attribute.objects.get(name='program_name').id
@@ -274,6 +286,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 
         if is_json:
             attr_by_source['programs'] = programSet
+            attr_by_source['filtered_counts'] = filtered_attr_by_source
             return attr_by_source
         else:
             context['order'] = {'derived_set': ['dicom_derived_all:segmentation', 'dicom_derived_all:qualitative',
@@ -306,7 +319,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
         source_type = sources.first().source_type if sources else DataSource.SOLR
 
         if not versions:
-            versions = DataVersion.objects.filter(active=True)
+            versions = ImagingDataCommonsVersion.objects.get(active=true).dataversion_set.all().distinct()
         if not versions.first().active and not sources:
             source_type = DataSource.BIGQUERY
 
@@ -332,15 +345,17 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
         elif source_type == DataSource.SOLR:
             results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only)
 
-        for source in results['facets']:
-            facets = results['facets'][source]['facets']
-            if 'BodyPartExamined' in facets:
-                if 'Kidney' in facets['BodyPartExamined']:
-                    if 'KIDNEY' in facets['BodyPartExamined']:
-                        facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
-                    else:
-                        facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
-                    del facets['BodyPartExamined']['Kidney']
+        for counts in ['facets', 'filtered_facets']:
+            facet_set = results.get(counts,{})
+            for source in facet_set:
+                facets = facet_set[source]['facets']
+                if 'BodyPartExamined' in facets:
+                    if 'Kidney' in facets['BodyPartExamined']:
+                        if 'KIDNEY' in facets['BodyPartExamined']:
+                            facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
+                        else:
+                            facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
+                        del facets['BodyPartExamined']['Kidney']
 
         if not counts_only:
             if 'SeriesNumber' in fields:
@@ -359,6 +374,9 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
+
+    if filters:
+        results['filtered_facets'] = {}
 
     source_versions = sources.get_source_versions()
     filter_attrs = sources.get_source_attrs(for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]t[e]|_btw',x) else x for x in filters.keys()], with_set_map=False)
@@ -380,11 +398,15 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
             search_child_records_by=search_child_records
         ) if filters else None
         solr_facets = None
+        solr_facets_filtered = None
         if not records_only:
             solr_facets = build_solr_facets(attrs_for_faceting['sources'][source.id]['attrs'],
                                             filter_tags=solr_query['filter_tags'] if solr_query else None,
                                             unique=source.count_col, min_max=True)
 
+            if filters:
+                solr_facets_filtered = build_solr_facets(attrs_for_faceting['sources'][source.id]['attrs'], None,
+                                                         unique=source.count_col, min_max=True)
         query_set = []
 
         if solr_query:
@@ -429,6 +451,19 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'counts_only': True,
                 'fields': None
             })
+
+            solr_count_filtered_result = None
+            if solr_facets_filtered:
+                solr_count_filtered_result = query_solr_and_format_result({
+                    'collection': source.name,
+                    'facets': solr_facets_filtered,
+                    'fqs': query_set,
+                    'query_string': None,
+                    'limit': 0,
+                    'counts_only': True,
+                    'fields': None
+                })
+
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
 
@@ -437,6 +472,11 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
             results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
                 'facets': solr_result['facets']
             }
+
+            if solr_count_filtered_result:
+                results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
+                    'facets': solr_count_filtered_result['facets']
+                }
 
         if source.has_data_type(DataSetType.IMAGE_DATA) and not counts_only:
             solr_result = query_solr_and_format_result({
