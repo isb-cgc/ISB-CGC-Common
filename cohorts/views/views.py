@@ -920,10 +920,10 @@ def download_cohort_manifest(request, cohort_id):
         manifest = None
 
         # Fields we need to fetch
-        field_list = ["PatientID", "collection_id", "Program", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_generation", "gcs_bucket",]
+        field_list = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_generation", "gcs_bucket",]
 
         # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
-        csv_cols = ["PatientID", "collection_id", "Program", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_path"]
+        csv_cols = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_path"]
 
         items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES)
 
