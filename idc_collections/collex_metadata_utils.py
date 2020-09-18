@@ -133,7 +133,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         for counts in ['facets', 'filtered_facets']:
             facet_counts = source_metadata.get(counts,{})
             _attr_by_source = attr_by_source
-            if counts == 'filtered_facets' and facet_counts:
+            if counts == 'filtered_facets' and len(facet_counts):
                 filtered_attr_by_source = copy.deepcopy(attr_by_source)
                 _attr_by_source = filtered_attr_by_source
             else:
@@ -197,7 +197,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                         else:
                                             _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
 
-        for _attr_by_source in [filtered_attr_by_source, attr_by_source]:
+        for which, _attr_by_source in {'filtered_attr_by_source': filtered_attr_by_source, 'attr_by_source': attr_by_source}.items():
             for set in _attr_by_source:
                 for source in _attr_by_source[set]:
                     if source == 'attributes':
@@ -237,7 +237,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         } for x, val in sorted(_attr_by_source[set][source]['attributes'].items())]
 
                 if not counts_only:
-                    attr_by_source[set]['docs'] = source_metadata['docs']
+                    _attr_by_source[set]['docs'] = source_metadata['docs']
 
             for key, source_set in _attr_by_source.items():
                 sources = list(source_set.keys())
