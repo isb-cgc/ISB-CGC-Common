@@ -11,5 +11,5 @@ urlpatterns = [
     url(r'^api/attributes/$', views.attributes_list_api, name='attributes_list_api'),
     url(r'^api/programs/$', views.public_program_list_api, name='public_programs_api'),
     url(r'^api/programs/(?P<program_name>[A-Za-z0-9_-]+)/$', views.program_detail_api, name='program_detail_api'),
-    url(r'^api/(?P<idc_version>[A-Za-z0-9_-]+)/$', views.collections_list_api, name='collections_api'),
+    # url(r'^api/(?P<idc_version>[A-Za-z0-9_-]+)/$', views.collections_list_api, name='collections_api'),
 ]

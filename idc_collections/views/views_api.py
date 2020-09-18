@@ -16,7 +16,7 @@
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
-from idc_collections.models import Program, Collection, DataVersion, Attribute, Attribute_Ranges
+from idc_collections.models import Program, Collection, DataVersion, Attribute, Attribute_Ranges, ImagingDataCommonsVersion
 from django.views.decorators.http import require_http_methods
 
 from solr_helpers import *
@@ -34,23 +34,25 @@ BLACKLIST_RE = settings.BLACKLIST_RE
 @require_http_methods(["GET"])
 def versions_list_api(request):
 
-    versions = DataVersion.objects.get_queryset()
+    idc_versions = ImagingDataCommonsVersion.objects.all()
+    # versions = DataVersion.objects.get_queryset()
 
-    versions_info = {"versions":
-        [
-            {
-                "version_id": "1",
-                "components":
-                [
-                    {
-                        "name": version.name,
-                        "version": version.version,
-                    }
-                    for version in versions
-                ]
-            }
-        ]
-    }
+    versions_info = {"versions": []}
+    for version in idc_versions:
+        version_data = dict(
+                name = version.name,
+                version_number = version.version_number,
+                version_uid = version.version_uid,
+                data_active = version.date_active,
+                active = version.active,
+                data_sources = []
+        )
+        for data_source in version.get_data_sources().filter(source_type='B'):
+            data_source_data = dict(
+                name = data_source.name,
+            )
+            version_data['data_sources'].append(data_source_data)
+        versions_info["versions"].append(version_data)
 
     return JsonResponse(versions_info)
 
@@ -133,55 +135,7 @@ def program_detail_api(request, program_name=None ):
                 "active": collection.active,
                 "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
                 "owner_id": collection.owner_id,
-                "IDC_versions": ["1"]}
-            collections_list.append(data)
-
-        collections_info = {"collections": collections_list}
-
-    except ObjectDoesNotExist as e:
-        logger.error("[ERROR] Specified program does not exist")
-        logger.exception(e)
-        collections_info = {
-            "message": "Specified program does not exist",
-            "code": 400
-        }
-    except Exception as e:
-        logger.error("[ERROR] While trying to retrieve program details")
-        logger.exception(e)
-        collections_info = {
-            "message": "Error while trying to retrieve program details.",
-            "code": 400
-        }
-
-    return JsonResponse(collections_info)
-
-
-@require_http_methods(["GET"])
-def collections_list_api(request, idc_version=None ):
-    # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
-
-    try:
-        # collections = program.collection_set.all()
-        collections = Collection.objects.all()
-
-        collections_list = []
-        for collection in collections:
-            dvs = collection.data_versions.all()
-            data = {
-                "collection_id": collection.collection_id,
-                "description": collection.description,
-                "date_updated": collection.date_updated,
-                "subject_count": collection.subject_count,
-                "image_types": collection.image_types,
-                "cancer_type": collection.cancer_type,
-                "doi": collection.doi,
-                "supporting_data": collection.supporting_data,
-                "species": collection.species,
-                "location": collection.location,
-                "active": collection.active,
-                "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
-                "owner_id": collection.owner_id,
-                "IDC_versions": ["1"]}
+                "IDC_versions": ["1.0"]}
             collections_list.append(data)
 
         collections_info = {"collections": collections_list}
@@ -205,67 +159,51 @@ def collections_list_api(request, idc_version=None ):
 
 
 # @require_http_methods(["GET"])
-# def collection_detail_api(request, program_name, collection_name):
+# def collections_list_api(request, idc_version=None ):
 #     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
 #
-#     collection_info = {}
 #     try:
-#         collection = Collection.objects.get(name=collection_name)
+#         # collections = program.collection_set.all()
+#         collections = Collection.objects.all()
+#
+#         collections_list = []
+#         for collection in collections:
+#             dvs = collection.data_versions.all()
+#             data = {
+#                 "collection_id": collection.collection_id,
+#                 "description": collection.description,
+#                 "date_updated": collection.date_updated,
+#                 "subject_count": collection.subject_count,
+#                 "image_types": collection.image_types,
+#                 "cancer_type": collection.cancer_type,
+#                 "doi": collection.doi,
+#                 "supporting_data": collection.supporting_data,
+#                 "species": collection.species,
+#                 "location": collection.location,
+#                 "active": collection.active,
+#                 "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
+#                 "owner_id": collection.owner_id,
+#                 "IDC_versions": ["1"]}
+#             collections_list.append(data)
+#
+#         collections_info = {"collections": collections_list}
 #
 #     except ObjectDoesNotExist as e:
-#         collection_info = {
-#             "message": "Collection {} does not exist".format(collection_name),
-#             "code": "",
+#         logger.error("[ERROR] Specified program does not exist")
+#         logger.exception(e)
+#         collections_info = {
+#             "message": "Specified program does not exist",
+#             "code": 400
 #         }
-#     else:
+#     except Exception as e:
+#         logger.error("[ERROR] While trying to retrieve program details")
+#         logger.exception(e)
+#         collections_info = {
+#             "message": "Error while trying to retrieve program details.",
+#             "code": 400
+#         }
 #
-#         attribute_type = request.GET['attribute_type']
-#         version = ""
-#         try:
-#             if 'version' in request.GET:
-#                 version = request.GET["version"]
-#                 dataVersion = collection.data_versions.get(data_type=attribute_type, version=request.GET["version"])
-#             else:
-#                 dataVersion = collection.data_versions.get(data_type=attribute_type, active=True)
-#                 version = dataVersion.version
-#         except ObjectDoesNotExist as e:
-#             collection_info = {
-#                 "message": "Attribute type/version {}/{} does not exist".format(attribute_type, version),
-#                 "code": "",
-#              }
-#         else:
-#             try:
-#                 bq_tables = dataVersion.datasource_set.filter(source_type='B')
+#     return JsonResponse(collections_info)
 #
-#                 fields = []
-#                 for table in bq_tables:
-#                     for attribute in table.attribute_set.all():
-#                         fields.append({
-#                             "id": attribute.id,
-#                             "name": attribute.name,
-#                             "display_name": attribute.display_name,
-#                             "description": attribute.description,
-#                             "data_type": attribute.data_type,
-#                             "active": attribute.active,
-#                             "preformatted_values": attribute.preformatted_values,
-#                             "bq_table": table.name
-#                             # } for attribute in attributes ]
-#                         })
-#
-#                 collection_info = {"collection":{
-#                     "collection_name": collection_name,
-#                     "attribute_type": attribute_type,
-#                     "version": version,
-#                     "active": dataVersion.active,
-#                     "fields": fields
-#                 }}
-#
-#             except ObjectDoesNotExist as e:
-#                 collection_info = {
-#                     "message": "Program/collection {}/{} does not exist".format(program_name, collection_name),
-#                     "code": 400,
-#                 }
-#
-#     return JsonResponse(collection_info)
 
 

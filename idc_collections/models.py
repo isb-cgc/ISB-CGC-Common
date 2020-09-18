@@ -129,6 +129,43 @@ class DataSetType(models.Model):
         return self.SET_TYPE_NAMES[self.set_type]
 
 
+class ImagingDataCommonsVersionQuerySet(models.QuerySet):
+    def get_data_sources(self):
+        sources = None
+        for idcdv in self.all():
+            versions = idcdv.dataversion_set.all().distinct()
+            if not sources:
+                sources = versions.get_data_sources()
+            else:
+                sources = sources | versions.get_data_sources()
+        return sources.distinct()
+
+class ImagingDataCommonsVersionManager(models.Manager):
+    def get_queryset(self):
+        return ImagingDataCommonsVersionQuerySet(self.model, using=self._db)
+
+class ImagingDataCommonsVersion(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False)
+    version_number = models.CharField(max_length=128, null=False, blank=False)
+    version_uid = models.CharField(max_length=128, null=True)
+    date_active = models.DateField(auto_now_add=True, null=False, blank=False)
+    active = models.BooleanField(default=True, null=False, blank=False)
+    objects = ImagingDataCommonsVersionManager()
+
+    def get_data_sources(self):
+        return self.dataversion_set.all().distinct().get_data_sources().distinct()
+
+    def get_display(self):
+        return self.__str__()
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return "{} Version {} {}".format(self.name, self.version_number, self.date_active)
+
+
 class DataVersionQuerySet(models.QuerySet):
     def get_data_sources(self):
         sources = None
@@ -147,6 +184,7 @@ class DataVersion(models.Model):
     version = models.CharField(max_length=16, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False)
     programs = models.ManyToManyField(Program)
+    idc_versions = models.ManyToManyField(ImagingDataCommonsVersion)
     active = models.BooleanField(default=True)
     objects = DataVersionManager()
 
@@ -154,7 +192,7 @@ class DataVersion(models.Model):
         return DataVersion.objects.get(active=True, name=name).version
 
     def __str__(self):
-        return "{} ({})".format(self.name, self.version)
+        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.all())
 
 
 class CollectionQuerySet(models.QuerySet):
@@ -208,12 +246,12 @@ class Collection(models.Model):
     program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
-        return self.program.all()
+        return self.program
 
     def __str__(self):
-        return "{} ({}), {}, Programs: {}".format(
+        return "{} ({}), {}, Program: {}".format(
             self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
-            str(self.program.all())
+            str(self.program.short_name)
         )
 
     def get_collection_type(self):

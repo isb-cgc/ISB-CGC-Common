@@ -22,7 +22,7 @@ import logging
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
 from .models import Cohort, Cohort_Perms, Filter, Filter_Group
-from idc_collections.models import Attribute, DataVersion
+from idc_collections.models import Attribute, DataVersion, ImagingDataCommonsVersion, Collection
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
 
 
@@ -155,20 +155,29 @@ def build_hierarchy(objects, rows, return_level, reorder):
             objects[row[0]][row[1]][row[2]][row[3]].append(row[4])
     return objects
 
+def get_idc_version(version_number=None):
+    if not version_number:
+        # No version specified. Use the current version
+        data_version = ImagingDataCommonsVersion.objects.get(active=True)
+    else:
+        data_version = ImagingDataCommonsVersion.objects.get(version_number=version_number)
+    return data_version
+
+
 # Get the filterSet of a cohort
 # get_filters_as_dict returns an array of filter groups, but can currently only define
 # a filter of one group. So take just the first group and also delete the attribute id
 def get_filterSet_api(cohort):
-    
-    version = cohort.get_data_versions()
+
+    version = cohort.get_data_versions()[0].version_number
     filter_group = cohort.get_filters_as_dict()[0]
 
-    filterSet = {'idc_version': "1"}
+    filterSet = {'idc_version': version}
     filters = {filter['name']: filter['values'] for filter in filter_group['filters']}
     filterSet['filters'] = filters
     return filterSet
 
-def get_cohort_objects(request, filters, data_versions, cohort_info):
+def get_cohort_objects(request, filters, data_version, cohort_info):
 
     levels = {'Instance': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID'],
               'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
@@ -193,12 +202,12 @@ def get_cohort_objects(request, filters, data_versions, cohort_info):
         # Accumulate the SQL for each call
         # if request.GET['return_sql'] in [True, 'True']:
         #     sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
-        #         filters=filters, fields=select, data_versions=data_versions,
+        #         filters=filters, fields=select, data_version=data_version,
         #         limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
         #         order_by=select[-1:]))
 
         results = get_bq_metadata(
-            filters=filters, fields=select, data_versions=data_versions,
+            filters=filters, fields=select, data_version=data_version,
             limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
             order_by=select[-1:])
         if results['totalFound'] == None:
@@ -276,9 +285,11 @@ def _cohort_detail_api(request, cohort, cohort_info):
                 collections.append(collection.lower().replace('-', '_'))
             filters['collection_id'] = collections
 
-    data_versions = filter_group.data_versions.all()
+    # data_versions = filter_group.data_versions.all()
+    data_version = filter_group.data_version
 
-    cohort_info = get_cohort_objects(request, filters, data_versions, cohort_info)
+    # cohort_info = get_cohort_objects(request, filters, data_versions, cohort_info)
+    cohort_info = get_cohort_objects(request, filters, data_version, cohort_info)
 
     return cohort_info
 
@@ -290,7 +301,7 @@ def form_rows(data):
     return rows
 
 # Get a list of GCS URLs or CRDC DOIs of the instances in the cohort
-def get_cohort_instances(request, filters, data_versions, cohort_info):
+def get_cohort_instances(request, filters, data_version, cohort_info):
 
     rows_left = fetch_count = int(request.GET['fetch_count'])
     page = int(request.GET['page'])
@@ -314,7 +325,7 @@ def get_cohort_instances(request, filters, data_versions, cohort_info):
         #     order_by=select[-1:]))
 
         results = get_bq_metadata(
-            filters=filters, fields=select, data_versions=data_versions,
+            filters=filters, fields=select, data_version=data_version,
             limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
             order_by=select[-1:])
         if results['totalFound'] == None:
@@ -367,9 +378,9 @@ def _cohort_manifest_api(request, cohort, cohort_info):
                 collections.append(collection.lower().replace('-', '_'))
             filters['collection_id'] = collections
 
-    data_versions = filter_group.data_versions.all()
+    data_version = filter_group.data_version
 
-    cohort_info = get_cohort_instances(request, filters, data_versions, cohort_info)
+    cohort_info = get_cohort_instances(request, filters, data_version, cohort_info)
 
     return cohort_info
 
@@ -386,10 +397,22 @@ def _cohort_preview_manifest_api(request, data, cohort_info):
     if 'collection_id' in filters:
         filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
 
-    # Get versions of datasets to be filtered, and link to filter group
-    data_versions = get_dataversions(filters)
 
-    cohort_info = get_cohort_instances(request, filters, data_versions, cohort_info)
+    # Get versions of datasets to be filtered, and link to filter group
+    # data_version = data['filterSet']['idc_version'] if data['filterSet']['idc_version'] else ImagingDataCommonsVersion.objects.filter(active=True)
+    if not data['filterSet']['idc_version']:
+        # No version specified. Use the current version
+        data_version = ImagingDataCommonsVersion.objects.get(active=True)
+    else:
+        try:
+            data_version = ImagingDataCommonsVersion.objects.get(version_number=data['filterSet']['idc_version'])
+        except:
+            return dict(
+                message = "Invalid IDC version {}".format(data['filterSet']['idc_version']),
+                code = 400
+            )
+
+    cohort_info = get_cohort_instances(request, filters, data_version, cohort_info)
 
     return cohort_info
 
@@ -414,7 +437,7 @@ def get_dataversions(filterset):
     #
     # return (imaging_version, bioclin_version)
 
-def _cohort_preview_api(request, data, cohort_info):
+def _cohort_preview_api(request, data, cohort_info, data_version):
     # filterset = data['filterSet']['attributes']
     filters = data['filterSet']['filters']
 
@@ -424,13 +447,14 @@ def _cohort_preview_api(request, data, cohort_info):
             "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
             "code": 400
             }
+
     if 'collection_id' in filters:
         filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
 
-    # Get versions of datasets to be filtered, and link to filter group
-    data_versions = get_dataversions(filters)
+    # # Get versions of datasets to be filtered, and link to filter group
+    # data_versions = get_dataversions(filters)
 
-    cohort_info = get_cohort_objects(request, filters, data_versions, cohort_info)
+    cohort_info = get_cohort_objects(request, filters, data_version, cohort_info)
 
     return cohort_info
 

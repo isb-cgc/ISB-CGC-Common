@@ -19,7 +19,7 @@ import time
 import copy
 import re
 from time import sleep
-from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType
+from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from django.conf import settings
@@ -45,33 +45,57 @@ logger = logging.getLogger('main_logger')
 #         'data_type': <data type of the this source, per its version>
 #     }
 # }
-def _build_attr_by_source(attrs, data_versions, source_type):
+def _build_attr_by_source(attrs, data_version, source_type, attr_data=None):
 
     attr_by_src = {'sources': {}}
 
+    if not attr_data:
+        sources = data_version.get_data_sources().filter(
+            source_type=DataSource.BIGQUERY)
+        attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
     for attr in attrs:
         stripped_attr = attr if (not '_' in attr) else \
             attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte', 'btw', 'lte', 'lt'] else \
             attr.rsplit('_', 1)[0]
 
-        attribute = Attribute.objects.get(active=True, name=stripped_attr)
-        sources = attribute.data_sources.all().filter(versions__in=data_versions, source_type=source_type).distinct()
-        for source in sources:
-            if source.name not in attr_by_src["sources"]:
-                attr_by_src["sources"][source.name] = {
-                    'name': source.name,
-                    'id': source.id,
-                    'alias': source.name.split(".")[-1].lower().replace("-", "_"),
-                    'list': [attr],
-                    'attrs': [attribute],
-                    # 'data_type': source.version.datasettype.get_set_data_type(),
-                    # 'set_type': source.version.get_set_type()
-                    'data_type': source.data_sets.get().data_type,
-                    'set_type': source.data_sets.get().set_type
-                }
-            else:
-                attr_by_src["sources"][source.name]['list'].append(attr)
-                attr_by_src["sources"][source.name]['attrs'].append(attribute)
+        # attribute = Attribute.objects.get(active=True, name=stripped_attr)
+        # sources = attribute.data_sources.all().filter(versions__in=data_versions, source_type=source_type).distinct()
+
+
+        for id, source in attr_data['sources'].items():
+            if stripped_attr in source['list']:
+                source_name = source['name']
+                if source_name not in attr_by_src["sources"]:
+                    attr_by_src["sources"][source_name] = {
+                        'name': source_name,
+                        'id': source['id'],
+                        'alias': source_name.split(".")[-1].lower().replace("-", "_"),
+                        'list': [attr],
+                        'attrs': [stripped_attr],
+                        # 'data_type': source.version.datasettype.get_set_data_type(),
+                        # 'set_type': source.version.get_set_type()
+                        'data_type': source['data_sets'].first().data_type,
+                        'set_type':  source['data_sets'].first().set_type
+                    }
+                else:
+                    attr_by_src["sources"][source_name]['list'].append(attr)
+                    attr_by_src["sources"][source_name]['attrs'].append(stripped_attr)
+        # for source in sources:
+        #     if source.name not in attr_by_src["sources"]:
+        #         attr_by_src["sources"][source.name] = {
+        #             'name': source.name,
+        #             'id': source.id,
+        #             'alias': source.name.split(".")[-1].lower().replace("-", "_"),
+        #             'list': [attr],
+        #             'attrs': [attribute],
+        #             # 'data_type': source.version.datasettype.get_set_data_type(),
+        #             # 'set_type': source.version.get_set_type()
+        #             'data_type': source.data_sets.get().data_type,
+        #             'set_type': source.data_sets.get().set_type
+        #         }
+        #     else:
+        #         attr_by_src["sources"][source.name]['list'].append(attr)
+        #         attr_by_src["sources"][source.name]['attrs'].append(attribute)
 
 
     return attr_by_src
@@ -698,10 +722,10 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 # fields: list of columns to return, string format only
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
 # returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
-def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True):
+def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True):
 
-    if not data_versions and not sources_and_attrs:
-        data_versions = DataVersion.objects.selected_related('datasettype').filter(active=True)
+    if not data_version and not sources_and_attrs:
+        data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
 
     if not group_by:
         group_by = fields
@@ -732,9 +756,14 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
 
     image_tables = {}
 
+    sources = data_version.get_data_sources().filter(
+        source_type=DataSource.BIGQUERY)
+    attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
+
+
     if not sources_and_attrs:
-        filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_versions, DataSource.BIGQUERY)
-        field_attr_by_bq = _build_attr_by_source(fields, data_versions, DataSource.BIGQUERY)
+        filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
+        field_attr_by_bq = _build_attr_by_source(fields, data_version, DataSource.BIGQUERY, attr_data)
     else:
         filter_attr_by_bq = sources_and_attrs['filters']
         field_attr_by_bq = sources_and_attrs['fields']
@@ -765,9 +794,11 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
     if order_by:
         new_order = []
         for order in order_by:
-            order_table = Attribute.objects.get(active=True, name=order).data_sources.all().filter(versions__in=data_versions, source_type=DataSource.BIGQUERY).distinct().first()
-            # new_order.append("{}.{}".format(table_info[order_table.id]['alias'],order))
-            new_order.append("{}.{}".format(table_info[order_table.name]['alias'], order))
+            for id, source in attr_data['sources'].items():
+                if order in source['list']:
+                    order_table = source['name']
+                    new_order.append("{}.{}".format(table_info[order_table]['alias'], order))
+                    break
         order_by = new_order
 
     if group_by:
@@ -779,13 +810,36 @@ def get_bq_metadata(filters, fields, data_versions, sources_and_attrs=None, grou
                 source_set.extend(list(sources_and_attrs['fields']['sources'].keys()))
                 group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(id__in=set(source_set)).distinct().first()
             else:
-                # group_table = Attribute.objects.get(active=True, name=grouping).data_sources.select_related('version').all().filter(version__in=data_versions,
+                # group_table = Attribute.objects.get(active=True, name=grouping).data_sources.select_related('version').all().filter(version__in=data_version,
                 #                                                                                       source_type=DataSource.BIGQUERY).distinct().first()
-                group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(versions__in=data_versions,
-                                            source_type=DataSource.BIGQUERY).distinct().first()
-            # new_groups.append("{}.{}".format(table_info[group_table.id]['alias'], grouping))
-            new_groups.append("{}.{}".format(table_info[group_table.name]['alias'], grouping))
+                # group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(versions__in=data_versions,
+                #                             source_type=DataSource.BIGQUERY).distinct().first()
+                # new_groups.append("{}.{}".format(table_info[group_table.id]['alias'], grouping))
+                for id, source in attr_data['sources'].items():
+                    if grouping in source['list']:
+                        group_table = source['name']
+                        break
+            new_groups.append("{}.{}".format(table_info[group_table]['alias'], grouping))
+
         group_by = new_groups
+
+    # if group_by:
+    #     new_groups = []
+    #     for grouping in group_by:
+    #         group_table = None
+    #         if sources_and_attrs:
+    #             source_set = list(sources_and_attrs['filters']['sources'].keys())
+    #             source_set.extend(list(sources_and_attrs['fields']['sources'].keys()))
+    #             group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(id__in=set(source_set)).distinct().first()
+    #         else:
+    #             # group_table = Attribute.objects.get(active=True, name=grouping).data_sources.select_related('version').all().filter(version__in=data_version,
+    #             #                                                                                       source_type=DataSource.BIGQUERY).distinct().first()
+    #             group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(versions__in=data_versions,
+    #                                         source_type=DataSource.BIGQUERY).distinct().first()
+    #         # new_groups.append("{}.{}".format(table_info[group_table.id]['alias'], grouping))
+    #         new_groups.append("{}.{}".format(table_info[group_table.name]['alias'], grouping))
+    #     group_by = new_groups
+
 
     # We join image tables to corresponding ancillary tables, and union between image tables
     for image_table in image_tables:
