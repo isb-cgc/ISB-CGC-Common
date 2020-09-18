@@ -309,6 +309,8 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
             return success, messages
 
         response_dict = json_loads(resp.text)
+        logger.info('=== debug ==')
+        logger.info(response_dict)
         error_info = response_dict['errors']
 
         # This is the evaluation of the DATASETS THE SA IS TO ACCESS.
