@@ -183,8 +183,6 @@ def cohort_detail(request, cohort_id):
         })
 
         template = 'cohorts/cohort_details.html'
-
-
     except ObjectDoesNotExist as e:
         logger.exception(e)
         messages.error(request, 'The cohort you were looking for does not exist.')
