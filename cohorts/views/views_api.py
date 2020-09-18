@@ -92,7 +92,7 @@ def cohort_detail_api(request, cohort_id=0):
             }
         }
 
-        if request.GET['return_objects'] in ['True', True]:
+        if request.GET['return_level'] != 'None':
             cohort_info = _cohort_detail_api(request, cohort, cohort_info)
 
         if request.GET['return_filter'] == 'True':
