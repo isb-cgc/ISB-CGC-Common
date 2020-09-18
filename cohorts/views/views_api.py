@@ -216,27 +216,6 @@ def save_cohort_api(request):
         }
 
     return JsonResponse(response)
-# def save_cohort_api(request):
-#     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-#
-#     print(request.GET.get('email', ''))
-#     try:
-#         body = json.loads(request.body.decode('utf-8'))
-#         user = User.objects.get(email=request.GET.get('email', ''))
-#         data = body["request_data"]
-#         cohort_name = data['name']
-#         response = _save_cohort_api(user, cohort_name, data)
-#
-#     except Exception as e:
-#         logger.error("[ERROR] While trying to view the cohort file list: ")
-#         logger.exception(e)
-#         response = {
-#             "message": "There was an error saving your cohort; it may not have been saved correctly.",
-#             "code": 400,
-#             "not_found": []
-#         }
-#
-#     return JsonResponse(response)
 
 
 @csrf_exempt
@@ -271,8 +250,7 @@ def cohort_preview_api(request):
             cohort_info['cohort']["filterSet"] =  copy.deepcopy(data['filterSet'])
             cohort_info['cohort']["filterSet"]['idc_version'] = version.version_number
 
-
-        if request.GET['return_objects'] in ['True', True]:
+        if request.GET['return_level'] != 'None':
             cohort_info = _cohort_preview_api(request, data, cohort_info, version)
 
     except Exception as e:

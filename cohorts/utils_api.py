@@ -15,14 +15,10 @@
 #
 from __future__ import absolute_import
 
-from builtins import str
-import re
 import logging
 
 from django.conf import settings
-from django.core.exceptions import ObjectDoesNotExist
-from .models import Cohort, Cohort_Perms, Filter, Filter_Group
-from idc_collections.models import Attribute, DataVersion, ImagingDataCommonsVersion, Collection
+from idc_collections.models import ImagingDataCommonsVersion
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
 
 
@@ -73,7 +69,6 @@ def build_studies(collection, patient, patient_studies, dois, urls):
                         "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}".format(collection,study),
                         "region": "Multi-region",
                         "type": "gs"
-
                     }
             ]
         if len(series) > 0:
@@ -93,13 +88,12 @@ def build_series(collection, patient, study, patient_studies, dois, urls):
             series[-1]["GUID"] = ""
         if urls:
             series[-1]["AccessMethods"] = [
-                    {
-                        "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}".format(collection,
-                                        study, aseries),
-                        "region": "Multi-region",
-                        "type": "gs"
-
-                    }
+                {
+                    "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}".format(collection,
+                                    study, aseries),
+                    "region": "Multi-region",
+                    "type": "gs"
+                }
             ]
         if len(instances) > 0:
             series[-1]["instances"] = instances
@@ -117,14 +111,13 @@ def build_instances(collection, patient, study, series, study_series, dois, urls
             instances[-1]["GUID"] = ""
         if urls:
             instances[-1]["AccessMethods"] = [
-                        {
-                            "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}/{}.dcm".format(collection,
-                                            study,series,instance),
-                            "region": "Multi-region",
-                            "type": "gs"
-
-                        }
-                    ]
+                {
+                    "access_url": "gs://gcs-public-data--healthcare-tcia-{}/dicom/{}/{}/{}.dcm".format(collection,
+                                    study,series,instance),
+                    "region": "Multi-region",
+                    "type": "gs"
+                }
+            ]
     return instances
 
 
@@ -183,7 +176,8 @@ def get_cohort_objects(request, filters, data_version, cohort_info):
               'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
               'Study': ['collection_id', 'PatientID', 'StudyInstanceUID'],
               'Patient': ['collection_id', 'PatientID'],
-              'Collection': ['collection_id']
+              'Collection': ['collection_id'],
+              'None': []
               }
 
     rows_left = fetch_count = int(request.GET['fetch_count'])
@@ -196,16 +190,14 @@ def get_cohort_objects(request, filters, data_version, cohort_info):
     all_rows = []
     sql = ""
 
+    # Get the SQL
+    if request.GET['return_sql'] in [True, 'True']:
+        sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
+            filters=filters, fields=select, data_version=data_version,
+            order_by=select[-1:]))
+
     # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
     while rows_left > 0:
-        ### get_bq_string() currently broken
-        # Accumulate the SQL for each call
-        # if request.GET['return_sql'] in [True, 'True']:
-        #     sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
-        #         filters=filters, fields=select, data_version=data_version,
-        #         limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
-        #         order_by=select[-1:]))
-
         results = get_bq_metadata(
             filters=filters, fields=select, data_version=data_version,
             limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
@@ -306,8 +298,6 @@ def get_cohort_instances(request, filters, data_version, cohort_info):
     rows_left = fetch_count = int(request.GET['fetch_count'])
     page = int(request.GET['page'])
     access_method = request.GET['access_class']
-    # return_level = request.GET['return_level']
-    # select = levels[return_level]
 
     select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
     offset = int(request.GET['offset']) + (fetch_count * (page - 1))
@@ -399,7 +389,6 @@ def _cohort_preview_manifest_api(request, data, cohort_info):
 
 
     # Get versions of datasets to be filtered, and link to filter group
-    # data_version = data['filterSet']['idc_version'] if data['filterSet']['idc_version'] else ImagingDataCommonsVersion.objects.filter(active=True)
     if not data['filterSet']['idc_version']:
         # No version specified. Use the current version
         data_version = ImagingDataCommonsVersion.objects.get(active=True)
@@ -417,28 +406,7 @@ def _cohort_preview_manifest_api(request, data, cohort_info):
     return cohort_info
 
 
-# Extract dataversions from filterset and fill in active version, if version is not specified
-def get_dataversions(filterset):
-
-    #### Temporary while IDC version changes to a single values ####
-    data_versions = DataVersion.objects.filter(active=True)
-
-    return data_versions
-
-    # imaging_version = 'imaging_version' in filterset and \
-    #                   len(DataVersion.objects.filter(name='TCIA Image Data', version=filterset['imaging_version'])) == 1 and \
-    #                   DataVersion.objects.get(name='TCIA Image Data', version=filterset['imaging_version']) or \
-    #                   DataVersion.objects.get(active=True, name='TCIA Image Data')
-    #
-    # bioclin_version = 'bioclin_version' in filterset and \
-    #                   len(DataVersion.objects.filter(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version'])) == 1 and \
-    #                   DataVersion.objects.get(name='TCGA Clinical and Biospecimen Data', version=filterset['bioclin_version']) or \
-    #                   DataVersion.objects.get(active=True, name='TCGA Clinical and Biospecimen Data')
-    #
-    # return (imaging_version, bioclin_version)
-
 def _cohort_preview_api(request, data, cohort_info, data_version):
-    # filterset = data['filterSet']['attributes']
     filters = data['filterSet']['filters']
 
     if not filters:
@@ -450,9 +418,6 @@ def _cohort_preview_api(request, data, cohort_info, data_version):
 
     if 'collection_id' in filters:
         filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
-
-    # # Get versions of datasets to be filtered, and link to filter group
-    # data_versions = get_dataversions(filters)
 
     cohort_info = get_cohort_objects(request, filters, data_version, cohort_info)
 
