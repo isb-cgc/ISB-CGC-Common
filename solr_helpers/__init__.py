@@ -452,9 +452,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 values.remove('None')
                 with_none = True
 
-            if len(values) == 1 and re.match(r'\d+ [tT][oO] \d+', values[0]):
-                values = values[0].lower().split(" to ")
-            if len(values) > 1 and type(values[0]) is list:
+            if len(values) >= 1 and type(values[0]) is str and re.match(r'\d+ [tT][oO] \d+', values[0]):
+                values[0] = values[0].lower().split(" to ")
+            elif len(values) >= 1 and type(values[0]) is list:
                 clause = " {} ".format(comb_with).join(
                     ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
             elif len(values) > 1 :

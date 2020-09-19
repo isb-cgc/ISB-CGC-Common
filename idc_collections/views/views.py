@@ -74,8 +74,7 @@ def collection_detail(request):
     inactive_collections = Collection.objects.filter(active=False)
 
     context = {
-        'active_collex': active_collections,
-        'inactive_collex': inactive_collections
+        'active_collex': active_collections
     }
 
     return render(request, template, context)
