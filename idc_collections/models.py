@@ -13,7 +13,17 @@ from functools import reduce
 logger = logging.getLogger('main_logger')
 
 
+class ProgramQuerySet(models.QuerySet):
+    def get_collections(self):
+        collections = None
+        for prog in self.all():
+            collections = prog.collection_set.all() if not collections else collections | prog.collection_set.all()
+        return collections.distinct()
+
 class ProgramManager(models.Manager):
+    def get_queryset(self):
+        return ProgramQuerySet(self.model, using=self._db)
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -119,6 +129,45 @@ class DataSetType(models.Model):
         return self.SET_TYPE_NAMES[self.set_type]
 
 
+class ImagingDataCommonsVersionQuerySet(models.QuerySet):
+    def get_data_sources(self, source_type=None):
+        sources = None
+        for idcdv in self.all():
+            versions = idcdv.dataversion_set.all().distinct()
+            if not sources:
+                sources = versions.get_data_sources()
+            else:
+                sources = sources | versions.get_data_sources()
+        if source_type:
+            return sources.distinct().filter(source_type=source_type)
+        return sources.distinct()
+
+class ImagingDataCommonsVersionManager(models.Manager):
+    def get_queryset(self):
+        return ImagingDataCommonsVersionQuerySet(self.model, using=self._db)
+
+class ImagingDataCommonsVersion(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False)
+    version_number = models.CharField(max_length=128, null=False, blank=False)
+    version_uid = models.CharField(max_length=128, null=True)
+    date_active = models.DateField(auto_now_add=True, null=False, blank=False)
+    active = models.BooleanField(default=True, null=False, blank=False)
+    objects = ImagingDataCommonsVersionManager()
+
+    def get_data_sources(self):
+        return self.dataversion_set.all().distinct().get_data_sources().distinct()
+
+    def get_display(self):
+        return self.__str__()
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return "{} Version {} {}".format(self.name, self.version_number, self.date_active)
+    
+
 class DataVersionQuerySet(models.QuerySet):
     def get_data_sources(self):
         sources = None
@@ -137,6 +186,7 @@ class DataVersion(models.Model):
     version = models.CharField(max_length=16, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False)
     programs = models.ManyToManyField(Program)
+    idc_versions = models.ManyToManyField(ImagingDataCommonsVersion)
     active = models.BooleanField(default=True)
     objects = DataVersionManager()
 
@@ -144,7 +194,7 @@ class DataVersion(models.Model):
         return DataVersion.objects.get(active=True, name=name).version
 
     def __str__(self):
-        return "{} ({})".format(self.name, self.version)
+        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.all())
 
 
 class CollectionQuerySet(models.QuerySet):
@@ -161,9 +211,13 @@ class CollectionManager(models.Manager):
 class Collection(models.Model):
     ANALYSIS_COLLEX = 'A'
     ORIGINAL_COLLEX = 'O'
+    COLLEX_DISPLAY = {
+        ANALYSIS_COLLEX: 'Analysis',
+        ORIGINAL_COLLEX: 'Original'
+    }
     COLLEX_TYPES = (
-        (ANALYSIS_COLLEX, 'Analysis'),
-        (ORIGINAL_COLLEX, 'Original')
+        (ANALYSIS_COLLEX, COLLEX_DISPLAY[ANALYSIS_COLLEX]),
+        (ORIGINAL_COLLEX, COLLEX_DISPLAY[ORIGINAL_COLLEX])
     )
 
     id = models.AutoField(primary_key=True)
@@ -191,16 +245,19 @@ class Collection(models.Model):
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
     # We make this many to many in case a collection is part of one program, though it may not be
-    program = models.ManyToManyField(Program)
+    program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
-        return self.program.all()
+        return self.program
 
     def __str__(self):
-        return "{} ({}), {}, Programs: {}".format(
+        return "{} ({}), {}, Program: {}".format(
             self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
-            str(self.program.all())
+            str(self.program.short_name)
         )
+
+    def get_collection_type(self):
+        return self.COLLEX_DISPLAY[self.collection_type]
 
 
 class DataSourceQuerySet(models.QuerySet):
@@ -229,9 +286,27 @@ class DataSourceQuerySet(models.QuerySet):
                 data_types[ds.id].append(data_set_type.data_type)
         return data_types
 
+    #
+    # returns a dictionary of comprehensive information mapping attributes to this set of data sources:
+    #
+    # {
+    #   'list': [<String>, ...],
+    #   'sources': {
+    #      <data source database ID>: {
+    #         'list': [<String>, ...],
+    #         'attrs': [<Attribute>, ...],
+    #         'id': <Integer>,
+    #         'name': <String>,
+    #         'data_sets': [<DataSetType>, ...],
+    #         'count_col': <Integer>
+    #      }
+    #   }
+    #
     def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False):
         start = time.time()
+        # Simple string list of attribute names (warning: will not properly resolve for collision)
         attrs = { 'list': None }
+        # Full source-ID dictionary of attributes
         if by_source:
             attrs['sources'] = {}
         if with_set_map:
@@ -307,6 +382,7 @@ class DataSource(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False)
     data_sets = models.ManyToManyField(DataSetType)
+    # Column used in faceted counts
     count_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     programs = models.ManyToManyField(Program)
@@ -374,6 +450,20 @@ class DataSourceJoin(models.Model):
 
 
 class AttributeQuerySet(models.QuerySet):
+
+    def get_data_sources(self, versions=None, source_type=None, active=True):
+        q_objects = Q()
+        if versions:
+            q_objects &= Q(id__in=versions.get_data_sources())
+        if source_type:
+            q_objects &= Q(source_type=source_type)
+
+        data_sources = None
+        for attr in self.all():
+            data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
+
+        return data_sources.distinct()
+
     def get_attr_cats(self):
         categories = {}
         for cat in Attribute_Display_Category.objects.select_related('attribute').filter(attribute__in=self.all()):
