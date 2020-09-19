@@ -309,12 +309,15 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
             return success, messages
 
         response_dict = json_loads(resp.text)
-        logger.info('=== debug ==')
-        logger.info(response_dict)
         error_info = response_dict['errors']
 
         # This is the evaluation of the DATASETS THE SA IS TO ACCESS.
 
+        sa_limit_error = error_info.get('service_account_limit')
+        if sa_limit_error:
+            dcf_error_type='dcf_'+sa_limit_error.get('error', 'sa_limit_error')
+            messages[dcf_error_type].append(sa_limit_error.get('error_description', 'You have exceeded the maximum number of projects that can be registered. Maximum 6 Projects allowed per account.'))
+            return success, messages
         project_access_info = error_info['project_access']
         if project_access_info['status'] == 200:
             messages['dcf_analysis_data_summary'] = "The requested dataset list [{}] was approved.".format(
@@ -743,11 +746,8 @@ def verify_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map, sa_
     #
     # Call DCF to see if there would be problems with the service account registration.
     #
-    logger.info('full_url: "{}"'.format(full_url))
-    logger.info('use_mode: "{}"'.format(use_mode))
 
     try:
-
         # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
         headers = {'Content-Type': 'application/json'}
         logger.info("[INFO] DCF verification request: {} {}".format(json_dumps(sa_data), service_account_id))
