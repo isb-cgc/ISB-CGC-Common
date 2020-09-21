@@ -16,8 +16,9 @@
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
-from idc_collections.models import Program, Collection, DataVersion, Attribute, Attribute_Ranges, ImagingDataCommonsVersion
+from idc_collections.models import Program, DataSetType, ImagingDataCommonsVersion
 from django.views.decorators.http import require_http_methods
+from cohorts.utils_api import get_idc_version
 
 from solr_helpers import *
 
@@ -58,9 +59,60 @@ def versions_list_api(request):
 
 
 @require_http_methods(["GET"])
-def attributes_list_api(request):
+def data_sources_list_api(request):
 
-    attributes = Attribute.objects.all()
+    try:
+        data_version = get_idc_version(request.GET.get('idc_version', ''))
+    except:
+        return JsonResponse(
+            dict(
+                message="Invalid IDC version {}".format(request.GET.get('idc_version', '')),
+                code=400
+            )
+        )
+
+    sources = data_version.get_data_sources().filter(
+        source_type=DataSource.BIGQUERY)
+
+    data_sources_info = {"data_sources": []}
+    for source in sources:
+        source_data = dict(
+                name = source.name,
+                data_type = dict(DataSetType.DATA_TYPES)[source.get_data_types().first()]
+        )
+        data_sources_info["data_sources"].append(source_data)
+
+    return JsonResponse(data_sources_info)
+
+
+@require_http_methods(["GET"])
+def attributes_list_api(request, data_source):
+
+    try:
+        data_version = get_idc_version(request.GET.get('idc_version', ''))
+    except:
+        return JsonResponse(
+            dict(
+                message="Invalid IDC version {}".format(request.GET.get('idc_version')),
+                code=400
+            )
+        )
+
+    try:
+        source = data_version.get_data_sources().get(name=data_source)
+    except idc_collections.models.DataSource.DoesNotExist:
+        return JsonResponse(
+            dict(
+                message="The  data source, {}, is not part of the specified version {}".format(data_source, data_version),
+                code=400
+            )
+        )
+
+    # attr_data = source.get_source_attrs(with_set_map=False, for_faceting=False)
+
+
+    # attributes = Attribute.objects.all()
+    attributes = source.get_attr()
 
     attributes_info = []
     for attribute in attributes:
@@ -69,17 +121,7 @@ def attributes_list_api(request):
             "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
             "active": attribute.active,
             "units": attribute.units,
-            "dataSetTypes":
-                [
-                    dict(DataSetType.DATA_TYPES)[attribute_set_type.datasettype.data_type]
-                    # {
-                    # 'id': attribute_set_type.datasettype.id,
-                    # 'data_type': dict(DataSetType.DATA_TYPES)[attribute_set_type.datasettype.data_type],
-                    # 'set_type': dict(DataSetType.SET_TYPE_NAMES)[attribute_set_type.datasettype.set_type]
-                    # }
-                    for attribute_set_type in attribute.attribute_set_type_set.all()
-                ],
-            "idc_versions": [1]
+            "idc_version": data_version.version_number
         }
         attributes_info.append(attribute_info)
         if attribute_info['data_type'] == 'Continuous Numeric':
@@ -92,7 +134,6 @@ def attributes_list_api(request):
 
 
     return JsonResponse(response)
-
 
 @require_http_methods(["GET"])
 def public_program_list_api(request):

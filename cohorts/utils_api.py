@@ -257,10 +257,11 @@ def get_cohort_objects(request, filters, data_version, cohort_info):
     urls = request.GET['return_URLs'] in ['True', True]
     collections = build_collections(objects, dois, urls)
 
+    cohort_info['cohort']['sql'] = sql
+
     cohort_info['cohort']["cohortObjects"] = {
         "rowsReturned": totalReturned,
         "collections": collections,
-        "sql": sql,
         # "rows": schema_rows if request.GET["return_rows"] in ['True', True] else []
     }
 

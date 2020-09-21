@@ -187,7 +187,7 @@ def save_cohort_api(request):
         try:
             version = get_idc_version(filterset['idc_version'])
         except:
-            return jsonResponse(
+            return JsonResponse(
                 dict(
                     message = "Invalid IDC version {}".format(data['filterSet']['idc_version']),
                     code = 400
