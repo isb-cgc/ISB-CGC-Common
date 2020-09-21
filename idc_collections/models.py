@@ -130,7 +130,7 @@ class DataSetType(models.Model):
 
 
 class ImagingDataCommonsVersionQuerySet(models.QuerySet):
-    def get_data_sources(self):
+    def get_data_sources(self, source_type=None):
         sources = None
         for idcdv in self.all():
             versions = idcdv.dataversion_set.all().distinct()
@@ -138,6 +138,8 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
                 sources = versions.get_data_sources()
             else:
                 sources = sources | versions.get_data_sources()
+        if source_type:
+            return sources.distinct().filter(source_type=source_type)
         return sources.distinct()
 
 class ImagingDataCommonsVersionManager(models.Manager):
@@ -284,9 +286,27 @@ class DataSourceQuerySet(models.QuerySet):
                 data_types[ds.id].append(data_set_type.data_type)
         return data_types
 
+    #
+    # returns a dictionary of comprehensive information mapping attributes to this set of data sources:
+    #
+    # {
+    #   'list': [<String>, ...],
+    #   'sources': {
+    #      <data source database ID>: {
+    #         'list': [<String>, ...],
+    #         'attrs': [<Attribute>, ...],
+    #         'id': <Integer>,
+    #         'name': <String>,
+    #         'data_sets': [<DataSetType>, ...],
+    #         'count_col': <Integer>
+    #      }
+    #   }
+    #
     def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False):
         start = time.time()
+        # Simple string list of attribute names (warning: will not properly resolve for collision)
         attrs = { 'list': None }
+        # Full source-ID dictionary of attributes
         if by_source:
             attrs['sources'] = {}
         if with_set_map:
@@ -362,6 +382,7 @@ class DataSource(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False)
     data_sets = models.ManyToManyField(DataSetType)
+    # Column used in faceted counts
     count_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     programs = models.ManyToManyField(Program)
