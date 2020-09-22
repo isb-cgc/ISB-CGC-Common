@@ -16,7 +16,7 @@
 
 from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
-from idc_collections.models import Program, DataSetType, ImagingDataCommonsVersion
+from idc_collections.models import Program, Collection, DataSetType, ImagingDataCommonsVersion
 from django.views.decorators.http import require_http_methods
 from cohorts.utils_api import get_idc_version
 
@@ -163,6 +163,7 @@ def program_detail_api(request, program_name=None ):
         for collection in collections:
             dvs = collection.data_versions.all()
             data = {
+                "name": collection.name,
                 "collection_id": collection.collection_id,
                 "description": collection.description,
                 "date_updated": collection.date_updated,
@@ -199,52 +200,53 @@ def program_detail_api(request, program_name=None ):
     return JsonResponse(collections_info)
 
 
-# @require_http_methods(["GET"])
-# def collections_list_api(request, idc_version=None ):
-#     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
-#
-#     try:
-#         # collections = program.collection_set.all()
-#         collections = Collection.objects.all()
-#
-#         collections_list = []
-#         for collection in collections:
-#             dvs = collection.data_versions.all()
-#             data = {
-#                 "collection_id": collection.collection_id,
-#                 "description": collection.description,
-#                 "date_updated": collection.date_updated,
-#                 "subject_count": collection.subject_count,
-#                 "image_types": collection.image_types,
-#                 "cancer_type": collection.cancer_type,
-#                 "doi": collection.doi,
-#                 "supporting_data": collection.supporting_data,
-#                 "species": collection.species,
-#                 "location": collection.location,
-#                 "active": collection.active,
-#                 "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
-#                 "owner_id": collection.owner_id,
-#                 "IDC_versions": ["1"]}
-#             collections_list.append(data)
-#
-#         collections_info = {"collections": collections_list}
-#
-#     except ObjectDoesNotExist as e:
-#         logger.error("[ERROR] Specified program does not exist")
-#         logger.exception(e)
-#         collections_info = {
-#             "message": "Specified program does not exist",
-#             "code": 400
-#         }
-#     except Exception as e:
-#         logger.error("[ERROR] While trying to retrieve program details")
-#         logger.exception(e)
-#         collections_info = {
-#             "message": "Error while trying to retrieve program details.",
-#             "code": 400
-#         }
-#
-#     return JsonResponse(collections_info)
-#
+@require_http_methods(["GET"])
+def collections_list_api(request, idc_version=None ):
+    # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
+
+    try:
+        # collections = program.collection_set.all()
+        collections = Collection.objects.all()
+
+        collections_list = []
+        for collection in collections:
+            dvs = collection.data_versions.all()
+            data = {
+                "name": collection.name,
+                "collection_id": collection.collection_id,
+                "description": collection.description,
+                "date_updated": collection.date_updated,
+                "subject_count": collection.subject_count,
+                "image_types": collection.image_types,
+                "cancer_type": collection.cancer_type,
+                "doi": collection.doi,
+                "supporting_data": collection.supporting_data,
+                "species": collection.species,
+                "location": collection.location,
+                "active": collection.active,
+                "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
+                "owner_id": collection.owner_id,
+                "IDC_versions": ["1.0"]}
+            collections_list.append(data)
+
+        collections_info = {"collections": collections_list}
+
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Specified program does not exist")
+        logger.exception(e)
+        collections_info = {
+            "message": "Specified program does not exist",
+            "code": 400
+        }
+    except Exception as e:
+        logger.error("[ERROR] While trying to retrieve program details")
+        logger.exception(e)
+        collections_info = {
+            "message": "Error while trying to retrieve program details.",
+            "code": 400
+        }
+
+    return JsonResponse(collections_info)
+
 
 

@@ -251,8 +251,8 @@ class Collection(models.Model):
         return self.program
 
     def __str__(self):
-        return "{} ({}), {}, Program: {}".format(
-            self.short_name, self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
+        return "{}, {}, Program: {}".format(
+            self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
             str(self.program.short_name)
         )
 

@@ -8,6 +8,7 @@ urlpatterns = [
     #url(r'^(?P<collection_id>\d+)/$', views.collection_detail, name='collection_detail'),
     url(r'^public/$', views.public_program_list, name='public_programs'),
     url(r'^api/versions/$', views.versions_list_api, name='versions_list_api'),
+    url(r'^api/$', views.collections_list_api, name='collections_list_api'),
     url(r'^api/data_sources/$', views.data_sources_list_api, name='data_sources_list_api'),
     url(r'^api/attributes/(?P<data_source>[\.A-Za-z0-9_-]+)/$', views.attributes_list_api, name='attributes_list_api'),
     url(r'^api/programs/$', views.public_program_list_api, name='public_programs_api'),
