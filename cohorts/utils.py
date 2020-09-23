@@ -74,6 +74,7 @@ def _delete_cohort(user, cohort_id):
 def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, desc=None, case_insens=True):
     cohort_info = {}
     cohort = None
+    new_cohort = bool(cohort_id is None)
 
     try:
         if not filters or not len(filters):
@@ -141,7 +142,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         logger.error("[ERROR] While saving a cohort: ")
         logger.exception(e)
         # if we were in the process of making a cohort, delete it; it might be malformed
-        if cohort and not cohort_id:
+        if cohort and new_cohort:
             cohort.delete()
         cohort_info['message'] = "Failed to save cohort!"
     
