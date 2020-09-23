@@ -73,12 +73,12 @@ def cohort_detail_api(request, cohort_id=0):
 
     try:
         user = User.objects.get(email=request.GET.get('email', ''))
-        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
     except Exception as e:
-        logger.error("[ERROR] {} isn't the owner of cohort ID {} and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
+        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id))
         logger.exception(e)
         cohort_info = {
-            "message": "{} isn't the owner of cohort ID {} and so cannot delete it.".format(request.GET.get('email', ''), cohort_id),
+            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
             "code": 403
         }
         return JsonResponse(cohort_info)
@@ -92,8 +92,8 @@ def cohort_detail_api(request, cohort_id=0):
             }
         }
 
-        if request.GET['return_level'] != 'None':
-            cohort_info = _cohort_detail_api(request, cohort, cohort_info)
+        # if request.GET['return_level'] != 'None':
+        cohort_info = _cohort_detail_api(request, cohort, cohort_info)
 
         if request.GET['return_filter'] == 'True':
             cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
@@ -135,12 +135,12 @@ def cohort_manifest_api(request, cohort_id=0):
 
     try:
         user = User.objects.get(email=request.GET.get('email', ''))
-        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
+        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
     except Exception as e:
-        logger.error("[ERROR] {} isn't the owner of cohort ID {} and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
+        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
         logger.exception(e)
         cohort_info = {
-            "message": "{} isn't the owner of cohort ID {} and so cannot delete it.".format(request.GET.get('email', ''), cohort_id),
+            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
             "code": 403
         }
         return JsonResponse(cohort_info)
@@ -250,8 +250,9 @@ def cohort_preview_api(request):
             cohort_info['cohort']["filterSet"] =  copy.deepcopy(data['filterSet'])
             cohort_info['cohort']["filterSet"]['idc_version'] = version.version_number
 
-        if request.GET['return_level'] != 'None':
-            cohort_info = _cohort_preview_api(request, data, cohort_info, version)
+        # if request.GET['return_level'] != 'None':
+        #     cohort_info = _cohort_preview_api(request, data, cohort_info, version)
+        cohort_info = _cohort_preview_api(request, data, cohort_info, version)
 
     except Exception as e:
         logger.error("[ERROR] While trying to obtain cohort objects: ")
