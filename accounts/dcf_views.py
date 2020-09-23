@@ -82,6 +82,8 @@ def oauth2_login(request):
 
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
         # to do data queries. Starting to recognize a pattern here...
+        logger.info('full_callback')
+        logger.info(full_callback)
         oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'data', 'google_service_account', 'google_link'])
 
         # assign idP value and pass it as a parameter in the URL
@@ -195,12 +197,8 @@ def oauth2_callback(request):
 
         client_id, client_secret = get_secrets()
         # You MUST provide the callback *here* to get it into the fetch request
-        logger.info("==full_callback")
-        logger.info(full_callback)
         dcf = OAuth2Session(client_id, state=saved_state, redirect_uri=full_callback)
         auth_response = request.build_absolute_uri(request.get_full_path())
-        logger.info("==auth_response")
-        logger.info(auth_response)
 
         # You MUST provide the client_id *here* (again!) in order to get this to do basic auth! DCF will not authorize
         # unless we use basic auth (i.e. client ID and secret in the header, not the body). Plus we need to provide
