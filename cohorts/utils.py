@@ -126,7 +126,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
-            filter_set.append(Filter(resulting_cohort=cohort, attribute=attr, value=",".join(filter_values), filter_group=grouping))
+            filter_set.append(Filter(resulting_cohort=cohort, attribute=attr, value=",".join([str(x) for x in filter_values]), filter_group=grouping))
 
         Filter.objects.bulk_create(filter_set)
 
