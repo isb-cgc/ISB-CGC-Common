@@ -82,6 +82,8 @@ def oauth2_login(request):
 
         # Found that 'user' scope had to be included to be able to do the user query on callback, and the data scope
         # to do data queries. Starting to recognize a pattern here...
+        logger.info('full_callback')
+        logger.info(full_callback)
         oauth = OAuth2Session(client_id, redirect_uri=full_callback, scope=['openid', 'user', 'data', 'google_service_account', 'google_link'])
 
         # assign idP value and pass it as a parameter in the URL
@@ -445,6 +447,7 @@ def oauth2_callback(request):
         link_callback = request.build_absolute_uri(reverse('dcf_link_callback'))
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
+
         return HttpResponseRedirect(callback)
     finally:
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
