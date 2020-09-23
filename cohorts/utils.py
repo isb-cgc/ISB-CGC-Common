@@ -45,30 +45,29 @@ def _delete_cohort(user, cohort_id):
 
     try:
         cohort = Cohort.objects.get(id=cohort_id)
+        try:
+            Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
+            try:
+                cohort = Cohort.objects.get(id=cohort_id, active=True)
+                cohort.active = False
+                cohort.save()
+                cohort_info = {
+                    'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
+                    'data': {'filters': cohort.get_filters_as_dict()},
+                }
+            except ObjectDoesNotExist:
+                cohort_info = {
+                    'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
+                }
+        except ObjectDoesNotExist:
+            cohort_info = {
+                'message': "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort_id),
+                'delete_permission': False
+            }
     except ObjectDoesNotExist:
         cohort_info = {
             'message': "A cohort with the ID {} was not found!".format(cohort_id),
         }
-    try:
-        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER)
-    except ObjectDoesNotExist:
-        cohort_info = {
-            'message': "{} isn't the owner of cohort ID {} and so cannot delete it.".format(user.email, cohort.id),
-            'delete_permission': False
-        }
-    if not cohort_info:
-        try:
-            cohort = Cohort.objects.get(id=cohort_id, active=True)
-            cohort.active = False
-            cohort.save()
-            cohort_info = {
-                'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
-                'data': {'filters': cohort.get_filters_as_dict()},
-            }
-        except ObjectDoesNotExist:
-            cohort_info = {
-                'message': 'Cohort ID {} has already been deleted.'.format(cohort_id)
-            }
     return cohort_info
 
 
@@ -127,7 +126,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
-            filter_set.append(Filter(resulting_cohort=cohort, attribute=attr, value=",".join(filter_values), filter_group=grouping))
+            filter_set.append(Filter(resulting_cohort=cohort, attribute=attr, value=",".join([str(x) for x in filter_values]), filter_group=grouping))
 
         Filter.objects.bulk_create(filter_set)
 
