@@ -195,8 +195,12 @@ def oauth2_callback(request):
 
         client_id, client_secret = get_secrets()
         # You MUST provide the callback *here* to get it into the fetch request
+        logger.info("==full_callback")
+        logger.info(full_callback)
         dcf = OAuth2Session(client_id, state=saved_state, redirect_uri=full_callback)
         auth_response = request.build_absolute_uri(request.get_full_path())
+        logger.info("==auth_response")
+        logger.info(auth_response)
 
         # You MUST provide the client_id *here* (again!) in order to get this to do basic auth! DCF will not authorize
         # unless we use basic auth (i.e. client ID and secret in the header, not the body). Plus we need to provide
@@ -445,6 +449,7 @@ def oauth2_callback(request):
         link_callback = request.build_absolute_uri(reverse('dcf_link_callback'))
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
+
         return HttpResponseRedirect(callback)
     finally:
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
