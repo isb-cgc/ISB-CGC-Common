@@ -164,7 +164,11 @@ def oauth2_callback(request):
         error = request.GET.get('error', None)
         if error:
             error_description = request.GET.get('error_description', None)
-            if error_description == 'The resource owner or authorization server denied the request':
+            if error == 'access_denied':
+                logger.info("[INFO] User {} did not allow ISB access to your eRA commons and dbGaP account.".format(request.user.id))
+                messages.warning(request,
+                                 "Login cannot continue if ISB-CGC is not allowed access to your eRA commons and dbGaP account.")
+            elif error_description == 'The resource owner or authorization server denied the request':
                 logger.info("[INFO] User {} did not allow ISB access".format(request.user.id))
                 messages.warning(request,
                                  "Login cannot continue if ISB-CGC is not allowed access to the Data Commons Framework.")
