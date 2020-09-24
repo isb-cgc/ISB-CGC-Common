@@ -18,6 +18,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.http import JsonResponse
 from idc_collections.models import Program, Collection, DataSetType, ImagingDataCommonsVersion
 from django.views.decorators.http import require_http_methods
+from cohorts.decorators import api_auth
+
 from cohorts.utils_api import get_idc_version
 
 from solr_helpers import *
@@ -32,6 +34,7 @@ BLACKLIST_RE = settings.BLACKLIST_RE
 # **** Currently the version is a tuple of (name, version), that identifies the version of ancillary, original and
 # **** derived data. We assume that eventually the IDC version will be a single identifier, and which maps to such a
 # **** tuple. For continuity, we currently return a single IDC version, "1", and the underlying tuple.
+@api_auth
 @require_http_methods(["GET"])
 def versions_list_api(request):
 
@@ -58,6 +61,7 @@ def versions_list_api(request):
     return JsonResponse(versions_info)
 
 
+@api_auth
 @require_http_methods(["GET"])
 def data_sources_list_api(request):
 
@@ -85,6 +89,7 @@ def data_sources_list_api(request):
     return JsonResponse(data_sources_info)
 
 
+@api_auth
 @require_http_methods(["GET"])
 def attributes_list_api(request, data_source):
 
@@ -112,10 +117,12 @@ def attributes_list_api(request, data_source):
 
 
     # attributes = Attribute.objects.all()
-    attributes = source.get_attr()
+    attributes = source.get_attr(for_faceting=False)
 
     attributes_info = []
     for attribute in attributes:
+        if 'clinical_' in attribute.name:
+            pass
         attribute_info = {
             "name": attribute.name,
             "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
@@ -135,6 +142,7 @@ def attributes_list_api(request, data_source):
 
     return JsonResponse(response)
 
+@api_auth
 @require_http_methods(["GET"])
 def public_program_list_api(request):
 
@@ -149,6 +157,7 @@ def public_program_list_api(request):
 #    return HttpResponse(programs_info,  content_type='application/json')
 
 
+@api_auth
 @require_http_methods(["GET"])
 def program_detail_api(request, program_name=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
@@ -210,6 +219,7 @@ def program_detail_api(request, program_name=None ):
     return JsonResponse(collections_info)
 
 
+@api_auth
 @require_http_methods(["GET"])
 def collections_list_api(request, idc_version=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
