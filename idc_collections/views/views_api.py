@@ -242,7 +242,6 @@ def collections_list_api(request, idc_version=None ):
         for collection in collections:
             dvs = collection.data_versions.all()
             data = {
-                "name": collection.name,
                 "collection_id": collection.collection_id,
                 "description": collection.description,
                 "date_updated": collection.date_updated,
