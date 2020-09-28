@@ -17,10 +17,12 @@ from __future__ import absolute_import
 
 import logging
 import copy
+import json
 
 from django.conf import settings
 from idc_collections.models import ImagingDataCommonsVersion
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 
 logger = logging.getLogger('main_logger')
@@ -181,13 +183,18 @@ def get_cohort_objects(request, filters, data_version, cohort_info):
               'None': []
               }
 
-    rows_left = fetch_count = int(request.GET['fetch_count'])
-    page = int(request.GET['page'])
     return_level = request.GET['return_level']
     select = levels[return_level]
-    offset = int(request.GET['offset']) + (fetch_count * (page - 1))
     objects = {}
-    all_rows = []
+
+    cohort_info['cohort']["cohortObjects"] = {
+        "totalFound": 0,
+        "rowsReturned": 0,
+        "collections": [],
+        "job_reference": None,
+        'next_page': None,
+    }
+
 
     # Get the SQL
     sql = ""
@@ -197,65 +204,43 @@ def get_cohort_objects(request, filters, data_version, cohort_info):
             order_by=select[-1:]))
     cohort_info['cohort']['sql'] = sql
 
+    job_reference = json.loads(request.GET['job_reference'].replace("'",'"')) if 'job_reference' in request.GET else None
+    next_page = request.GET['next_page']
 
-    totalReturned = 0
     collections = []
     if request.GET['return_level'] != "None":
-        # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
-        while rows_left > 0:
+        if job_reference and next_page:
+            results = BigQuerySupport.get_job_result_page(job_ref=job_reference, page_token=next_page)
+        elif (job_reference and not next_page) or (not job_reference and next_page):
+            logger.error("[ERROR] Only one of job_reference and next_page provided. You must provide both or neither.")
+            cohort_info = {
+                "message": "Only one of job_reference and next_page provided. You must provide both or neither.",
+                "code": 400
+            }
+        else:
             results = get_bq_metadata(
                 filters=filters, fields=select, data_version=data_version,
-                limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+                # limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+                paginated=True,
                 order_by=select[-1:])
-            if results['totalFound'] == None:
-                # If there are not as many rows as asked for, we're done with BQ
-                break
 
-            # returned has the number of rows actually returned by the query
-            returned = len(results["results"])
+        rowsReturned = len(results["current_page_rows"])
 
-            totalReturned += returned
-            fetch_count -= returned
+        # Create a list of the fields in the returned schema
+        fields = [field['name'] for field in results['schema']['fields']]
+        # Build a list of indices into fields that tells build_hierarchy how to reorder
+        reorder = [fields.index(x) for x in select]
 
-            # Create a list of the fields in the returned schema
-            fields = [field['name'] for field in results['schema']['fields']]
-            # Build a list of indices into fields that tells build_hierarchy how to reorder
-            reorder = [fields.index(x) for x in select]
+        # rows holds the actual data
+        rows = results['current_page_rows']
 
-            # rows holds the actual data
-            rows = results['results']
-            all_rows.extend(rows)
+        # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
+        objects = build_hierarchy(
+            objects=objects,
+            rows=rows,
+            reorder=reorder,
+            return_level=return_level)
 
-            # unFound is the number of rows we haven't yet obtained from BQ
-            unFound = rows_left - returned
-            if unFound >= 0:
-                #  We need to add all the rows just received from BQ to the hierarchy
-                objects = build_hierarchy(
-                    objects=objects,
-                    rows=rows,
-                    reorder=reorder,
-                    return_level=return_level)
-                rows_left -= returned
-                offset += returned
-                if returned < min(fetch_count, settings.MAX_BQ_RECORD_RESULT):
-                    # We got all there is to get
-                    break
-            elif unFound == 0:
-                # We have all we need
-                objects = build_hierarchy(
-                    objects=objects,
-                    rows=rows,
-                    reorder=reorder,
-                    return_level=return_level)
-                break
-            else:
-                # If we got more than requested by user, trim the list of rows received from BQ
-                objects = build_hierarchy(
-                    objects=objects,
-                    rows=rows[:unFound],
-                    reorder=reorder,
-                    return_level=return_level)
-                break
 
         # Then we add the details such as DOI, URL, etc. about each object
         # dois = request.GET['return_DOIs'] in ['True', True]
@@ -264,10 +249,12 @@ def get_cohort_objects(request, filters, data_version, cohort_info):
         urls = False
         collections = build_collections(objects, dois, urls)
 
-    cohort_info['cohort']["cohortObjects"] = {
-        "rowsReturned": totalReturned,
-        "collections": collections,
-        # "rows": schema_rows if request.GET["return_rows"] in ['True', True] else []
+        cohort_info['cohort']["cohortObjects"] = {
+            "totalFound": int(results['totalFound']),
+            "rowsReturned": rowsReturned,
+            "collections": collections,
+            "job_reference": results['job_reference'],
+            'next_page': results['next_page'],
     }
 
     return cohort_info
@@ -301,64 +288,42 @@ def form_rows(data):
 # Get a list of GCS URLs or CRDC DOIs of the instances in the cohort
 def get_cohort_instances(request, filters, data_version, cohort_info):
 
-    rows_left = fetch_count = int(request.GET['fetch_count'])
-    page = int(request.GET['page'])
     access_method = request.GET['access_class']
 
     select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
-    offset = int(request.GET['offset']) + (fetch_count * (page - 1))
-    objects = {}
-    totalReturned = 0
     all_rows = []
-    sql = ""
+
+    job_reference = json.loads(request.GET['job_reference'].replace("'",'"')) if 'job_reference' in request.GET else None
+    next_page = request.GET['next_page']
 
     # We first build a tree of just the object IDS: collection_ids, PatientIDs, StudyInstanceUID,...
-    while rows_left > 0:
-        # Accumulate the SQL for each call
-        # sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
-        #     filters=filters, fields=select, data_versions=data_versions,
-        #     limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
-        #     order_by=select[-1:]))
-
+    if job_reference and next_page:
+        results = BigQuerySupport.get_job_result_page(job_ref=job_reference, page_token=next_page)
+    elif (job_reference and not next_page) or (not job_reference and next_page):
+        logger.error("[ERROR] Only one of job_reference and next_page provided. You must provide both or neither.")
+        cohort_info = {
+            "message": "Only one of job_reference and next_page provided. You must provide both or neither.",
+            "code": 400
+        }
+    else:
         results = get_bq_metadata(
             filters=filters, fields=select, data_version=data_version,
-            limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
+            paginated=True,
             order_by=select[-1:])
-        if results['totalFound'] == None:
-            # If there are not as many rows as asked for, we're done with BQ
-            break
 
-        # rows holds the actual data
-        rows = form_rows(results['results'])
-        # returned has the number of rows actually returned by the query
-        returned = len(rows)
-
-        totalReturned += returned
-        fetch_count -= returned
-
-        # unFound is the number of rows we haven't yet obtained from BQ
-        unFound = rows_left - returned
-        if unFound >= 0:
-            rows_left -= returned
-            offset += returned
-            # all_rows.extend(urls)
-            all_rows.extend(rows)
-            if returned < min(fetch_count, settings.MAX_BQ_RECORD_RESULT):
-                # We got all there is to get
-                break
-        elif unFound == 0:
-            break
-        else:
-            # If we got more than requested by user, trim the list of rows received from BQ
-            # all_rows.extend(urls[:unFound])
-            all_rows.extend(rows[:unFound])
-            break
+    # rows holds the actual data
+    rows = form_rows(results['current_page_rows'])
+    rowsReturned = len(results["current_page_rows"])
 
     cohort_info["manifest"]["accessMethods"] = dict(
+                totalFound = int(results['totalFound']),
+                rowsReturned = rowsReturned,
                 type = "gs",
                 region = "us",
-                urls = all_rows if access_method == 'url' else [],
-                dois = all_rows if access_method != 'url' else []
+                urls = rows if access_method == 'url' else [],
+                dois = rows if access_method != 'url' else [],
+                job_reference = results['job_reference'],
+                next_page = results['next_page']
     )
 
     return cohort_info
