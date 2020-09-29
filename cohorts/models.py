@@ -26,7 +26,7 @@ from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from idc_collections.models import Collection, Attribute, User_Feature_Definitions, DataVersion, DataSource, ImagingDataCommonsVersion
+from idc_collections.models import Collection, Attribute, User_Feature_Definitions, DataVersion, DataSource, ImagingDataCommonsVersion, Attribute_Display_Values
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
@@ -150,6 +150,22 @@ class Cohort(models.Model):
             })
         return result
 
+    def get_filter_display_string(self, prefix=None):
+        filter_groups = self.filter_group_set.all()
+        filter_sets = []
+
+        ar_dvals = Attribute_Display_Values.objects.select_related('attribute').filter(attribute=Attribute.objects.get(name="AnatomicRegionSequence")).to_dict()
+
+        for fg in filter_groups:
+            filters = fg.filter_set.all().get_filter_set_array()
+            group_filters = {x['name']: [ar_dvals.get(x['id'],{}).get(y,y) for y in x['values']] for x in filters}
+
+            filter_sets.append(BigQuerySupport.build_bq_where_clause(
+                group_filters, field_prefix=prefix
+            ))
+
+        return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")
+
     # Produce a BigQuery filter WHERE clause for this cohort's filters that can be used in the BQ console
     def get_bq_filter_string(self, prefix=None):
 
@@ -267,6 +283,7 @@ class FilterQuerySet(models.QuerySet):
             filters.append({
                 'id': fltr.attribute.id,
                 'name': ("{}{}".format(fltr.name.lower(),fltr.numeric_op)) if fltr.numeric_op else fltr.attribute.name,
+                'display_name': fltr.attribute.display_name,
                 'values': fltr.value.split(fltr.value_delimiter)
             })
         return filters
