@@ -151,7 +151,7 @@ def build_hierarchy(objects, rows, return_level, reorder):
             objects[row[0]][row[1]][row[2]][row[3]].append(row[4])
     return objects
 
-def get_idc_version(version_number=None):
+def get_idc_data_version(version_number=None):
     if not version_number:
         # No version specified. Use the current version
         data_version = ImagingDataCommonsVersion.objects.get(active=True)
@@ -168,7 +168,7 @@ def get_filterSet_api(cohort):
     version = cohort.get_data_versions()[0].version_number
     filter_group = cohort.get_filters_as_dict()[0]
 
-    filterSet = {'idc_version': version}
+    filterSet = {'idc_data_version': version}
     filters = {filter['name']: filter['values'] for filter in filter_group['filters']}
     filterSet['filters'] = filters
     return filterSet
@@ -223,7 +223,6 @@ def get_cohort_objects(request, filters, data_version, cohort_info):
                 # limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
                 paginated=True,
                 order_by=select[-1:])
-
         rowsReturned = len(results["current_page_rows"])
 
         # Create a list of the fields in the returned schema
@@ -362,22 +361,22 @@ def _cohort_preview_manifest_api(request, data, cohort_info):
 
 
     # Get versions of datasets to be filtered, and link to filter group
-    if not data['filterSet']['idc_version']:
+    if not data['filterSet']['idc_data_version']:
         # No version specified. Use the current version
         data_version = ImagingDataCommonsVersion.objects.get(active=True)
     else:
         try:
-            data_version = ImagingDataCommonsVersion.objects.get(version_number=data['filterSet']['idc_version'])
+            data_version = ImagingDataCommonsVersion.objects.get(version_number=data['filterSet']['idc_data_version'])
         except:
             return dict(
-                message = "Invalid IDC version {}".format(data['filterSet']['idc_version']),
+                message = "Invalid IDC version {}".format(data['filterSet']['idc_data_version']),
                 code = 400
             )
 
     cohort_info = get_cohort_instances(request, filters, data_version, cohort_info)
 
     cohort_info['manifest']["filterSet"] = copy.deepcopy(data['filterSet'])
-    cohort_info['manifest']["filterSet"]['idc_version'] = data_version.version_number
+    cohort_info['manifest']["filterSet"]['idc_data_version'] = data_version.version_number
 
     return cohort_info
 

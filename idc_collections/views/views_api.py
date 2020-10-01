@@ -20,7 +20,7 @@ from idc_collections.models import Program, Collection, DataSetType, ImagingData
 from django.views.decorators.http import require_http_methods
 from cohorts.decorators import api_auth
 
-from cohorts.utils_api import get_idc_version
+from cohorts.utils_api import get_idc_data_version
 
 from solr_helpers import *
 
@@ -38,14 +38,14 @@ BLACKLIST_RE = settings.BLACKLIST_RE
 @require_http_methods(["GET"])
 def versions_list_api(request):
 
-    idc_versions = ImagingDataCommonsVersion.objects.all()
+    idc_data_versions = ImagingDataCommonsVersion.objects.all()
     # versions = DataVersion.objects.get_queryset()
 
     versions_info = {"versions": []}
-    for version in idc_versions:
+    for version in idc_data_versions:
         version_data = dict(
                 name = version.name,
-                idc_version = version.version_number,
+                idc_data_version = version.version_number,
                 version_uid = version.version_uid,
                 data_active = version.date_active,
                 active = version.active,
@@ -66,11 +66,11 @@ def versions_list_api(request):
 def data_sources_list_api(request):
 
     try:
-        data_version = get_idc_version(request.GET.get('idc_version', ''))
+        data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
     except:
         return JsonResponse(
             dict(
-                message="Invalid IDC version {}".format(request.GET.get('idc_version', '')),
+                message="Invalid IDC version {}".format(request.GET.get('idc_data_version', '')),
                 code=400
             )
         )
@@ -94,11 +94,11 @@ def data_sources_list_api(request):
 def attributes_list_api(request, data_source):
 
     try:
-        data_version = get_idc_version(request.GET.get('idc_version', ''))
+        data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
     except:
         return JsonResponse(
             dict(
-                message="Invalid IDC version {}".format(request.GET.get('idc_version')),
+                message="Invalid IDC version {}".format(request.GET.get('idc_data_version')),
                 code=400
             )
         )
@@ -128,7 +128,7 @@ def attributes_list_api(request, data_source):
             "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
             "active": attribute.active,
             "units": attribute.units,
-            "idc_version": data_version.version_number
+            "idc_data_version": data_version.version_number
         }
         attributes_info.append(attribute_info)
         if attribute_info['data_type'] == 'Continuous Numeric':
@@ -163,11 +163,11 @@ def program_detail_api(request, program_name=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
 
     try:
-        data_version = get_idc_version(request.GET.get('idc_version', ''))
+        data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
     except:
         return JsonResponse(
             dict(
-                message="Invalid IDC version {}".format(request.GET.get('idc_version', '')),
+                message="Invalid IDC version {}".format(request.GET.get('idc_data_version', '')),
                 code=400
             )
         )
@@ -196,7 +196,7 @@ def program_detail_api(request, program_name=None ):
                 "active": collection.active,
                 "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
                 "owner_id": collection.owner_id,
-                "IDC_versions": ["1.0"]}
+                "idc_data_versions": ["1.0"]}
             collections_list.append(data)
 
         collections_info = {"collections": collections_list}
@@ -221,15 +221,15 @@ def program_detail_api(request, program_name=None ):
 
 @api_auth
 @require_http_methods(["GET"])
-def collections_list_api(request, idc_version=None ):
+def collections_list_api(request, idc_data_version=None ):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
 
     try:
-        data_version = get_idc_version(request.GET.get('idc_version', ''))
+        data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
     except:
         return JsonResponse(
             dict(
-                message="Invalid IDC version {}".format(request.GET.get('idc_version', '')),
+                message="Invalid IDC version {}".format(request.GET.get('idc_data_version', '')),
                 code=400
             )
         )
@@ -255,7 +255,7 @@ def collections_list_api(request, idc_version=None ):
                 "active": collection.active,
                 "collection_type": dict(collection.COLLEX_TYPES)[collection.collection_type],
                 "owner_id": collection.owner_id,
-                "IDC_versions": ["1.0"]}
+                "idc_data_versions": ["1.0"]}
             collections_list.append(data)
 
         collections_info = {"collections": collections_list}
