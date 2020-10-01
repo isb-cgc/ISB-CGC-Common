@@ -44,10 +44,10 @@ def versions_list_api(request):
     versions_info = {"versions": []}
     for version in idc_data_versions:
         version_data = dict(
-                name = version.name,
+                # name = version.name,
                 idc_data_version = version.version_number,
-                version_uid = version.version_uid,
-                data_active = version.date_active,
+                # version_uid = version.version_uid,
+                date_active = version.date_active,
                 active = version.active,
                 data_sources = []
         )
