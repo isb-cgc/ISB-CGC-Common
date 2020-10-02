@@ -137,15 +137,12 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             str((stop - start))
         ))
 
-        filtered_attr_by_source = None
+        filtered_attr_by_source = copy.deepcopy(attr_by_source)
 
-        for counts in ['facets', 'filtered_facets']:
-            facet_counts = source_metadata.get(counts,{})
-            _attr_by_source = attr_by_source
-            if counts == 'filtered_facets' and len(facet_counts):
-                filtered_attr_by_source = copy.deepcopy(attr_by_source)
-                _attr_by_source = filtered_attr_by_source
-            else:
+        for which, _attr_by_source in {'filtered_facets': filtered_attr_by_source,
+                                       'facets': attr_by_source}.items():
+            facet_counts = source_metadata.get(which,{})
+            if not len(facet_counts):
                 filtered_attr_by_source = {}
             for source in facet_counts:
                 source_name = ":".join(source.split(":")[0:2])
@@ -472,6 +469,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'counts_only': True,
                     'fields': None
                 })
+
+            print("filtered result: {}".format(solr_count_filtered_result))
 
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
