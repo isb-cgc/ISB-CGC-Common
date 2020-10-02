@@ -16,6 +16,7 @@
 from __future__ import absolute_import
 
 import logging
+import copy
 
 from django.conf import settings
 from idc_collections.models import ImagingDataCommonsVersion
@@ -377,6 +378,8 @@ def _cohort_manifest_api(request, cohort, cohort_info):
 
     cohort_info = get_cohort_instances(request, filters, data_version, cohort_info)
 
+    cohort_info['manifest']["filterSet"] = get_filterSet_api(cohort)
+
     return cohort_info
 
 
@@ -407,6 +410,9 @@ def _cohort_preview_manifest_api(request, data, cohort_info):
             )
 
     cohort_info = get_cohort_instances(request, filters, data_version, cohort_info)
+
+    cohort_info['manifest']["filterSet"] = copy.deepcopy(data['filterSet'])
+    cohort_info['manifest']["filterSet"]['idc_version'] = data_version.version_number
 
     return cohort_info
 
