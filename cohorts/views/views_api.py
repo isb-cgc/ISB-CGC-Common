@@ -280,7 +280,6 @@ def cohort_preview_manifest_api(request):
                 "description": data['description'],
             }
         }
-
         cohort_info = _cohort_preview_manifest_api(request, data, cohort_info)
 
     except Exception as e:
