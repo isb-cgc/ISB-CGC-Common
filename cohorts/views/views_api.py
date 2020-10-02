@@ -214,8 +214,11 @@ def save_cohort_api(request):
             "message": "There was an error saving your cohort; it may not have been saved correctly.",
             "code": 400,
         }
-
-    return JsonResponse(response)
+    cohort_properties = dict(
+        cohort_properties = response,
+        code = 200
+    )
+    return JsonResponse(cohort_properties)
 
 
 @csrf_exempt
@@ -319,7 +322,6 @@ def cohort_list_api(request):
                 "description": cohort.description,
                 "owner": "{} {}".format(cohort.cohort_perms_set.get().user.first_name,cohort.cohort_perms_set.get().user.last_name),
                 "permission": cohort.cohort_perms_set.get().perm,
-                "hashes": []
             }
             cohortList.append(cohortMetadata)
 
