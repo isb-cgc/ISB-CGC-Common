@@ -319,7 +319,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 # facets: array of strings, attributes to faceted count as a list of attribute names; if not provided not faceted counts will be performed
 def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, with_ancillary = True,
                         collapse_on = 'PatientID', order_docs=None, sources = None, versions = None, with_derived=True,
-                        facets=None, records_only=False):
+                        facets=None, records_only=False, sort=None):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -349,7 +349,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit)
         elif source_type == DataSource.SOLR:
-            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only)
+            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only, sort)
 
         for counts in ['facets', 'filtered_facets']:
             facet_set = results.get(counts,{})
@@ -377,7 +377,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
     return results
 
 # Use solr to fetch faceted counts and/or records
-def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False):
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False, sort=None):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -492,6 +492,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'query_string': None,
                 'collapse_on': collapse_on,
                 'counts_only': counts_only,
+                'sort': sort,
                 'limit': record_limit
             })
             results['docs'] = solr_result['docs']
