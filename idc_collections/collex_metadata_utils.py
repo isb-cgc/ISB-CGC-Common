@@ -470,8 +470,6 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'fields': None
                 })
 
-            print("filtered result: {}".format(solr_count_filtered_result))
-
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
 

@@ -157,7 +157,7 @@ def cohort_manifest(cohort, user, fields, limit):
 
         filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
 
-        cohort_records = get_collex_metadata(filters, fields, limit, sources=sources, versions=versions, counts_only=False, collapse_on='SeriesInstanceUID', records_only=True)
+        cohort_records = get_collex_metadata(filters, fields, limit, sources=sources, versions=versions, counts_only=False, collapse_on='SOPInstanceUID', records_only=True)
         
         return cohort_records
         
