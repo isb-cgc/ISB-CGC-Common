@@ -473,7 +473,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
 
-            results['total'] = solr_result['numFound']
+            if source.has_data_type(DataSetType.IMAGE_DATA):
+                results['total'] = solr_result['numFound']
 
             results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
                 'facets': solr_result['facets']
