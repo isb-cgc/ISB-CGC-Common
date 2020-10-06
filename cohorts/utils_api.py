@@ -287,7 +287,7 @@ def form_rows(data):
 # Get a list of GCS URLs or CRDC DOIs of the instances in the cohort
 def get_cohort_instances(request, filters, data_version, cohort_info):
 
-    access_method = request.GET['access_class']
+    access_method = request.GET['access_method']
 
     select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
     all_rows = []
@@ -317,8 +317,8 @@ def get_cohort_instances(request, filters, data_version, cohort_info):
     cohort_info["manifest"]["accessMethods"] = dict(
                 totalFound = int(results['totalFound']),
                 rowsReturned = rowsReturned,
-                type = "gs",
-                region = "us",
+                url_access_type = "gs",
+                url_region = "us",
                 urls = rows if access_method == 'url' else [],
                 dois = rows if access_method != 'url' else [],
                 job_reference = results['job_reference'],
