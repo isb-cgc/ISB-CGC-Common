@@ -129,7 +129,7 @@ def dcf_simple_logout(request):
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
-    callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+    callback = '{}?force_era_global_logout=true&next={}'.format(DCF_LOGOUT_URL, logout_callback)
     return HttpResponseRedirect(callback)
 
 
@@ -900,7 +900,7 @@ def dcf_disconnect_user(request):
     #
 
     logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
-    callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+    callback = '{}?force_era_global_logout=true&next={}'.format(DCF_LOGOUT_URL, logout_callback)
 
     return HttpResponseRedirect(callback)
 
