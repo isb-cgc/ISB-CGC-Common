@@ -49,129 +49,6 @@ USER_DATA_ON = settings.USER_DATA_ON
 
 @csrf_exempt
 @api_auth
-@require_http_methods(["GET"])
-def cohort_detail_api(request, cohort_id=0):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-
-    # template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
-
-    if cohort_id == 0:
-        messages.error(request, 'Cohort requested does not exist.')
-        return redirect('/user_landing')
-
-    print(request.GET.get('email', ''))
-    try:
-        cohort = Cohort.objects.get(id=cohort_id)
-    except ObjectDoesNotExist as e:
-        logger.error("[ERROR] A cohort with the ID {} was not found: ".format(cohort_id))
-        logger.exception(e)
-        cohort_info = {
-            "message": "A cohort with the ID {} was not found.".format(cohort_id),
-            "code": 400
-        }
-        return JsonResponse(cohort_info)
-
-    try:
-        user = User.objects.get(email=request.GET.get('email', ''))
-        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
-    except Exception as e:
-        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id))
-        logger.exception(e)
-        cohort_info = {
-            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
-            "code": 403
-        }
-        return JsonResponse(cohort_info)
-
-    try:
-        cohort_info = {
-            "cohort": {
-                "cohort_id": int(cohort_id),
-                "name": cohort.name,
-                "description": cohort.description,
-            }
-        }
-
-        # if request.GET['return_level'] != 'None':
-        cohort_info = _cohort_detail_api(request, cohort, cohort_info)
-
-        if request.GET['return_filter'] == 'True':
-            cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
-
-    except Exception as e:
-        logger.error("[ERROR] While trying to obtain cohort objects: ")
-        logger.exception(e)
-        cohort_info = {
-            "message": "Error while trying to obtain cohort objects.",
-            "code": 400
-        }
-
-    return JsonResponse(cohort_info)
-
-
-@csrf_exempt
-@api_auth
-@require_http_methods(["GET"])
-def cohort_manifest_api(request, cohort_id=0):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-
-    # template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
-
-    if cohort_id == 0:
-        messages.error(request, 'Cohort requested does not exist.')
-        return redirect('/user_landing')
-
-    print(request.GET.get('email', ''))
-    try:
-        cohort = Cohort.objects.get(id=cohort_id)
-    except ObjectDoesNotExist as e:
-        logger.error("[ERROR] A cohort with the ID {} was not found: ".format(cohort_id))
-        logger.exception(e)
-        cohort_info = {
-            "message": "A cohort with the ID {} was not found.".format(cohort_id),
-            "code": 400
-        }
-        return JsonResponse(cohort_info)
-
-    try:
-        user = User.objects.get(email=request.GET.get('email', ''))
-        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
-    except Exception as e:
-        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
-        logger.exception(e)
-        cohort_info = {
-            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
-            "code": 403
-        }
-        return JsonResponse(cohort_info)
-
-    try:
-        cohort_info = {
-            "manifest": {
-                "cohort_id": int(cohort_id),
-                "name": cohort.name,
-                "description": cohort.description,
-            }
-        }
-
-        cohort_info = _cohort_manifest_api(request, cohort, cohort_info)
-
-        # if request.GET['return_filter'] == 'True':
-        #     cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
-
-    except Exception as e:
-        logger.error("[ERROR] While trying to obtain cohort objects: ")
-        logger.exception(e)
-        cohort_info = {
-            "message": "Error while trying to obtain cohort objects.",
-            "code": 400
-        }
-
-    return JsonResponse(cohort_info)
-
-
-@csrf_exempt
-@api_auth
 @require_http_methods(["POST"])
 def save_cohort_api(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -223,39 +100,53 @@ def save_cohort_api(request):
 
 @csrf_exempt
 @api_auth
-@require_http_methods(["POST"])
-def cohort_preview_api(request):
+@require_http_methods(["GET"])
+def cohort_detail_api(request, cohort_id=0):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
+    # template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+
+    if cohort_id == 0:
+        messages.error(request, 'Cohort requested does not exist.')
+        return redirect('/user_landing')
+
+    print(request.GET.get('email', ''))
     try:
-        body = json.loads(request.body.decode('utf-8'))
-        data = body["request_data"]
+        cohort = Cohort.objects.get(id=cohort_id)
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] A cohort with the ID {} was not found: ".format(cohort_id))
+        logger.exception(e)
+        cohort_info = {
+            "message": "A cohort with the ID {} was not found.".format(cohort_id),
+            "code": 400
+        }
+        return JsonResponse(cohort_info)
+
+    try:
+        user = User.objects.get(email=request.GET.get('email', ''))
+        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
+    except Exception as e:
+        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id))
+        logger.exception(e)
+        cohort_info = {
+            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
+            "code": 403
+        }
+        return JsonResponse(cohort_info)
+
+    try:
         cohort_info = {
             "cohort": {
-                "name": data['name'],
-                "description": data['description'],
+                "cohort_id": int(cohort_id),
+                "name": cohort.name,
+                "description": cohort.description,
             }
         }
 
-        filterset = data['filterSet']
-
-        try:
-            version = get_idc_data_version(filterset['idc_data_version'])
-        except:
-            return JsonResponse(
-                dict(
-                    message = "Invalid IDC version {}".format(data['filterSet']['idc_data_version']),
-                    code = 400
-                )
-            )
-
-        if request.GET['return_filter'] == 'True':
-            cohort_info['cohort']["filterSet"] =  copy.deepcopy(data['filterSet'])
-            cohort_info['cohort']["filterSet"]['idc_data_version'] = version.version_number
-
         # if request.GET['return_level'] != 'None':
-        #     cohort_info = _cohort_preview_api(request, data, cohort_info, version)
-        cohort_info = _cohort_preview_api(request, data, cohort_info, version)
+        cohort_info = _cohort_detail_api(request, cohort, cohort_info)
+
+        cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
 
     except Exception as e:
         logger.error("[ERROR] While trying to obtain cohort objects: ")
@@ -270,30 +161,62 @@ def cohort_preview_api(request):
 
 @csrf_exempt
 @api_auth
-@require_http_methods(["POST"])
-def cohort_preview_manifest_api(request):
+@require_http_methods(["GET"])
+def cohort_manifest_api(request, cohort_id=0):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
+    # template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+
+    if cohort_id == 0:
+        messages.error(request, 'Cohort requested does not exist.')
+        return redirect('/user_landing')
+
+    print(request.GET.get('email', ''))
     try:
-        body = json.loads(request.body.decode('utf-8'))
-        data = body["request_data"]
+        cohort = Cohort.objects.get(id=cohort_id)
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] A cohort with the ID {} was not found: ".format(cohort_id))
+        logger.exception(e)
+        manifest_info = {
+            "message": "A cohort with the ID {} was not found.".format(cohort_id),
+            "code": 400
+        }
+        return JsonResponse(manifest_info)
+
+    try:
+        user = User.objects.get(email=request.GET.get('email', ''))
+        Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
+    except Exception as e:
+        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
+        logger.exception(e)
         cohort_info = {
-            "manifest": {
-                "name": data['name'],
-                "description": data['description'],
+            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
+            "code": 403
+        }
+        return JsonResponse(cohort_info)
+
+    try:
+        manifest_info = {
+            "cohort": {
+                "cohort_id": int(cohort_id),
+                "name": cohort.name,
+                "description": cohort.description,
+                "filterSet": get_filterSet_api(cohort)
+
             }
         }
-        cohort_info = _cohort_preview_manifest_api(request, data, cohort_info)
+
+        manifest_info = _cohort_manifest_api(request, cohort, manifest_info)
 
     except Exception as e:
         logger.error("[ERROR] While trying to obtain cohort objects: ")
         logger.exception(e)
-        cohort_info = {
+        manifest_info = {
             "message": "Error while trying to obtain cohort objects.",
             "code": 400
         }
 
-    return JsonResponse(cohort_info)
+    return JsonResponse(manifest_info)
 
 
 # Return a list of all cohorts owned by some user
@@ -366,3 +289,79 @@ def delete_cohort_api(request):
             "code": 400}
 
     return JsonResponse(cohort_info)
+
+
+@csrf_exempt
+@api_auth
+@require_http_methods(["POST"])
+def cohort_preview_api(request):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+        data = body["request_data"]
+        cohort_info = {
+            "cohort": {
+                "name": data['name'],
+                "description": data['description'],
+            }
+        }
+
+        filterset = data['filterSet']
+
+        try:
+            version = get_idc_data_version(filterset['idc_data_version'])
+        except:
+            return JsonResponse(
+                dict(
+                    message = "Invalid IDC version {}".format(data['filterSet']['idc_data_version']),
+                    code = 400
+                )
+            )
+
+        cohort_info['cohort']["filterSet"] =  copy.deepcopy(data['filterSet'])
+        cohort_info['cohort']["filterSet"]['idc_data_version'] = version.version_number
+
+        # if request.GET['return_level'] != 'None':
+        #     cohort_info = _cohort_preview_api(request, data, cohort_info, version)
+        cohort_info = _cohort_preview_api(request, data, cohort_info, version)
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to obtain cohort objects: ")
+        logger.exception(e)
+        cohort_info = {
+            "message": "Error while trying to obtain cohort objects.",
+            "code": 400
+        }
+
+    return JsonResponse(cohort_info)
+
+
+@csrf_exempt
+@api_auth
+@require_http_methods(["POST"])
+def cohort_preview_manifest_api(request):
+    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+
+    try:
+        body = json.loads(request.body.decode('utf-8'))
+        data = body["request_data"]
+        manifest_info = {
+            "cohort": {
+                "name": data['name'],
+                "description": data['description'],
+            }
+        }
+        manifest_info = _cohort_preview_manifest_api(request, data, manifest_info)
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to obtain cohort objects: ")
+        logger.exception(e)
+        manifest_info = {
+            "message": "Error while trying to obtain cohort objects.",
+            "code": 400
+        }
+
+    return JsonResponse(manifest_info)
+
+
