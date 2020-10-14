@@ -156,7 +156,7 @@ def collections_list_api(request):
 
 @api_auth
 @require_http_methods(["GET"])
-def attributes_list_api(request):
+def facets_list_api(request):
 
     try:
         data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
@@ -188,29 +188,29 @@ def attributes_list_api(request):
 
 
     for source in sources:
-        # attributes = Attribute.objects.all()
-        attributes = source.get_attr(for_faceting=False)
+        # facets = Attribute.objects.all()
+        facets = source.get_attr(for_faceting=False)
 
-        attributes_info = []
-        for attribute in attributes:
-            if 'clinical_' in attribute.name:
+        facets_info = []
+        for facet in facets:
+            if 'clinical_' in facet.name:
                 pass
-            attribute_info = {
-                "name": attribute.name,
-                "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
-                "active": attribute.active,
-                "units": attribute.units,
+            facet_info = {
+                "name": facet.name,
+                "data_type": dict(Attribute.DATA_TYPES)[facet.data_type],
+                "active": facet.active,
+                "units": facet.units,
                 "idc_data_version": data_version.version_number
             }
-            attributes_info.append(attribute_info)
-            if attribute_info['data_type'] == 'Continuous Numeric':
+            facets_info.append(facet_info)
+            if facet_info['data_type'] == 'Continuous Numeric':
                 for suffix in ['lt', 'lte', 'btw', 'gte', 'gt']:
-                    attribute_info_copy = dict(attribute_info)
-                    attribute_info_copy['name'] = '{}_{}'.format(attribute.name, suffix)
-                    attributes_info.append(attribute_info_copy)
+                    facet_info_copy = dict(facet_info)
+                    facet_info_copy['name'] = '{}_{}'.format(facet.name, suffix)
+                    facets_info.append(facet_info_copy)
         data_source = {
             "data_source": source.name,
-            'attributes': attributes_info
+            'facets': facets_info
         }
         response["data_sources"].append(data_source)
 
