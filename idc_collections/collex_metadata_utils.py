@@ -77,6 +77,18 @@ def _build_attr_by_source(attrs, data_version, source_type, attr_data=None):
     return attr_by_src
 
 
+def sortNum(x):
+    if x == 'None':
+        return float(-1)
+    else:
+        strt = x.split(' ')[0];
+        if strt =='*':
+            return float(0)
+        else:
+            return float(strt)
+
+
+
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
                            with_derived, collapse_on, is_json):
@@ -177,7 +189,15 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                                     'units': this_attr.units,
                                                     'count': facet_set[attr][val] if val in facet_set[attr] else 0
                                                 })
-                                        _attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
+                                        if _attr_by_source[set_name][source_name]['attributes'][attr]['obj'].data_type == 'N':
+                                            _attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortNum(x['value']))
+                                            if _attr_by_source[set_name][source_name]['attributes'][attr]['vals'][0][
+                                                'value'] == 'None':
+                                                litem = _attr_by_source[set_name][source_name]['attributes'][attr]['vals'].pop(0)
+                                                _attr_by_source[set_name][source_name]['attributes'][attr]['vals'].append(litem)
+                                            pass
+                                        else:
+                                            _attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
                             else:
                                 _attr_by_source[set_name]['All'] = {'attributes': _attr_by_source[set_name]['attributes']}
                                 for attr in facet_set:
@@ -200,6 +220,12 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                             sortDic = {'underweight': 0, 'normal weight': 1, 'overweight': 2, 'obese': 3,
                                                        'None': 4}
                                             _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortDic[x['value']])
+                                        elif _attr_by_source[set_name]['All']['attributes'][attr]['obj'].data_type=='N':
+                                            _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key= lambda x: sortNum(x['value']))
+                                            if _attr_by_source[set_name]['All']['attributes'][attr]['vals'][0]['value']=='None':
+                                                litem=_attr_by_source[set_name]['All']['attributes'][attr]['vals'].pop(0)
+                                                _attr_by_source[set_name]['All']['attributes'][attr]['vals'].append(litem)
+                                            pass
                                         else:
                                             _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
 
