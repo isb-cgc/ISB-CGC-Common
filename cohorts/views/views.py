@@ -133,7 +133,7 @@ def cohorts_list(request, is_public=False):
     for cohort in cohorts:
         cohort_data_versions.append({
             'id': cohort.id,
-            'version': str(cohort.get_data_versions()[0])
+            'version': "; ".join(cohort.get_data_versions().get_displays())
         })
 
     previously_selected_cohort_ids = []
@@ -188,7 +188,7 @@ def cohort_detail(request, cohort_id):
             'cohort': cohort,
             'shared_with_users': shared_with_users,
             'cohort_filters': cohort_filters,
-            'cohort_version': str(cohort_versions[0])
+            'cohort_version': "; ".join(cohort_versions.get_displays())
         })
 
         template = 'cohorts/cohort_details.html'
