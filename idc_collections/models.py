@@ -130,6 +130,8 @@ class DataSetType(models.Model):
 
 
 class ImagingDataCommonsVersionQuerySet(models.QuerySet):
+
+    # Return all the data sources corresponding to this queryset
     def get_data_sources(self, source_type=None):
         sources = None
         for idcdv in self.all():
@@ -141,6 +143,13 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
         if source_type:
             return sources.distinct().filter(source_type=source_type)
         return sources.distinct()
+
+    # Return all display strings in this queryset
+    def get_displays(self):
+        displays = []
+        for idcdv in self.all():
+            displays.append(idcdv.get_display())
+        return displays
 
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
