@@ -128,13 +128,21 @@ def cohorts_list(request, is_public=False):
             'value': int(cohort['id']),
             'label': escape(cohort['name'])
         })
-        
+
+    cohort_data_versions = []
+    for cohort in cohorts:
+        cohort_data_versions.append({
+            'id': cohort.id,
+            'version': "; ".join(cohort.get_data_versions().get_displays())
+        })
+
     previously_selected_cohort_ids = []
 
     return render(request, 'cohorts/cohort_list.html', {'request': request,
                                                         'cohorts': cohorts,
                                                         'user_list': users,
                                                         'cohorts_listing': cohort_listing,
+                                                        'cohort_versions': cohort_data_versions,
                                                         'shared_users':  json.dumps(shared_users),
                                                         'base_url': settings.BASE_URL,
                                                         'base_api_url': settings.BASE_API_URL,
@@ -179,7 +187,8 @@ def cohort_detail(request, cohort_id):
             'base_url': settings.BASE_URL,
             'cohort': cohort,
             'shared_with_users': shared_with_users,
-            'cohort_filters': cohort_filters
+            'cohort_filters': cohort_filters,
+            'cohort_version': "; ".join(cohort_versions.get_displays())
         })
 
         template = 'cohorts/cohort_details.html'
