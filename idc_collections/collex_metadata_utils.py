@@ -77,6 +77,18 @@ def _build_attr_by_source(attrs, data_version, source_type, attr_data=None):
     return attr_by_src
 
 
+def sortNum(x):
+    if x == 'None':
+        return float(-1)
+    else:
+        strt = x.split(' ')[0];
+        if strt =='*':
+            return float(0)
+        else:
+            return float(strt)
+
+
+
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
                            with_derived, collapse_on, is_json):
@@ -177,7 +189,15 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                                     'units': this_attr.units,
                                                     'count': facet_set[attr][val] if val in facet_set[attr] else 0
                                                 })
-                                        _attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
+                                        if _attr_by_source[set_name][source_name]['attributes'][attr]['obj'].data_type == 'N':
+                                            _attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortNum(x['value']))
+                                            if _attr_by_source[set_name][source_name]['attributes'][attr]['vals'][0][
+                                                'value'] == 'None':
+                                                litem = _attr_by_source[set_name][source_name]['attributes'][attr]['vals'].pop(0)
+                                                _attr_by_source[set_name][source_name]['attributes'][attr]['vals'].append(litem)
+                                            pass
+                                        else:
+                                            _attr_by_source[set_name][source_name]['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
                             else:
                                 _attr_by_source[set_name]['All'] = {'attributes': _attr_by_source[set_name]['attributes']}
                                 for attr in facet_set:
@@ -200,6 +220,12 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                             sortDic = {'underweight': 0, 'normal weight': 1, 'overweight': 2, 'obese': 3,
                                                        'None': 4}
                                             _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortDic[x['value']])
+                                        elif _attr_by_source[set_name]['All']['attributes'][attr]['obj'].data_type=='N':
+                                            _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key= lambda x: sortNum(x['value']))
+                                            if _attr_by_source[set_name]['All']['attributes'][attr]['vals'][0]['value']=='None':
+                                                litem=_attr_by_source[set_name]['All']['attributes'][attr]['vals'].pop(0)
+                                                _attr_by_source[set_name]['All']['attributes'][attr]['vals'].append(litem)
+                                            pass
                                         else:
                                             _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
 
@@ -319,7 +345,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 # facets: array of strings, attributes to faceted count as a list of attribute names; if not provided not faceted counts will be performed
 def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, with_ancillary = True,
                         collapse_on = 'PatientID', order_docs=None, sources = None, versions = None, with_derived=True,
-                        facets=None, records_only=False):
+                        facets=None, records_only=False, sort=None):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -349,7 +375,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit)
         elif source_type == DataSource.SOLR:
-            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only)
+            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only, sort)
 
         for counts in ['facets', 'filtered_facets']:
             facet_set = results.get(counts,{})
@@ -377,7 +403,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
     return results
 
 # Use solr to fetch faceted counts and/or records
-def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False):
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False, sort=None):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -470,12 +496,11 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'fields': None
                 })
 
-            print("filtered result: {}".format(solr_count_filtered_result))
-
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
 
-            results['total'] = solr_result['numFound']
+            if source.has_data_type(DataSetType.IMAGE_DATA):
+                results['total'] = solr_result['numFound']
 
             results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
                 'facets': solr_result['facets']
@@ -494,6 +519,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'query_string': None,
                 'collapse_on': collapse_on,
                 'counts_only': counts_only,
+                'sort': sort,
                 'limit': record_limit
             })
             results['docs'] = solr_result['docs']
