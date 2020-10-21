@@ -33,7 +33,7 @@ from ..decorators import api_auth
 
 from idc_collections.models import Attribute
 from cohorts.models import Cohort, Cohort_Perms
-from cohorts.utils_api import get_filterSet_api, get_idc_version, _cohort_detail_api, _cohort_preview_api, _cohort_manifest_api, _cohort_preview_manifest_api
+from cohorts.utils_api import get_filterSet_api, get_idc_data_version, _cohort_detail_api, _cohort_preview_api, _cohort_manifest_api, _cohort_preview_manifest_api
 from ..views.views import _save_cohort,_delete_cohort
 
 BQ_ATTEMPT_MAX = 10
@@ -185,11 +185,11 @@ def save_cohort_api(request):
         description = data['description']
         filterset = data['filterSet']
         try:
-            version = get_idc_version(filterset['idc_version'])
+            version = get_idc_data_version(filterset['idc_data_version'])
         except:
             return JsonResponse(
                 dict(
-                    message = "Invalid IDC version {}".format(data['filterSet']['idc_version']),
+                    message = "Invalid IDC version {}".format(data['filterSet']['idc_data_version']),
                     code = 400
                 )
             )
@@ -200,12 +200,12 @@ def save_cohort_api(request):
             filters_by_id[str(attr['id'])] = filters[attr['name']]
         response = _save_cohort(user, filters=filters_by_id, name=name, desc=description, version=version)
         cohort_id = response['cohort_id']
-        idc_version = Cohort.objects.get(id=cohort_id).get_data_versions()[0].version_number
+        idc_data_version = Cohort.objects.get(id=cohort_id).get_data_versions()[0].version_number
         # if request.GET['return_filter'] == 'True':
         #     response["filterSet"] =  get_filterSet_api(cohort)
         # response["filterSet"] =  get_filterSet_api(cohort)
 
-        response['filterSet'] = {'idc_version': idc_version, 'filters': response.pop('filters')}
+        response['filterSet'] = {'idc_data_version': idc_data_version, 'filters': response.pop('filters')}
 
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -214,8 +214,11 @@ def save_cohort_api(request):
             "message": "There was an error saving your cohort; it may not have been saved correctly.",
             "code": 400,
         }
-
-    return JsonResponse(response)
+    cohort_properties = dict(
+        cohort_properties = response,
+        code = 200
+    )
+    return JsonResponse(cohort_properties)
 
 
 @csrf_exempt
@@ -237,18 +240,18 @@ def cohort_preview_api(request):
         filterset = data['filterSet']
 
         try:
-            version = get_idc_version(filterset['idc_version'])
+            version = get_idc_data_version(filterset['idc_data_version'])
         except:
             return JsonResponse(
                 dict(
-                    message = "Invalid IDC version {}".format(data['filterSet']['idc_version']),
+                    message = "Invalid IDC version {}".format(data['filterSet']['idc_data_version']),
                     code = 400
                 )
             )
 
         if request.GET['return_filter'] == 'True':
             cohort_info['cohort']["filterSet"] =  copy.deepcopy(data['filterSet'])
-            cohort_info['cohort']["filterSet"]['idc_version'] = version.version_number
+            cohort_info['cohort']["filterSet"]['idc_data_version'] = version.version_number
 
         # if request.GET['return_level'] != 'None':
         #     cohort_info = _cohort_preview_api(request, data, cohort_info, version)
@@ -319,7 +322,6 @@ def cohort_list_api(request):
                 "description": cohort.description,
                 "owner": "{} {}".format(cohort.cohort_perms_set.get().user.first_name,cohort.cohort_perms_set.get().user.last_name),
                 "permission": cohort.cohort_perms_set.get().perm,
-                "hashes": []
             }
             cohortList.append(cohortMetadata)
 

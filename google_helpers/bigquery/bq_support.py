@@ -352,17 +352,23 @@ class BigQuerySupport(BigQueryABC):
 
     # TODO: shim until we have time to rework this into a single method
     # Fetch the results of a job based on the reference provided
-    def fetch_job_result_page(self, job_ref, page_token=None):
+    def fetch_job_result_page(self, job_ref, page_token=None, maxResults=settings.MAX_BQ_RECORD_RESULT):
 
         page = self.bq_service.jobs().getQueryResults(
             pageToken=page_token,
+            maxResults=maxResults,
             **job_ref).execute(num_retries=2)
 
         schema = page['schema']
         totalFound = page['totalRows']
         next_page = page.get('pageToken')
 
-        return {'current_page_rows': page['rows'], 'job_reference': job_ref, 'schema': schema, 'totalFound': totalFound, 'next_page': next_page}
+        return {
+            'current_page_rows': page['rows'] if 'rows' in page else [],
+            'job_reference': job_ref,
+            'schema': schema,
+            'totalFound': totalFound,
+            'next_page': next_page}
 
 
     # TODO: shim until we have time to rework this into a single method

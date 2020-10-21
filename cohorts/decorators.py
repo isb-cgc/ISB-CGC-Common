@@ -32,16 +32,23 @@ def api_auth(function):
             auth_header = request.META.get('HTTP_AUTHORIZATION',b'')
             # Force local dev to behave like deployed system
             if settings.DEBUG:
-                auth_header = auth_header.encode('iso-8859-1')
+                if isinstance(auth_header,str):
+                    auth_header = auth_header.encode('iso-8859-1')
             auth_header = auth_header.split()
 
             # Check for our Auth Header Token key, whatever that is.
-            if not auth_header or auth_header[0].lower() != settings.API_AUTH_KEY.lower().encode():
-                return JsonResponse({'message':'API access token not provided, or the wrong key was used.'},status=403)
+            if not auth_header:
+                logger.error("No API authentication header")
+                return JsonResponse({'message': 'No API authentication header.'}, status=403)
+            elif auth_header[0].lower() != settings.API_AUTH_KEY.lower().encode():
+                logger.error("Invalid auth_header: {}, expecting key {}".format(
+                    auth_header, settings.API_AUTH_KEY))
+                return JsonResponse({'message':'The wrong API auth key was used.'},status=403)
 
             # Make sure our Auth Header is the expected size
             if len(auth_header) == 1 or len(auth_header) > 2:
-                return JsonResponse({'message': 'API access token not provided, or the wrong key was used.'},status=403)
+                logger.error("Auth header {} should have exactly two parts".format(auth_header))
+                return JsonResponse({'message': 'Malformed API authentication header.'},status=403)
 
             # Now actually validate with the token
             token = auth_header[1].decode()
