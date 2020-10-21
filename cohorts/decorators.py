@@ -29,26 +29,28 @@ logger = logging.getLogger('main_logger')
 def api_auth(function):
     def wrap(request, *args, **kwargs):
         try:
-            auth_header = request.META.get('HTTP_AUTHORIZATION',b'')
+            auth_header = request.META.get('HTTP_AUTHORIZATION',None)
+            if not auth_header:
+                logger.error("No Authorization header found for API call!")
+                return JsonResponse({'message': 'No API authorization header - please be sure to provide an API token for API calls.'}, status=403)
+
+            print("type of auth_header is: {}".format(type(auth_header)))
             # Force local dev to behave like deployed system
             if settings.DEBUG:
                 if isinstance(auth_header,str):
                     auth_header = auth_header.encode('iso-8859-1')
             auth_header = auth_header.split()
 
-            # Check for our Auth Header Token key, whatever that is.
-            if not auth_header:
-                logger.error("No API authentication header")
-                return JsonResponse({'message': 'No API authentication header.'}, status=403)
-            elif auth_header[0].lower() != settings.API_AUTH_KEY.lower().encode():
-                logger.error("Invalid auth_header: {}, expecting key {}".format(
-                    auth_header, settings.API_AUTH_KEY))
-                return JsonResponse({'message':'The wrong API auth key was used.'},status=403)
-
             # Make sure our Auth Header is the expected size
             if len(auth_header) == 1 or len(auth_header) > 2:
-                logger.error("Auth header {} should have exactly two parts".format(auth_header))
-                return JsonResponse({'message': 'Malformed API authentication header.'},status=403)
+                logger.error("Malformed Authorization header: {}".format(auth_header))
+                return JsonResponse({'message': 'Received malformed API authorization header.'},status=403)
+
+            # Check for our Auth Header Token key
+            if auth_header[0].lower() != settings.API_AUTH_KEY.lower().encode():
+                logger.error("Invalid API Token key; received: {} - expected {}".format(
+                    auth_header[0].lower(), settings.API_AUTH_KEY.lower().encode()))
+                return JsonResponse({'message':'API Auth token key not recognized.'},status=403)
 
             # Now actually validate with the token
             token = auth_header[1].decode()
