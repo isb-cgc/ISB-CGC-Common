@@ -1393,7 +1393,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             if request.GET.get('case_barcode', None):
                 inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -1523,7 +1523,7 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
@@ -1532,7 +1532,7 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+                            metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
             else:
                 for attr in metadata_data_attr:
                     for val in metadata_data_attr[attr]['values']:
