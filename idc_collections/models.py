@@ -18,7 +18,15 @@ class ProgramQuerySet(models.QuerySet):
         collections = None
         for prog in self.all():
             collections = prog.collection_set.all() if not collections else collections | prog.collection_set.all()
-        return collections.distinct()
+        return collections.distinct() if collections else None
+
+    def get_data_sources(self):
+        data_sources = None
+        for prog in self.all():
+            print(prog.datasource_set.all())
+            data_sources = prog.datasource_set.all() if not data_sources else data_sources | prog.datasource_set.all()
+        return data_sources.distinct() if data_sources else None
+
 
 class ProgramManager(models.Manager):
     def get_queryset(self):
@@ -130,6 +138,8 @@ class DataSetType(models.Model):
 
 
 class ImagingDataCommonsVersionQuerySet(models.QuerySet):
+
+    # Return all the data sources corresponding to this queryset
     def get_data_sources(self, source_type=None):
         sources = None
         for idcdv in self.all():
@@ -141,6 +151,13 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
         if source_type:
             return sources.distinct().filter(source_type=source_type)
         return sources.distinct()
+
+    # Return all display strings in this queryset
+    def get_displays(self):
+        displays = []
+        for idcdv in self.all():
+            displays.append(idcdv.get_display())
+        return displays
 
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
@@ -291,6 +308,7 @@ class DataSourceQuerySet(models.QuerySet):
     #
     # {
     #   'list': [<String>, ...],
+    #   'ids': [<Integer>, ...],
     #   'sources': {
     #      <data source database ID>: {
     #         'list': [<String>, ...],
@@ -305,7 +323,7 @@ class DataSourceQuerySet(models.QuerySet):
     def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False):
         start = time.time()
         # Simple string list of attribute names (warning: will not properly resolve for collision)
-        attrs = { 'list': None }
+        attrs = { 'list': None, 'ids': None }
         # Full source-ID dictionary of attributes
         if by_source:
             attrs['sources'] = {}
@@ -347,8 +365,11 @@ class DataSourceQuerySet(models.QuerySet):
                     )
 
             attrs['list'] = attr_set.values_list('name', flat=True) if not attrs['list'] else (attrs['list'] | attr_set.values_list('name', flat=True))
+            attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
+                        attrs['ids'] | attr_set.values_list('id', flat=True))
 
-        attrs['list'] = attrs['list'].distinct()
+        attrs['list'] = attrs['list'] and attrs['list'].distinct()
+        attrs['ids'] = attrs['ids'] and attrs['ids'].distinct()
         stop = time.time()
         logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
 

@@ -29,22 +29,30 @@ logger = logging.getLogger('main_logger')
 def api_auth(function):
     def wrap(request, *args, **kwargs):
         try:
-            auth_header = request.META.get('HTTP_AUTHORIZATION',b'')
-            # Force local dev to behave like deployed system
-            if settings.DEBUG:
-                auth_header = auth_header.encode('iso-8859-1')
-            auth_header = auth_header.split()
+            auth_header = request.META.get('HTTP_AUTHORIZATION',None)
+            if not auth_header:
+                logger.error("No Authorization header found for API call!")
+                return JsonResponse({'message': 'No API authorization header - please be sure to provide an API token for API calls.'}, status=403)
 
-            # Check for our Auth Header Token key, whatever that is.
-            if not auth_header or auth_header[0].lower() != settings.API_AUTH_KEY.lower().encode():
-                return JsonResponse({'message':'API access token not provided, or the wrong key was used.'},status=403)
+            # Force local dev to behave like deployed system
+            # if settings.DEBUG:
+            #     if isinstance(auth_header,str):
+            #         auth_header = auth_header.encode('iso-8859-1')
+            auth_header = auth_header.split()
 
             # Make sure our Auth Header is the expected size
             if len(auth_header) == 1 or len(auth_header) > 2:
-                return JsonResponse({'message': 'API access token not provided, or the wrong key was used.'},status=403)
+                logger.error("Malformed Authorization header: {}".format(auth_header))
+                return JsonResponse({'message': 'Received malformed API authorization header.'},status=403)
+
+            # Check for our Auth Header Token key
+            if auth_header[0].lower() != settings.API_AUTH_KEY.lower():
+                logger.error("Invalid API Token key; received: {} - expected {}".format(
+                    auth_header[0].lower(), settings.API_AUTH_KEY.lower()))
+                return JsonResponse({'message':'API Auth token key not recognized.'},status=403)
 
             # Now actually validate with the token
-            token = auth_header[1].decode()
+            token = auth_header[1]
             Token.objects.select_related('user').get(key=token)
 
             # If a user was found, we've received a valid API call, and can proceed.
