@@ -197,6 +197,14 @@ def get_manifest_job(request, filters, data_version, manifest_info):
 
     select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
 
+    # Get the SQL
+    sql = ""
+    if request.GET['return_sql'] in [True, 'True']:
+        sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
+            filters=filters, fields=select, data_version=data_version,
+            order_by=select[-1:]))
+    manifest_info['cohort']['sql'] = sql
+
     # Perform the query but don't return the results, just the job reference
     results = get_bq_metadata(
         filters=filters, fields=select, data_version=data_version,
