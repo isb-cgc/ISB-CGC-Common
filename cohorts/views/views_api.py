@@ -95,8 +95,7 @@ def cohort_detail_api(request, cohort_id=0):
         # if request.GET['return_level'] != 'None':
         cohort_info = _cohort_detail_api(request, cohort, cohort_info)
 
-        if request.GET['return_filter'] == 'True':
-            cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
+        cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
 
     except Exception as e:
         logger.error("[ERROR] While trying to obtain cohort objects: ")
@@ -127,11 +126,11 @@ def cohort_manifest_api(request, cohort_id=0):
     except ObjectDoesNotExist as e:
         logger.error("[ERROR] A cohort with the ID {} was not found: ".format(cohort_id))
         logger.exception(e)
-        cohort_info = {
+        manifest_info = {
             "message": "A cohort with the ID {} was not found.".format(cohort_id),
             "code": 400
         }
-        return JsonResponse(cohort_info)
+        return JsonResponse(manifest_info)
 
     try:
         user = User.objects.get(email=request.GET.get('email', ''))
@@ -139,35 +138,34 @@ def cohort_manifest_api(request, cohort_id=0):
     except Exception as e:
         logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
         logger.exception(e)
-        cohort_info = {
+        manifest_info = {
             "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
             "code": 403
         }
-        return JsonResponse(cohort_info)
+        return JsonResponse(manifest_info)
 
     try:
-        cohort_info = {
-            "manifest": {
+        manifest_info = {
+            "cohort": {
                 "cohort_id": int(cohort_id),
                 "name": cohort.name,
                 "description": cohort.description,
             }
         }
 
-        cohort_info = _cohort_manifest_api(request, cohort, cohort_info)
+        manifest_info = _cohort_manifest_api(request, cohort, manifest_info)
 
-        # if request.GET['return_filter'] == 'True':
-        #     cohort_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
+        manifest_info['cohort']["filterSet"] =  get_filterSet_api(cohort)
 
     except Exception as e:
         logger.error("[ERROR] While trying to obtain cohort objects: ")
         logger.exception(e)
-        cohort_info = {
+        manifest_info = {
             "message": "Error while trying to obtain cohort objects.",
             "code": 400
         }
 
-    return JsonResponse(cohort_info)
+    return JsonResponse(manifest_info)
 
 
 @csrf_exempt
@@ -249,9 +247,8 @@ def cohort_preview_api(request):
                 )
             )
 
-        if request.GET['return_filter'] == 'True':
-            cohort_info['cohort']["filterSet"] =  copy.deepcopy(data['filterSet'])
-            cohort_info['cohort']["filterSet"]['idc_data_version'] = version.version_number
+        cohort_info['cohort']["filterSet"] =  copy.deepcopy(data['filterSet'])
+        cohort_info['cohort']["filterSet"]['idc_data_version'] = version.version_number
 
         # if request.GET['return_level'] != 'None':
         #     cohort_info = _cohort_preview_api(request, data, cohort_info, version)
@@ -277,23 +274,23 @@ def cohort_preview_manifest_api(request):
     try:
         body = json.loads(request.body.decode('utf-8'))
         data = body["request_data"]
-        cohort_info = {
-            "manifest": {
+        manifest_info = {
+            "cohort": {
                 "name": data['name'],
                 "description": data['description'],
             }
         }
-        cohort_info = _cohort_preview_manifest_api(request, data, cohort_info)
+        manifest_info = _cohort_preview_manifest_api(request, data, manifest_info)
 
     except Exception as e:
         logger.error("[ERROR] While trying to obtain cohort objects: ")
         logger.exception(e)
-        cohort_info = {
+        manifest_info = {
             "message": "Error while trying to obtain cohort objects.",
             "code": 400
         }
 
-    return JsonResponse(cohort_info)
+    return JsonResponse(manifest_info)
 
 
 # Return a list of all cohorts owned by some user

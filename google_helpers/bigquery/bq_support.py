@@ -284,7 +284,7 @@ class BigQuerySupport(BigQueryABC):
     # Runs a basic, optionally parameterized query
     # If self.project_id, self.dataset_id, and self.table_id are set they will be used as the destination table for
     # the query WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False, paginated=False):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False, paginated=False, no_results=False):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
 
@@ -310,7 +310,10 @@ class BigQuerySupport(BigQueryABC):
                 logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
-                if paginated:
+                if no_results:
+                    # Just return the job reference.
+                    query_results = query_job['jobReference']
+                elif paginated:
                     query_results = self.fetch_job_result_page(query_job['jobReference'])
                 elif with_schema:
                     query_results = self.fetch_job_results_with_schema(query_job['jobReference'])
@@ -444,9 +447,9 @@ class BigQuerySupport(BigQueryABC):
 
     # Execute a query, optionally parameterized, and fetch its results
     @classmethod
-    def execute_query_and_fetch_results(cls, query, parameters=None, with_schema=False, paginated=False):
+    def execute_query_and_fetch_results(cls, query, parameters=None, with_schema=False, paginated=False, no_results=False):
         bqs = cls(None, None, None)
-        return bqs.execute_query(query, parameters, with_schema=with_schema, paginated=paginated)
+        return bqs.execute_query(query, parameters, with_schema=with_schema, paginated=paginated, no_results=no_results)
 
     @classmethod
     # Execute a query, optionally parameterized, to be saved on a temp table
@@ -515,9 +518,9 @@ class BigQuerySupport(BigQueryABC):
         return results['schema']
 
     @classmethod
-    def get_job_result_page(cls, job_ref, page_token):
+    def get_job_result_page(cls, job_ref, page_token, maxResults=settings.MAX_BQ_RECORD_RESULT):
         bqs = cls(None, None, None)
-        page = bqs.fetch_job_result_page(job_ref,page_token)
+        page = bqs.fetch_job_result_page(job_ref, page_token, maxResults=maxResults)
         return page
     
     # Method for submitting a group of jobs and awaiting the results of the whole set
