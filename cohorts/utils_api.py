@@ -164,9 +164,8 @@ def get_cohort_query(request, filters, data_version, cohort_info):
     if request.GET['return_level'] != "None":
         # Get the SQL
         if request.GET['return_sql'] in [True, 'True']:
-            cohort_info['cohort']['sql'] = "\t({})\n\tUNION ALL\n".format(get_bq_string(
-                filters=filters, fields=select, data_version=data_version,
-                order_by=select[-1:]))
+            cohort_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+                order_by=select[-1:])
         else:
             cohort_info['cohort']['sql'] = ""
 
@@ -198,9 +197,8 @@ def get_manifest_query(request, filters, data_version, manifest_info):
 
     # Get the SQL
     if request.GET['return_sql'] in [True, 'True']:
-        manifest_info['cohort']['sql'] = "\t({})\n\tUNION ALL\n".format(get_bq_string(
-            filters=filters, fields=select, data_version=data_version,
-            order_by=select[-1:]))
+        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+            order_by=select[-1:])
     else:
         manifest_info['cohort']['sql'] = ""
 
