@@ -75,10 +75,10 @@ def cohort_detail_api(request, cohort_id=0):
         user = User.objects.get(email=request.GET.get('email', ''))
         Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
     except Exception as e:
-        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id))
+        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted.".format(request.GET.get('email', ''), cohort_id))
         logger.exception(e)
         cohort_info = {
-            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
+            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted.".format(request.GET.get('email', ''), cohort_id),
             "code": 403
         }
         return JsonResponse(cohort_info)
@@ -136,10 +136,10 @@ def cohort_manifest_api(request, cohort_id=0):
         user = User.objects.get(email=request.GET.get('email', ''))
         Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
     except Exception as e:
-        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot delete it.".format(request.GET.get('email', ''), cohort_id))
+        logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted.".format(request.GET.get('email', ''), cohort_id))
         logger.exception(e)
         manifest_info = {
-            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted, and so cannot be deleted.".format(request.GET.get('email', ''), cohort_id),
+            "message": "{} isn't the owner of cohort ID {}, or the cohort has been deleted.".format(request.GET.get('email', ''), cohort_id),
             "code": 403
         }
         return JsonResponse(manifest_info)
@@ -209,7 +209,7 @@ def save_cohort_api(request):
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         response = {
-            "message": "There was an error saving your cohort; it may not have been saved correctly.",
+            "message": "There was an error saving your cohort.",
             "code": 400,
         }
     cohort_properties = dict(

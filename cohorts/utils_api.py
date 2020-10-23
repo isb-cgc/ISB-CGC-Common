@@ -67,7 +67,7 @@ def _cohort_detail_api(request, cohort, cohort_info):
     # data_versions = filter_group.data_versions.all()
     data_version = filter_group.data_version
 
-    cohort_info = get_cohort_job(request, filters, data_version, cohort_info)
+    cohort_info = get_cohort_query(request, filters, data_version, cohort_info)
 
     return cohort_info
 
@@ -86,7 +86,7 @@ def _cohort_manifest_api(request, cohort, manifest_info):
 
     data_version = filter_group.data_version
 
-    manifest_info = get_manifest_job(request, filters, data_version, manifest_info)
+    manifest_info = get_manifest_query(request, filters, data_version, manifest_info)
 
     manifest_info['cohort']["filterSet"] = get_filterSet_api(cohort)
 
@@ -107,7 +107,7 @@ def _cohort_preview_api(request, data, cohort_info, data_version):
     if 'collection_id' in filters:
         filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
 
-    cohort_info = get_cohort_job(request, filters, data_version, cohort_info)
+    cohort_info = get_cohort_query(request, filters, data_version, cohort_info)
 
     return cohort_info
 
@@ -139,7 +139,7 @@ def _cohort_preview_manifest_api(request, data, manifest_info):
                 code = 400
             )
 
-    manifest_info = get_manifest_job(request, filters, data_version, manifest_info)
+    manifest_info = get_manifest_query(request, filters, data_version, manifest_info)
 
     manifest_info['cohort']["filterSet"] = copy.deepcopy(data['filterSet'])
     manifest_info['cohort']["filterSet"]['idc_data_version'] = data_version.version_number
@@ -148,7 +148,7 @@ def _cohort_preview_manifest_api(request, data, manifest_info):
 
 
 # Launch a cohort job
-def get_cohort_job(request, filters, data_version, cohort_info):
+def get_cohort_query(request, filters, data_version, cohort_info):
 
     levels = {'Instance': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID', 'SOPInstanceUID'],
               'Series': ['collection_id', 'PatientID', 'StudyInstanceUID', 'SeriesInstanceUID'],
@@ -161,17 +161,18 @@ def get_cohort_job(request, filters, data_version, cohort_info):
     return_level = request.GET['return_level']
     select = levels[return_level]
 
-    # Get the SQL
-    if request.GET['return_sql'] in [True, 'True']:
-        cohort_info['cohort']['sql'] = get_bq_string(
-            filters=filters, fields=select, data_version=data_version,
-            order_by=select[-1:])
-
     if request.GET['return_level'] != "None":
+        # Get the SQL
+        if request.GET['return_sql'] in [True, 'True']:
+            cohort_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+                order_by=select[-1:])
+        else:
+            cohort_info['cohort']['sql'] = ""
+
         results = get_bq_metadata(
             filters=filters, fields=select, data_version=data_version,
             # limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
-            no_results=True,
+            no_submit=True,
             order_by=select[-1:])
         if not results:
             cohort_info = {
@@ -180,33 +181,31 @@ def get_cohort_job(request, filters, data_version, cohort_info):
             }
             return cohort_info
 
-        print("Results in get_cohort_job: {}".format(results))
-        
-        cohort_info['job_reference'] = results
+        cohort_info['query'] = results
     else:
-        cohort_info['job_reference'] = {}
+        cohort_info['cohort']['sql'] = ""
+        cohort_info['query'] = {}
     return cohort_info
 
 
 # Launch a manifest job
-def get_manifest_job(request, filters, data_version, manifest_info):
+def get_manifest_query(request, filters, data_version, manifest_info):
 
     access_method = request.GET['access_method']
 
     select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
 
     # Get the SQL
-    sql = ""
     if request.GET['return_sql'] in [True, 'True']:
-        sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
-            filters=filters, fields=select, data_version=data_version,
-            order_by=select[-1:]))
-    manifest_info['cohort']['sql'] = sql
+        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+            order_by=select[-1:])
+    else:
+        manifest_info['cohort']['sql'] = ""
 
     # Perform the query but don't return the results, just the job reference
     results = get_bq_metadata(
         filters=filters, fields=select, data_version=data_version,
-        no_results=True,
+        no_submit=True,
         order_by=select[-1:])
 
     if not results:
@@ -216,7 +215,7 @@ def get_manifest_job(request, filters, data_version, manifest_info):
         }
         return manifest_info
 
-    manifest_info['job_reference'] = results
+    manifest_info['query'] = results
 
     return manifest_info
 
