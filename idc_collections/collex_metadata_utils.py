@@ -763,7 +763,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 # fields: list of columns to return, string format only
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
 # returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
-def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True, paginated=False, no_results=False):
+def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False):
 
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
@@ -936,7 +936,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
 
-    results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated, no_results=no_results)
+    if no_submit:
+        results = {"sql_string":full_query_str, "params":params}
+    else:
+        results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
 
     return results
 
