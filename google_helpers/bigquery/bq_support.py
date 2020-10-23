@@ -287,6 +287,7 @@ class BigQuerySupport(BigQueryABC):
     def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False, paginated=False, no_results=False):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
+        logger.debug("query_job: {}".format(query_job))
 
         job_id = query_job['jobReference']['jobId']
 
