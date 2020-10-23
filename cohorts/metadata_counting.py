@@ -287,13 +287,13 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
     logger.info("[STATUS] Entering Solr metadata counter")
     comb_mut_filters = comb_mut_filters.upper()
-    user_id = 0
-    if user:
-        user_id = user.id
+    # user_id = 0
+    # if user:
+    #     user_id = user.id
 
     mutation_filters = None
     filters = {}
-    data_type_filters = {}
+    # data_type_filters = {}
     mutation_build = None
 
     results = { 'programs': {} }
