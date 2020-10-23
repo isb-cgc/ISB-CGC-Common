@@ -184,6 +184,8 @@ def get_cohort_job(request, filters, data_version, cohort_info):
             }
             return cohort_info
 
+        print("Results in get_cohort_job: {}".format(results))
+        
         cohort_info['job_reference'] = results
     else:
         cohort_info['job_reference'] = {}

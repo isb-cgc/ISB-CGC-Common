@@ -316,11 +316,13 @@ class BigQuerySupport(BigQueryABC):
                     query_results = query_job['jobReference']
                 elif paginated:
                     query_results = self.fetch_job_result_page(query_job['jobReference'])
+                    logger.info("[STATUS] {} results found for query {}.".format(str(query_results['totalFound']), job_id))
                 elif with_schema:
                     query_results = self.fetch_job_results_with_schema(query_job['jobReference'])
+                    logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results['results'])), job_id))
                 else:
                     query_results = self.fetch_job_results(query_job['jobReference'])
-                logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
+                    logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
         else:
             logger.error("[ERROR] Query took longer than the allowed time to execute--" +
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
