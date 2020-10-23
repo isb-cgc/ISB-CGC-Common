@@ -161,16 +161,12 @@ def get_cohort_job(request, filters, data_version, cohort_info):
     return_level = request.GET['return_level']
     select = levels[return_level]
 
-
     # Get the SQL
-    sql = ""
     if request.GET['return_sql'] in [True, 'True']:
-        sql += "\t({})\n\tUNION ALL\n".format(get_bq_string(
+        cohort_info['cohort']['sql'] = get_bq_string(
             filters=filters, fields=select, data_version=data_version,
-            order_by=select[-1:]))
-    cohort_info['cohort']['sql'] = sql
+            order_by=select[-1:])
 
-    collections = []
     if request.GET['return_level'] != "None":
         results = get_bq_metadata(
             filters=filters, fields=select, data_version=data_version,

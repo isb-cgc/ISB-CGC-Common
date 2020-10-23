@@ -938,6 +938,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated, no_results=no_results)
 
+    print("results in fetch_bq_metadata: {}".format(results))
+
     return results
 
 # For faceted counting of continuous numeric fields, ranges must be constructed so the faceted counts are properly
