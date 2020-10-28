@@ -851,12 +851,11 @@ def download_cohort_manifest(request, cohort_id):
         field_list = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_generation", "gcs_bucket", "crdc_instance_uuid"]
 
         # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
-        # csv_cols = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_path"]
-        if request.POST.get('columns'):
-            selected_columns = json.loads(request.POST.get('columns'))
+        if request.GET.get('columns'):
+            selected_columns = json.loads(request.GET.get('columns'))
 
-        if request.POST.get('header_fields'):
-            selected_header_fields = json.loads(request.POST.get('header_fields'))
+        if request.GET.get('header_fields'):
+            selected_header_fields = json.loads(request.GET.get('header_fields'))
 
         items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES)
 
@@ -894,16 +893,30 @@ def download_cohort_manifest(request, cohort_id):
             rows += (selected_columns,)
             for row in manifest:
                 this_row = [row[x] for x in column_order]
-                this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
-                    "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
-                    row['SOPInstanceUID'],row['gcs_generation'])
-                )
+                if 'gcs_path' in selected_columns:
+                    this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
+                        "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
+                        row['SOPInstanceUID'],row['gcs_generation'])
+                    )
                 rows += (this_row,)
             pseudo_buffer = Echo()
-            writer = csv.writer(pseudo_buffer)
+
+            file_type = request.GET.get('file_type')
+            if file_type == 'csv':
+                writer = csv.writer(pseudo_buffer)
+            elif file_type == 'tsv':
+                writer = csv.writer(pseudo_buffer, delimiter='\t')
+            elif file_type == 'json':
+                # TODO
+                writer = csv.writer(pseudo_buffer)
+
             response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-            response['Content-Disposition'] = 'attachment; filename="manifest_cohort_{}_{}.csv"'.format(str(cohort_id),timestamp)
+            if request.GET.get('file_name'):
+                file_name = "{}.{}".format(request.GET.get('file_name'), file_type)
+            else:
+                file_name = "manifest_cohort_{}_{}.{}".format(str(cohort_id), timestamp, file_type)
+            response['Content-Disposition'] = 'attachment; filename=' + file_name
             response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
     except ObjectDoesNotExist:
