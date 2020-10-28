@@ -96,19 +96,12 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
 
     samples_and_cases = {'samples': [], 'cases': [], 'project_counts': {}}
 
-    user_id = 0
-    if user:
-        user_id = user.id
 
     comb_mut_filters = comb_mut_filters.upper()
-    user_id = 0
-    if user:
-        user_id = user.id
 
     mutation_filters = None
     mutation_build = None
     filters = {}
-    data_type_filters = {}
 
     results = { 'programs': {} }
 

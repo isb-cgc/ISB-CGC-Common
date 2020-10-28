@@ -177,7 +177,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                     org_dict = file_query_result.get(result_key, {})
                     for k in result_val:
                         # k in [disease_code,program_name,data_category, experimental_strategy, and etc...]
-                        org_dict[k]= Counter(org_dict.get(k, {})) + Counter(result_val[k])
+                        org_dict[k]= dict(Counter(org_dict.get(k, {})) + Counter(result_val[k]))
                     file_query_result.update({result_key: org_dict})
 
                 else:

@@ -177,7 +177,7 @@ BQ_MOLECULAR_ATTR_TABLES = {
     },
     'CCLE': None,
     'TARGET': None,
-    'BEATAML': None
+    'BEATAML1.0': None
 }
 
 
@@ -998,9 +998,7 @@ def get_full_sample_metadata(barcodes):
             dash = barcode.find("-")
             if dash >= 0:
                 prog = barcode[0:dash]
-                if not prog.startsWith('BEATAML'):
-                    prog = 'BEATAML'
-                elif prog not in ['TCGA', 'TARGET']:
+                if prog not in ['TCGA', 'TARGET', 'BEATAML1.0']:
                     prog = 'CCLE'
             else:
                 prog = 'CCLE'
@@ -1229,7 +1227,7 @@ def get_sample_metadata(barcode):
     db = None
     cursor = None
 
-    program_tables = Program.objects.get(name=('TCGA' if 'TCGA-' in barcode else 'TARGET' if 'TARGET-' in barcode else 'BEATAML' if barcode.startsWith('BEATAML') else 'CCLE'),active=True,is_public=True).get_metadata_tables()
+    program_tables = Program.objects.get(name=('TCGA' if 'TCGA-' in barcode else 'TARGET' if 'TARGET-' in barcode else 'BEATAML1.0' if 'BEATAML1.0-' else 'CCLE'),active=True,is_public=True).get_metadata_tables()
 
     try:
         db = get_sql_connection()
