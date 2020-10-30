@@ -32,7 +32,7 @@ import string
 import time
 from time import sleep
 import re
-from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables, DataSource, DataVersion
+from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables, DataSource, DataVersion, Attribute
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
 from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -384,13 +384,11 @@ def fetch_program_data_types(program, for_display=False):
 
 # Returns the list of attributes for a program, as stored in the METADATA_ATTR[<program>] list
 # If a current list is not found, it is retrieved using the get_metadata_attr sproc.
+#
+# program: database ID of the program being requested
+#
 def fetch_program_attr(program):
-
-    db = None
-    cursor = None
-
     try:
-
         if not program:
             program = Program.objects.get(name="TCGA")
         else:
@@ -401,32 +399,13 @@ def fetch_program_attr(program):
 
         if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
 
-            METADATA_ATTR[program.id] = {}
+            METADATA_ATTR[program.id] = program.get_attrs()
 
-            preformatted_attr = get_preformatted_attr(program.id)
-
-            db = get_sql_connection()
-            cursor = db.cursor()
-            cursor.callproc('get_program_attr', (program.id,))
-            for row in cursor.fetchall():
-                METADATA_ATTR[program.id][row[0]] = {'name': row[0], 'displ_name': format_for_display(row[0]) if row[0] not in preformatted_attr else row[0], 'values': {}, 'type': row[1]}
-
-            cursor.close()
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program.id,))
-
-            for row in cursor.fetchall():
-                if row['value_name'] is None and row['attr_name'] in METADATA_ATTR[program.id]:
-                    METADATA_ATTR[program.id][row['attr_name']]['displ_name'] = row['display_string']
-
-        return copy.deepcopy(METADATA_ATTR[program.id])
+        return copy.deepcopy(METADATA_ATTR[program.id]['attrs'])
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
         logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 # Generate the ISB_CGC_PROJECTS['list'] value set based on the get_isbcgc_project_set sproc
@@ -516,56 +495,43 @@ def fetch_metadata_value_set(program=None):
         if not program.is_public:
             return {}
 
-        if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
+        if program.id not in METADATA_ATTR or not METADATA_ATTR[program.id] or len(METADATA_ATTR[program.id]) <= 0:
             fetch_program_attr(program)
 
-        preformatted_values = get_preformatted_values(program.id)
-
-        if len(METADATA_ATTR[program.id][list(METADATA_ATTR[program.id].keys())[0]]['values']) <= 0:
-            db = get_sql_connection()
-            cursor = db.cursor()
-
-            cursor.callproc('get_metadata_values', (program.id,))
-
-            for row in cursor.fetchall():
-                METADATA_ATTR[program.id][cursor.description[0][0]]['values'][str(row[0])] = {
-                    'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
+        if len(METADATA_ATTR[program.id]['attrs'][list(METADATA_ATTR[program.id]['attrs'].keys())[0]]['values']) <= 0:
+            for src in METADATA_ATTR[program.id]['by_src']:
+                solr_query = {
+                    'collection': METADATA_ATTR[program.id]['by_src'][src]['name'],
+                    'facets': None,
+                    'fields': None,
+                    'distincts': list(METADATA_ATTR[program.id]['by_src'][src]['attrs'].filter(data_type=Attribute.CATEGORICAL).values_list('name',flat=True))
                 }
 
-            while (cursor.nextset() and cursor.description is not None):
-                for row in cursor.fetchall():
-                    METADATA_ATTR[program.id][cursor.description[0][0]]['values'][str(row[0])] = {
-                        'displ_value': format_for_display(str(row[0])) if cursor.description[0][0] not in preformatted_values else str(row[0]),
-                    }
+                values = query_solr_and_format_result(solr_query)
 
-            cursor.close()
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program.id,))
+                for attr in values['values']:
+                    for val in values['values'][attr]:
+                        METADATA_ATTR[program.id]['attrs'][attr]['values'][val] = {
+                            'displ_value': format_for_display(str(val)) if not METADATA_ATTR[program.id]['attrs'][attr]['preformatted'] else str(val),
+                        }
 
-            for row in cursor.fetchall():
-                if row['value_name'] is not None and row['attr_name'] in METADATA_ATTR[program.id]:
-                    if row['value_name'] in METADATA_ATTR[program.id][row['attr_name']]['values']:
-                        METADATA_ATTR[program.id][row['attr_name']]['values'][row['value_name']] = {
-                            'displ_value': row['display_string'],
-                        }
-                    # Bucketed continuous numerics like BMI will not already have values in, since the bucketing is done in post-process
-                    elif METADATA_ATTR[program.id][row['attr_name']]['type'] == 'N':
-                        METADATA_ATTR[program.id][row['attr_name']]['values'][row['value_name']] = {
-                            'displ_value': row['display_string'],
-                        }
+                for dv in METADATA_ATTR[program.id]['by_src'][src]['attrs'].get_display_values():
+                    if dv.raw_value not in METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values']:
+                        METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values'][dv.raw_value] = {}
+                    METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
 
             # Fetch the tooltip strings for Disease Codes
-            cursor.close()
+            db = get_sql_connection()
             cursor = db.cursor()
             cursor.callproc('get_project_tooltips', (program.id,))
 
             for row in cursor.fetchall():
-                if 'disease_code' in METADATA_ATTR[program.id] and row[0] in METADATA_ATTR[program.id]['disease_code']['values']:
-                    METADATA_ATTR[program.id]['disease_code']['values'][row[0]]['tooltip'] = row[2]
+                if 'disease_code' in METADATA_ATTR[program.id]['attrs'] and row[0] in METADATA_ATTR[program.id]['attrs']['disease_code']['values']:
+                    METADATA_ATTR[program.id]['attrs']['disease_code']['values'][row[0]]['tooltip'] = row[2]
                 if 'project_short_name' in METADATA_ATTR[program.id] and row[1] in METADATA_ATTR[program.id]['project_short_name']['values']:
-                    METADATA_ATTR[program.id]['project_short_name']['values'][row[1]]['tooltip'] = row[2]
+                    METADATA_ATTR[program.id]['attrs']['project_short_name']['values'][row[1]]['tooltip'] = row[2]
 
-        return copy.deepcopy(METADATA_ATTR[program.id   ])
+        return copy.deepcopy(METADATA_ATTR[program.id])
 
     except Exception as e:
         logger.error('[ERROR] Exception when fetching the metadata value set:')
@@ -644,7 +610,6 @@ def get_preformatted_values(program=None):
 
 # Confirm that a filter key is a valid column in the attribute and data type sets or a valid mutation filter
 def validate_filter_key(col, program, build='HG19'):
-
     if not program in METADATA_ATTR:
         fetch_program_attr(program)
 
@@ -660,7 +625,7 @@ def validate_filter_key(col, program, build='HG19'):
     if ':' in col:
         col = col.split(':')[1]
 
-    return col in METADATA_ATTR[program] or METADATA_DATA_TYPES[program] or col in METADATA_DATA_ATTR[build]
+    return col in METADATA_ATTR[program]['attrs'] or METADATA_DATA_TYPES[program] or col in METADATA_DATA_ATTR[build]
 
 
 # Make standard adjustments to a string for display: replace _ with ' ', title case (except for 'to')
