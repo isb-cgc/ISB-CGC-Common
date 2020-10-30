@@ -311,8 +311,17 @@ def _parse_dcf_verify_response(resp, gcp_id, service_account_id, datasets, phs_m
         response_dict = json_loads(resp.text)
         error_info = response_dict['errors']
 
-        # This is the evaluation of the DATASETS THE SA IS TO ACCESS.
 
+        #
+        #  display error when user attempts to register number of datasets that is more than a service account is allowed for
+        #
+        sa_limit_error = error_info.get('service_account_limit')
+        if sa_limit_error:
+            messages['dcf_problems'].append(sa_limit_error.get('error_description',
+                                                               'You have exceeded the maximum number of projects that can be registered. Maximum 6 Projects allowed per account.'))
+            return success, messages
+
+        # This is the evaluation of the DATASETS THE SA IS TO ACCESS.
         project_access_info = error_info['project_access']
         if project_access_info['status'] == 200:
             messages['dcf_analysis_data_summary'] = "The requested dataset list [{}] was approved.".format(
@@ -1387,6 +1396,9 @@ def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, 
     # MissingTokenError: (missing_token) Missing access token parameter.
 
     try:
+        logger.info('== mode {}'.format(mode))
+        logger.info('== full_url {}'.format(full_url))
+        
         resp = dcf.request(mode, full_url, client_id=client_id,
                            client_secret=client_secret, data=post_body, headers=headers, params=params_dict)
     except (TokenFailure, RefreshTokenExpired) as e:
