@@ -868,49 +868,61 @@ def download_cohort_manifest(request, cohort_id):
                 messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
             return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
 
+        file_type = request.GET.get('file_type')
+
         if len(manifest) > 0:
-            rows = ()
-            if 'cohort_name' in selected_header_fields:
-                rows += (["Manifest for cohort '{}'".format(cohort.name)],)
+            if file_type == 'csv' or file_type == 'tsv':
+                # CSV and TSV export
+                if 'cohort_name' in selected_header_fields:
+                    rows += (["Manifest for cohort '{}'".format(cohort.name)],)
 
-            if 'user_email' in selected_header_fields:
-                rows += (["User: {}".format(request.user.email)],)
+                if 'user_email' in selected_header_fields:
+                    rows += (["User: {}".format(request.user.email)],)
 
-            if 'cohort_filters' in selected_header_fields:
-                rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
+                if 'cohort_filters' in selected_header_fields:
+                    rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
 
-            if 'timestamp' in selected_header_fields:
-                rows += (["Date generated: {}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'))],)
+                if 'timestamp' in selected_header_fields:
+                    rows += (["Date generated: {}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'))],)
 
-            if 'total_records' in selected_header_fields:
-                rows += (["Total records found: {}".format(str(items['total']))],)
+                if 'total_records' in selected_header_fields:
+                    rows += (["Total records found: {}".format(str(items['total']))],)
 
-            if items['total'] > MAX_FILE_LIST_ENTRIES:
-                rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(str(MAX_FILE_LIST_ENTRIES))
-                          + " Your cohort's total entries exceeded this number. The first {} entries have been ".format(str(MAX_FILE_LIST_ENTRIES))
-                          + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
-            column_order = [x for x in selected_columns if x in manifest[0].keys()]
-            rows += (selected_columns,)
-            for row in manifest:
-                this_row = [row[x] for x in column_order]
-                if 'gcs_path' in selected_columns:
-                    this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
-                        "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
-                        row['SOPInstanceUID'],row['gcs_generation'])
-                    )
-                rows += (this_row,)
-            pseudo_buffer = Echo()
+                if items['total'] > MAX_FILE_LIST_ENTRIES:
+                    rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(str(MAX_FILE_LIST_ENTRIES))
+                              + " Your cohort's total entries exceeded this number. The first {} entries have been ".format(str(MAX_FILE_LIST_ENTRIES))
+                              + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
+                column_order = [x for x in selected_columns if x in manifest[0].keys()]
+                rows += (selected_columns,)
+                for row in manifest:
+                    this_row = [row[x] for x in column_order]
+                    if 'gcs_path' in selected_columns:
+                        this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
+                            "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
+                            row['SOPInstanceUID'],row['gcs_generation'])
+                        )
+                    rows += (this_row,)
+                pseudo_buffer = Echo()
 
-            file_type = request.GET.get('file_type')
-            if file_type == 'csv':
-                writer = csv.writer(pseudo_buffer)
-            elif file_type == 'tsv':
-                writer = csv.writer(pseudo_buffer, delimiter='\t')
-            elif file_type == 'json':
-                # TODO
-                writer = csv.writer(pseudo_buffer)
+                if file_type == 'csv':
+                    writer = csv.writer(pseudo_buffer)
+                elif file_type == 'tsv':
+                    writer = csv.writer(pseudo_buffer, delimiter='\t')
+                elif file_type == 'json':
+                    # TODO
+                    writer = csv.writer(pseudo_buffer)
 
-            response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
+                response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
+            else:
+                # JSON export
+                json_list = []
+                json_result = ""
+                for i in range(0, 8):
+                    json_row = json.dumps({'id': i,'name': "test",'path': "fake_path"}) + "\n"
+                    json_result += json_row
+
+                response = StreamingHttpResponse(json_result, content_type="text/json")
+
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
             if request.GET.get('file_name'):
                 file_name = "{}.{}".format(request.GET.get('file_name'), file_type)
