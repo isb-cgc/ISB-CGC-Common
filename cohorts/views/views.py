@@ -871,8 +871,11 @@ def download_cohort_manifest(request, cohort_id):
         file_type = request.GET.get('file_type')
 
         if len(manifest) > 0:
+            column_order = [x for x in selected_columns if x in manifest[0].keys()]
+
             if file_type == 'csv' or file_type == 'tsv':
                 # CSV and TSV export
+                rows = ()
                 if 'cohort_name' in selected_header_fields:
                     rows += (["Manifest for cohort '{}'".format(cohort.name)],)
 
@@ -892,7 +895,6 @@ def download_cohort_manifest(request, cohort_id):
                     rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(str(MAX_FILE_LIST_ENTRIES))
                               + " Your cohort's total entries exceeded this number. The first {} entries have been ".format(str(MAX_FILE_LIST_ENTRIES))
                               + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
-                column_order = [x for x in selected_columns if x in manifest[0].keys()]
                 rows += (selected_columns,)
                 for row in manifest:
                     this_row = [row[x] for x in column_order]
@@ -908,17 +910,29 @@ def download_cohort_manifest(request, cohort_id):
                     writer = csv.writer(pseudo_buffer)
                 elif file_type == 'tsv':
                     writer = csv.writer(pseudo_buffer, delimiter='\t')
-                elif file_type == 'json':
-                    # TODO
-                    writer = csv.writer(pseudo_buffer)
 
                 response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
-            else:
+
+            elif file_type == 'json':
                 # JSON export
-                json_list = []
                 json_result = ""
-                for i in range(0, 8):
-                    json_row = json.dumps({'id': i,'name': "test",'path': "fake_path"}) + "\n"
+
+                if 'gcs_path' in selected_columns:
+                    column_order.append('gcs_path')
+
+                for row in manifest:
+                    if 'gcs_path' in selected_columns:
+                        gcs_path = ("{}{}/dicom/{}/{}/{}.dcm#{}".format(
+                            "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
+                            row['SOPInstanceUID'],row['gcs_generation'])
+                        )
+                        row['gcs_path'] = gcs_path
+
+                    keys_to_delete = [key for key in row if key not in column_order]
+                    for key in keys_to_delete:
+                        del row[key]
+
+                    json_row = json.dumps(row) + "\n"
                     json_result += json_row
 
                 response = StreamingHttpResponse(json_result, content_type="text/json")
