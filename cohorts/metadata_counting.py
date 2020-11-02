@@ -452,17 +452,19 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                             dvals = obj.get_display_values()
                             facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
                             for val in vals:
+                                val_index = val
+                                val = str(val)
                                 val_name = val
                                 val_value = val
                                 displ_value = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
                                 displ_name = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
-                                count = vals[val]
+                                count = vals[val_index]
                                 if "::" in val:
                                     val_name = val.split("::")[0]
                                     val_value = val.split("::")[-1]
                                     displ_value = val_name if obj.preformatted_values else dvals.get(val_name,format_for_display(val_name))
                                     displ_name = val_name if obj.preformatted_values else dvals.get(val_name, format_for_display(val_name))
-                                facets[set][attr]['values'][val] = {
+                                facets[set][attr]['values'][val_index] = {
                                     'name': val_name,
                                     'value': val_value,
                                     'displ_value': displ_value,
@@ -477,10 +479,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                     'full_id': (re.sub('\s+', '_', (attr + "-" + str(val_value)))).upper()
                                 }
                                 # TODO: to be replaced with use of the Attribute_Tooltip class
-                                if attr in metadata_attr_values and val in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][val] is not None \
-                                        and len(metadata_attr_values[attr]['values'][val]) > 0:
-                                    if 'tooltip' in metadata_attr_values[attr]['values'][val]:
-                                        facets[set][attr]['values'][val]['tooltip'] = metadata_attr_values[attr]['values'][val]['tooltip']
+                                if attr in metadata_attr_values and val_index in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][val_index] is not None \
+                                        and len(metadata_attr_values[attr]['values'][val_index]) > 0:
+                                    if 'tooltip' in metadata_attr_values[attr]['values'][val_index]:
+                                        facets[set][attr]['values'][val_index]['tooltip'] = metadata_attr_values[attr]['values'][val_index]['tooltip']
         logger.info("[STATUS] Exiting count_public_metadata")
 
         return {'counts': facets, 'samples': sample_count, 'cases': case_count}
