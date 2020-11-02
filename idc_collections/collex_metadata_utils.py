@@ -443,7 +443,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
         if solr_query:
             for attr in solr_query['queries']:
-                attr_name = re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
+                attr_name = re.sub("(_btw|_lte|_lt|_gte|_gt)", "", attr)
                 # If an attribute from the filters isn't in the attribute listing, just warn and continue
                 if attr_name in all_ui_attrs['list']:
                     # If the attribute is from this source, just add the query
