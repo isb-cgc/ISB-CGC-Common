@@ -1396,9 +1396,6 @@ def _dcf_call(full_url, user_id, mode='get', post_body=None, force_token=False, 
     # MissingTokenError: (missing_token) Missing access token parameter.
 
     try:
-        logger.info('== mode {}'.format(mode))
-        logger.info('== full_url {}'.format(full_url))
-        
         resp = dcf.request(mode, full_url, client_id=client_id,
                            client_secret=client_secret, data=post_body, headers=headers, params=params_dict)
     except (TokenFailure, RefreshTokenExpired) as e:

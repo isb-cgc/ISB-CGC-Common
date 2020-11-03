@@ -177,6 +177,7 @@ BQ_MOLECULAR_ATTR_TABLES = {
     },
     'CCLE': None,
     'TARGET': None,
+    'BEATAML1.0': None
 }
 
 
@@ -301,7 +302,7 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
                             for row in cursor.fetchall():
                                 val = "None" if not row[0] else row[0]
                                 tooltip = ''
-                                if attr == 'disease_code' and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
+                                if attr == 'disease_code' and disease_code_dict and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
                                     tooltip = disease_code_dict[val]['tooltip']
                                 if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                     METADATA_DATA_ATTR[build][attr]['values'][val] = {
@@ -646,7 +647,6 @@ def format_for_display(item):
 # If the names of the columns differ across the 2 platforms, the alt_key_map can be
 # used to map a filter 'key' to a different column name
 def build_where_clause(filters, alt_key_map=False, program=None, for_files=False, comb_with='OR'):
-    first = True
     query_str = ''
     big_query_str = ''  # todo: make this work for non-string values -- use {}.format
     value_tuple = ()
@@ -963,7 +963,7 @@ def get_full_sample_metadata(barcodes):
             dash = barcode.find("-")
             if dash >= 0:
                 prog = barcode[0:dash]
-                if prog not in ['TCGA', 'TARGET']:
+                if prog not in ['TCGA', 'TARGET', 'BEATAML1.0']:
                     prog = 'CCLE'
             else:
                 prog = 'CCLE'
@@ -1192,7 +1192,7 @@ def get_sample_metadata(barcode):
     db = None
     cursor = None
 
-    program_tables = Program.objects.get(name=('TCGA' if 'TCGA-' in barcode else 'TARGET' if 'TARGET-' in barcode else 'CCLE'),active=True,is_public=True).get_metadata_tables()
+    program_tables = Program.objects.get(name=('TCGA' if 'TCGA-' in barcode else 'TARGET' if 'TARGET-' in barcode else 'BEATAML1.0' if 'BEATAML1.0-' else 'CCLE'),active=True,is_public=True).get_metadata_tables()
 
     try:
         db = get_sql_connection()
