@@ -349,7 +349,7 @@ def delete_cohort_api(request):
         body = json.loads(request.body.decode('utf-8'))
         cohort_ids = body["cohort_ids"]
 
-        for cohort_id in cohort_ids:
+        for cohort_id in cohort_ids['cohorts']:
             # result = _delete_cohort_api(user, cohort_id)
             result = _delete_cohort(user, cohort_id)
             cohort_info.append({"cohort_id": cohort_id, "result": result})
