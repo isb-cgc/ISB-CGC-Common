@@ -284,7 +284,7 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
                                     if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                         tooltip = ''
                                         if attr == 'disease_code':
-                                            if val in disease_code_dict:
+                                            if disease_code_dict and val in disease_code_dict:
                                                 tooltip = disease_code_dict[val]['tooltip']
 
                                         METADATA_DATA_ATTR[build][attr]['values'][val] = {

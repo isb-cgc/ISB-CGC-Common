@@ -98,7 +98,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                            ])
 
             col_map.update({
-                'col-filename': 'file_name',
+                'col-filename': 'file_name_key',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
