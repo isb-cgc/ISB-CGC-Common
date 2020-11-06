@@ -32,7 +32,7 @@ import string
 import time
 from time import sleep
 import re
-from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables, DataSource, DataVersion, Attribute
+from projects.models import Program, Public_Data_Tables, Public_Metadata_Tables, Project, User_Data_Tables, DataSource, DataVersion, Attribute, Attribute_Tooltips
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
 from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -480,9 +480,6 @@ def get_public_program_id(program):
 # Program ID defaults to TCGA if one is not provided
 def fetch_metadata_value_set(program=None):
 
-    db = None
-    cursor = None
-
     try:
         if not program:
             program = Program.objects.get(name="TCGA")
@@ -522,24 +519,18 @@ def fetch_metadata_value_set(program=None):
                     METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
 
             # Fetch the tooltip strings for Disease Codes
-            db = get_sql_connection()
-            cursor = db.cursor()
-            cursor.callproc('get_project_tooltips', (program.id,))
+            tooltips = Attribute_Tooltips.objects.select_related('attribute').filter(attribute__active=1)
 
-            for row in cursor.fetchall():
-                if 'disease_code' in METADATA_ATTR[program.id]['attrs'] and row[0] in METADATA_ATTR[program.id]['attrs']['disease_code']['values']:
-                    METADATA_ATTR[program.id]['attrs']['disease_code']['values'][row[0]]['tooltip'] = row[2]
-                if 'project_short_name' in METADATA_ATTR[program.id] and row[1] in METADATA_ATTR[program.id]['project_short_name']['values']:
-                    METADATA_ATTR[program.id]['attrs']['project_short_name']['values'][row[1]]['tooltip'] = row[2]
+            for tip in tooltips:
+                value_data = METADATA_ATTR[program.id]['attrs'].get(tip.attribute.name,{}).get('values',{}).get(tip.value, None)
+                if value_data is not None:
+                    value_data['tooltip'] = tip.tooltip
 
         return copy.deepcopy(METADATA_ATTR[program.id])
 
     except Exception as e:
         logger.error('[ERROR] Exception when fetching the metadata value set:')
         logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 # Returns the list of a given program's preformatted attributes, i.e. attributes whose database names should
