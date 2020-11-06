@@ -478,11 +478,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                     # with a unwieldy template statement. So we do it here:
                                     'full_id': (re.sub('\s+', '_', (attr + "-" + str(val_value)))).upper()
                                 }
-                                # TODO: to be replaced with use of the Attribute_Tooltip class
-                                if attr in metadata_attr_values and val_index in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][val_index] is not None \
-                                        and len(metadata_attr_values[attr]['values'][val_index]) > 0:
-                                    if 'tooltip' in metadata_attr_values[attr]['values'][val_index]:
-                                        facets[set][attr]['values'][val_index]['tooltip'] = metadata_attr_values[attr]['values'][val_index]['tooltip']
+                                value_data = metadata_attr_values['attrs'].get(attr,{}).get('values', {}).get(val_index, None)
+                                if value_data is not None and 'tooltip' in value_data:
+                                    facets[set][attr]['values'][val_index]['tooltip'] = value_data['tooltip']
+
         logger.info("[STATUS] Exiting count_public_metadata")
 
         return {'counts': facets, 'samples': sample_count, 'cases': case_count}
