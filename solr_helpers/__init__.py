@@ -80,6 +80,11 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
         elif 'facet_counts' in result:
                 formatted_query_result['facets'] = result['facet_counts']['facet_fields']
 
+        if 'stats' in result:
+            formatted_query_result['values'] = {
+                x: result['stats']['stats_fields'][x]['distinctValues'] for x in result['stats']['stats_fields']
+            }
+
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
@@ -89,7 +94,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     return formatted_query_result
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000, unique=None):
+def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000, unique=None, distincts=None):
 
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
@@ -101,6 +106,8 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
             "debugQuery": "on"
         }
     }
+
+    param_set = ""
 
     if facets:
         payload['facet'] = facets
@@ -114,6 +121,12 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
         payload['sort'] = sort
     if fqs:
         payload['filter'] = fqs if type(fqs) is list else [fqs]
+    if distincts:
+        payload['params']['stats'] = True
+        payload['params']['stats.field'] = ["{!distinctValues=true}%s"%x for x in distincts]
+
+    if len(param_set):
+        query_uri += ("?"+param_set)
 
     # Note that collapse does NOT allow for proper faceted counting of facets where documents may have more than one entry
     # in such a case, build a unique facet in the facet builder

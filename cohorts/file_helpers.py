@@ -16,23 +16,14 @@
 from __future__ import absolute_import
 
 from builtins import str
-import logging
-import time
-import MySQLdb
-import copy
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
-from django.conf import settings
 
-from .metadata_counting import count_public_data_type
-from .metadata_helpers import get_sql_connection, build_where_clause
-
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables, \
-    Attribute, Attribute_Ranges, Attribute_Display_Values, DataSource, DataVersion
+from projects.models import DataVersion
 from cohorts.models import Cohort, Cohort_Perms
 
 from solr_helpers import *
-
+from collections import Counter
 
 logger = logging.getLogger('main_logger')
 
@@ -43,7 +34,7 @@ FILTER_DATA_FORMAT = {
 }
 
 
-def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, type=None, do_filter_count=True):
+def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, data_type=None, do_filter_count=True):
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
@@ -56,10 +47,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
     db = None
     cursor = None
     facets = None
-    limit_clause = ""
-    offset_clause = ""
     file_list = []
-    total_file_count = 0
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
@@ -77,15 +65,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             }
 
         facet_attr = None
-        file_collection = None
         collapse = None
         format_filter = None
 
-        if type in ('igv', 'camic', 'pdf'):
-            format_filter = {'data_format': FILTER_DATA_FORMAT[type]}
+        if data_type in ('igv', 'camic', 'pdf'):
+            format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]}
 
-        if type == 'dicom':
-            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
+        if data_type == 'dicom':
+            file_collection_set = DataSource.objects.select_related('version').filter(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
 
             fields.extend(["file_path", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality"])
 
@@ -102,7 +89,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             unique="StudyInstanceUID"
 
         else:
-            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__active=True, version__data_type=DataVersion.FILE_DATA, name__contains=build.lower())
+            file_collection_set = DataSource.objects.select_related('version').filter(source_type=DataSource.SOLR, version__active=True,
+                                                                version__data_type=DataVersion.FILE_DATA,
+                                                                name__contains=build.lower())
             fields.extend(["sample_barcode", "file_name_key", "index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "index_file_id", "experimental_strategy", "data_format",
                            "file_gdc_id", "case_gdc_id", "file_size"
@@ -121,14 +110,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             if do_filter_count:
                 facet_names = ['disease_code',]
-                if not type or type in ['all', 'igv']:
+                if not data_type or data_type in ['all', 'igv']:
                     facet_names.extend(['data_format', 'data_category','experimental_strategy','platform'])
-                if not type or type in ['camic', 'all', 'igv']:
+                if not data_type or data_type in ['camic', 'all', 'igv']:
                     facet_names.extend(['data_type'])
-                if not type or type != 'dicom':
+                if not data_type or data_type != 'dicom':
                     facet_names.extend(['project_short_name'])
 
-                if (not type or type != 'camic') and not cohort_id:
+                if (not data_type or data_type != 'camic') and not cohort_id:
                     facet_names.extend(['program_name'])
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
@@ -162,25 +151,43 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         if solr_query:
             query_set = [y for x, y in solr_query['queries'].items()]
 
-        query_params = {
-            "collection": file_collection.name,
-            "fields": fields,
-            "fqs": query_set,
-            "facets": facets,
-            "sort": sort,
-            "offset": offset,
-            "limit": limit,
-            "counts_only": False,
-            "collapse_on": collapse
-        }
+        file_query_result = {}
+        total_file_count = 0
+        for file_collection in file_collection_set:
+            query_fields = fields.copy() if fields else None
+            query_facets = facets.copy() if facets else None
+            query_params = {
+                "collection": file_collection.name,
+                "fields": query_fields,
+                "fqs": query_set,
+                "facets": query_facets,
+                "sort": sort,
+                "offset": offset,
+                "limit": limit,
+                "counts_only": False,
+                "collapse_on": collapse
+            }
+            collection_file_query_result = query_solr_and_format_result(query_params)
+            for result_key in collection_file_query_result:
 
-        file_query_result = query_solr_and_format_result(query_params)
+                result_val = collection_file_query_result[result_key]
+                if type(result_val) is list: # docs
+                    file_query_result.update({ result_key: (result_val + file_query_result.get(result_key, []))[:limit]})
+                elif type(result_val) is dict: # facets
+                    org_dict = file_query_result.get(result_key, {})
+                    for k in result_val:
+                        # k in [disease_code,program_name,data_category, experimental_strategy, and etc...]
+                        org_dict[k]= dict(Counter(org_dict.get(k, {})) + Counter(result_val[k]))
+                    file_query_result.update({result_key: org_dict})
 
-        total_file_count = file_query_result['numFound']
+                else:
+                    # numFound or count
+                    file_query_result.update({ result_key: (result_val + file_query_result.get(result_key, 0))})
+            total_file_count = file_query_result.get('numFound', 0)
 
         if 'docs' in file_query_result and len(file_query_result['docs']):
             for entry in file_query_result['docs']:
-                if type == 'dicom':
+                if data_type == 'dicom':
                     file_list.append({
                         'case': entry['case_barcode'],
                         'study_uid': entry['StudyInstanceUID'],
