@@ -55,7 +55,7 @@ def _build_attr_by_source(attrs, data_version, source_type, attr_data=None):
         attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
     for attr in attrs:
         stripped_attr = attr if (not '_' in attr) else \
-            attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte', 'btw', 'lte', 'lt'] else \
+            attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte','ebtwe','ebtw','btwe', 'btw', 'lte', 'lt'] else \
             attr.rsplit('_', 1)[0]
 
         for id, source in attr_data['sources'].items():
@@ -411,7 +411,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         results['filtered_facets'] = {}
 
     source_versions = sources.get_source_versions()
-    filter_attrs = sources.get_source_attrs(for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]t[e]|_btw',x) else x for x in filters.keys()], with_set_map=False)
+    filter_attrs = sources.get_source_attrs(for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]t[e]|_ebtwe|_ebtw|_btwe|_btw',x) else x for x in filters.keys()], with_set_map=False)
     attrs_for_faceting = None
     if not records_only:
         attrs_for_faceting = sources.get_source_attrs(for_ui=True, with_set_map=False) if not facets else sources.get_source_attrs(for_ui=True, with_set_map=False, named_set=facets)
@@ -443,7 +443,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
         if solr_query:
             for attr in solr_query['queries']:
-                attr_name = re.sub("(_btw|_lte|_lt|_gte|_gt)", "", attr)
+                attr_name = re.sub("(_ebtwe|_ebtw|_btwe|_btw|_lte|_lt|_gte|_gt)", "", attr)
                 # If an attribute from the filters isn't in the attribute listing, just warn and continue
                 if attr_name in all_ui_attrs['list']:
                     # If the attribute is from this source, just add the query

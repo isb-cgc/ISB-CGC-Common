@@ -414,8 +414,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
     # All other filters
     for attr, values in list(main_filters.items()):
-        attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
-        attr_rng = attr[attr.rfind('_')+1:] if re.search('_[gl]t[e]|_btw', attr) else ''
+        attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_e?btwe?',attr) else attr
+        attr_rng = attr[attr.rfind('_')+1:] if re.search('_[gl]t[e]|_e?btwe?', attr) else ''
 
         query_str = ''
 
@@ -448,12 +448,13 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
 
         elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
-            rngTemp="{}:[{} TO {}]"
-            if attr_rng=='gte':
+            rngTemp="{}:{{{} TO {}}}"
+            if attr_rng=='btwe':
                 rngTemp="{}:{{{} TO {}]"
-            elif attr_rng=='lte':
+            elif attr_rng=='ebtw':
                 rngTemp = "{}:[{} TO {}}}"
-
+            elif attr_rng =='ebtwe':
+                rngTemp = "{}:[{} TO {}]"
 
             clause = ""
             with_none = False
