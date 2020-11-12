@@ -22,6 +22,7 @@ from time import sleep
 from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
+import hashlib
 from django.conf import settings
 
 BQ_ATTEMPT_MAX = 10
@@ -49,14 +50,21 @@ logger = logging.getLogger('main_logger')
 DATA_SOURCE_ATTR = {}
 DATA_SOURCE_TYPES = {}
 
-def fetch_data_source_attr(sources, for_ui=True, with_set_map=True, for_faceting=True, named_set=None):
-    source_ids = [str(x) for x in sources.order_by('id').values_list('id',flat=True)]
-    source_set = "{}_{}_{}_{}".format(":".join(source_ids),for_ui,with_set_map,for_faceting)
+def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
+    start = time.time()
 
-    if source_set not in DATA_SOURCE_ATTR:
-        DATA_SOURCE_ATTR[source_set] = sources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting, with_set_map=with_set_map, named_set=named_set)
+    source_set = None
 
-    return DATA_SOURCE_ATTR[source_set]
+    if cache_as:
+        if cache_as not in DATA_SOURCE_ATTR:
+            DATA_SOURCE_ATTR[cache_as] = sources.get_source_attrs(**fetch_settings)
+        source_set = DATA_SOURCE_ATTR[cache_as]
+    else:
+        source_set = sources.get_source_attrs(**fetch_settings)
+
+    stop = time.time()
+    logger.debug("Time to fetch method: {}".format(stop-start))
+    return source_set
 
 def fetch_data_source_types(sources):
     source_ids = [str(x) for x in sources.order_by('id').values_list('id',flat=True)]
@@ -147,7 +155,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         sources = data_sets.get_data_sources().filter(source_type=source, id__in=versions.get_data_sources().filter(
             source_type=source).values_list("id", flat=True)).distinct()
 
-        source_attrs = fetch_data_source_attr(sources, True, True)
+        source_attrs = fetch_data_source_attr(sources, {'for_ui': True, 'with_set_map': True}, cache_as="ui_faceting_set_map")
 
         source_data_types = fetch_data_source_types(sources)
 
@@ -451,11 +459,11 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         results['filtered_facets'] = {}
 
     source_versions = sources.get_source_versions()
-    filter_attrs = fetch_data_source_attr(sources, for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]t[e]|_btw',x) else x for x in filters.keys()], with_set_map=False)
+    filter_attrs = fetch_data_source_attr(sources, {'for_ui':True, 'named_set': [x[:x.rfind('_')] if re.search('_[gl]t[e]|_btw',x) else x for x in filters.keys()]})
     attrs_for_faceting = None
     if not records_only:
-        attrs_for_faceting = fetch_data_source_attr(sources, for_ui=True, with_set_map=False, named_set=facets)
-    all_ui_attrs = fetch_data_source_attr(sources, for_ui=True, for_faceting=False, with_set_map=False)
+        attrs_for_faceting = fetch_data_source_attr(sources, {'for_ui':True, 'named_set': facets}, cache_as="ui_facet_set")
+    all_ui_attrs = fetch_data_source_attr(sources, {'for_ui':True, 'for_faceting': False}, cache_as="all_ui_attr")
 
     # Eventually this will need to go per program
     for source in sources:

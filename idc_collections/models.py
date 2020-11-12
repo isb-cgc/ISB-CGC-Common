@@ -16,13 +16,15 @@ logger = logging.getLogger('main_logger')
 class ProgramQuerySet(models.QuerySet):
     def get_collections(self):
         collections = None
-        for prog in self.all():
+        progs = self.all()
+        for prog in progs:
             collections = prog.collection_set.all() if not collections else collections | prog.collection_set.all()
         return collections.distinct() if collections else None
 
     def get_data_sources(self):
         data_sources = None
-        for prog in self.all():
+        progs = self.all()
+        for prog in progs:
             print(prog.datasource_set.all())
             data_sources = prog.datasource_set.all() if not data_sources else data_sources | prog.datasource_set.all()
         return data_sources.distinct() if data_sources else None
@@ -89,7 +91,8 @@ class Project(models.Model):
 class DataSetTypeQuerySet(models.QuerySet):
     def get_data_sources(self):
         sources = None
-        for dst in self.all():
+        dsts = self.all()
+        for dst in dsts:
             if not sources:
                 sources = dst.datasource_set.all()
             else:
@@ -142,7 +145,8 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
     # Return all the data sources corresponding to this queryset
     def get_data_sources(self, source_type=None):
         sources = None
-        for idcdv in self.all():
+        idcdvs = self.all()
+        for idcdv in idcdvs:
             versions = idcdv.dataversion_set.all().distinct()
             if not sources:
                 sources = versions.get_data_sources()
@@ -155,7 +159,8 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
     # Return all display strings in this queryset
     def get_displays(self):
         displays = []
-        for idcdv in self.all():
+        idcdvs = self.all()
+        for idcdv in idcdvs:
             displays.append(idcdv.get_display())
         return displays
 
@@ -188,7 +193,8 @@ class ImagingDataCommonsVersion(models.Model):
 class DataVersionQuerySet(models.QuerySet):
     def get_data_sources(self):
         sources = None
-        for dv in self.all():
+        dvs = self.all()
+        for dv in dvs:
             if not sources:
                 sources = dv.datasource_set.all()
             else:
@@ -217,7 +223,8 @@ class DataVersion(models.Model):
 class CollectionQuerySet(models.QuerySet):
     def get_tooltips(self):
         tips = {}
-        for collex in self.all():
+        collections = self.all()
+        for collex in collections:
             tips[collex.collection_id] = collex.description
         return tips
 
@@ -279,23 +286,26 @@ class Collection(models.Model):
 
 class DataSourceQuerySet(models.QuerySet):
     def to_dicts(self):
+        sources = self.all()
         return [{
             "id": ds.id,
             "name": ds.name,
             "versions": ["{}: {}".format(dv.name, dv.version) for dv in self.versions.all()],
             "type": ds.source_type,
 
-        } for ds in self.all()]
+        } for ds in sources]
 
     def get_source_versions(self, active=None):
         versions = {}
-        for ds in self.all():
+        sources = self.all()
+        for ds in sources:
             versions[ds.id] = ds.versions.filter(active=active) if active is not None else ds.versions.all()
         return versions
 
     def get_source_data_types(self):
         data_types = {}
-        for ds in self.all():
+        sources = self.all()
+        for ds in sources:
             data_set_types = ds.data_sets.all()
             for data_set_type in data_set_types:
                 if ds.id not in data_types:
@@ -330,7 +340,9 @@ class DataSourceQuerySet(models.QuerySet):
         if with_set_map:
             attrs['set_map'] = {}
 
-        for ds in self.all():
+        sources = self.all()
+
+        for ds in sources:
             q_objects = Q(active=True)
             if for_ui:
                 q_objects &= Q(default_ui_display=for_ui)
@@ -480,7 +492,8 @@ class AttributeQuerySet(models.QuerySet):
             q_objects &= Q(source_type=source_type)
 
         data_sources = None
-        for attr in self.all():
+        attrs = self.all()
+        for attr in attrs:
             data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
 
         return data_sources.distinct()
@@ -515,7 +528,8 @@ class AttributeQuerySet(models.QuerySet):
     def get_facet_types(self):
         facet_types = {}
         attr_with_ranges = {x[0]: x[1] for x in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()).values_list('attribute__id','attribute__data_type')}
-        for attr in self.all():
+        attrs = self.all()
+        for attr in attrs:
             facet_types[attr.id] = DataSource.QUERY if attr.data_type == Attribute.CONTINUOUS_NUMERIC and attr.id in attr_with_ranges else DataSource.TERMS
         return facet_types
 
@@ -624,7 +638,8 @@ class Attribute_Set_Type(models.Model):
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):
         dvals = {}
-        for dv in self.all().select_related('attribute'):
+        dvattrs = self.all().select_related('attribute')
+        for dv in dvattrs:
             if dv.attribute.id not in dvals:
                 dvals[dv.attribute.id] = {}
             dvals[dv.attribute.id][dv.raw_value] = dv.display_value
