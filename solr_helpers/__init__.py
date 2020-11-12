@@ -414,7 +414,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
     # All other filters
     for attr, values in list(main_filters.items()):
-        attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_btw',attr) else attr
+        attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_e?btwe?',attr) else attr
+        attr_rng = attr[attr.rfind('_')+1:] if re.search('_[gl]t[e]|_e?btwe?', attr) else ''
+
         query_str = ''
 
         if type(values) is dict and 'values' in values:
@@ -446,6 +448,14 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
 
         elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
+            rngTemp="{}:{{{} TO {}}}"
+            if attr_rng=='btwe':
+                rngTemp="{}:{{{} TO {}]"
+            elif attr_rng=='ebtw':
+                rngTemp = "{}:[{} TO {}}}"
+            elif attr_rng =='ebtwe':
+                rngTemp = "{}:[{} TO {}]"
+
             clause = ""
             with_none = False
             if 'None' in values:
@@ -456,9 +466,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 values[0] = values[0].lower().split(" to ")
             elif len(values) >= 1 and type(values[0]) is list:
                 clause = " {} ".format(comb_with).join(
-                    ["{}:[{} TO {}]".format(attr_name, str(x[0]), str(x[1])) for x in values])
+                    [rngTemp.format(attr_name, str(x[0]), str(x[1])) for x in values])
             elif len(values) > 1 :
-                clause = "{}:[{} TO {}]".format(attr_name, values[0], values[1])
+                clause = rngTemp.format(attr_name, values[0], values[1])
             else:
                 clause = "{}:{}".format(attr_name, values[0])
 

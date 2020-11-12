@@ -22,12 +22,58 @@ from time import sleep
 from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
+import hashlib
 from django.conf import settings
 
 BQ_ATTEMPT_MAX = 10
 
 logger = logging.getLogger('main_logger')
 
+# a cached  of comprehensive information mapping attributes to data sources:
+#
+# {
+#  '<source_IDs_asc_joined_by_colon>' : {
+#    'list': [<String>, ...],
+#    'ids': [<Integer>, ...],
+#    'sources': {
+#       <data source database ID>: {
+#          'list': [<String>, ...],
+#          'attrs': [<Attribute>, ...],
+#          'id': <Integer>,
+#          'name': <String>,
+#          'data_sets': [<DataSetType>, ...],
+#          'count_col': <Integer>
+#       }
+#     }
+#   }
+# }
+DATA_SOURCE_ATTR = {}
+DATA_SOURCE_TYPES = {}
+
+def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
+    start = time.time()
+
+    source_set = None
+
+    if cache_as:
+        if cache_as not in DATA_SOURCE_ATTR:
+            DATA_SOURCE_ATTR[cache_as] = sources.get_source_attrs(**fetch_settings)
+        source_set = DATA_SOURCE_ATTR[cache_as]
+    else:
+        source_set = sources.get_source_attrs(**fetch_settings)
+
+    stop = time.time()
+    logger.debug("Time to fetch method: {}".format(stop-start))
+    return source_set
+
+def fetch_data_source_types(sources):
+    source_ids = [str(x) for x in sources.order_by('id').values_list('id',flat=True)]
+    source_set = ":".join(source_ids)
+
+    if source_set not in DATA_SOURCE_TYPES:
+        DATA_SOURCE_TYPES[source_set] = sources.get_source_data_types()
+
+    return DATA_SOURCE_TYPES[source_set]
 
 # Helper method which, given a list of attribute names, a set of data version objects,
 # and a data source type, will produce a list of the Attribute ORM objects. Primarily
@@ -55,7 +101,7 @@ def _build_attr_by_source(attrs, data_version, source_type, attr_data=None):
         attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
     for attr in attrs:
         stripped_attr = attr if (not '_' in attr) else \
-            attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte', 'btw', 'lte', 'lt'] else \
+            attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte','ebtwe','ebtw','btwe', 'btw', 'lte', 'lt'] else \
             attr.rsplit('_', 1)[0]
 
         for id, source in attr_data['sources'].items():
@@ -87,8 +133,6 @@ def sortNum(x):
         else:
             return float(strt)
 
-
-
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
                            with_derived, collapse_on, is_json):
@@ -111,9 +155,9 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         sources = data_sets.get_data_sources().filter(source_type=source, id__in=versions.get_data_sources().filter(
             source_type=source).values_list("id", flat=True)).distinct()
 
-        source_attrs = sources.get_source_attrs(for_ui=True, with_set_map=True)
+        source_attrs = fetch_data_source_attr(sources, {'for_ui': True, 'with_set_map': True}, cache_as="ui_faceting_set_map")
 
-        source_data_types = sources.get_source_data_types()
+        source_data_types = fetch_data_source_types(sources)
 
         for source in sources:
             is_origin = DataSetType.IMAGE_DATA in source_data_types[source.id]
@@ -368,6 +412,8 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
         if len(versions.filter(active=False)) and len(sources.filter(source_type=DataSource.SOLR)):
             raise Exception("[ERROR] Can't request archived data from Solr, only BigQuery.")
 
+        start = time.time()
+        logger.debug("Metadata fetch beginning:")
         if source_type == DataSource.BIGQUERY:
             results = get_metadata_bq(filters, fields, {
                 'filters': sources.get_source_attrs(for_ui=True, for_faceting=False, with_set_map=False),
@@ -376,6 +422,8 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
             }, counts_only, collapse_on, record_limit)
         elif source_type == DataSource.SOLR:
             results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only, sort)
+        stop = time.time()
+        logger.debug("Metadata received: {}".format(stop-start))
 
         for counts in ['facets', 'filtered_facets']:
             facet_set = results.get(counts,{})
@@ -411,11 +459,11 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         results['filtered_facets'] = {}
 
     source_versions = sources.get_source_versions()
-    filter_attrs = sources.get_source_attrs(for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]t[e]|_btw',x) else x for x in filters.keys()], with_set_map=False)
+    filter_attrs = sources.get_source_attrs(for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]te?|_e?btwe?',x) else x for x in filters.keys()], with_set_map=False)
     attrs_for_faceting = None
     if not records_only:
-        attrs_for_faceting = sources.get_source_attrs(for_ui=True, with_set_map=False) if not facets else sources.get_source_attrs(for_ui=True, with_set_map=False, named_set=facets)
-    all_ui_attrs = sources.get_source_attrs(for_ui=True, for_faceting=False, with_set_map=False)
+        attrs_for_faceting = fetch_data_source_attr(sources, {'for_ui':True, 'named_set': facets}, cache_as="ui_facet_set")
+    all_ui_attrs = fetch_data_source_attr(sources, {'for_ui':True, 'for_faceting': False}, cache_as="all_ui_attr")
 
     # Eventually this will need to go per program
     for source in sources:
@@ -443,7 +491,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
         if solr_query:
             for attr in solr_query['queries']:
-                attr_name = re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
+                attr_name = re.sub("(_ebtwe|_ebtw|_btwe|_btw|_lte|_lt|_gte|_gt)", "", attr)
                 # If an attribute from the filters isn't in the attribute listing, just warn and continue
                 if attr_name in all_ui_attrs['list']:
                     # If the attribute is from this source, just add the query
@@ -763,7 +811,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 # fields: list of columns to return, string format only
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
 # returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
-def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True):
+def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False):
 
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
@@ -936,7 +984,12 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
 
-    results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, with_schema=True)
+    if no_submit:
+        results = {"sql_string":full_query_str, "params":params}
+    else:
+        results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
+
+    print("results in fetch_bq_metadata: {}".format(results))
 
     return results
 
