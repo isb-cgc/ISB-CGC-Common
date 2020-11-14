@@ -161,16 +161,19 @@ def get_cohort_query(request, filters, data_version, cohort_info):
     return_level = request.GET['return_level']
     select = levels[return_level]
 
+    # Construct the query from active dataversions
+    data_versions = data_version.dataversion_set.filter(active=True)
+
     if request.GET['return_level'] != "None":
         # Get the SQL
         if request.GET['return_sql'] in [True, 'True']:
-            cohort_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+            cohort_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_versions,
                 order_by=select[-1:])
         else:
             cohort_info['cohort']['sql'] = ""
 
         results = get_bq_metadata(
-            filters=filters, fields=select, data_version=data_version,
+            filters=filters, fields=select, data_version=data_versions,
             # limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
             no_submit=True,
             order_by=select[-1:])
@@ -195,16 +198,19 @@ def get_manifest_query(request, filters, data_version, manifest_info):
 
     select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
 
+    # Construct the query from active dataversions
+    data_versions = data_version.dataversion_set.filter(active=True)
+
     # Get the SQL
     if request.GET['return_sql'] in [True, 'True']:
-        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_versions,
             order_by=select[-1:])
     else:
         manifest_info['cohort']['sql'] = ""
 
     # Perform the query but don't return the results, just the job reference
     results = get_bq_metadata(
-        filters=filters, fields=select, data_version=data_version,
+        filters=filters, fields=select, data_version=data_versions,
         no_submit=True,
         order_by=select[-1:])
 
