@@ -109,17 +109,18 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
         start = time.time()
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
-        for key in inc_filters:
-            if 'data_type' in key:
-                    filters[key] = inc_filters[key]
-            elif 'MUT:' in key:
-                if not mutation_filters:
-                    mutation_filters = {}
-                mutation_filters[key] = inc_filters[key]
-                if not mutation_build:
-                    mutation_build = key.split(":")[1]
-            else:
-                filters[key.split(':')[-1]] = inc_filters[key]
+        if inc_filters:
+            for key in inc_filters:
+                if 'data_type' in key:
+                        filters[key] = inc_filters[key]
+                elif 'MUT:' in key:
+                    if not mutation_filters:
+                        mutation_filters = {}
+                    mutation_filters[key] = inc_filters[key]
+                    if not mutation_build:
+                        mutation_build = key.split(":")[1]
+                else:
+                    filters[key.split(':')[-1]] = inc_filters[key]
 
         versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
@@ -1026,7 +1027,7 @@ def set_operation(request):
     try:
 
         if request.POST:
-            name = request.POST.get('name').encode('utf8')
+            name = request.POST.get('name')
             cohorts = []
             base_cohort = None
             subtracted_cohorts = []
@@ -1827,7 +1828,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     try:
         # Check program ID against public programs
-        public_program = Program.objects.get(id=program_id)
+        public_program = Program.objects.filter(id=program_id).first()
         user = request.user
 
         if public_program:
@@ -1927,7 +1928,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             template_values = {
                 'request': request,
                 'attr_counts': results['count'],
-                'total_samples': int(results['samples']),
+                'total_samples': int(results['total']),
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
