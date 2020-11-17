@@ -1827,7 +1827,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     try:
         # Check program ID against public programs
-        public_program = Program.objects.get(id=program_id)
+        public_program = Program.objects.filter(id=program_id).first()
         user = request.user
 
         if public_program:
@@ -1927,7 +1927,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             template_values = {
                 'request': request,
                 'attr_counts': results['count'],
-                'total_samples': int(results['samples']),
+                'total_samples': int(results['total']),
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
