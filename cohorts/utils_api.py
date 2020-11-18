@@ -166,7 +166,7 @@ def get_cohort_query(request, filters, data_version, cohort_info):
 
     if request.GET['return_level'] != "None":
         # Get the SQL
-        if request.GET['return_sql'] in [True, 'True']:
+        if request.GET['sql'] in [True, 'True']:
             cohort_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_versions,
                 order_by=select[-1:])
         else:
@@ -194,15 +194,26 @@ def get_cohort_query(request, filters, data_version, cohort_info):
 # Launch a manifest job
 def get_manifest_query(request, filters, data_version, manifest_info):
 
-    access_method = request.GET['access_method']
-
-    select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
+    select = []
+    if request.GET['Collection_IDs'] in [True, 'True']:
+        select.append('collection_id')
+    if request.GET['Patient_IDs'] in [True, 'True']:
+        select.append('PatientID')
+    if request.GET['StudyInstanceUIDs'] in [True, 'True']:
+        select.append('StudyInstanceUID')
+    if request.GET['SeriesInstanceUIDs'] in [True, 'True']:
+        select.append('SeriesInstanceUID')
+    if request.GET['SOPInstanceUIDs'] in [True, 'True']:
+        select.append('SOPInstanceUID')
+    if request.GET['Collection_DOIs'] in [True, 'True']:
+        select.append('source_DOI')
+    select.append('gcs_url' if request.GET['access_method'] == 'url' else 'crdc_instance_uuid')
 
     # Construct the query from active dataversions
     data_versions = data_version.dataversion_set.filter(active=True)
 
     # Get the SQL
-    if request.GET['return_sql'] in [True, 'True']:
+    if request.GET['sql'] in [True, 'True']:
         manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_versions,
             order_by=select[-1:])
     else:
