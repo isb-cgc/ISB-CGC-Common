@@ -51,8 +51,6 @@ DATA_SOURCE_ATTR = {}
 DATA_SOURCE_TYPES = {}
 
 def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
-    start = time.time()
-
     source_set = None
 
     if cache_as:
@@ -62,8 +60,6 @@ def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
     else:
         source_set = sources.get_source_attrs(**fetch_settings)
 
-    stop = time.time()
-    logger.debug("Time to fetch method: {}".format(stop-start))
     return source_set
 
 def fetch_data_source_types(sources):
