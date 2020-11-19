@@ -53,7 +53,7 @@ def versions_list_api(request):
                 active = version.active,
                 data_sources = []
         )
-        for data_source in version.get_data_sources().filter(source_type='B'):
+        for data_source in version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B').distinct():
             data_source_data = dict(
                 name = data_source.name,
                 data_type = dict(DataSetType.DATA_TYPES)[data_source.get_data_types().first()]
@@ -182,9 +182,10 @@ def attributes_list_api(request):
 
     # attr_data = source.get_source_attrs(with_set_map=False, for_faceting=False)
     if data_source_name:
-        sources = data_version.get_data_sources().filter(name=data_source_name)
+        sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B') \
+            .filter(name=data_source_name).distinct()
     else:
-        sources = data_version.get_data_sources().filter(source_type='B')
+        sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B').distinct()
 
 
     for source in sources:
