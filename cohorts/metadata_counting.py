@@ -287,13 +287,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
     logger.info("[STATUS] Entering Solr metadata counter")
     comb_mut_filters = comb_mut_filters.upper()
-    # user_id = 0
-    # if user:
-    #     user_id = user.id
-
     mutation_filters = None
     filters = {}
-    # data_type_filters = {}
     mutation_build = None
 
     results = { 'programs': {} }
@@ -302,17 +297,18 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         start = time.time()
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
-        for key in inc_filters:
-            if 'data_type' in key:
-                    filters[key] = inc_filters[key]
-            elif 'MUT:' in key:
-                if not mutation_filters:
-                    mutation_filters = {}
-                if not mutation_build:
-                    mutation_build = key.split(":")[1]
-                mutation_filters[key] = inc_filters[key]
-            else:
-                filters[key.split(':')[-1]] = inc_filters[key]
+        if inc_filters:
+            for key in inc_filters:
+                if 'data_type' in key:
+                        filters[key] = inc_filters[key]
+                elif 'MUT:' in key:
+                    if not mutation_filters:
+                        mutation_filters = {}
+                    if not mutation_build:
+                        mutation_build = key.split(":")[1]
+                    mutation_filters[key] = inc_filters[key]
+                else:
+                    filters[key.split(':')[-1]] = inc_filters[key]
 
         versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
@@ -398,6 +394,12 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 if cohort_id:
                     cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
                     query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+
+                    # cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                    # cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                    # solr_q = "({!terms f=case_barcode}" + "{})".format(",".join(cohort_cases))
+                    # solr_q += "AND ({!terms f=sample_barcode}" + "{})".format(",".join(cohort_samples))
+                    # query_set.append(solr_q)
 
                 solr_result = query_solr_and_format_result({
                     'collection': source.name,
