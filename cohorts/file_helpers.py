@@ -71,7 +71,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]}
 
         if data_type == 'dicom':
-            file_collection_set = DataSource.objects.select_related('version').filter(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
+            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
 
             fields.extend(["file_path", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality"])
 
@@ -115,15 +115,15 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
 
             if do_filter_count:
-                facet_names = ['disease_code',]
-                if not data_type or data_type in ['all', 'igv']:
-                    facet_names.extend(['data_format', 'data_category','experimental_strategy','platform'])
-                if not data_type or data_type in ['camic', 'all', 'igv']:
+                facet_names = ['disease_code', 'project_short_name']
+                if data_type == 'all':
+                    facet_names.extend(['data_format', 'data_category', 'experimental_strategy', 'platform', 'data_type'])
+                elif data_type == 'camic':
                     facet_names.extend(['data_type'])
-                if not data_type or data_type != 'dicom':
-                    facet_names.extend(['project_short_name'])
+                elif data_type == 'igv':
+                    facet_names.extend(['data_category', 'experimental_strategy', 'platform', 'data_type'])
 
-                if (not data_type or data_type != 'camic') and not cohort_id:
+                if data_type != 'camic' and not cohort_id:
                     facet_names.extend(['program_name'])
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
@@ -135,13 +135,18 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         solr_query = build_solr_query(inc_filters, with_tags_for_ex=do_filter_count) if inc_filters else None
 
         if cohort_id:
-            cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
             cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
             if not solr_query:
                 solr_query = {'queries': {}}
-            s_query = "({!terms f=case_barcode}" + "{})".format(",".join(cohort_cases))
-            s_query += "&& ({!terms f=sample_barcode}" + "{})".format(",".join(cohort_samples))
-            solr_query['queries']['cohort'] = s_query
+            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
+
+            # cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+            # cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+            # if not solr_query:
+            #     solr_query = {'queries': {}}
+            # s_query = "({!terms f=case_barcode}" + "{})".format(",".join(cohort_cases))
+            # s_query += "&& ({!terms f=sample_barcode}" + "{})".format(",".join(cohort_samples))
+            # solr_query['queries']['cohort'] = s_query
 
         if format_filter:
             format_query = build_solr_query(format_filter, with_tags_for_ex=False)
@@ -159,7 +164,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         query_set = []
         if solr_query:
             query_set = [y for x, y in solr_query['queries'].items()]
-
         query_params = {
                 "collection": file_collection.name,
                 "fields": fields,
@@ -171,7 +175,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 "counts_only": False,
                 "collapse_on": collapse
         }
-        if data_type != 'igv':
+        if data_type != 'igv' and data_type != 'dicom':
             query_params.update({
                 "unique": 'file_gdc_id'
             })
