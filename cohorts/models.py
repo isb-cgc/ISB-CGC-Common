@@ -74,6 +74,10 @@ class Cohort(models.Model):
         logger.info("[STATUS] Time to get case list: {}s".format(str(stop-start)))
         return list(cases)
 
+    # def get_cohort_samples(self):
+    #     samples = self.samples_set.all().values('sample_barcode').distinct().values_list('sample_barcode', flat=True)
+    #     return list(samples)
+
     def case_size(self):
         return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
 

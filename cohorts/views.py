@@ -1799,7 +1799,7 @@ def get_metadata(request):
         if cohort:
             results['cohort-total'] = results['samples']
             results['cohort-cases'] = results['cases']
-            cohort_progs = cohort.get_programs()
+            cohort_progs = Program.objects.filter(id__in=Cohort.objects.get(id=cohort).get_programs())
             for prog in cohort_progs:
                 if not prog.is_public:
                     user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
