@@ -116,12 +116,6 @@ def _cohort_preview_api(request, data, cohort_info, data_version):
 def _cohort_preview_manifest_api(request, data, manifest_info):
     filters = data['filterSet']['filters']
 
-    if not filters:
-        # Can't save/edit a cohort when nothing is being changed!
-        return {
-            "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
-            "code": 400
-            }
     if 'collection_id' in filters:
         filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
 
