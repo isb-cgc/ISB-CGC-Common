@@ -116,12 +116,6 @@ def _cohort_preview_api(request, data, cohort_info, data_version):
 def _cohort_preview_manifest_api(request, data, manifest_info):
     filters = data['filterSet']['filters']
 
-    if not filters:
-        # Can't save/edit a cohort when nothing is being changed!
-        return {
-            "message": "Can't save a cohort with no information to save! (Name and filters not provided.)",
-            "code": 400
-            }
     if 'collection_id' in filters:
         filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
 
@@ -161,16 +155,19 @@ def get_cohort_query(request, filters, data_version, cohort_info):
     return_level = request.GET['return_level']
     select = levels[return_level]
 
+    # Construct the query from active dataversions
+    data_versions = data_version.dataversion_set.filter(active=True)
+
     if request.GET['return_level'] != "None":
         # Get the SQL
-        if request.GET['return_sql'] in [True, 'True']:
-            cohort_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+        if request.GET['sql'] in [True, 'True']:
+            cohort_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_versions,
                 order_by=select[-1:])
         else:
             cohort_info['cohort']['sql'] = ""
 
         results = get_bq_metadata(
-            filters=filters, fields=select, data_version=data_version,
+            filters=filters, fields=select, data_version=data_versions,
             # limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
             no_submit=True,
             order_by=select[-1:])
@@ -191,20 +188,34 @@ def get_cohort_query(request, filters, data_version, cohort_info):
 # Launch a manifest job
 def get_manifest_query(request, filters, data_version, manifest_info):
 
-    access_method = request.GET['access_method']
+    select = []
+    if request.GET['Collection_IDs'] in [True, 'True']:
+        select.append('collection_id')
+    if request.GET['Patient_IDs'] in [True, 'True']:
+        select.append('PatientID')
+    if request.GET['StudyInstanceUIDs'] in [True, 'True']:
+        select.append('StudyInstanceUID')
+    if request.GET['SeriesInstanceUIDs'] in [True, 'True']:
+        select.append('SeriesInstanceUID')
+    if request.GET['SOPInstanceUIDs'] in [True, 'True']:
+        select.append('SOPInstanceUID')
+    if request.GET['Collection_DOIs'] in [True, 'True']:
+        select.append('source_DOI')
+    select.append('gcs_url' if request.GET['access_method'] == 'url' else 'crdc_instance_uuid')
 
-    select = ['gcs_url'] if access_method == 'url' else ['crdc_instance_uuid']
+    # Construct the query from active dataversions
+    data_versions = data_version.dataversion_set.filter(active=True)
 
     # Get the SQL
-    if request.GET['return_sql'] in [True, 'True']:
-        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+    if request.GET['sql'] in [True, 'True']:
+        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_versions,
             order_by=select[-1:])
     else:
         manifest_info['cohort']['sql'] = ""
 
     # Perform the query but don't return the results, just the job reference
     results = get_bq_metadata(
-        filters=filters, fields=select, data_version=data_version,
+        filters=filters, fields=select, data_version=data_versions,
         no_submit=True,
         order_by=select[-1:])
 

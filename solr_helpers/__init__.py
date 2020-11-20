@@ -473,13 +473,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
 
         elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
-            rngTemp="{}:{{{} TO {}}}"
-            if attr_rng=='btwe':
-                rngTemp="{}:{{{} TO {}]"
-            elif attr_rng=='ebtw':
-                rngTemp = "{}:[{} TO {}}}"
-            elif attr_rng =='ebtwe':
-                rngTemp = "{}:[{} TO {}]"
+            bounds = ("[" if re.search('^ebtwe?',attr_rng) else "{{","]" if re.search('e?btwe$',attr_rng) else "}}",)
+            rngTemp = "{}:%s{} TO {}%s" % bounds
 
             clause = ""
             with_none = False
