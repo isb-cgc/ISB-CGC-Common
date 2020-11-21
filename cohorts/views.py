@@ -195,8 +195,13 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
                         logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
             if cohort_id:
-                cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+                source_name = source.name.lower()
+                if source_name.startswith('files'):
+                    cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                    query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
+                else:
+                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
             samples_and_cases = query_solr_and_format_result({
                 'collection': source.name,
