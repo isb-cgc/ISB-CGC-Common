@@ -915,9 +915,6 @@ def download_cohort_manifest(request, cohort_id):
                 # JSON export
                 json_result = ""
 
-                if 'gcs_path' in selected_columns:
-                    column_order.append('gcs_path')
-
                 for row in manifest:
                     if 'gcs_path' in selected_columns:
                         gcs_path = ("{}{}/dicom/{}/{}/{}.dcm#{}".format(
@@ -926,11 +923,11 @@ def download_cohort_manifest(request, cohort_id):
                         )
                         row['gcs_path'] = gcs_path
 
-                    keys_to_delete = [key for key in row if key not in column_order]
-                    for key in keys_to_delete:
-                        del row[key]
+                    this_row = {}
+                    for key in selected_columns:
+                        this_row[key] = row[key] if key in row else ""
 
-                    json_row = json.dumps(row) + "\n"
+                    json_row = json.dumps(this_row) + "\n"
                     json_result += json_row
 
                 response = StreamingHttpResponse(json_result, content_type="text/json")
