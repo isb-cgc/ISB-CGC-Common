@@ -871,8 +871,6 @@ def download_cohort_manifest(request, cohort_id):
         file_type = request.GET.get('file_type')
 
         if len(manifest) > 0:
-            column_order = [x for x in selected_columns if x in manifest[0].keys()]
-
             if file_type == 'csv' or file_type == 'tsv':
                 # CSV and TSV export
                 rows = ()
@@ -897,7 +895,7 @@ def download_cohort_manifest(request, cohort_id):
                               + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
                 rows += (selected_columns,)
                 for row in manifest:
-                    this_row = [row[x] for x in column_order]
+                    this_row = [(row[x] if x in row else "") for x in selected_columns if x != 'gcs_path']
                     if 'gcs_path' in selected_columns:
                         this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
                             "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
@@ -917,9 +915,6 @@ def download_cohort_manifest(request, cohort_id):
                 # JSON export
                 json_result = ""
 
-                if 'gcs_path' in selected_columns:
-                    column_order.append('gcs_path')
-
                 for row in manifest:
                     if 'gcs_path' in selected_columns:
                         gcs_path = ("{}{}/dicom/{}/{}/{}.dcm#{}".format(
@@ -928,11 +923,11 @@ def download_cohort_manifest(request, cohort_id):
                         )
                         row['gcs_path'] = gcs_path
 
-                    keys_to_delete = [key for key in row if key not in column_order]
-                    for key in keys_to_delete:
-                        del row[key]
+                    this_row = {}
+                    for key in selected_columns:
+                        this_row[key] = row[key] if key in row else ""
 
-                    json_row = json.dumps(row) + "\n"
+                    json_row = json.dumps(this_row) + "\n"
                     json_result += json_row
 
                 response = StreamingHttpResponse(json_result, content_type="text/json")

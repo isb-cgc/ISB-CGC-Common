@@ -305,28 +305,29 @@ class BigQuerySupport(BigQueryABC):
         job_is_done = self.await_job_is_done(query_job)
 
         # Parse the final disposition
-        if job_is_done and job_is_done['status']['state'] == 'DONE':
-            if 'status' in job_is_done and 'errors' in job_is_done['status']:
-                logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done['status']['errors'])))
-                logger.error("[ERROR] Error'd out query: {}".format(query))
-            else:
-                logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
-                if no_results:
-                    # Just return the job reference.
-                    query_results = query_job['jobReference']
-                elif paginated:
-                    query_results = self.fetch_job_result_page(query_job['jobReference'])
-                    logger.info("[STATUS] {} results found for query {}.".format(str(query_results['totalFound']), job_id))
-                elif with_schema:
-                    query_results = self.fetch_job_results_with_schema(query_job['jobReference'])
-                    logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results['results'])), job_id))
-                else:
-                    query_results = self.fetch_job_results(query_job['jobReference'])
-                    logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
+        if no_results:
+            # Just return the job data. Let the caller decide what to do
+            query_results = job_is_done
         else:
-            logger.error("[ERROR] Query took longer than the allowed time to execute--" +
-                         "if you check job ID {} manually you can wait for it to finish.".format(job_id))
-            logger.error("[ERROR] Timed out query: {}".format(query))
+            if job_is_done and job_is_done['status']['state'] == 'DONE':
+                if 'status' in job_is_done and 'errors' in job_is_done['status']:
+                    logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done['status']['errors'])))
+                    logger.error("[ERROR] Error'd out query: {}".format(query))
+                else:
+                    logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
+                    if paginated:
+                        query_results = self.fetch_job_result_page(query_job['jobReference'])
+                        logger.info("[STATUS] {} results found for query {}.".format(str(query_results['totalFound']), job_id))
+                    elif with_schema:
+                        query_results = self.fetch_job_results_with_schema(query_job['jobReference'])
+                        logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results['results'])), job_id))
+                    else:
+                        query_results = self.fetch_job_results(query_job['jobReference'])
+                        logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
+            else:
+                logger.error("[ERROR] Query took longer than the allowed time to execute--" +
+                             "if you check job ID {} manually you can wait for it to finish.".format(job_id))
+                logger.error("[ERROR] Timed out query: {}".format(query))
 
         if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
                 job_is_done['statistics']['query']:
@@ -484,6 +485,13 @@ class BigQuerySupport(BigQueryABC):
     def get_job_results(cls, job_reference):
         bqs = cls(None, None, None)
         return bqs.fetch_job_results(job_reference)
+
+    # Given a job reference for a running job, await the completion,
+    # then fetch and return the results
+    @classmethod
+    def wait_for_done(cls, query_job):
+        bqs = cls(None, None, None)
+        return bqs.await_job_is_done(query_job)
 
     # Given a job reference for a running job, await the completion,
     # then fetch and return the results
