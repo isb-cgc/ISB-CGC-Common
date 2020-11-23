@@ -51,8 +51,6 @@ DATA_SOURCE_ATTR = {}
 DATA_SOURCE_TYPES = {}
 
 def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
-    start = time.time()
-
     source_set = None
 
     if cache_as:
@@ -62,8 +60,6 @@ def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
     else:
         source_set = sources.get_source_attrs(**fetch_settings)
 
-    stop = time.time()
-    logger.debug("Time to fetch method: {}".format(stop-start))
     return source_set
 
 def fetch_data_source_types(sources):
@@ -135,7 +131,7 @@ def sortNum(x):
 
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
-                           with_derived, collapse_on, is_json):
+                           with_derived, collapse_on, is_json, uniques=None):
     attr_by_source = {}
     attr_sets = {}
     context = {}
@@ -185,7 +181,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         start = time.time()
         source_metadata = get_collex_metadata(
             filters, fields, record_limit=2000, counts_only=counts_only, with_ancillary=with_related,
-            collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions
+            collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques
         )
         stop = time.time()
         logger.debug("[STATUS] Benchmarking: Time to collect metadata for source type {}: {}s".format(
@@ -363,6 +359,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         if is_json:
             attr_by_source['programs'] = programSet
             attr_by_source['filtered_counts'] = filtered_attr_by_source
+            if 'uniques' in source_metadata:
+                attr_by_source['uniques'] = source_metadata['uniques']
             return attr_by_source
         else:
             context['order'] = {'derived_set': ['dicom_derived_all:segmentation', 'dicom_derived_all:qualitative',
@@ -389,7 +387,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 # facets: array of strings, attributes to faceted count as a list of attribute names; if not provided not faceted counts will be performed
 def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, with_ancillary = True,
                         collapse_on = 'PatientID', order_docs=None, sources = None, versions = None, with_derived=True,
-                        facets=None, records_only=False, sort=None):
+                        facets=None, records_only=False, sort=None, uniques=None):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -421,7 +419,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit)
         elif source_type == DataSource.SOLR:
-            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only, sort)
+            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only, sort,uniques)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
 
@@ -451,7 +449,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
     return results
 
 # Use solr to fetch faceted counts and/or records
-def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False, sort=None):
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False, sort=None, uniques=None):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -467,6 +465,10 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
     # Eventually this will need to go per program
     for source in sources:
+        if source.has_data_type(DataSetType.IMAGE_DATA):
+            curUniques = uniques
+        else:
+            curUniques = None
         start = time.time()
         search_child_records = None
         if source.has_data_type(DataSetType.DERIVED_DATA):
@@ -529,7 +531,9 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'query_string': None,
                 'limit': 0,
                 'counts_only': True,
-                'fields': None
+                'fields': None,
+                'uniques': curUniques
+                
             })
 
             solr_count_filtered_result = None
@@ -541,7 +545,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'query_string': None,
                     'limit': 0,
                     'counts_only': True,
-                    'fields': None
+                    'fields': None,
+
                 })
 
             stop = time.time()
@@ -549,6 +554,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
             if source.has_data_type(DataSetType.IMAGE_DATA):
                 results['total'] = solr_result['numFound']
+                if 'uniques' in solr_result:
+                    results['uniques'] = solr_result['uniques']
 
             results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
                 'facets': solr_result['facets']
@@ -568,11 +575,12 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'collapse_on': collapse_on,
                 'counts_only': counts_only,
                 'sort': sort,
-                'limit': record_limit
+                'limit': record_limit,
             })
             results['docs'] = solr_result['docs']
             if records_only:
                 results['total'] = solr_result['numFound']
+
 
     return results
 
@@ -846,7 +854,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     image_tables = {}
 
     sources = data_version.get_data_sources().filter(
-        source_type=DataSource.BIGQUERY)
+        source_type=DataSource.BIGQUERY).distinct()
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
 
@@ -1092,7 +1100,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     image_tables = {}
 
     sources = data_version.get_data_sources().filter(
-        source_type=DataSource.BIGQUERY)
+        source_type=DataSource.BIGQUERY).distinct()
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:

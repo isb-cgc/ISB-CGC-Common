@@ -59,7 +59,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
             if normalize_facets:
                 formatted_query_result['facets'] = {}
                 for facet in result['facets']:
-                    if facet != 'count' and facet != 'unique_count':
+                    if facet != 'count' and facet != 'unique_count' and not (re.search('^unique_',facet)) :
                         facet_counts = result['facets'][facet]
                         if 'buckets' in facet_counts:
                             # This is a term facet
@@ -78,6 +78,12 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                                 formatted_query_result['facets'][facet_name][facet_range] = facet_counts
                             else:
                                 formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
+                    elif (re.search('^unique_',facet)):
+                        newFacet = facet.replace('^unique_','')
+                        if not('uniques' in formatted_query_result):
+                            formatted_query_result['uniques'] ={}
+                        formatted_query_result['uniques'][newFacet] = result['facets'][facet]
+
             else:
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
@@ -91,7 +97,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000, unique=None):
+def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000, uniques=None):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -105,10 +111,22 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
     if facets:
         payload['facet'] = facets
-    if unique:
+    if uniques:
         if not facets:
             payload['facet'] = {}
-        payload['facet']['unique_count'] = "unique({})".format(unique)
+        #payload['facet']['unique_count'] = "unique({})".format(unique)
+        ufield =  uniques.pop(0)
+        for x in uniques:
+            #payload['facet']['unique_'+x] = "unique({})".format(x)
+            payload['facet']['unique_'+x] = {}
+            payload['facet']['unique_'+x]['type']='terms'
+            payload['facet']['unique_' + x]['field'] = ufield
+            payload['facet']['unique_' + x]['limit'] = -1
+            payload['facet']['unique_' + x]['missing'] = True
+            payload['facet']['unique_' + x]['facet'] = {}
+            payload['facet']['unique_' + x]['facet']['unique_count']='unique('+x+')'
+
+
     if fields:
         payload['fields'] = fields
     if sort:
@@ -129,6 +147,13 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
     try:
         start = time.time()
+        #payload['facet']['x'] = 'unique(PatientID)'
+        #payload['facet']['x']['type']='terms'
+        #payload['facet']['x']['field'] = 'PatientID'
+        #payload['facet']['x']['facet'] = {}
+        #payload['facet']['x']['facet']['unique_count'] = 'unique(PatientID)'
+        #['unique_count'] = 'unique(PatientID)'
+
         query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD), verify=SOLR_CERT)
         stop = time.time()
 
@@ -448,13 +473,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
 
         elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
-            rngTemp="{}:{{{} TO {}}}"
-            if attr_rng=='btwe':
-                rngTemp="{}:{{{} TO {}]"
-            elif attr_rng=='ebtw':
-                rngTemp = "{}:[{} TO {}}}"
-            elif attr_rng =='ebtwe':
-                rngTemp = "{}:[{} TO {}]"
+            bounds = ("[" if re.search('^ebtwe?',attr_rng) else "{{","]" if re.search('e?btwe$',attr_rng) else "}}",)
+            rngTemp = "{}:%s{} TO {}%s" % bounds
 
             clause = ""
             with_none = False
