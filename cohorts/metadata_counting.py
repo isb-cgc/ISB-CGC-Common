@@ -392,14 +392,14 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                             logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
                 if cohort_id:
-                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+                    source_name = source.name.lower()
+                    if source_name.startswith('files'):
+                        cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                        query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
 
-                    # cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
-                    # cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                    # solr_q = "({!terms f=case_barcode}" + "{})".format(",".join(cohort_cases))
-                    # solr_q += "AND ({!terms f=sample_barcode}" + "{})".format(",".join(cohort_samples))
-                    # query_set.append(solr_q)
+                    else:
+                        cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                        query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
                 solr_result = query_solr_and_format_result({
                     'collection': source.name,
