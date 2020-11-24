@@ -857,7 +857,14 @@ def download_cohort_manifest(request, cohort_id):
         if request.GET.get('header_fields'):
             selected_header_fields = json.loads(request.GET.get('header_fields'))
 
-        items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES)
+        MAX_FILE_LIST_ENTRIES = 500
+
+        offset = 0
+        if request.GET.get('file_part'):
+            selected_file_part = json.loads(request.GET.get('file_part'))
+            offset = selected_file_part * MAX_FILE_LIST_ENTRIES
+
+        items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
 
         if 'docs' in items:
             manifest = items['docs']
