@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2020, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -165,9 +165,9 @@ def oauth2_callback(request):
         if error:
             error_description = request.GET.get('error_description', None)
             if error == 'access_denied':
-                logger.info("[INFO] User {} did not allow ISB access to your eRA commons and dbGaP account.".format(request.user.id))
+                logger.info("[INFO] User {} did not allow ISB access to your NIH ID and dbGaP account.".format(request.user.id))
                 messages.warning(request,
-                                 "Login cannot continue if ISB-CGC is not allowed access to your eRA commons and dbGaP account.")
+                                 "Login cannot continue if ISB-CGC is not allowed access to your NIH ID and dbGaP account.")
             elif error_description == 'The resource owner or authorization server denied the request':
                 logger.info("[INFO] User {} did not allow ISB access".format(request.user.id))
                 messages.warning(request,
