@@ -135,18 +135,17 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         solr_query = build_solr_query(inc_filters, with_tags_for_ex=do_filter_count) if inc_filters else None
 
         if cohort_id:
-            cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
             if not solr_query:
                 solr_query = {'queries': {}}
-            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
 
-            # cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
-            # cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-            # if not solr_query:
-            #     solr_query = {'queries': {}}
-            # s_query = "({!terms f=case_barcode}" + "{})".format(",".join(cohort_cases))
-            # s_query += "&& ({!terms f=sample_barcode}" + "{})".format(",".join(cohort_samples))
-            # solr_query['queries']['cohort'] = s_query
+            file_collection_name = file_collection.name.lower()
+
+            if file_collection_name.startswith('files'):
+                cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                solr_query['queries']['cohort'] = "{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples))
+            else:
+                cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
 
         if format_filter:
             format_query = build_solr_query(format_filter, with_tags_for_ex=False)
