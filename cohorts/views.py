@@ -395,7 +395,7 @@ def validate_barcodes(request):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        body_unicode = request.body.decode('utf-8')
+        body_unicode = request.body
         body = json.loads(body_unicode)
         barcodes = body['barcodes']
 
