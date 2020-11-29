@@ -318,6 +318,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                         'max': "max({})".format(attr.name),
                     }
                 }
+                if filter_tags and attr.name in filter_tags:
+                    min_max_name="{}:min_max".format(attr.name)
+                    if not 'domain' in facets[min_max_name]:
+                        facets[min_max_name]['domain'] = {}
+                    facets[min_max_name]['domain']["excludeTags"] = filter_tags[attr.name]
         else:
             facets[attr.name] = {
                 'type': facet_type,
@@ -512,11 +517,11 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
         if with_tags_for_ex:
             filter_tags = filter_tags or {}
             tag = "f{}".format(str(count))
-            filter_tags[attr] = tag
+            filter_tags[attr_name] = tag
             query_str = ("{!tag=%s}" % tag)+query_str
             count += 1
 
-        query_set[attr] = query_str
+        query_set[attr_name] = query_str
 
     return {
         'queries': query_set,

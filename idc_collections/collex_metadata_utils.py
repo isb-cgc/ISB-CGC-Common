@@ -276,6 +276,10 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         continue
                     if is_dicofdic:
                         for x in list(_attr_by_source[set][source]['attributes'].keys()):
+                            if 'min_max' in _attr_by_source[set][source]['attributes'][x]:
+                                min_max = _attr_by_source[set][source]['attributes'][x]['min_max']
+                            else:
+                                min_max = None
                             if (isinstance(_attr_by_source[set][source]['attributes'][x]['vals'], list) and (
                                     len(_attr_by_source[set][source]['attributes'][x]['vals']) > 0)):
                                 _attr_by_source[set][source]['attributes'][x] = {y['value']: {
@@ -283,6 +287,9 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                 } for y in _attr_by_source[set][source]['attributes'][x]['vals']}
                             else:
                                 _attr_by_source[set][source]['attributes'][x] = {}
+                            if min_max is not None:
+                                _attr_by_source[set][source]['attributes'][x]['min_max'] = min_max
+
 
                         if set == 'origin_set':
                             context['collections'] = {
