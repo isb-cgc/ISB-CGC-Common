@@ -489,6 +489,13 @@ class BigQuerySupport(BigQueryABC):
     # Given a job reference for a running job, await the completion,
     # then fetch and return the results
     @classmethod
+    def wait_for_done(cls, query_job):
+        bqs = cls(None, None, None)
+        return bqs.await_job_is_done(query_job)
+
+    # Given a job reference for a running job, await the completion,
+    # then fetch and return the results
+    @classmethod
     def wait_for_done_and_get_results(cls, query_job):
         bqs = cls(None, None, None)
         check_done = bqs.await_job_is_done(query_job)
