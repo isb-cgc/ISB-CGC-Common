@@ -857,7 +857,16 @@ def download_cohort_manifest(request, cohort_id):
         if request.GET.get('header_fields'):
             selected_header_fields = json.loads(request.GET.get('header_fields'))
 
-        items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES)
+        include_header = True
+        if request.GET.get('include_header'):
+            include_header = json.loads(request.GET.get('include_header'))
+
+        offset = 0
+        if request.GET.get('file_part'):
+            selected_file_part = json.loads(request.GET.get('file_part'))
+            offset = selected_file_part * MAX_FILE_LIST_ENTRIES
+
+        items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
 
         if 'docs' in items:
             manifest = items['docs']
@@ -874,26 +883,31 @@ def download_cohort_manifest(request, cohort_id):
             if file_type == 'csv' or file_type == 'tsv':
                 # CSV and TSV export
                 rows = ()
-                if 'cohort_name' in selected_header_fields:
-                    rows += (["Manifest for cohort '{}'".format(cohort.name)],)
+                if include_header:
+                    # File headers (first file part always have header)
+                    if 'cohort_name' in selected_header_fields:
+                        rows += (["Manifest for cohort '{}'".format(cohort.name)],)
 
-                if 'user_email' in selected_header_fields:
-                    rows += (["User: {}".format(request.user.email)],)
+                    if 'user_email' in selected_header_fields:
+                        rows += (["User: {}".format(request.user.email)],)
 
-                if 'cohort_filters' in selected_header_fields:
-                    rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
+                    if 'cohort_filters' in selected_header_fields:
+                        rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
 
-                if 'timestamp' in selected_header_fields:
-                    rows += (["Date generated: {}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'))],)
+                    if 'timestamp' in selected_header_fields:
+                        rows += (["Date generated: {}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'))],)
 
-                if 'total_records' in selected_header_fields:
-                    rows += (["Total records found: {}".format(str(items['total']))],)
+                    if 'total_records' in selected_header_fields:
+                        rows += (["Total records found: {}".format(str(items['total']))],)
 
-                if items['total'] > MAX_FILE_LIST_ENTRIES:
-                    rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(str(MAX_FILE_LIST_ENTRIES))
-                              + " Your cohort's total entries exceeded this number. The first {} entries have been ".format(str(MAX_FILE_LIST_ENTRIES))
-                              + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
-                rows += (selected_columns,)
+                    if items['total'] > MAX_FILE_LIST_ENTRIES:
+                        rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(str(MAX_FILE_LIST_ENTRIES))
+                                  + " Your cohort's total entries exceeded this number. This part of {} entries has been ".format(str(MAX_FILE_LIST_ENTRIES))
+                                  + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
+
+                    # Column headers
+                    rows += (selected_columns,)
+
                 for row in manifest:
                     this_row = [(row[x] if x in row else "") for x in selected_columns if x != 'gcs_path']
                     if 'gcs_path' in selected_columns:
@@ -933,10 +947,11 @@ def download_cohort_manifest(request, cohort_id):
                 response = StreamingHttpResponse(json_result, content_type="text/json")
 
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+            file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
             if request.GET.get('file_name'):
-                file_name = "{}.{}".format(request.GET.get('file_name'), file_type)
+                file_name = "{}{}.{}".format(request.GET.get('file_name'), file_part_str, file_type)
             else:
-                file_name = "manifest_cohort_{}_{}.{}".format(str(cohort_id), timestamp, file_type)
+                file_name = "manifest_cohort_{}_{}{}.{}".format(str(cohort_id), timestamp, file_part_str, file_type)
             response['Content-Disposition'] = 'attachment; filename=' + file_name
             response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
