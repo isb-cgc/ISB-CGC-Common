@@ -24,8 +24,8 @@ from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 import hashlib
 from django.conf import settings
-
 BQ_ATTEMPT_MAX = 10
+MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
 logger = logging.getLogger('main_logger')
 
@@ -189,8 +189,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             str((stop - start))
         ))
 
-        context['manifest_count'] = source_metadata['total']
-
         filtered_attr_by_source = copy.deepcopy(attr_by_source)
 
         for which, _attr_by_source in {'filtered_facets': filtered_attr_by_source,
@@ -320,9 +318,10 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         source_set.pop(key)
 
         attr_by_source['total'] = source_metadata['total']
+        attr_by_source['file_parts_count'] = source_metadata['total'] / MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1
 
         context['set_attributes'] = attr_by_source
-        context['filtered_set_attributes'] =  filtered_attr_by_source
+        context['filtered_set_attributes'] = filtered_attr_by_source
         context['filters'] = filters
 
         prog_attr_id = Attribute.objects.get(name='program_name').id
