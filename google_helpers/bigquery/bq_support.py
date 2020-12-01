@@ -242,6 +242,32 @@ class BigQuerySupport(BigQueryABC):
                 'status': 'TABLE_EXISTS'
             }
 
+    # Apply a dataViewer IAM role to the specified user
+    def set_table_access(self, user_email):
+        this_table_policy = self.bq_service.tables().getIamPolicy(
+            resource="projects/{}/datasets/{}/tables/{}".format(self.project_id, self.dataset_id, self.table_id),
+            body={}
+        ).execute(
+            num_retries=5
+        )
+
+        this_table_policy['bindings'] = [
+            {
+                "role": "roles/bigquery.dataViewer",
+                "members": [
+                    "user:{}".format(user_email)
+                ]
+            }
+        ]
+        this_table_policy['version'] = 1
+
+        self.bq_service.tables().setIamPolicy(
+            resource="projects/{}/datasets/{}/tables/{}".format(self.project_id, self.dataset_id, self.table_id),
+            body={'policy':this_table_policy}
+        ).execute(
+            num_retries=5
+        )
+
     # Build and insert a BQ job
     def insert_bq_query_job(self, query,parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
 
@@ -589,7 +615,7 @@ class BigQuerySupport(BigQueryABC):
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
     def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None, case_insens=True):
-        if field_prefix[-1] != ".":
+        if field_prefix and field_prefix[-1] != ".":
             field_prefix += "."
 
         result = {

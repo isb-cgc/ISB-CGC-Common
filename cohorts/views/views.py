@@ -34,7 +34,7 @@ import logging
 import django
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
-from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
+from google_helpers.bigquery.export_support import BigQueryExportFileList
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -189,7 +189,8 @@ def cohort_detail(request, cohort_id):
             'shared_with_users': shared_with_users,
             'cohort_filters': cohort_filters,
             'cohort_version': "; ".join(cohort_versions.get_displays()),
-            'cohort_id': cohort_id
+            'cohort_id': cohort_id,
+            'is_social': bool(len(request.user.socialaccount_set.all()) > 0)
         })
 
         template = 'cohorts/cohort_details.html'
@@ -836,6 +837,159 @@ class Echo(object):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
 
+def create_manifest_bq_table(request, cohort):
+    timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+    user_table = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
+    bqs = BigQueryExportFileList(settings.BIGQUERY_PROJECT_ID, settings.BIGQUERY_USER_MANIFEST_DATASET, user_table)
+
+    filter_sets = cohort.get_filters_for_bq()
+
+    field_list = json.loads(request.GET.get('columns','["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]'))
+
+    query = """
+        #standardSQL
+        SELECT {field_list}
+        FROM `{pivot_table}`
+        WHERE {where_clause}
+    """
+
+    result = bqs.export_file_list_query_to_bq(
+        query.format(field_list=",".join(field_list),pivot_table=settings.BIGQUERY_PIVOT_TABLE,where_clause=filter_sets[0]['filter_string']),
+        filter_sets[0]['parameters'],cohort.id, user_email=request.user.email
+    )
+
+    if result['status'] == 'error':
+        response = JsonResponse({'status': 400, 'message': result['message']})
+    else:
+        table_uri = "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(settings.BIGQUERY_PROJECT_ID, settings.BIGQUERY_USER_MANIFEST_DATASET, user_table)
+        response = JsonResponse({
+            'status': 200,
+            'message': 'Table {} successfully made. This table will be available for '.format(result['full_table_id']) +
+                       'seven (7) days, accessible via your {} Google Account at this URL:\n{}'.format(request.user.email, table_uri)
+        })
+
+    return response
+
+# Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
+def create_file_manifest(request,cohort):
+    manifest = None
+    response = None
+
+    print(request.GET)
+    
+    # Fields we need to fetch
+    field_list = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI",
+                  "gcs_generation", "gcs_bucket", "crdc_instance_uuid"]
+
+    # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
+    if request.GET.get('columns'):
+        selected_columns = json.loads(request.GET.get('columns'))
+
+    if request.GET.get('header_fields'):
+        selected_header_fields = json.loads(request.GET.get('header_fields'))
+
+    include_header = (request.GET.get('include_header','false').lower() == 'true')
+
+    offset = 0
+    if len(request.GET.get('file_part','')) > 0:
+        selected_file_part = json.loads(request.GET.get('file_part'))
+        offset = selected_file_part * MAX_FILE_LIST_ENTRIES
+
+    items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
+
+    if 'docs' in items:
+        manifest = items['docs']
+    else:
+        if 'error' in items:
+            messages.error(request, items['error']['message'])
+        else:
+            messages.error(request,
+                           "There was an error while attempting to retrieve this file list - please contact the administrator.")
+        return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+
+    file_type = request.GET.get('file_type')
+
+    if len(manifest) > 0:
+        if file_type == 'csv' or file_type == 'tsv':
+            # CSV and TSV export
+            rows = ()
+            if include_header:
+                # File headers (first file part always have header)
+                if 'cohort_name' in selected_header_fields:
+                    rows += (["Manifest for cohort '{}'".format(cohort.name)],)
+
+                if 'user_email' in selected_header_fields:
+                    rows += (["User: {}".format(request.user.email)],)
+
+                if 'cohort_filters' in selected_header_fields:
+                    rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
+
+                if 'timestamp' in selected_header_fields:
+                    rows += (["Date generated: {}".format(
+                        datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'))],)
+
+                if 'total_records' in selected_header_fields:
+                    rows += (["Total records found: {}".format(str(items['total']))],)
+
+                if items['total'] > MAX_FILE_LIST_ENTRIES:
+                    rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(
+                        str(MAX_FILE_LIST_ENTRIES))
+                              + " Your cohort's total entries exceeded this number. This part of {} entries has been ".format(
+                        str(MAX_FILE_LIST_ENTRIES))
+                              + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
+
+                # Column headers
+                rows += (selected_columns,)
+
+            for row in manifest:
+                this_row = [(row[x] if x in row else "") for x in selected_columns if x != 'gcs_url']
+                if 'gcs_url' in selected_columns:
+                    this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
+                        "gs://", row['gcs_bucket'], row['StudyInstanceUID'], row['SeriesInstanceUID'],
+                        row['SOPInstanceUID'], row['gcs_generation'])
+                    )
+                rows += (this_row,)
+            pseudo_buffer = Echo()
+
+            if file_type == 'csv':
+                writer = csv.writer(pseudo_buffer)
+            elif file_type == 'tsv':
+                writer = csv.writer(pseudo_buffer, delimiter='\t')
+
+            response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
+
+        elif file_type == 'json':
+            # JSON export
+            json_result = ""
+
+            for row in manifest:
+                if 'gcs_url' in selected_columns:
+                    gcs_url = ("{}{}/dicom/{}/{}/{}.dcm#{}".format(
+                        "gs://", row['gcs_bucket'], row['StudyInstanceUID'], row['SeriesInstanceUID'],
+                        row['SOPInstanceUID'], row['gcs_generation'])
+                    )
+                    row['gcs_url'] = gcs_url
+
+                this_row = {}
+                for key in selected_columns:
+                    this_row[key] = row[key] if key in row else ""
+
+                json_row = json.dumps(this_row) + "\n"
+                json_result += json_row
+
+            response = StreamingHttpResponse(json_result, content_type="text/json")
+
+        timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+        file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
+        if request.GET.get('file_name'):
+            file_name = "{}{}.{}".format(request.GET.get('file_name'), file_part_str, file_type)
+        else:
+            file_name = "manifest_cohort_{}_{}{}.{}".format(str(cohort_id), timestamp, file_part_str, file_type)
+        response['Content-Disposition'] = 'attachment; filename=' + file_name
+        response.set_cookie("downloadToken", request.GET.get('downloadToken'))
+        
+        return response
+
 def download_cohort_manifest(request, cohort_id):
     if not cohort_id:
         messages.error(request, "A cohort ID was not provided.")
@@ -845,116 +999,12 @@ def download_cohort_manifest(request, cohort_id):
         cohort = Cohort.objects.get(id=cohort_id)
         Cohort_Perms.objects.get(cohort=cohort, user=request.user)
 
-        manifest = None
-
-        # Fields we need to fetch
-        field_list = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "gcs_generation", "gcs_bucket", "crdc_instance_uuid"]
-
-        # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
-        if request.GET.get('columns'):
-            selected_columns = json.loads(request.GET.get('columns'))
-
-        if request.GET.get('header_fields'):
-            selected_header_fields = json.loads(request.GET.get('header_fields'))
-
-        include_header = True
-        if request.GET.get('include_header'):
-            include_header = json.loads(request.GET.get('include_header'))
-
-        offset = 0
-        if request.GET.get('file_part'):
-            selected_file_part = json.loads(request.GET.get('file_part'))
-            offset = selected_file_part * MAX_FILE_LIST_ENTRIES
-
-        items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
-
-        if 'docs' in items:
-            manifest = items['docs']
+        if request.GET.get('manifest-type','file-manifest') == 'bq-manifest':
+            response = create_manifest_bq_table(request,cohort)
         else:
-            if 'error' in items:
-                messages.error(request, items['error']['message'])
-            else:
-                messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
-            return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+            response = create_file_manifest(request,cohort)
 
-        file_type = request.GET.get('file_type')
-
-        if len(manifest) > 0:
-            if file_type == 'csv' or file_type == 'tsv':
-                # CSV and TSV export
-                rows = ()
-                if include_header:
-                    # File headers (first file part always have header)
-                    if 'cohort_name' in selected_header_fields:
-                        rows += (["Manifest for cohort '{}'".format(cohort.name)],)
-
-                    if 'user_email' in selected_header_fields:
-                        rows += (["User: {}".format(request.user.email)],)
-
-                    if 'cohort_filters' in selected_header_fields:
-                        rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
-
-                    if 'timestamp' in selected_header_fields:
-                        rows += (["Date generated: {}".format(datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'))],)
-
-                    if 'total_records' in selected_header_fields:
-                        rows += (["Total records found: {}".format(str(items['total']))],)
-
-                    if items['total'] > MAX_FILE_LIST_ENTRIES:
-                        rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(str(MAX_FILE_LIST_ENTRIES))
-                                  + " Your cohort's total entries exceeded this number. This part of {} entries has been ".format(str(MAX_FILE_LIST_ENTRIES))
-                                  + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
-
-                    # Column headers
-                    rows += (selected_columns,)
-
-                for row in manifest:
-                    this_row = [(row[x] if x in row else "") for x in selected_columns if x != 'gcs_path']
-                    if 'gcs_path' in selected_columns:
-                        this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
-                            "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
-                            row['SOPInstanceUID'],row['gcs_generation'])
-                        )
-                    rows += (this_row,)
-                pseudo_buffer = Echo()
-
-                if file_type == 'csv':
-                    writer = csv.writer(pseudo_buffer)
-                elif file_type == 'tsv':
-                    writer = csv.writer(pseudo_buffer, delimiter='\t')
-
-                response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
-
-            elif file_type == 'json':
-                # JSON export
-                json_result = ""
-
-                for row in manifest:
-                    if 'gcs_path' in selected_columns:
-                        gcs_path = ("{}{}/dicom/{}/{}/{}.dcm#{}".format(
-                            "gs://",row['gcs_bucket'],row['StudyInstanceUID'],row['SeriesInstanceUID'],
-                            row['SOPInstanceUID'],row['gcs_generation'])
-                        )
-                        row['gcs_path'] = gcs_path
-
-                    this_row = {}
-                    for key in selected_columns:
-                        this_row[key] = row[key] if key in row else ""
-
-                    json_row = json.dumps(this_row) + "\n"
-                    json_result += json_row
-
-                response = StreamingHttpResponse(json_result, content_type="text/json")
-
-            timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-            file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
-            if request.GET.get('file_name'):
-                file_name = "{}{}.{}".format(request.GET.get('file_name'), file_part_str, file_type)
-            else:
-                file_name = "manifest_cohort_{}_{}{}.{}".format(str(cohort_id), timestamp, file_part_str, file_type)
-            response['Content-Disposition'] = 'attachment; filename=' + file_name
-            response.set_cookie("downloadToken", request.GET.get('downloadToken'))
-            return response
+        return response
     except ObjectDoesNotExist:
         logger.error("[ERROR] User ID {} attempted to access cohort {}, which they do not have permission to view.".format(request.user.id,cohort.id))
         messages.error(request,"You don't have permission to view that cohort.")

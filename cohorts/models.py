@@ -195,7 +195,7 @@ class Cohort(models.Model):
         group_filter_dict = self.get_filters_as_dict()
 
         for group in group_filter_dict:
-            group_filters = {x: [y for y in x['values']] for x in group['filters']}
+            group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
                 group_filters, field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
                 type_schema=schema
