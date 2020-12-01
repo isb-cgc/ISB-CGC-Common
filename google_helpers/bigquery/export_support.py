@@ -333,6 +333,12 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         else:
             logger.error("[WARNING] Export is taking a long time to run, informing user.")
             result['status'] = 'long_running'
+            result['message'] = {
+                'full_table_id': '{}.{}.{}'.format(
+                    self.project_id,
+                    job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                    job_is_done['configuration']['query']['destinationTable']['tableId'])
+            }
             result['jobId'] = job_id
 
         return result
