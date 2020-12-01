@@ -862,10 +862,13 @@ def create_manifest_bq_table(request, cohort):
         response = JsonResponse({'status': 400, 'message': result['message']})
     else:
         table_uri = "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(settings.BIGQUERY_PROJECT_ID, settings.BIGQUERY_USER_MANIFEST_DATASET, user_table)
+        msg = 'Table {} successfully made. This table will be available for '.format(result['full_table_id']) \
+            + 'seven (7) days, accessible via your {} Google Account at this URL:\n{}'.format(request.user.email, table_uri)
+        if result['status'] == 'long_running':
+            msg += '\nYour manifest may still be exporting; be sure to wait five minutes to allow the export to complete.'
         response = JsonResponse({
             'status': 200,
-            'message': 'Table {} successfully made. This table will be available for '.format(result['full_table_id']) +
-                       'seven (7) days, accessible via your {} Google Account at this URL:\n{}'.format(request.user.email, table_uri)
+            'message': msg
         })
 
     return response

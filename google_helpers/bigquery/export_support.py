@@ -324,16 +324,18 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             else:
                 #Check for 'too large'
                 result['status'] = 'success'
-                result['message'] = {
-                    'full_table_id': '{}.{}.{}'.format(
-                        self.project_id, 
-                        job_is_done['configuration']['query']['destinationTable']['datasetId'],
-                        job_is_done['configuration']['query']['destinationTable']['tableId'])
-                }
+
         else:
-            logger.error("[WARNING] Export is taking a long time to run, informing user.")
-            result['status'] = 'long_running'
-            result['jobId'] = job_id
+            logger.warn("[WARNING] Export is taking a long time to run, informing user.")
+            result = {
+                'status': 'success',
+                'full_table_id': '{}.{}.{}'.format(
+                    self.project_id,
+                    job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                    job_is_done['configuration']['query']['destinationTable']['tableId']
+                ),
+                'jobId': job_id
+            }
 
         return result
 
