@@ -24,8 +24,8 @@ from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 import hashlib
 from django.conf import settings
-
 BQ_ATTEMPT_MAX = 10
+MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
 logger = logging.getLogger('main_logger')
 
@@ -180,7 +180,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 
         start = time.time()
         source_metadata = get_collex_metadata(
-            filters, fields, record_limit=2000, counts_only=counts_only, with_ancillary=with_related,
+            filters, fields, record_limit=2000, offset=0, counts_only=counts_only, with_ancillary=with_related,
             collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques
         )
         stop = time.time()
@@ -318,9 +318,10 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         source_set.pop(key)
 
         attr_by_source['total'] = source_metadata['total']
+        attr_by_source['file_parts_count'] = source_metadata['total'] / MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1
 
         context['set_attributes'] = attr_by_source
-        context['filtered_set_attributes'] =  filtered_attr_by_source
+        context['filtered_set_attributes'] = filtered_attr_by_source
         context['filters'] = filters
 
         prog_attr_id = Attribute.objects.get(name='program_name').id
@@ -385,7 +386,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 # sources (optional): List of data sources to query; all active sources will be used if not provided
 # versions (optional): List of data versions to query; all active data versions will be used if not provided
 # facets: array of strings, attributes to faceted count as a list of attribute names; if not provided not faceted counts will be performed
-def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, with_ancillary = True,
+def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_only=False, with_ancillary = True,
                         collapse_on = 'PatientID', order_docs=None, sources = None, versions = None, with_derived=True,
                         facets=None, records_only=False, sort=None, uniques=None):
 
@@ -417,9 +418,9 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
                 'filters': sources.get_source_attrs(for_ui=True, for_faceting=False, with_set_map=False),
                 'facets': sources.get_source_attrs(for_ui=True, with_set_map=False),
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
-            }, counts_only, collapse_on, record_limit)
+            }, counts_only, collapse_on, record_limit, offset)
         elif source_type == DataSource.SOLR:
-            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets, records_only, sort,uniques)
+            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset, facets, records_only, sort,uniques)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
 
@@ -449,7 +450,7 @@ def get_collex_metadata(filters, fields, record_limit=2000, counts_only=False, w
     return results
 
 # Use solr to fetch faceted counts and/or records
-def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, facets=None, records_only=False, sort=None, uniques=None):
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None, records_only=False, sort=None, uniques=None):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -576,6 +577,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'counts_only': counts_only,
                 'sort': sort,
                 'limit': record_limit,
+                'offset': offset,
             })
             results['docs'] = solr_result['docs']
             if records_only:
@@ -585,7 +587,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
     return results
 
 # Use BigQuery to fetch the faceted counts and/or records
-def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on, record_limit):
+def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on, record_limit, offset):
     results = {'docs': None, 'facets': {}}
 
     try:
@@ -594,7 +596,7 @@ def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on
         results['total'] = res['facets']['total']
 
         if not counts_only:
-            docs = get_bq_metadata(filters, fields, None, sources_and_attrs, [collapse_on], record_limit)
+            docs = get_bq_metadata(filters, fields, None, sources_and_attrs, [collapse_on], record_limit, offset)
             doc_result_schema = {i: x['name'] for i,x in enumerate(docs['schema']['fields'])}
 
             results['docs'] = [{
