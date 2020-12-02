@@ -866,9 +866,8 @@ def create_manifest_bq_table(request, cohort):
         if result['status'] == 'long_running':
             msg += 'Your manifest job is still exporting; be sure to wait five minutes to allow the export to complete. Once complete, this'
         else:
-            msg += 'Table {} successfully made. This'
-        msg += ' table will be available for '.format(result['full_table_id']) \
-            + 'seven (7) days, accessible via your {} Google Account at this URL: {}'.format(request.user.email, table_uri)
+            msg += 'Table {} successfully made. This'.format(result['full_table_id'])
+        msg += ' table will be available for seven (7) days, accessible via your {} Google Account at this URL: {}'.format(request.user.email, table_uri)
         response = JsonResponse({
             'status': 200,
             'message': msg
