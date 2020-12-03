@@ -22,6 +22,7 @@ from time import sleep
 from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
+from google_helpers.bigquery.export_support import BigQueryExportFileList
 import hashlib
 from django.conf import settings
 BQ_ATTEMPT_MAX = 10
@@ -87,36 +88,42 @@ def fetch_data_source_types(sources):
 #         'data_type': <data type of the this source, per its version>
 #     }
 # }
-def _build_attr_by_source(attrs, data_version, source_type, attr_data=None):
+def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, attr_data=None, cache_as=None, active=None):
+    
+    if cache_as and cache_as in DATA_SOURCE_ATTR:
+        attr_by_src = DATA_SOURCE_ATTR[cache_as] 
+    else:
+        attr_by_src = {'sources': {}}
+    
+        if not attr_data:
+            sources = data_version.get_data_sources(source_type=source_type, active=active)
+            attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
+            
+        for attr in attrs:
+            stripped_attr = attr if (not '_' in attr) else \
+                attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte','ebtwe','ebtw','btwe', 'btw', 'lte', 'lt'] else \
+                attr.rsplit('_', 1)[0]
+    
+            for id, source in attr_data['sources'].items():
+                if stripped_attr in source['list']:
+                    source_name = source['name']
+                    if source_name not in attr_by_src["sources"]:
+                        attr_by_src["sources"][source_name] = {
+                            'name': source_name,
+                            'id': source['id'],
+                            'alias': source_name.split(".")[-1].lower().replace("-", "_"),
+                            'list': [attr],
+                            'attrs': [stripped_attr],
+                            'data_type': source['data_sets'].first().data_type,
+                            'set_type':  source['data_sets'].first().set_type
+                        }
+                    else:
+                        attr_by_src["sources"][source_name]['list'].append(attr)
+                        attr_by_src["sources"][source_name]['attrs'].append(stripped_attr)
+        if cache_as:
+            DATA_SOURCE_ATTR[cache_as] = attr_by_src
 
-    attr_by_src = {'sources': {}}
-
-    if not attr_data:
-        sources = data_version.get_data_sources().filter(
-            source_type=DataSource.BIGQUERY)
-        attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
-    for attr in attrs:
-        stripped_attr = attr if (not '_' in attr) else \
-            attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte','ebtwe','ebtw','btwe', 'btw', 'lte', 'lt'] else \
-            attr.rsplit('_', 1)[0]
-
-        for id, source in attr_data['sources'].items():
-            if stripped_attr in source['list']:
-                source_name = source['name']
-                if source_name not in attr_by_src["sources"]:
-                    attr_by_src["sources"][source_name] = {
-                        'name': source_name,
-                        'id': source['id'],
-                        'alias': source_name.split(".")[-1].lower().replace("-", "_"),
-                        'list': [attr],
-                        'attrs': [stripped_attr],
-                        'data_type': source['data_sets'].first().data_type,
-                        'set_type':  source['data_sets'].first().set_type
-                    }
-                else:
-                    attr_by_src["sources"][source_name]['list'].append(attr)
-                    attr_by_src["sources"][source_name]['attrs'].append(stripped_attr)
-    return attr_by_src
+    return  attr_by_src
 
 
 def sortNum(x):
@@ -276,6 +283,10 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         continue
                     if is_dicofdic:
                         for x in list(_attr_by_source[set][source]['attributes'].keys()):
+                            if 'min_max' in _attr_by_source[set][source]['attributes'][x]:
+                                min_max = _attr_by_source[set][source]['attributes'][x]['min_max']
+                            else:
+                                min_max = None
                             if (isinstance(_attr_by_source[set][source]['attributes'][x]['vals'], list) and (
                                     len(_attr_by_source[set][source]['attributes'][x]['vals']) > 0)):
                                 _attr_by_source[set][source]['attributes'][x] = {y['value']: {
@@ -283,6 +294,9 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                 } for y in _attr_by_source[set][source]['attributes'][x]['vals']}
                             else:
                                 _attr_by_source[set][source]['attributes'][x] = {}
+                            if min_max is not None:
+                                _attr_by_source[set][source]['attributes'][x]['min_max'] = min_max
+
 
                         if set == 'origin_set':
                             context['collections'] = {
@@ -820,8 +834,11 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 # filters: dict filter set
 # fields: list of columns to return, string format only
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
-# returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
-def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False):
+# returns: 
+#   output_settings: is None: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
+#   output_settings is not None: { 'status': <'success'||'error'||'long_running'>, 'full_table_id': <string>, 'message': <string>} 
+def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, 
+                    offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False, output_settings=None):
 
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
@@ -855,10 +872,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     image_tables = {}
 
-    sources = data_version.get_data_sources().filter(
-        source_type=DataSource.BIGQUERY).distinct()
+    sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
-
 
     if not sources_and_attrs:
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
@@ -994,10 +1009,16 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
 
+    print(full_query_str)
+
     if no_submit:
         results = {"sql_string":full_query_str, "params":params}
     else:
-        results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
+        if output_settings:
+            bqs = BigQueryExportFileList(**output_settings['dest'])
+            results = bqs.export_file_list_query_to_bq(full_query_str, params, output_settings['cohort_id'], user_email=output_settings['email'])
+        else:
+            results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
 
     print("results in fetch_bq_metadata: {}".format(results))
 
