@@ -25,7 +25,6 @@ class ProgramQuerySet(models.QuerySet):
         data_sources = None
         progs = self.all()
         for prog in progs:
-            print(prog.datasource_set.all())
             data_sources = prog.datasource_set.all() if not data_sources else data_sources | prog.datasource_set.all()
         return data_sources.distinct() if data_sources else None
 
@@ -143,11 +142,11 @@ class DataSetType(models.Model):
 class ImagingDataCommonsVersionQuerySet(models.QuerySet):
 
     # Return all the data sources corresponding to this queryset
-    def get_data_sources(self, source_type=None):
+    def get_data_sources(self, source_type=None, active=None):
         sources = None
         idcdvs = self.all()
         for idcdv in idcdvs:
-            versions = idcdv.dataversion_set.all().distinct()
+            versions = idcdv.dataversion_set.all().distinct() if active is None else idcdv.dataversion_set.filter(active=active).distinct()
             if not sources:
                 sources = versions.get_data_sources()
             else:
@@ -177,7 +176,9 @@ class ImagingDataCommonsVersion(models.Model):
     active = models.BooleanField(default=True, null=False, blank=False)
     objects = ImagingDataCommonsVersionManager()
 
-    def get_data_sources(self):
+    def get_data_sources(self, active=None):
+        if active is not None:
+            return self.dataversion_set.filter(active=active).distinct().get_data_sources().distinct()
         return self.dataversion_set.all().distinct().get_data_sources().distinct()
 
     def get_display(self):

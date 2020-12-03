@@ -34,96 +34,33 @@ MAX_INSERT = settings.MAX_BQ_INSERT
 
 FILE_LIST_EXPORT_SCHEMA = {
     'fields': [
-        {
-            'name': 'cohort_id',
-            'type': 'INTEGER',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'case_barcode',
+         {
+            'name': 'PatientID',
             'type': 'STRING',
-            'mode': 'REQUIRED'
         }, {
-            'name': 'sample_barcode',
+            'name': 'collection_id',
+            'type': 'STRING'
+        }, {
+            'name': 'StudyInstanceUID',
             'type': 'STRING',
-            'mode': 'REQUIRED'
         }, {
-            'name': 'project_short_name',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'date_added',
-            'type': 'TIMESTAMP',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'build',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'gdc_file_uuid',
+            'name': 'SeriesInstanceUID',
             'type': 'STRING'
         }, {
-            'name': 'gdc_case_uuid',
+            'name': 'SOPInstanceUID',
             'type': 'STRING'
         }, {
-            'name': 'platform',
+            'name': 'source_DOI',
             'type': 'STRING'
         }, {
-            'name': 'exp_strategy',
+            'name': 'crdc_instance_uuid',
             'type': 'STRING'
         }, {
-            'name': 'data_category',
-            'type': 'STRING'
-        }, {
-            'name': 'data_type',
-            'type': 'STRING'
-        }, {
-            'name': 'data_format',
-            'type': 'STRING'
-        }, {
-            'name': 'cloud_storage_location',
-            'type': 'STRING'
-        }, {
-            'name': 'file_size_bytes',
-            'type': 'INTEGER'
-        }, {
-            'name': 'index_file_gdc_uuid',
-            'type': 'STRING'
-        }, {
-            'name': 'index_file_cloud_storage_location',
+            'name': 'gcs_url',
             'type': 'STRING'
         }
     ]
 }
-
-COHORT_EXPORT_SCHEMA = {
-    'fields': [
-        {
-            'name': 'cohort_id',
-            'type': 'INTEGER',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'case_barcode',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'sample_barcode',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'project_short_name',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'date_added',
-            'type': 'TIMESTAMP',
-            'mode': 'REQUIRED'
-        }, {
-            'name': 'case_gdc_uuid',
-            'type': 'STRING'
-        }
-    ]
-}
-
 
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
@@ -339,10 +276,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     msg = "Export of {} to temporary table ".format(export_type)
                     result['message'] += "temporary table--please contact the administrator."
                 else:
-                    msg = "Export of {} to table {}:{}.{} ".format(
+                    msg = "Export of {} to table {}.{}.{} ".format(
                         export_type, self.project_id, self.dataset_id, self.table_id
                     )
-                    result['message'] += "table {}:{}.{}--please contact the administrator.".format(
+                    result['message'] += "table {}.{}.{}--please contact the administrator.".format(
                         self.project_id, self.dataset_id, self.table_id
                     )
                 msg += "was unsuccessful, reason: {}".format(job_is_done['status']['errors'][0]['message'])
@@ -358,13 +295,20 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     if 'errors' in bq_result:
                         logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
                     result['status'] = 'error'
-                    result['message'] = "Unable to export {} to table {}:{}.{}--please contact the administrator.".format(
+                    result['message'] = "Unable to export {} to table {}.{}.{}--please contact the administrator.".format(
                         export_type, self.project_id, self.dataset_id, self.table_id)
                 else:
                     if int(export_table['numRows']) > 0:
-                        logger.info("[STATUS] Successfully exported {} into BQ table {}:{}.{}".format(export_type, self.project_id,self.dataset_id,self.table_id))
-                        result['status'] = 'success'
-                        result['message'] = int(export_table['numRows'])
+                        logger.info("[STATUS] Successfully exported {} into BQ table {}.{}.{}".format(export_type, self.project_id,self.dataset_id,self.table_id))
+                        result = {
+                            'status': 'success',
+                            'full_table_id': '{}.{}.{}'.format(
+                                self.project_id,
+                                job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                                job_is_done['configuration']['query']['destinationTable']['tableId']
+                            ),
+                            'row_count': int(export_table['numRows'])
+                        }
                     else:
                         logger.warning("[WARNING] Rows not found, job info:")
                         logger.warning(str(job_is_done))
@@ -380,28 +324,30 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             else:
                 #Check for 'too large'
                 result['status'] = 'success'
-                result['message'] = {
-                    'dataset_id': job_is_done['configuration']['query']['destinationTable']['datasetId'],
-                    'table_id': job_is_done['configuration']['query']['destinationTable']['tableId']
-                }
+
         else:
-            logger.error("[WARNING] Export is taking a long time to run, informing user.")
-            result['status'] = 'long_running'
-            result['jobId'] = job_id
+            logger.warn("[WARNING] Export is taking a long time to run, informing user.")
+            result = {
+                'status': 'long_running',
+                'full_table_id': '{}.{}.{}'.format(
+                    self.project_id,
+                    job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                    job_is_done['configuration']['query']['destinationTable']['tableId']
+                ),
+                'jobId': job_id
+            }
 
         return result
 
     def export_query_to_bq(self, desc, query, parameters, type, is_temp=False):
+        write_disp = 'WRITE_EMPTY'
+
         if not is_temp:
             check_dataset_table = self._confirm_dataset_and_table(desc)
-            write_disp = 'WRITE_EMPTY'
-
             if 'tableErrors' in check_dataset_table:
                 return check_dataset_table
             elif 'status' in check_dataset_table and check_dataset_table['status'] == 'TABLE_EXISTS':
-                write_disp = 'WRITE_APPEND'
-        else:
-            write_disp = 'WRITE_EMPTY'
+                return {'status': 'error', 'message': 'Unable to export file manifest: table {} already exists.'.format('{}.{}.{}'.format(self.project_id,self.dataset_id,self.table_id))}
 
         return self._query_to_table(query, parameters, type, write_disp, is_temp)
 
@@ -455,9 +401,6 @@ class BigQueryExportFileList(BigQueryExport):
             'file_size_bytes': data['file_size'],
             'date_added': date_added
         }
-        if 'index_file_gdc_uuid' in data:
-            entry_dict['index_file_cloud_storage_location'] = data['index_file_cloudstorage_location'],
-            entry_dict['index_file_gdc_uuid'] = data['index_file_gdc_uuid']
             
         return entry_dict
 
@@ -471,13 +414,15 @@ class BigQueryExportFileList(BigQueryExport):
         return self.export_rows_to_bq(desc, self._build_rows(files))
 
     # Create the BQ table referenced by project_id:dataset_id:table_id from a parameterized BQ query
-    def export_file_list_query_to_bq(self, query, parameters, cohort_id):
-        desc = ""
+    def export_file_list_query_to_bq(self, query, parameters, cohort_id, desc=None, user_email=None):
+        if not desc:
+            desc = "File Manifest export for cohort ID {}".format(str(cohort_id))
 
-        if not self._table_exists():
-            desc = "BQ Export file list table from ISB-CGC cohort ID {}".format(str(cohort_id))
+        result = self.export_query_to_bq(desc, query, parameters, "cohort file manifest")
 
-        return self.export_query_to_bq(desc, query, parameters, "cohort file manifest")
+        self.set_table_access(user_email)
+
+        return result
 
     # Export a cohort file manifest to the GCS bucket referenced by bucket_path from a parameterized
     # BQ query, using the query's temp-table to perform the extract
@@ -499,63 +444,3 @@ class BigQueryExportFileList(BigQueryExport):
                 'status': 'error',
                 'message': 'Unable to query BigQuery for file manifest export--please contact to the administrator.'
             }
-
-
-class BigQueryExportCohort(BigQueryExport):
-
-    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None):
-        self._uuids = uuids
-        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA)
-
-    def _build_row(self, sample):
-        date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        entry_dict = {
-            'cohort_id': sample['cohort_id'],
-            'sample_barcode': sample['sample_barcode'],
-            'case_barcode': sample['case_barcode'],
-            'project_short_name': sample['project_short_name'],
-            'date_added': date_added
-        }
-        if self._uuids and sample['sample_barcode'] in self._uuids:
-            entry_dict['case_gdc_uuid'] = self._uuids[sample['sample_barcode']]
-
-        return entry_dict
-
-    # Export a cohort into the BQ table referenced by project_id:dataset_id:table_id
-    def export_cohort_to_bq(self, samples):
-        desc = ""
-        if not self._table_exists():
-            cohorts = set([x['cohort_id'] for x in samples])
-            desc = "BQ Export table from ISB-CGC"
-            if len(cohorts):
-                desc += ", cohort ID{} {}".format(("s" if len(cohorts) > 1 else ""),
-                                                  ", ".join([str(x) for x in cohorts]))
-
-        return self.export_rows_to_bq(desc, self._build_rows(samples))
-
-    # Export a cohort to the GCS bucket referenced by bucket_path from a parameterized
-    # BQ query, using the query's temp-table to perform the extract
-    def export_cohort_to_gcs(self, file_format, query, parameters):
-
-        # Export the query to our temp table
-        query_result = self.export_query_to_bq(None, query, parameters, "cohort", True)
-
-        if query_result['status'] == 'success' or query_result['status'] == 'long_running':
-            export_result = self._table_to_gcs(
-                file_format, query_result['message'],
-                "cohort",
-                query_result['jobId'] if 'jobId' in query_result else None
-            )
-            return export_result
-        else:
-            return {
-                'status': 'error',
-                'message': 'Unable to query BigQuery for cohort export--please contact to the administrator.'
-            }
-
-    def export_cohort_query_to_bq(self, query, parameters, cohort_id):
-        desc = ""
-        if not self._table_exists():
-            desc = "BQ Export cohort table from ISB-CGC, cohort ID {}".format(str(cohort_id))
-
-        return self.export_query_to_bq(desc, query, parameters, "cohort")

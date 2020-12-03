@@ -100,20 +100,21 @@ class Cohort(models.Model):
 
     # Returns the data versions identified in the filter groups for this cohort
     # Returns a DataVersion QuerySet
-    def get_data_versions(self):
+    def get_data_versions(self, active=None):
 
-        data_versions = ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True))
+        data_versions = ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True)) \
+            if active is None else ImagingDataCommonsVersion.objects.filter(active=active, id__in=self.filter_group_set.all().values_list('data_version',flat=True))
 
         return data_versions.distinct()
 
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     # Return values can be
-    def get_data_sources(self, source_type=DataSource.SOLR):
+    def get_data_sources(self, source_type=DataSource.SOLR, active=None):
 
         cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
         attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
 
-        data_versions = self.get_data_versions()
+        data_versions = self.get_data_versions(active=active)
 
         sources = attributes.get_data_sources(data_versions, source_type)
 
@@ -135,6 +136,18 @@ class Cohort(models.Model):
                     }
 
         return result
+
+
+    # Returns a dict of the filters defining this cohort organized by filter group
+    def get_filters_as_dict_simple(self):
+        result = []
+
+        filter_groups = self.filter_group_set.all()
+
+        for fg in filter_groups:
+            result.append(fg.filter_set.all().get_filter_set())
+        return result
+
 
     # Returns a dict of the filters defining this cohort organized by filter group
     def get_filters_as_dict(self):
@@ -195,7 +208,7 @@ class Cohort(models.Model):
         group_filter_dict = self.get_filters_as_dict()
 
         for group in group_filter_dict:
-            group_filters = {x: [y for y in x['values']] for x in group['filters']}
+            group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
                 group_filters, field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
                 type_schema=schema
