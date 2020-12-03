@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2020, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -90,6 +90,8 @@ def oauth2_login(request):
         dcf_auth_url = DCF_AUTH_URL
         if idp:
             dcf_auth_url += "?idp={}".format(idp)
+        logger.info('dcf_auth_url')
+        logger.info(dcf_auth_url)
         authorization_url, state = oauth.authorization_url(dcf_auth_url)
 
 
@@ -127,7 +129,7 @@ def dcf_simple_logout(request):
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
-    callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+    callback = '{}?force_era_global_logout=true&next={}'.format(DCF_LOGOUT_URL, logout_callback)
     return HttpResponseRedirect(callback)
 
 
@@ -162,7 +164,11 @@ def oauth2_callback(request):
         error = request.GET.get('error', None)
         if error:
             error_description = request.GET.get('error_description', None)
-            if error_description == 'The resource owner or authorization server denied the request':
+            if error == 'access_denied':
+                logger.info("[INFO] User {} did not allow ISB access to your NIH ID and dbGaP account.".format(request.user.id))
+                messages.warning(request,
+                                 "Login cannot continue if ISB-CGC is not allowed access to your NIH ID and dbGaP account.")
+            elif error_description == 'The resource owner or authorization server denied the request':
                 logger.info("[INFO] User {} did not allow ISB access".format(request.user.id))
                 messages.warning(request,
                                  "Login cannot continue if ISB-CGC is not allowed access to the Data Commons Framework.")
@@ -445,6 +451,7 @@ def oauth2_callback(request):
         link_callback = request.build_absolute_uri(reverse('dcf_link_callback'))
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
+
         return HttpResponseRedirect(callback)
     finally:
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
@@ -893,7 +900,7 @@ def dcf_disconnect_user(request):
     #
 
     logout_callback = request.build_absolute_uri(reverse('user_detail', args=[request.user.id]))
-    callback = '{}?next={}'.format(DCF_LOGOUT_URL, logout_callback)
+    callback = '{}?force_era_global_logout=true&next={}'.format(DCF_LOGOUT_URL, logout_callback)
 
     return HttpResponseRedirect(callback)
 

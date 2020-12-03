@@ -16,23 +16,13 @@
 from __future__ import absolute_import
 
 from builtins import str
-import logging
-import time
-import MySQLdb
-import copy
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
-from django.conf import settings
 
-from .metadata_counting import count_public_data_type
-from .metadata_helpers import get_sql_connection, build_where_clause
-
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables, \
-    Attribute, Attribute_Ranges, Attribute_Display_Values, DataSource, DataVersion
+from projects.models import DataVersion
 from cohorts.models import Cohort, Cohort_Perms
 
 from solr_helpers import *
-
 
 logger = logging.getLogger('main_logger')
 
@@ -43,7 +33,7 @@ FILTER_DATA_FORMAT = {
 }
 
 
-def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, type=None, do_filter_count=True):
+def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, data_type=None, do_filter_count=True):
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
@@ -56,10 +46,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
     db = None
     cursor = None
     facets = None
-    limit_clause = ""
-    offset_clause = ""
     file_list = []
-    total_file_count = 0
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
@@ -77,14 +64,13 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             }
 
         facet_attr = None
-        file_collection = None
         collapse = None
         format_filter = None
 
-        if type in ('igv', 'camic', 'pdf'):
-            format_filter = {'data_format': FILTER_DATA_FORMAT[type]}
+        if data_type in ('igv', 'camic', 'pdf'):
+            format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]}
 
-        if type == 'dicom':
+        if data_type == 'dicom':
             file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
 
             fields.extend(["file_path", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality"])
@@ -102,14 +88,23 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             unique="StudyInstanceUID"
 
         else:
-            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__active=True, version__data_type=DataVersion.FILE_DATA, name__contains=build.lower())
-            fields.extend(["sample_barcode", "file_name_key", "index_file_name_key", "access", "acl", "platform",
+            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR,
+                                                                               version__active=True,
+                                                                               version__data_type=DataVersion.FILE_DATA,
+                                                                               name__contains=build.lower())
+            if data_type == 'igv':
+                fields.extend(["sample_barcode"])
+                col_map.update({
+                    'col-sbarcode': 'sample_barcode'
+                })
+
+            fields.extend(["file_name_key", "index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "index_file_id", "experimental_strategy", "data_format",
                            "file_gdc_id", "case_gdc_id", "file_size"
                            ])
 
             col_map.update({
-                'col-filename': 'file_name',
+                'col-filename': 'file_name_key',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
@@ -120,15 +115,15 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
 
             if do_filter_count:
-                facet_names = ['disease_code',]
-                if not type or type in ['all', 'igv']:
-                    facet_names.extend(['data_format', 'data_category','experimental_strategy','platform'])
-                if not type or type in ['camic', 'all', 'igv']:
+                facet_names = ['disease_code', 'project_short_name']
+                if data_type == 'all':
+                    facet_names.extend(['data_format', 'data_category', 'experimental_strategy', 'platform', 'data_type'])
+                elif data_type == 'camic':
                     facet_names.extend(['data_type'])
-                if not type or type != 'dicom':
-                    facet_names.extend(['project_short_name'])
+                elif data_type == 'igv':
+                    facet_names.extend(['data_category', 'experimental_strategy', 'platform', 'data_type'])
 
-                if (not type or type != 'camic') and not cohort_id:
+                if data_type != 'camic' and not cohort_id:
                     facet_names.extend(['program_name'])
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
@@ -140,10 +135,17 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         solr_query = build_solr_query(inc_filters, with_tags_for_ex=do_filter_count) if inc_filters else None
 
         if cohort_id:
-            cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
             if not solr_query:
                 solr_query = {'queries': {}}
-            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
+
+            file_collection_name = file_collection.name.lower()
+
+            if file_collection_name.startswith('files'):
+                cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                solr_query['queries']['cohort'] = "{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples))
+            else:
+                cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
 
         if format_filter:
             format_query = build_solr_query(format_filter, with_tags_for_ex=False)
@@ -161,26 +163,28 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         query_set = []
         if solr_query:
             query_set = [y for x, y in solr_query['queries'].items()]
-
         query_params = {
-            "collection": file_collection.name,
-            "fields": fields,
-            "fqs": query_set,
-            "facets": facets,
-            "sort": sort,
-            "offset": offset,
-            "limit": limit,
-            "counts_only": False,
-            "collapse_on": collapse
+                "collection": file_collection.name,
+                "fields": fields,
+                "fqs": query_set,
+                "facets": facets,
+                "sort": sort,
+                "offset": offset,
+                "limit": limit,
+                "counts_only": False,
+                "collapse_on": collapse
         }
-
+        if data_type != 'igv' and data_type != 'dicom':
+            query_params.update({
+                "unique": 'file_gdc_id'
+            })
         file_query_result = query_solr_and_format_result(query_params)
 
-        total_file_count = file_query_result['numFound']
+        total_file_count = file_query_result.get('numFound', 0)
 
         if 'docs' in file_query_result and len(file_query_result['docs']):
             for entry in file_query_result['docs']:
-                if type == 'dicom':
+                if data_type == 'dicom':
                     file_list.append({
                         'case': entry['case_barcode'],
                         'study_uid': entry['StudyInstanceUID'],

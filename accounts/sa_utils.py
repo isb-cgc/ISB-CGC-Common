@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2020, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -51,6 +51,7 @@ SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
+IDP = settings.IDP
 
 
 class SAModes(object):
@@ -762,19 +763,20 @@ def found_linking_problems(NIH_username, user_id, user_email, my_st_logger, resu
     for nih_user in nih_usernames_already_linked_to_this_user_identity:
         if nih_user.NIH_username.lower() != NIH_username.lower():
             existing_nih_user_name = nih_user.NIH_username
-            logger.warn(
-                "User {} is already linked to the eRA commons identity {} and attempted authentication"
-                " with the eRA commons identity {}."
-                    .format(user_email, existing_nih_user_name, NIH_username))
+            identity_provider = 'RAS' if IDP == 'ras' else 'eRA commons'
+            logger.warning(
+                "User {} is already linked to the {} identity {} and attempted authentication"
+                " with the {} identity {}."
+                    .format(user_email,  identity_provider , existing_nih_user_name, identity_provider, NIH_username))
             my_st_logger.write_text_log_entry(LOG_NAME_ERA_LOGIN_VIEW, "[STATUS] {}".format(
-                "User {} is already linked to the eRA commons identity {} and attempted authentication"
-                " with the eRA commons identity {}."
-                    .format(user_email, existing_nih_user_name, NIH_username)))
+                "User {} is already linked to the {} identity {} and attempted authentication"
+                " with the {} identity {}."
+                    .format(user_email, identity_provider, existing_nih_user_name, identity_provider, NIH_username)))
 
-            user_message = "User {} is already linked to the eRA commons identity {}. " \
+            user_message = "User {} is already linked to the {} identity {}. " \
                            "You must now use the link below to first log out of the Data Commons. " \
                            "Then, please have {} unlink from {} before trying this again." \
-                           .format(user_email, existing_nih_user_name, user_email, existing_nih_user_name)
+                           .format(user_email, identity_provider, existing_nih_user_name, user_email, existing_nih_user_name)
             results.messages.append(user_message)
             return True
 
@@ -848,7 +850,7 @@ def handle_user_db_update_for_dcf_linking(user_id, user_data_dict, nih_assertion
                                        "[STATUS] NIH_User {} associated with email {}".format(
                                            str(nih_user.NIH_username), our_user.email))
 
-        # default warn message is for eRA Commons users who are not dbGaP authorized
+        # default warn message is for eRA Commons or RAS users who are not dbGaP authorized
         warn_message = '''
             <h3>WARNING NOTICE</h3>
             <p>You are accessing a US Government web site which may contain information that must be protected under the US Privacy Act or other sensitive information and is intended for Government authorized use only.</p>
@@ -927,7 +929,7 @@ def handle_user_db_entry(user_id, NIH_username, user_email, auth_response, num_a
                                        "[STATUS] NIH_User {} associated with email {} and logged in with assertion: {}".format(
                                            str(nih_user.NIH_username), str(user_email), str(auth_response)))
 
-        # default warn message is for eRA Commons users who are not dbGaP authorized
+        # default warn message is for eRA Commons or RAS users who are not dbGaP authorized
         warn_message = '''
             <h3>WARNING NOTICE</h3>
             <p>You are accessing a US Government web site which may contain information that must be protected under the US Privacy Act or other sensitive information and is intended for Government authorized use only.</p>
