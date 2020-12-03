@@ -54,7 +54,7 @@ from django.utils.html import escape
 from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, cohort_manifest
 from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion
-from idc_collections.collex_metadata_utils import build_explorer_context
+from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
@@ -840,23 +840,22 @@ class Echo(object):
 def create_manifest_bq_table(request, cohort):
     timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
     user_table = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
-    bqs = BigQueryExportFileList(settings.BIGQUERY_PROJECT_ID, settings.BIGQUERY_USER_MANIFEST_DATASET, user_table)
 
-    filter_sets = cohort.get_filters_for_bq()
+    export_settings = {
+        'dest': {
+            'project_id': settings.BIGQUERY_DATA_PROJECT_ID,
+            'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
+            'table_id': user_table
+        },
+        'email': request.user.email,
+        'cohort_id': cohort.id
+    }
+
+    order_by = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]
 
     field_list = json.loads(request.GET.get('columns','["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]'))
 
-    query = """
-        #standardSQL
-        SELECT {field_list}
-        FROM `{pivot_table}`
-        WHERE {where_clause}
-    """
-
-    result = bqs.export_file_list_query_to_bq(
-        query.format(field_list=",".join(field_list),pivot_table=settings.BIGQUERY_PIVOT_TABLE,where_clause=filter_sets[0]['filter_string']),
-        filter_sets[0]['parameters'],cohort.id, user_email=request.user.email
-    )
+    result = get_bq_metadata(cohort.get_filters_as_dict_simple()[0],field_list,cohort.get_data_versions(active=True),order_by=order_by, output_settings=export_settings)
 
     if result['status'] == 'error':
         response = JsonResponse({'status': 400, 'message': result['message']})
@@ -879,8 +878,6 @@ def create_manifest_bq_table(request, cohort):
 def create_file_manifest(request,cohort):
     manifest = None
     response = None
-
-    print(request.GET)
     
     # Fields we need to fetch
     field_list = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI",
