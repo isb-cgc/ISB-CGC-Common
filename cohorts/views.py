@@ -1848,7 +1848,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             # case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
             #     version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
             # ).get_source_attrs(for_ui=True)
-            case_sample_attr = fetch_program_attr(program_id)
+            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False)
 
             #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
