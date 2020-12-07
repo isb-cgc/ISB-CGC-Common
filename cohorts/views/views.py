@@ -895,6 +895,7 @@ def create_file_manifest(request,cohort):
     offset = 0
     if len(request.GET.get('file_part','')) > 0:
         selected_file_part = json.loads(request.GET.get('file_part'))
+        selected_file_part = min(selected_file_part, 9)
         offset = selected_file_part * MAX_FILE_LIST_ENTRIES
 
     items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)

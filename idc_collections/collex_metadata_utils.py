@@ -25,6 +25,7 @@ from google_helpers.bigquery.bq_support import BigQuerySupport
 from google_helpers.bigquery.export_support import BigQueryExportFileList
 import hashlib
 from django.conf import settings
+import math
 BQ_ATTEMPT_MAX = 10
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
@@ -332,7 +333,11 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         source_set.pop(key)
 
         attr_by_source['total'] = source_metadata['total']
-        attr_by_source['file_parts_count'] = source_metadata['total'] / MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1
+
+        file_parts_count = source_metadata['total'] / MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1
+        attr_by_source['file_parts_count'] = math.ceil(file_parts_count)
+        attr_by_source['display_file_parts_count'] = min(file_parts_count, 10)
+
 
         context['set_attributes'] = attr_by_source
         context['filtered_set_attributes'] = filtered_attr_by_source
