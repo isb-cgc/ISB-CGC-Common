@@ -61,10 +61,15 @@ class Program(models.Model):
             ).filter(source_type=source_type)
         return self.datasource_set.select_related('version') if not source_type else self.datasource_set.select_related('version').filter(source_type=source_type)
 
-    def get_attrs(self, for_ui=True):
+    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
         prog_attrs = {'attrs': {}, 'by_src': {}}
-        attrs = self.get_data_sources(source_type=DataSource.SOLR).get_source_attrs(for_ui=for_ui)
-
+        if data_type_list:
+            datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list[0])
+            for data_type in data_type_list[1:]:
+                datasources |= self.get_data_sources(source_type=source_type, data_type=data_type)
+        else:
+            datasources = self.get_data_sources(source_type=source_type)
+        attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
         for attr in attrs['attrs']:
             prog_attrs['attrs'][attr.name] = {'name': attr.name, 'displ_name': attr.display_name, 'values': {}, 'type': attr.data_type, 'preformatted': bool(attr.preformatted_values)}
 
