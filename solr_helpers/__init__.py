@@ -89,6 +89,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
         elif 'facet_counts' in result:
                 formatted_query_result['facets'] = result['facet_counts']['facet_fields']
 
+        formatted_query_result['nextCursor'] = result.get('nextCursorMark',None)
+
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
         logger.exception(e)
@@ -97,7 +99,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000, uniques=None):
+def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True,
+               collapse_on=None, offset=0, limit=1000, uniques=None, with_cursor=None):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -109,23 +112,26 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
         }
     }
 
+    if with_cursor:
+        payload['params']['cursorMark'] = with_cursor
+        del payload['offset']
+
     if facets:
         payload['facet'] = facets
     if uniques:
         if not facets:
             payload['facet'] = {}
-        #payload['facet']['unique_count'] = "unique({})".format(unique)
         ufield =  uniques.pop(0)
         for x in uniques:
-            #payload['facet']['unique_'+x] = "unique({})".format(x)
-            payload['facet']['unique_'+x] = {}
-            payload['facet']['unique_'+x]['type']='terms'
-            payload['facet']['unique_' + x]['field'] = ufield
-            payload['facet']['unique_' + x]['limit'] = -1
-            payload['facet']['unique_' + x]['missing'] = True
-            payload['facet']['unique_' + x]['facet'] = {}
-            payload['facet']['unique_' + x]['facet']['unique_count']='unique('+x+')'
-
+            payload['facet']['unique_{}'.format(x)] = {
+                'type': 'terms',
+                'field': ufield,
+                'limit': -1,
+                'missing': True,
+                'facet': {
+                    'unique_count': 'unique({})'.format(x)
+                }
+            }
 
     if fields:
         payload['fields'] = fields
@@ -147,12 +153,6 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
     try:
         start = time.time()
-        #payload['facet']['x'] = 'unique(PatientID)'
-        #payload['facet']['x']['type']='terms'
-        #payload['facet']['x']['field'] = 'PatientID'
-        #payload['facet']['x']['facet'] = {}
-        #payload['facet']['x']['facet']['unique_count'] = 'unique(PatientID)'
-        #['unique_count'] = 'unique(PatientID)'
 
         query_response = requests.post(query_uri, data=json.dumps(payload), headers={'Content-type': 'application/json'}, auth=(SOLR_LOGIN, SOLR_PASSWORD), verify=SOLR_CERT)
         stop = time.time()
