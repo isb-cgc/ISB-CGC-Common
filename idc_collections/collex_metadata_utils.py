@@ -335,7 +335,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         attr_by_source['total'] = source_metadata['total']
 
         file_parts_count = source_metadata['total'] / MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1
-        attr_by_source['file_parts_count'] = math.ceil(file_parts_count)
+        file_parts_count = math.ceil(file_parts_count)
+        attr_by_source['file_parts_count'] = file_parts_count
         attr_by_source['display_file_parts_count'] = min(file_parts_count, 10)
 
 
