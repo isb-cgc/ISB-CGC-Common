@@ -855,6 +855,9 @@ def create_manifest_bq_table(request, cohort):
 
     field_list = json.loads(request.GET.get('columns','["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]'))
 
+    # We can only ORDER BY columns which we've actually requested
+    order_by = list(set.intersection(set(order_by),set(field_list)))
+
     result = get_bq_metadata(cohort.get_filters_as_dict_simple()[0],field_list,cohort.get_data_versions(active=True),order_by=order_by, output_settings=export_settings)
 
     if result['status'] == 'error':
