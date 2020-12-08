@@ -335,7 +335,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         attr_by_source['total'] = source_metadata['total']
 
         file_parts_count = source_metadata['total'] / MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1
-        attr_by_source['file_parts_count'] = math.ceil(file_parts_count)
+        file_parts_count = math.ceil(file_parts_count)
+        attr_by_source['file_parts_count'] = file_parts_count
         attr_by_source['display_file_parts_count'] = min(file_parts_count, 10)
 
 
@@ -1014,18 +1015,18 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
 
-    print(full_query_str)
-
     if no_submit:
         results = {"sql_string":full_query_str, "params":params}
     else:
         if output_settings:
             bqs = BigQueryExportFileList(**output_settings['dest'])
-            results = bqs.export_file_list_query_to_bq(full_query_str, params, output_settings['cohort_id'], user_email=output_settings['email'])
+            results = bqs.export_file_list_query_to_bq(
+                full_query_str, params, output_settings['cohort_id'],
+                user_email=output_settings['email'],
+                desc=output_settings.get('desc',None)
+            )
         else:
             results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
-
-    print("results in fetch_bq_metadata: {}".format(results))
 
     return results
 
