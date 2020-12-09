@@ -96,19 +96,12 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
 
     samples_and_cases = {'samples': [], 'cases': [], 'project_counts': {}}
 
-    user_id = 0
-    if user:
-        user_id = user.id
 
     comb_mut_filters = comb_mut_filters.upper()
-    user_id = 0
-    if user:
-        user_id = user.id
 
     mutation_filters = None
     mutation_build = None
     filters = {}
-    data_type_filters = {}
 
     results = { 'programs': {} }
 
@@ -116,17 +109,18 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
         start = time.time()
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
-        for key in inc_filters:
-            if 'data_type' in key:
-                    filters[key] = inc_filters[key]
-            elif 'MUT:' in key:
-                if not mutation_filters:
-                    mutation_filters = {}
-                mutation_filters[key] = inc_filters[key]
-                if not mutation_build:
-                    mutation_build = key.split(":")[1]
-            else:
-                filters[key.split(':')[-1]] = inc_filters[key]
+        if inc_filters:
+            for key in inc_filters:
+                if 'data_type' in key:
+                        filters[key] = inc_filters[key]
+                elif 'MUT:' in key:
+                    if not mutation_filters:
+                        mutation_filters = {}
+                    mutation_filters[key] = inc_filters[key]
+                    if not mutation_build:
+                        mutation_build = key.split(":")[1]
+                else:
+                    filters[key.split(':')[-1]] = inc_filters[key]
 
         versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
@@ -201,8 +195,13 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
                         logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
             if cohort_id:
-                cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+                source_name = source.name.lower()
+                if source_name.startswith('files'):
+                    cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                    query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
+                else:
+                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
             samples_and_cases = query_solr_and_format_result({
                 'collection': source.name,
@@ -396,7 +395,7 @@ def validate_barcodes(request):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        body_unicode = request.body.decode('utf-8')
+        body_unicode = request.body
         body = json.loads(body_unicode)
         barcodes = body['barcodes']
 
@@ -1033,7 +1032,7 @@ def set_operation(request):
     try:
 
         if request.POST:
-            name = request.POST.get('name').encode('utf8')
+            name = request.POST.get('name')
             cohorts = []
             base_cohort = None
             subtracted_cohorts = []
@@ -1393,7 +1392,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             if request.GET.get('case_barcode', None):
                 inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -1523,7 +1522,7 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
@@ -1532,7 +1531,7 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+                            metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
             else:
                 for attr in metadata_data_attr:
                     for val in metadata_data_attr[attr]['values']:
@@ -1805,7 +1804,7 @@ def get_metadata(request):
         if cohort:
             results['cohort-total'] = results['samples']
             results['cohort-cases'] = results['cases']
-            cohort_progs = cohort.get_programs()
+            cohort_progs = Program.objects.filter(id__in=Cohort.objects.get(id=cohort).get_programs())
             for prog in cohort_progs:
                 if not prog.is_public:
                     user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
@@ -1834,7 +1833,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     try:
         # Check program ID against public programs
-        public_program = Program.objects.get(id=program_id)
+        public_program = Program.objects.filter(id=program_id).first()
         user = request.user
 
         if public_program:
@@ -1849,7 +1848,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             # case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
             #     version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
             # ).get_source_attrs(for_ui=True)
-            case_sample_attr = fetch_program_attr(program_id)
+            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False)
 
             #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
@@ -1934,7 +1933,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             template_values = {
                 'request': request,
                 'attr_counts': results['count'],
-                'total_samples': int(results['samples']),
+                'total_samples': int(results['total']),
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,

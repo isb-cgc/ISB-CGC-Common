@@ -287,13 +287,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
     logger.info("[STATUS] Entering Solr metadata counter")
     comb_mut_filters = comb_mut_filters.upper()
-    user_id = 0
-    if user:
-        user_id = user.id
-
     mutation_filters = None
     filters = {}
-    data_type_filters = {}
     mutation_build = None
 
     results = { 'programs': {} }
@@ -302,17 +297,18 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         start = time.time()
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
-        for key in inc_filters:
-            if 'data_type' in key:
-                    filters[key] = inc_filters[key]
-            elif 'MUT:' in key:
-                if not mutation_filters:
-                    mutation_filters = {}
-                if not mutation_build:
-                    mutation_build = key.split(":")[1]
-                mutation_filters[key] = inc_filters[key]
-            else:
-                filters[key.split(':')[-1]] = inc_filters[key]
+        if inc_filters:
+            for key in inc_filters:
+                if 'data_type' in key:
+                        filters[key] = inc_filters[key]
+                elif 'MUT:' in key:
+                    if not mutation_filters:
+                        mutation_filters = {}
+                    if not mutation_build:
+                        mutation_build = key.split(":")[1]
+                    mutation_filters[key] = inc_filters[key]
+                else:
+                    filters[key.split(':')[-1]] = inc_filters[key]
 
         versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
@@ -396,8 +392,14 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                             logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
                 if cohort_id:
-                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+                    source_name = source.name.lower()
+                    if source_name.startswith('files'):
+                        cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                        query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
+
+                    else:
+                        cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                        query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
                 solr_result = query_solr_and_format_result({
                     'collection': source.name,
@@ -452,17 +454,19 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                             dvals = obj.get_display_values()
                             facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
                             for val in vals:
+                                val_index = val
+                                val = str(val)
                                 val_name = val
                                 val_value = val
                                 displ_value = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
                                 displ_name = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
-                                count = vals[val]
+                                count = vals[val_index]
                                 if "::" in val:
                                     val_name = val.split("::")[0]
                                     val_value = val.split("::")[-1]
                                     displ_value = val_name if obj.preformatted_values else dvals.get(val_name,format_for_display(val_name))
                                     displ_name = val_name if obj.preformatted_values else dvals.get(val_name, format_for_display(val_name))
-                                facets[set][attr]['values'][val] = {
+                                facets[set][attr]['values'][val_index] = {
                                     'name': val_name,
                                     'value': val_value,
                                     'displ_value': displ_value,
@@ -476,11 +480,10 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                                     # with a unwieldy template statement. So we do it here:
                                     'full_id': (re.sub('\s+', '_', (attr + "-" + str(val_value)))).upper()
                                 }
-                                # TODO: to be replaced with use of the Attribute_Tooltip class
-                                if attr in metadata_attr_values and val in metadata_attr_values[attr]['values'] and metadata_attr_values[attr]['values'][val] is not None \
-                                        and len(metadata_attr_values[attr]['values'][val]) > 0:
-                                    if 'tooltip' in metadata_attr_values[attr]['values'][val]:
-                                        facets[set][attr]['values'][val]['tooltip'] = metadata_attr_values[attr]['values'][val]['tooltip']
+                                value_data = metadata_attr_values['attrs'].get(attr,{}).get('values', {}).get(val_index, None)
+                                if value_data is not None and 'tooltip' in value_data:
+                                    facets[set][attr]['values'][val_index]['tooltip'] = value_data['tooltip']
+
         logger.info("[STATUS] Exiting count_public_metadata")
 
         return {'counts': facets, 'samples': sample_count, 'cases': case_count}
