@@ -843,7 +843,7 @@ def create_manifest_bq_table(request, cohort):
 
     export_settings = {
         'dest': {
-            'project_id': settings.BIGQUERY_DATA_PROJECT_ID,
+            'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
             'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
             'table_id': user_table
         },
