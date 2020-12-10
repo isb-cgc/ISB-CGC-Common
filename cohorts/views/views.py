@@ -872,7 +872,7 @@ def create_manifest_bq_table(request, cohort):
     if result['status'] == 'error':
         response = JsonResponse({'status': 400, 'message': result['message']})
     else:
-        table_uri = "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(settings.BIGQUERY_PROJECT_ID, settings.BIGQUERY_USER_MANIFEST_DATASET, user_table)
+        table_uri = "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(settings.BIGQUERY_USER_DATA_PROJECT_ID, settings.BIGQUERY_USER_MANIFEST_DATASET, user_table)
         msg = ''
         if result['status'] == 'long_running':
             msg += 'Your manifest job is still exporting; be sure to wait five minutes to allow the export to complete. Once complete, this'
