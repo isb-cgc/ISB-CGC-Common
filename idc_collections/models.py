@@ -673,6 +673,19 @@ class Attribute_Display_Category(models.Model):
     def __str__(self):
         return "{} - {}".format(self.attribute.name, self.category_display_name)
 
+# Attributes with tooltips for their values can use this model to record them
+class Attribute_Tooltips(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    value = models.CharField(max_length=256, null=False, blank=False)
+    tooltip = models.CharField(max_length=256, null=False, blank=False)
+
+    class Meta(object):
+        unique_together = (("value", "attribute"),)
+
+    def __str__(self):
+        return "{} - {}".format(self.value, self.display_value)
+
 class Attribute_Ranges(models.Model):
     FLOAT = 'F'
     INT = 'I'
