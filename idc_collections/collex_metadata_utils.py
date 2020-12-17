@@ -31,6 +31,13 @@ MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
 logger = logging.getLogger('main_logger')
 
+BMI_MAPPING = {
+    'underweight': [0, 18.5],
+    'normal weight': [18.5,25],
+    'overweight': [25,30],
+    'obese': 30
+}
+
 # a cached  of comprehensive information mapping attributes to data sources:
 #
 # {

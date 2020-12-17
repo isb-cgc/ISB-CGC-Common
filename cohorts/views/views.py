@@ -60,6 +60,13 @@ MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
 BQ_ATTEMPT_MAX = 10
 
+BMI_MAPPING = {
+    'underweight': [0, 18.5],
+    'normal weight': [18.5, 25],
+    'overweight': [25, 30],
+    'obese': 30
+}
+
 debug = settings.DEBUG # RO global for this file
 
 BLACKLIST_RE = settings.BLACKLIST_RE
@@ -68,7 +75,6 @@ BQ_SERVICE = None
 logger = logging.getLogger('main_logger')
 
 USER_DATA_ON = settings.USER_DATA_ON
-
 
 def convert(data):
     if isinstance(data, basestring):
@@ -867,7 +873,18 @@ def create_manifest_bq_table(request, cohort):
 
         export_settings['desc'] = "\n".join(headers)
 
-    result = get_bq_metadata(cohort.get_filters_as_dict_simple()[0],field_list,cohort.get_data_versions(active=True),order_by=order_by, output_settings=export_settings)
+        base_filters = cohort.get_filters_as_dict_simple()[0]
+        if 'bmi' in base_filters:
+            vals = base_filters['bmi']
+            del base_filters['bmi']
+            base_filters['bmi_btw'] = []
+            for val in vals:
+                if val != 'obese':
+                    base_filters['bmi_btw'].append(BMI_MAPPING[val])
+                else:
+                    base_filters['bmi_gt'] = BMI_MAPPING[val]
+
+    result = get_bq_metadata(base_filters,field_list,cohort.get_data_versions(active=True),order_by=order_by, output_settings=export_settings)
 
     if result['status'] == 'error':
         response = JsonResponse({'status': 400, 'message': result['message']})
