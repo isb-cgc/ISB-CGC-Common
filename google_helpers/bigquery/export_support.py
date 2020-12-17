@@ -385,7 +385,7 @@ class BigQueryExportFileList(BigQueryExport):
     def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         entry_dict = {
-            'cohort_id': data['cohort_id'],
+            'cohort_id': data['cohort_id'], 
             'sample_barcode': data['sample'],
             'build': data['build'],
             'case_barcode': data['case'],
