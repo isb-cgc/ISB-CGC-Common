@@ -858,6 +858,8 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, 
                     offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False, output_settings=None):
 
+    print(filters)
+
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
 
@@ -950,7 +952,6 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
         group_by = new_groups
 
-
     # We join image tables to corresponding ancillary tables, and union between image tables
     for image_table in image_tables:
         tables_in_query = []
@@ -1026,6 +1027,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     full_query_str =  """
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
+
+    print(full_query_str)
 
     if no_submit:
         results = {"sql_string":full_query_str, "params":params}
