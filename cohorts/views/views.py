@@ -1010,7 +1010,7 @@ def create_file_manifest(request,cohort):
                 json_row = json.dumps(this_row) + "\n"
                 json_result += json_row
 
-            response = StreamingHttpResponse(json_result, content_type="text/json")
+            response = HttpResponse(json_result, content_type="text/json")
 
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
         file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
