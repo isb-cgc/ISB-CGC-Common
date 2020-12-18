@@ -950,7 +950,6 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
         group_by = new_groups
 
-
     # We join image tables to corresponding ancillary tables, and union between image tables
     for image_table in image_tables:
         tables_in_query = []

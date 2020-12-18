@@ -877,9 +877,10 @@ def create_manifest_bq_table(request, cohort):
         if 'bmi' in base_filters:
             vals = base_filters['bmi']
             del base_filters['bmi']
-            base_filters['bmi_btw'] = []
             for val in vals:
                 if val != 'obese':
+                    if 'bmi_btw' not in base_filters:
+                        base_filters['bmi_btw'] = []
                     base_filters['bmi_btw'].append(BMI_MAPPING[val])
                 else:
                     base_filters['bmi_gt'] = BMI_MAPPING[val]

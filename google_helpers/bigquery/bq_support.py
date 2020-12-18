@@ -694,11 +694,15 @@ class BigQuerySupport(BigQueryABC):
         ranged_attrs = Attribute.get_ranged_attrs()
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
-            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_e?btwe?', attr) else attr
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            print("{} :: {}".format(attr, attr_name))
+            # We require out attributes to be value lists
             if type(values) is not list:
                 values = [values]
-            if len(values) == 1 and type(values[0]) is list and not is_btw:
-                values = values[0]
+            # However, *only* ranged numerics can be a list of lists; all others must be a single list
+            else:
+                if type(values[0]) is list and not is_btw and attr not in ranged_attrs:
+                    values = [y for x in values for y in x]
 
             parameter_type = None
             if type_schema and attr in type_schema and type_schema[attr]:
@@ -738,10 +742,10 @@ class BigQuerySupport(BigQueryABC):
                                                                  param_name)
                     elif query_param['parameterType']['type'] == 'NUMERIC':
                         operator = "{}{}".format(
-                            ">" if re.search(r'_gt?e',attr_name) else "<" if re.search(r'_lt?e',attr_name) else "",
-                            '=' if re.search(r'_[lg]te',attr_name) or not re.search(r'_[gt]',attr_name) else ''
+                            ">" if re.search(r'_gte?',attr) else "<" if re.search(r'_lte?',attr) else "",
+                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[gt]',attr) else ''
                         )
-                        filter_string += "{}{} {}{} @{}".format(
+                        filter_string += "{}{} {} @{}".format(
                             '' if not field_prefix else field_prefix, attr_name,
                             operator, param_name
                         )
