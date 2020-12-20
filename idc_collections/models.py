@@ -269,7 +269,7 @@ class Collection(models.Model):
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
-    # We make this many to many in case a collection is part of one program, though it may not be
+    # We make this many to many in case a collection is part of one program, thoug  h it may not be
     program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
@@ -544,12 +544,14 @@ class Attribute(models.Model):
     CATEGORICAL = 'C'
     TEXT = 'T'
     STRING = 'S'
+    DATE = 'D'
     DATA_TYPES = (
         (CONTINUOUS_NUMERIC, 'Continuous Numeric'),
         (CATEGORICAL, 'Categorical String'),
         (CATEGORICAL_NUMERIC, 'Categorical Number'),
         (TEXT, 'Text'),
-        (STRING, 'String')
+        (STRING, 'String'),
+        (DATE, 'Date')
     )
     id = models.AutoField(primary_key=True, null=False, blank=False)
     objects = AttributeManager()
