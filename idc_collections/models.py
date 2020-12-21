@@ -678,7 +678,7 @@ class Attribute_Tooltips(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     value = models.CharField(max_length=256, null=False, blank=False)
-    tooltip = models.CharField(max_length=256, null=False, blank=False)
+    tooltip = models.CharField(max_length=2560, null=False, blank=False)
 
     class Meta(object):
         unique_together = (("value", "attribute"),)
