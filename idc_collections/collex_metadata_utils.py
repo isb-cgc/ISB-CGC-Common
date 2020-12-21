@@ -31,6 +31,13 @@ MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
 logger = logging.getLogger('main_logger')
 
+BMI_MAPPING = {
+    'underweight': [0, 18.5],
+    'normal weight': [18.5,25],
+    'overweight': [25,30],
+    'obese': 30
+}
+
 # a cached  of comprehensive information mapping attributes to data sources:
 #
 # {
@@ -51,6 +58,11 @@ logger = logging.getLogger('main_logger')
 # }
 DATA_SOURCE_ATTR = {}
 DATA_SOURCE_TYPES = {}
+
+TYPE_SCHEMA = {'sample_type': 'STRING',
+               'SOPInstanceUID': 'STRING',
+               'SeriesInstanceUID': 'STRING',
+               'StudyInstanceUID': 'STRING'}
 
 def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
     source_set = None
@@ -849,6 +861,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
 
+    ranged_numerics = Attribute.get_ranged_attrs()
+
     if not group_by:
         group_by = fields
     else:
@@ -938,7 +952,6 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
         group_by = new_groups
 
-
     # We join image tables to corresponding ancillary tables, and union between image tables
     for image_table in image_tables:
         tables_in_query = []
@@ -950,7 +963,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             if len(filter_set):
                 filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
                     filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
-                    case_insens=True, type_schema={'sample_type': 'STRING'}
+                    case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                 )
                 param_sfx += 1
                 query_filters.append(filter_clauses[image_table]['filter_string'])
@@ -962,7 +975,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_filter_and_params(
                         filter_set, param_suffix=str(param_sfx), field_prefix=table_info[filter_bqtable]['alias'],
-                        case_insens=True, type_schema={'sample_type': 'STRING'}
+                        case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                     )
                     param_sfx += 1
 
@@ -1014,6 +1027,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     full_query_str =  """
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
+
+    settings.DEBUG and logger.debug("[STATUS] get_bq_metadata: {}".format(full_query_str))
 
     if no_submit:
         results = {"sql_string":full_query_str, "params":params}
@@ -1128,8 +1143,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
 
     image_tables = {}
 
-    sources = data_version.get_data_sources().filter(
-        source_type=DataSource.BIGQUERY).distinct()
+    sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
@@ -1199,7 +1213,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
             if len(filter_set):
                 filter_clauses[image_table] = BigQuerySupport.build_bq_where_clause(
-                        filter_set, field_prefix=table_info[image_table]['alias'], type_schema={'sample_type': 'STRING'})
+                        filter_set, field_prefix=table_info[image_table]['alias'], type_schema=TYPE_SCHEMA)
                 query_filters.append(filter_clauses[image_table])
         tables_in_query.append(image_table)
         for filter_bqtable in filter_attr_by_bq['sources']:
@@ -1208,7 +1222,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                               x in filter_attr_by_bq['sources'][filter_bqtable]['list']}
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_where_clause(
-                        filter_set, field_prefix=table_info[filter_bqtable]['alias'], type_schema={'sample_type': 'STRING'})
+                        filter_set, field_prefix=table_info[filter_bqtable]['alias'], type_schema=TYPE_SCHEMA)
                     source_join = DataSourceJoin.objects.get(
                         from_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']],
                         to_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']]

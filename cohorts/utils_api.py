@@ -38,6 +38,18 @@ def get_idc_data_version(version_number=None):
     return data_version
 
 
+# Get the current if none specified
+def get_idc_data_version_query_set(version_number=None):
+    if not version_number:
+        # No version specified. Use the current version
+        # data_version = ImagingDataCommonsVersion.objects.get(active=True)
+        data_version = ImagingDataCommonsVersion.objects.filter(active=True)
+    else:
+        # data_version = ImagingDataCommonsVersion.objects.get(version_number=version_number)
+        data_version = ImagingDataCommonsVersion.objects.filter(version_number=version_number)
+    return data_version
+
+
 # Get the filterSet of a cohort
 # get_filters_as_dict returns an array of filter groups, but can currently only define
 # a filter of one group. So take just the first group and also delete the attribute id
@@ -64,8 +76,7 @@ def _cohort_detail_api(request, cohort, cohort_info):
                 collections.append(collection.lower().replace('-', '_'))
             filters['collection_id'] = collections
 
-    # data_versions = filter_group.data_versions.all()
-    data_version = filter_group.data_version
+    data_version = cohort.get_data_versions()
 
     cohort_info = get_cohort_query(request, filters, data_version, cohort_info)
 
@@ -84,7 +95,7 @@ def _cohort_manifest_api(request, cohort, manifest_info):
                 collections.append(collection.lower().replace('-', '_'))
             filters['collection_id'] = collections
 
-    data_version = filter_group.data_version
+    data_version = cohort.get_data_versions()
 
     manifest_info = get_manifest_query(request, filters, data_version, manifest_info)
 
@@ -120,23 +131,12 @@ def _cohort_preview_manifest_api(request, data, manifest_info):
         filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
 
 
-    # Get versions of datasets to be filtered, and link to filter group
-    if not data['filterSet']['idc_data_version']:
-        # No version specified. Use the current version
-        data_version = ImagingDataCommonsVersion.objects.get(active=True)
-    else:
-        try:
-            data_version = ImagingDataCommonsVersion.objects.get(version_number=data['filterSet']['idc_data_version'])
-        except:
-            return dict(
-                message = "Invalid IDC version {}".format(data['filterSet']['idc_data_version']),
-                code = 400
-            )
 
+    data_version = get_idc_data_version_query_set(data['filterSet']['idc_data_version'])
     manifest_info = get_manifest_query(request, filters, data_version, manifest_info)
 
     manifest_info['cohort']["filterSet"] = copy.deepcopy(data['filterSet'])
-    manifest_info['cohort']["filterSet"]['idc_data_version'] = data_version.version_number
+    manifest_info['cohort']["filterSet"]['idc_data_version'] = data_version.values()[0]['version_number']
 
     return manifest_info
 
@@ -156,7 +156,7 @@ def get_cohort_query(request, filters, data_version, cohort_info):
     select = levels[return_level]
 
     # Construct the query from active dataversions
-    data_versions = data_version.dataversion_set.filter(active=True)
+    data_versions = data_version
 
     if request.GET['return_level'] != "None":
         # Get the SQL
@@ -203,19 +203,16 @@ def get_manifest_query(request, filters, data_version, manifest_info):
         select.append('source_DOI')
     select.append('gcs_url' if request.GET['access_method'] == 'url' else 'crdc_instance_uuid')
 
-    # Construct the query from active dataversions
-    data_versions = data_version.dataversion_set.filter(active=True)
-
     # Get the SQL
     if request.GET['sql'] in [True, 'True']:
-        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_versions,
+        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
             order_by=select[-1:])
     else:
         manifest_info['cohort']['sql'] = ""
 
     # Perform the query but don't return the results, just the job reference
     results = get_bq_metadata(
-        filters=filters, fields=select, data_version=data_versions,
+        filters=filters, fields=select, data_version=data_version,
         no_submit=True,
         order_by=select[-1:])
 

@@ -611,12 +611,16 @@ class BigQuerySupport(BigQueryABC):
     #     eg. {"age_at_diagnosis_gte": [50,]}
     # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
     # Support for providing an explicit schema of the fields being searched
+    # Support for specifying a set of continuous numeric attributes to be presumed for BETWEEN clauses
     #
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None, case_insens=True):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False,
+                                   field_prefix=None, type_schema=None, case_insens=True, continuous_numerics=None):
         if field_prefix and field_prefix[-1] != ".":
             field_prefix += "."
+
+        continuous_numerics = continuous_numerics or []
 
         result = {
             'filter_string': '',
@@ -691,17 +695,27 @@ class BigQuerySupport(BigQueryABC):
 
         # Standard query filters
         for attr, values in list(other_filters.items()):
+            is_btw = re.search('_e?btwe?', attr.lower()) is not None
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            # We require out attributes to be value lists
             if type(values) is not list:
                 values = [values]
+            # However, *only* ranged numerics can be a list of lists; all others must be a single list
+            else:
+                if type(values[0]) is list and not is_btw and attr not in continuous_numerics:
+                    values = [y for x in values for y in x]
 
             parameter_type = None
-            if type_schema and attr in type_schema and type_schema[attr]:
-                parameter_type = ('INT64' if type_schema[attr] == 'INTEGER' else 'STRING')
+            if type_schema and type_schema.get(attr,None):
+                parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
             else:
+                # If the values are arrays we assume the first value in the first array is indicative of all
+                # other values (since we don't support multi-typed fields)
+                type_check = values[0] if type(values[0]) is not list else values[0][0]
                 parameter_type = (
                     'STRING' if (
-                        type(values[0]) is not int and re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0])
-                    ) else 'INT64'
+                        type(type_check) not in [int,float,complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
+                    ) else 'NUMERIC'
                 )
 
             filter_string = ''
@@ -718,50 +732,64 @@ class BigQuerySupport(BigQueryABC):
             if len(values) > 0:
                 if len(filter_string):
                     filter_string += " OR "
-                if len(values) == 1:
-                    # Scalar param
+                if len(values) == 1 and not is_btw:
+                    # Single scalar param
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
                         if '%' in values[0] or case_insens:
-                            filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
+                            filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr_name, param_name)
                         else:
                             filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
                                                                  param_name)
-                    elif query_param['parameterType']['type'] == 'INT64':
-                        if attr.endswith('_gt') or attr.endswith('_gte'):
-                            filter_string += "{}{} >{} @{}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                                '=' if attr.endswith('_gte') else '',
-                                param_name
-                            )
-                        elif attr.endswith('_lt') or attr.endswith('_lte'):
-                            filter_string += "{}{} <{} @{}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                                '=' if attr.endswith('_lte') else '',
-                                param_name
-                            )
-                        else:
-                            filter_string += "{}{} = @{}".format(
-                                '' if not field_prefix else field_prefix, attr, param_name
-                            )
-                elif len(values) == 2 and attr.endswith('_btw'):
-                    param_name_1 = param_name + '_btw_1'
-                    param_name_2 = param_name + '_btw_2'
-                    filter_string += "{}{} BETWEEN @{} AND @{}".format(
-                        '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                        param_name_1,
-                        param_name_2
-                    )
-                    query_param_1 = query_param
-                    query_param_2 = copy.deepcopy(query_param)
-                    query_param = [query_param_1, query_param_2, ]
-                    query_param_1['name'] = param_name_1
-                    query_param_1['parameterValue']['value'] = values[0]
-                    query_param_2['name'] = param_name_2
-                    query_param_2['parameterValue']['value'] = values[1]
+                    elif query_param['parameterType']['type'] == 'NUMERIC':
+                        operator = "{}{}".format(
+                            ">" if re.search(r'_gte?',attr) else "<" if re.search(r'_lte?',attr) else "",
+                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[gt]',attr) else ''
+                        )
+                        filter_string += "{}{} {} @{}".format(
+                            '' if not field_prefix else field_prefix, attr_name,
+                            operator, param_name
+                        )
+                # Occasionally attributes may come in without the appropriate _e?btwe? suffix; we account for that here
+                # by checking for the proper attr_name in the optional continuous_numerics list
+                elif is_btw or attr_name in continuous_numerics:
+                    # Check for a single array of two and if we find it, convert it to an array containing a 2-member array
+                    if len(values) == 2 and type(values[0]) is not list:
+                        values = [values]
+                    else:
+                        # confirm an array of arrays all contain paired values
+                        all_pairs = True
+                        for x in values:
+                            if len(x) != 2:
+                                all_pairs = False
+                        if not all_pairs:
+                            logger.error("[ERROR] While parsing attribute {}, calculated to be a numeric range filter, found an unparseable value:")
+                            logger.error("[ERROR] {}".format(values))
+                            continue
+                    btw_counter = 1
+                    query_params = []
+                    for btws in values:
+                        param_name_1 = '{}_btw_{}'.format(param_name,btw_counter)
+                        btw_counter+=1
+                        param_name_2 = '{}_btw_{}'.format(param_name,btw_counter)
+                        btw_counter += 1
+                        filter_string += "{}{} BETWEEN @{} AND @{}".format(
+                            '' if not field_prefix else field_prefix, attr_name,
+                            param_name_1,
+                            param_name_2
+                        )
+                        # query_param becomes our template for each pair
+                        query_param_1 = copy.deepcopy(query_param)
+                        query_param_2 = copy.deepcopy(query_param)
+                        query_param_1['name'] = param_name_1
+                        query_param_1['parameterValue']['value'] = btws[0]
+                        query_param_2['name'] = param_name_2
+                        query_param_2['parameterValue']['value'] = btws[1]
+                        query_params.extend([query_param_1, query_param_2,] )
 
+                    query_param = query_params
                 else:
-                    # Array param
+                    # Simple array param
                     query_param['parameterType']['type'] = "ARRAY"
                     query_param['parameterType']['arrayType'] = {
                         'type': parameter_type
@@ -865,12 +893,12 @@ class BigQuerySupport(BigQueryABC):
 
             parameter_type = None
             if type_schema and attr in type_schema and type_schema[attr]:
-                parameter_type = ('INT64' if type_schema[attr] == 'INTEGER' else 'STRING')
+                parameter_type = ('NUMERIC' if type_schema[attr] == 'INTEGER' else 'STRING')
             else:
                 parameter_type = (
                     'STRING' if (
                         type(values[0]) is not int and re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0])
-                    ) else 'INT64'
+                    ) else 'NUMERIC'
                 )
 
             filter_string = ''
@@ -890,7 +918,7 @@ class BigQuerySupport(BigQueryABC):
                         else:
                             filter_string += "{}{} = '{}'".format('' if not field_prefix else field_prefix, attr,
                                                                  values[0])
-                    elif parameter_type == 'INT64':
+                    elif parameter_type == 'NUMERIC':
                         if attr.endswith('_gt') or attr.endswith('_gte'):
                             filter_string += "{}{} >{} {}".format(
                                 '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
