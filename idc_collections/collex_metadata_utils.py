@@ -861,6 +861,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
 
+    ranged_numerics = Attribute.get_ranged_attrs()
+
     if not group_by:
         group_by = fields
     else:
@@ -961,7 +963,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             if len(filter_set):
                 filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
                     filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
-                    case_insens=True, type_schema=TYPE_SCHEMA
+                    case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                 )
                 param_sfx += 1
                 query_filters.append(filter_clauses[image_table]['filter_string'])
@@ -973,7 +975,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_filter_and_params(
                         filter_set, param_suffix=str(param_sfx), field_prefix=table_info[filter_bqtable]['alias'],
-                        case_insens=True, type_schema=TYPE_SCHEMA
+                        case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                     )
                     param_sfx += 1
 
@@ -1025,6 +1027,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     full_query_str =  """
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
+
+    settings.DEBUG and logger.debug("[STATUS] get_bq_metadata: {}".format(full_query_str))
 
     if no_submit:
         results = {"sql_string":full_query_str, "params":params}
