@@ -23,7 +23,6 @@ import copy
 from django.conf import settings
 from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.bigquery.abstract import BigQueryABC
-from idc_collections.models import Attribute
 
 logger = logging.getLogger('main_logger')
 
@@ -612,12 +611,16 @@ class BigQuerySupport(BigQueryABC):
     #     eg. {"age_at_diagnosis_gte": [50,]}
     # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
     # Support for providing an explicit schema of the fields being searched
+    # Support for specifying a set of continuous numeric attributes to be presumed for BETWEEN clauses
     #
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None, case_insens=True):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False,
+                                   field_prefix=None, type_schema=None, case_insens=True, continuous_numerics=None):
         if field_prefix and field_prefix[-1] != ".":
             field_prefix += "."
+
+        continuous_numerics = continuous_numerics or []
 
         result = {
             'filter_string': '',
@@ -691,21 +694,19 @@ class BigQuerySupport(BigQueryABC):
             mut_filtr_count += 1
 
         # Standard query filters
-        ranged_attrs = Attribute.get_ranged_attrs()
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
             attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
-            print("{} :: {}".format(attr, attr_name))
             # We require out attributes to be value lists
             if type(values) is not list:
                 values = [values]
             # However, *only* ranged numerics can be a list of lists; all others must be a single list
             else:
-                if type(values[0]) is list and not is_btw and attr not in ranged_attrs:
+                if type(values[0]) is list and not is_btw and attr not in continuous_numerics:
                     values = [y for x in values for y in x]
 
             parameter_type = None
-            if type_schema and attr in type_schema and type_schema[attr]:
+            if type_schema and type_schema.get(attr,None):
                 parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
             else:
                 # If the values are arrays we assume the first value in the first array is indicative of all
@@ -732,7 +733,7 @@ class BigQuerySupport(BigQueryABC):
                 if len(filter_string):
                     filter_string += " OR "
                 if len(values) == 1 and not is_btw:
-                    # Scalar param
+                    # Single scalar param
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
                         if '%' in values[0] or case_insens:
@@ -749,11 +750,22 @@ class BigQuerySupport(BigQueryABC):
                             '' if not field_prefix else field_prefix, attr_name,
                             operator, param_name
                         )
-
-                elif is_btw or attr_name in ranged_attrs:
-                    # 'between' param
+                # Occasionally attributes may come in without the appropriate _e?btwe? suffix; we account for that here
+                # by checking for the proper attr_name in the optional continuous_numerics list
+                elif is_btw or attr_name in continuous_numerics:
+                    # Check for a single array of two and if we find it, convert it to an array containing a 2-member array
                     if len(values) == 2 and type(values[0]) is not list:
                         values = [values]
+                    else:
+                        # confirm an array of arrays all contain paired values
+                        all_pairs = True
+                        for x in values:
+                            if len(x) != 2:
+                                all_pairs = False
+                        if not all_pairs:
+                            logger.error("[ERROR] While parsing attribute {}, calculated to be a numeric range filter, found an unparseable value:")
+                            logger.error("[ERROR] {}".format(values))
+                            continue
                     btw_counter = 1
                     query_params = []
                     for btws in values:
