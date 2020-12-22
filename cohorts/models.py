@@ -145,7 +145,8 @@ class Cohort(models.Model):
         filter_groups = self.filter_group_set.all()
 
         for fg in filter_groups:
-            result.append(fg.filter_set.all().get_filter_set())
+            filter_group = fg.filter_set.all().get_filter_set()
+            result.append(filter_group)
         return result
 
 
