@@ -574,64 +574,6 @@ def format_for_display(item):
 
     return formatted_item
 
-# Display Formatting Methods
-def data_availability_sort(key, value, attr_details):
-    if key == 'has_Illumina_DNASeq':
-        attr_details['DNA_sequencing'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
-    if key == 'has_SNP6':
-        attr_details['SNP_CN'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
-    if key == 'has_RPPA':
-        attr_details['Protein'] = sorted(value, key=lambda k: int(k['count']), reverse=True)
-
-    if key == 'has_27k':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['DNA_methylation'].append({
-            'value': '27k',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_450k':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['DNA_methylation'].append({
-            'value': '450k',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_HiSeq_miRnaSeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['miRNA_sequencing'].append({
-            'value': 'Illumina HiSeq',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_GA_miRNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['miRNA_sequencing'].append({
-            'value': 'Illumina GA',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_UNC_HiSeq_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'UNC Illumina HiSeq',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_UNC_GA_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'UNC Illumina GA',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_BCGSC_HiSeq_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'BCGSC Illumina HiSeq',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-    if key == 'has_BCGSC_GA_RNASeq':
-        count = [v['count'] for v in value if v['value'] == 'True']
-        attr_details['RNA_sequencing'].append({
-            'value': 'BCGSC Illumina GA',
-            'count': count[0] if count.__len__() > 0 else 0
-        })
-
 
 def get_acls_by_uuid(uuids):
 
