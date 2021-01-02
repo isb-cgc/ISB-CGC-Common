@@ -153,7 +153,7 @@ def _cohort_query_api(request, cohort, data, info):
 
     data_version = cohort.get_data_versions()
 
-    info = get_query_query(request, filters, data['queryFields']['fields'], data_version, info)
+    info = get_query_query(request, filters, data['fields'], data_version, info)
 
     info['cohort_def']["filterSet"] = get_filterSet_api(cohort)
 
