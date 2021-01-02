@@ -19,7 +19,7 @@ import time
 import copy
 import re
 from time import sleep
-from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
+from idc_collections.models import Collection, Attribute_Tooltips, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from google_helpers.bigquery.export_support import BigQueryExportFileList
@@ -159,6 +159,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     try:
         if not is_json:
             context['collection_tooltips'] = Collection.objects.filter(active=True).get_tooltips()
+            #context['collection_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips()
 
         collectionsList = Collection.objects.filter(active=True).values_list('collection_id',flat=True)
 
