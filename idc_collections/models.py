@@ -676,11 +676,12 @@ class Attribute_Display_Category(models.Model):
         return "{} - {}".format(self.attribute.name, self.category_display_name)
 
 class Attribute_TooltipsQuerySet(models.QuerySet):
-    def get_tooltips(self):
+    def get_tooltips(self, attribute_id):
         tips = {}
         tooltips = self.all()
         for tip in tooltips:
-            tips[tip.collection_id] = tip.tooltip
+            if tip.attribute_id == attribute_id:
+                tips[tip.tooltip_id] = tip.tooltip
         return tips
 
 class Attribute_TooltipsManager(models.Manager):
@@ -691,15 +692,15 @@ class Attribute_TooltipsManager(models.Manager):
 class Attribute_Tooltips(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
-    collection_id = models.CharField(max_length=256, null=False, blank=False)
+    tooltip_id = models.CharField(max_length=256, null=False, blank=False)
     tooltip = models.CharField(max_length=2560, null=False, blank=False)
     objects = Attribute_TooltipsManager()
 
     class Meta(object):
-        unique_together = (("collection_id", "attribute"),)
+        unique_together = (("tooltip_id", "attribute"),)
 
     def __str__(self):
-        return "{} - {}".format(self.collection_id, self.tooltip)
+        return "{} - {}".format(self.tooltip_id, self.tooltip)
 
 class Attribute_Ranges(models.Model):
     FLOAT = 'F'
