@@ -749,8 +749,17 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                         from_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']],
                         to_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']]
                     )
-
+                    join_type = ""
+                    if table_info[filter_bqtable]['set'] == DataSetType.RELATED_SET:
+                        join_type = "LEFT "
+                        filter_clauses[filter_bqtable]['filter_string'] = "({} OR {}.{} IS NULL)".format(
+                            filter_clauses[filter_bqtable]['filter_string'],
+                            table_info[filter_bqtable]['alias'],
+                            table_info[filter_bqtable]['count_col']
+                        )
+                        
                     joins.append(join_clause_base.format(
+                        join_type=join_type,
                         join_to_table=table_info[filter_bqtable]['name'],
                         join_to_alias=table_info[filter_bqtable]['alias'],
                         join_to_id=source_join.get_col(table_info[filter_bqtable]['name']),
@@ -885,8 +894,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         {offset_clause}
     """
 
+    join_type = ""
+
     join_clause_base = """
-        JOIN `{filter_table}` {filter_alias}
+        {join_type}JOIN `{filter_table}` {filter_alias}
         ON {field_alias}.{field_join_id} = {filter_alias}.{filter_join_id}
     """
 
@@ -911,7 +922,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         x: {
             'name': y['sources'][x]['name'],
             'alias': y['sources'][x]['name'].split(".")[-1].lower().replace("-", "_"),
-            'id': y['sources'][x]['id']
+            'id': y['sources'][x]['id'],
+            'type': y['sources'][x]['data_type'],
+            'set': y['sources'][x]['set_type'],
+            'count_col': y['sources'][x]['count_col']
         } for y in [field_attr_by_bq, filter_attr_by_bq] for x in y['sources']
     }
 
@@ -984,7 +998,17 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                         to_src__in=[table_info[filter_bqtable]['id'],table_info[image_table]['id']]
                     )
 
+                    join_type = ""
+                    if table_info[filter_bqtable]['set'] == DataSetType.RELATED_SET:
+                        join_type = "LEFT "
+                        filter_clauses[filter_bqtable]['filter_string'] = "({} OR {}.{} IS NULL)".format(
+                            filter_clauses[filter_bqtable]['filter_string'],
+                            table_info[filter_bqtable]['alias'],
+                            table_info[filter_bqtable]['count_col']
+                        )
+
                     joins.append(join_clause_base.format(
+                        join_type=join_type,
                         filter_alias=table_info[filter_bqtable]['alias'],
                         filter_table=table_info[filter_bqtable]['name'],
                         filter_join_id=source_join.get_col(filter_bqtable),
@@ -1006,6 +1030,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     to_src__in=[table_info[field_bqtable]['id'], table_info[image_table]['id']]
                 )
                 joins.append(join_clause_base.format(
+                    join_type=join_type,
                     field_alias=table_info[image_table]['alias'],
                     field_join_id=source_join.get_col(table_info[image_table]['name']),
                     filter_alias=table_info[field_bqtable]['alias'],
@@ -1136,8 +1161,10 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
         {offset_clause}
     """
 
+    join_type=""
+
     join_clause_base = """
-        JOIN `{filter_table}` {filter_alias}
+        {join_type}JOIN `{filter_table}` {filter_alias}
         ON {field_alias}.{field_join_id} = {filter_alias}.{filter_join_id}
     """
 
@@ -1229,6 +1256,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                     )
 
                     joins.append(join_clause_base.format(
+                        join_type=join_type,
                         filter_alias=table_info[filter_bqtable]['alias'],
                         filter_table=table_info[filter_bqtable]['name'],
                         filter_join_id=source_join.get_col(filter_bqtable),
@@ -1249,6 +1277,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                     to_src__in=[table_info[field_bqtable]['id'], table_info[image_table]['id']]
                 )
                 joins.append(join_clause_base.format(
+                    join_type=join_type,
                     field_alias=table_info[image_table]['alias'],
                     field_join_id=source_join.get_col(table_info[image_table]['name']),
                     filter_alias=table_info[field_bqtable]['alias'],
