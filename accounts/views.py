@@ -497,7 +497,6 @@ def register_sa(request, user_id):
                     projectId=gcp_id).execute()
                 context['gcp_id'] = gcp_id
                 context['default_sa_id'] = gcp['projectNumber']+'-compute@developer.gserviceaccount.com'
-                context['datasets_limit'] = DCF_GOOGLE_SA_REGISTER_DATASETS_LIMIT
 
             return render(request, template, context)
 
