@@ -128,7 +128,8 @@ def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, 
                             'list': [attr],
                             'attrs': [stripped_attr],
                             'data_type': source['data_sets'].first().data_type,
-                            'set_type':  source['data_sets'].first().set_type
+                            'set_type':  source['data_sets'].first().set_type,
+                            'count_col': source['count_col']
                         }
                     else:
                         attr_by_src["sources"][source_name]['list'].append(attr)
