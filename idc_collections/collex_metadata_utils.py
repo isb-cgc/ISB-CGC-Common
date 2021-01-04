@@ -19,7 +19,7 @@ import time
 import copy
 import re
 from time import sleep
-from idc_collections.models import Collection, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
+from idc_collections.models import Collection, Attribute_Tooltips, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from google_helpers.bigquery.export_support import BigQueryExportFileList
@@ -157,9 +157,11 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     attr_sets = {}
     context = {}
 
+    collex_attr_id = Attribute.objects.get(name='collection_id').id
+
     try:
         if not is_json:
-            context['collection_tooltips'] = Collection.objects.filter(active=True).get_tooltips()
+            context['collection_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips(collex_attr_id)
 
         collectionsList = Collection.objects.filter(active=True).values_list('collection_id',flat=True)
 
@@ -358,7 +360,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         context['filters'] = filters
 
         prog_attr_id = Attribute.objects.get(name='program_name').id
-        collex_attr_id = Attribute.objects.get(name='collection_id').id
 
         programSet = {}
         for collection in Collection.objects.select_related('program').filter(active=True):
