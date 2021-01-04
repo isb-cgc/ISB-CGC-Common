@@ -649,9 +649,11 @@ class Attribute_Display_ValuesQuerySet(models.QuerySet):
 
         return dvals
 
+
 class Attribute_Display_ValuesManager(models.Manager):
     def get_queryset(self):
         return Attribute_Display_ValuesQuerySet(self.model, using=self._db)
+
 
 class Attribute_Display_Values(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -666,6 +668,7 @@ class Attribute_Display_Values(models.Model):
     def __str__(self):
         return "{} - {}".format(self.raw_value, self.display_value)
 
+
 class Attribute_Display_Category(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
@@ -674,6 +677,35 @@ class Attribute_Display_Category(models.Model):
 
     def __str__(self):
         return "{} - {}".format(self.attribute.name, self.category_display_name)
+
+
+class Attribute_TooltipsQuerySet(models.QuerySet):
+    def get_tooltips(self, attribute_id):
+        tooltips = self.filter(attribute=attribute_id)
+        tips = {tip.tooltip_id: tip.tooltip for tip in tooltips}
+
+        return tips
+
+
+class Attribute_TooltipsManager(models.Manager):
+    def get_queryset(self):
+        return Attribute_TooltipsQuerySet(self.model, using=self._db)
+
+
+# Attributes with tooltips for their values can use this model to record them
+class Attribute_Tooltips(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    # The value of the attribute linked to this tooltip
+    tooltip_id = models.CharField(max_length=256, null=False, blank=False)
+    tooltip = models.CharField(max_length=4096, null=False, blank=False)
+    objects = Attribute_TooltipsManager()
+
+    class Meta(object):
+        unique_together = (("tooltip_id", "attribute"),)
+
+    def __str__(self):
+        return "{}:{} - {}{}".format(self.attribute.name, self.tooltip_id, self.tooltip[:64]," [...]" if len(self.tooltip) > 64 else "")
 
 class Attribute_Ranges(models.Model):
     FLOAT = 'F'
