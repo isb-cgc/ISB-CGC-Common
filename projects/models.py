@@ -61,6 +61,26 @@ class Program(models.Model):
             ).filter(source_type=source_type)
         return self.datasource_set.select_related('version') if not source_type else self.datasource_set.select_related('version').filter(source_type=source_type)
 
+    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
+        prog_attrs = {'attrs': {}, 'by_src': {}}
+        if data_type_list:
+            datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list[0])
+            for data_type in data_type_list[1:]:
+                datasources |= self.get_data_sources(source_type=source_type, data_type=data_type)
+        else:
+            datasources = self.get_data_sources(source_type=source_type)
+        attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
+        for attr in attrs['attrs']:
+            prog_attrs['attrs'][attr.name] = {'name': attr.name, 'displ_name': attr.display_name, 'values': {}, 'type': attr.data_type, 'preformatted': bool(attr.preformatted_values)}
+
+        for src in attrs['sources']:
+            prog_attrs['by_src'][src] = {
+                'attrs': attrs['sources'][src]['attrs'],
+                'name': attrs['sources'][src]['name']
+             }
+
+        return prog_attrs
+
     def get_metadata_tables(self):
         return self.public_metadata_tables_set.first()
 
@@ -155,8 +175,26 @@ class DataSourceQuerySet(models.QuerySet):
 
         } for ds in self.select_related('version').all()]
 
+    #
+    # returns a dictionary of comprehensive information mapping attributes to this set of data sources:
+    #
+    # {
+    #   'list': [<String>, ...],
+    #   'ids': [<Integer>, ...],
+    #   'attrs': [<Attribute>, ...],
+    #   'sources': {
+    #      <data source database ID>: {
+    #         'list': [<String>, ...],
+    #         'attrs': [<Attribute>, ...],
+    #         'id': <Integer>,
+    #         'name': <String>,
+    #         'data_sets': [<DataSetType>, ...],
+    #         'count_col': <Integer>
+    #      }
+    #  }
+    #
     def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None):
-        attrs = { 'list': None }
+        attrs = { 'list': None, 'attrs': None, 'ids': None }
         if by_source:
             attrs['sources'] = {}
 
@@ -183,8 +221,13 @@ class DataSourceQuerySet(models.QuerySet):
                 }
 
             attrs['list'] = attr_set.values_list('name', flat=True) if not attrs['list'] else (attrs['list'] | attr_set.values_list('name', flat=True))
+            attrs['attrs'] = attr_set if not attrs['attrs'] else (attrs['attrs'] | attr_set)
+            attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
+                        attrs['ids'] | attr_set.values_list('id', flat=True))
 
         attrs['list'] = attrs['list'].distinct()
+        attrs['attrs'] = attrs['attrs'].distinct()
+        attrs['ids'] = attrs['ids'].distinct()
 
         return attrs
 
@@ -449,6 +492,45 @@ class Public_Metadata_Tables(models.Model):
         return self.samples_table
 
 
+class AttributeQuerySet(models.QuerySet):
+
+    def get_data_sources(self, versions=None, source_type=None, active=True):
+        q_objects = Q()
+        if versions:
+            q_objects &= Q(id__in=versions.get_data_sources())
+        if source_type:
+            q_objects &= Q(source_type=source_type)
+
+        data_sources = None
+        for attr in self.all():
+            data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
+
+        return data_sources.distinct()
+
+    def get_attr_ranges(self, as_dict=False):
+        if as_dict:
+            ranges = {}
+            for range in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()):
+                if range.attribute.id not in ranges:
+                    ranges[range.attribute.id] = []
+                ranges[range.attribute.id].append(range)
+            return ranges
+        return Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all())
+
+    def get_facet_types(self):
+        facet_types = {}
+        attr_with_ranges = {x[0]: x[1] for x in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()).values_list('attribute__id','attribute__data_type')}
+        for attr in self.all():
+            facet_types[attr.id] = DataSource.QUERY if attr.data_type == Attribute.CONTINUOUS_NUMERIC and attr.id in attr_with_ranges else DataSource.TERMS
+        return facet_types
+    
+    def get_display_values(self):
+        return Attribute_Display_Values.objects.select_related('attribute').filter(attribute__in=self.all())
+
+class AttributeManager(models.Manager):
+    def get_queryset(self):
+        return AttributeQuerySet(self.model, using=self._db)
+
 # A field which is available in data sources. Attributes may be linked to numerous data sources.
 class Attribute(models.Model):
     CONTINUOUS_NUMERIC = 'N'
@@ -471,6 +553,7 @@ class Attribute(models.Model):
     preformatted_values = models.BooleanField(default=False)
     default_ui_display = models.BooleanField(default=True)
     data_sources = models.ManyToManyField(DataSource)
+    objects = AttributeManager()
 
     @classmethod
     def get_ranged_attrs(cls, as_list=True):
@@ -501,6 +584,20 @@ class Attribute(models.Model):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
 
+
+class Attribute_Display_ValuesQuerySet(models.QuerySet):
+    def to_dict(self):
+        dvals = {}
+        for dv in self.all().select_related('attribute'):
+            if dv.attribute.id not in dvals:
+                dvals[dv.attribute.id] = {}
+            dvals[dv.attribute.id][dv.raw_value] = dv.display_value
+
+        return dvals
+
+class Attribute_Display_ValuesManager(models.Manager):
+    def get_queryset(self):
+        return Attribute_Display_ValuesQuerySet(self.model, using=self._db)
 
 # Attributes with specific display value attributes can use this model to record them
 class Attribute_Display_Values(models.Model):

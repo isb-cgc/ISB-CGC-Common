@@ -96,19 +96,12 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
 
     samples_and_cases = {'samples': [], 'cases': [], 'project_counts': {}}
 
-    user_id = 0
-    if user:
-        user_id = user.id
 
     comb_mut_filters = comb_mut_filters.upper()
-    user_id = 0
-    if user:
-        user_id = user.id
 
     mutation_filters = None
     mutation_build = None
     filters = {}
-    data_type_filters = {}
 
     results = { 'programs': {} }
 
@@ -116,17 +109,18 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
         start = time.time()
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
-        for key in inc_filters:
-            if 'data_type' in key:
-                    filters[key] = inc_filters[key]
-            elif 'MUT:' in key:
-                if not mutation_filters:
-                    mutation_filters = {}
-                mutation_filters[key] = inc_filters[key]
-                if not mutation_build:
-                    mutation_build = key.split(":")[1]
-            else:
-                filters[key.split(':')[-1]] = inc_filters[key]
+        if inc_filters:
+            for key in inc_filters:
+                if 'data_type' in key:
+                        filters[key] = inc_filters[key]
+                elif 'MUT:' in key:
+                    if not mutation_filters:
+                        mutation_filters = {}
+                    mutation_filters[key] = inc_filters[key]
+                    if not mutation_build:
+                        mutation_build = key.split(":")[1]
+                else:
+                    filters[key.split(':')[-1]] = inc_filters[key]
 
         versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
@@ -145,7 +139,7 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
                 'sets': {},
                 'totals': {}
             }
-            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA, DataVersion.CLINICAL_DATA, DataVersion.FILE_DATA])
+            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA, DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA])
             list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.BIOSPECIMEN_DATA)
             all_sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
             source = prog.get_data_sources(source_type=source_type).filter(version__in=list_versions).first()
@@ -201,8 +195,13 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
                         logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
             if cohort_id:
-                cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+                source_name = source.name.lower()
+                if source_name.startswith('files'):
+                    cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                    query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
+                else:
+                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
             samples_and_cases = query_solr_and_format_result({
                 'collection': source.name,
@@ -396,7 +395,7 @@ def validate_barcodes(request):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        body_unicode = request.body.decode('utf-8')
+        body_unicode = request.body
         body = json.loads(body_unicode)
         barcodes = body['barcodes']
 
@@ -527,7 +526,7 @@ def cohort_detail(request, cohort_id):
         template_values['total_cases'] = cohort.case_size()
         template_values['shared_with_users'] = shared_with_users
         template_values['cohort_programs'] = cohort_programs
-        template_values['export_url'] = reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
+        template_values['export_url'] = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
         template_values['programs_this_cohort'] = [x['id'] for x in cohort_programs]
         template_values['creation_filters'] = cohort.get_creation_filters()
         template_values['current_filters'] = cohort.get_current_filters()
@@ -1033,7 +1032,7 @@ def set_operation(request):
     try:
 
         if request.POST:
-            name = request.POST.get('name').encode('utf8')
+            name = request.POST.get('name')
             cohorts = []
             base_cohort = None
             subtracted_cohorts = []
@@ -1360,12 +1359,14 @@ def save_cohort_from_plot(request):
     return HttpResponse(json.dumps(result), status=200)
 
 
-@login_required
 @csrf_protect
-def cohort_filelist(request, cohort_id=0, panel_type=None):
+def filelist(request, cohort_id=None, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    template = 'cohorts/cohort_filelist{}.html'.format("_{}".format(panel_type) if panel_type else "")
+    if panel_type:
+        template = 'cohorts/cohort_filelist_{}.html'.format(panel_type)
+    else:
+        template = 'cohorts/cohort_filelist.html'
 
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
@@ -1373,15 +1374,15 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
 
     try:
         metadata_data_attr_builds = {
-            'HG19': fetch_build_data_attr('HG19', panel_type),
-            'HG38': fetch_build_data_attr('HG38', panel_type)
+            'HG19': fetch_build_data_attr('HG19', panel_type, cohort_id is None),
+            'HG38': fetch_build_data_attr('HG38', panel_type, cohort_id is None)
         }
 
         build = request.GET.get('build', 'HG19')
 
         metadata_data_attr = metadata_data_attr_builds[build]
 
-        has_access = auth_dataset_whitelists_for_user(request.user.id)
+        has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
         items = None
 
@@ -1391,7 +1392,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
             if request.GET.get('case_barcode', None):
                 inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -1424,45 +1425,57 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
                                                                              metadata_data_attr_builds[attr_build][attr]['values']]
             metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
 
-        cohort = Cohort.objects.get(id=cohort_id, active=True)
-        cohort.perm = cohort.get_perm(request)
+        cohort = None
+        has_user_data = False
+        programs_this_cohort = []
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id, active=True)
+            cohort.perm = cohort.get_perm(request)
 
-        # Check if cohort contains user data samples - return info message if it does.
-        # Get user accessed projects
-        user_projects = Project.get_user_projects(request.user)
-        cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
-        if cohort_sample_list.count():
-            messages.info(
-                request,
-                "File listing is not available for cohort samples that come from a user uploaded project. " +
-                "This functionality is currently being worked on and will become available in a future release."
-            )
+            # Check if cohort contains user data samples - return info message if it does.
+            # Get user accessed projects
+            user_projects = Project.get_user_projects(request.user)
+            cohort_sample_list = Samples.objects.filter(cohort=cohort, project__in=user_projects)
+            if cohort_sample_list.count():
+                messages.info(
+                    request,
+                    "File listing is not available for cohort samples that come from a user uploaded project. " +
+                    "This functionality is currently being worked on and will become available in a future release."
+                )
+            has_user_data = bool(cohort_sample_list.count() > 0)
+            programs_this_cohort = cohort.get_program_names()
+            download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
+            export_url = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
+        else:
+            download_url = reverse("download_filelist")
+            export_url = reverse('export_data', kwargs={'export_type': 'file_manifest'})
 
         logger.debug("[STATUS] Returning response from cohort_filelist")
 
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
-                                            'download_url': reverse('download_filelist', kwargs={'cohort_id': cohort_id}),
-                                            'export_url': reverse('export_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'}),
+                                            'download_url': download_url,
+                                            'export_url': export_url,
                                             'metadata_data_attr': metadata_data_attr_builds,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'img_thumbs_url': settings.IMG_THUMBS_URL,
-                                            'has_user_data': bool(cohort_sample_list.count() > 0),
+                                            'has_user_data': has_user_data,
                                             'build': build,
-                                            'programs_this_cohort': cohort.get_program_names()})
+                                            'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
         logger.exception(e)
         messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
-        return redirect(reverse('cohort_details', args=[cohort_id]))
+        if cohort_id:
+            return redirect(reverse('cohort_details', args=[cohort_id]))
+        else:
+            return redirect(reverse('landing_page'))
 
 
-@login_required
-def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
-
+def filelist_ajax(request, cohort_id=None, panel_type=None):
     status = 200
     try:
         if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -1502,23 +1515,23 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
 
         build = request.GET.get('build','HG19')
 
-        has_access = auth_dataset_whitelists_for_user(request.user.id)
+        has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_build_data_attr(build, type=panel_type)
+            metadata_data_attr = fetch_build_data_attr(build, panel_type, cohort_id is None)
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            metadata_data_attr[attr]['values'][val]['count'] = result['metadata_data_counts'][attr][val]
+                            metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
             else:
                 for attr in metadata_data_attr:
                     for val in metadata_data_attr[attr]['values']:
@@ -1541,7 +1554,12 @@ def cohort_filelist_ajax(request, cohort_id=0, panel_type=None):
         logger.error("[ERROR] While retrieving cohort file data for AJAX call:")
         logger.exception(e)
         status=500
-        result={'redirect': reverse('cohort_details', args=[cohort_id]), 'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+        if cohort_id:
+            result={'redirect': reverse('cohort_details', args=[cohort_id]),
+                    'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+        else:
+            result = {'redirect': reverse('landing_page', args=[]),
+                    'message': "Encountered an error while trying to fetch filelist--please contact the administrator."}
 
     return JsonResponse(result, status=status)
 
@@ -1590,13 +1608,16 @@ class Echo(object):
         return value
 
 
-def streaming_csv_view(request, cohort_id=0):
+def streaming_csv_view(request, cohort_id=None):
     if cohort_id == 0:
         messages.error(request, 'Cohort {} does not exist.'.format(str(cohort_id)))
         return redirect('cohort_list')
 
     try:
-        cohort = Cohort.objects.get(id=cohort_id)
+        cohort = None
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+
         total_expected = int(request.GET.get('total', '0'))
 
         if total_expected == 0:
@@ -1625,18 +1646,25 @@ def streaming_csv_view(request, cohort_id=0):
                 messages.error(request, items['error']['message'])
             else:
                 messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
-            return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            if cohort_id:
+                return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            else:
+                return redirect(reverse('user_landing'))
 
         if len(file_list) < total_expected:
             messages.error(request, 'Only %d files found out of %d expected!' % (len(file_list), total_expected))
-            return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            if cohort_id:
+                return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+            else:
+                return redirect(reverse('user_landing'))
 
         if len(file_list) > 0:
             """A view that streams a large CSV file."""
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
-            rows = (["File listing for Cohort '{}', Build {}".format(cohort.name, build)],)
+            cohort_string = "Cohort '{}', ".format(cohort.name) if cohort else ""
+            rows = (["File listing for {}Build {}".format(cohort_string, build)],)
             rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
                       "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
@@ -1648,7 +1676,9 @@ def streaming_csv_view(request, cohort_id=0):
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
                                              content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-            response['Content-Disposition'] = 'attachment; filename="file_list_cohort_{}_build_{}_{}.csv"'.format(str(cohort_id),build,timestamp)
+            cohort_string = 'cohort_{}_'.format(str(cohort_id)) if cohort_id else ''
+            filename = 'file_list_{}build_{}_{}.csv'.format(cohort_string, build, timestamp)
+            response['Content-Disposition'] = 'attachment; filename=' + filename
             response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
 
@@ -1657,7 +1687,10 @@ def streaming_csv_view(request, cohort_id=0):
         logger.exception(e)
         messages.error(request,"There was an error while attempting to download your filelist--please contact the administrator.")
 
-    return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+    if cohort_id:
+        return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
+    else:
+        return redirect(reverse('filelist'))
 
 
 @login_required
@@ -1735,7 +1768,9 @@ def get_metadata(request):
         user = AnonymousUser
 
     if program_id is not None and program_id > 0:
+        logger.info("[STATUS] Getting metadata counts from get_metadata...")
         results = public_metadata_counts(filters[str(program_id)], cohort, user, program_id, limit, comb_mut_filters=comb_mut_filters)
+        logger.info("[STATUS] ...done.")
 
         attr_counts = []
         data_type_counts = {}
@@ -1769,18 +1804,18 @@ def get_metadata(request):
         if cohort:
             results['cohort-total'] = results['samples']
             results['cohort-cases'] = results['cases']
-            cohort_pub_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id',flat=True).distinct(), is_public=True)
-            for prog in cohort_pub_progs:
-                if prog.id != program_id:
-                    prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
-                    results['cohort-total'] += prog_res['samples']
-                    results['cohort-cases'] += prog_res['cases']
+            cohort_progs = Program.objects.filter(id__in=Cohort.objects.get(id=cohort).get_programs())
+            for prog in cohort_progs:
+                if not prog.is_public:
+                    user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
+                    results['cohort-total'] += user_prog_res['samples']
+                    results['cohort-cases'] += user_prog_res['cases']
+                else:
+                    if prog.id != program_id:
+                        prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
+                        results['cohort-total'] += prog_res['samples']
+                        results['cohort-cases'] += prog_res['cases']
 
-            cohort_user_progs = Program.objects.filter(id__in=Project.objects.filter(id__in=Samples.objects.filter(cohort_id=cohort).values_list('project_id',flat=True).distinct()).values_list('program_id', flat=True).distinct(), is_public=False)
-            for prog in cohort_user_progs:
-                user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
-                results['cohort-total'] += user_prog_res['samples']
-                results['cohort-cases'] += user_prog_res['cases']
     else:
         results = user_metadata_counts(user, filters, cohort)
 
@@ -1798,7 +1833,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 
     try:
         # Check program ID against public programs
-        public_program = Program.objects.get(id=program_id)
+        public_program = Program.objects.filter(id=program_id).first()
         user = request.user
 
         if public_program:
@@ -1813,7 +1848,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             # case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
             #     version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
             # ).get_source_attrs(for_ui=True)
-            case_sample_attr = fetch_program_attr(program_id)
+            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False)
 
             #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
@@ -1898,7 +1933,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             template_values = {
                 'request': request,
                 'attr_counts': results['count'],
-                'total_samples': int(results['samples']),
+                'total_samples': int(results['total']),
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
@@ -1915,10 +1950,10 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
 # Master method for exporting data types to BQ, GCS, etc.
 @login_required
 @csrf_protect
-def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
+def export_data(request, cohort_id=None, export_type=None, export_sub_type=None):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
-    redirect_url = reverse('cohort_list') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
+    redirect_url = reverse('filelist') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
 
     status = 200
     result = None
@@ -1933,17 +1968,15 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         dataset = None
         bq_proj_id = None
 
-        if not cohort_id:
-            messages.error(request, "You must provide a valid cohort ID in order to export its information.")
-            return redirect(redirect_url)
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
 
-        cohort = Cohort.objects.get(id=cohort_id)
-
-        try:
-            Cohort_Perms.objects.get(user=req_user, cohort=cohort)
-        except ObjectDoesNotExist as e:
-            messages.error(request, "You must be the owner of a cohort, or have been granted access by the owner, in order to export its data.")
-            return redirect(redirect_url)
+            try:
+                Cohort_Perms.objects.get(user=req_user, cohort=cohort)
+            except ObjectDoesNotExist as e:
+                messages.error(request, "You must be the owner of a cohort, or have been granted access by the owner, "
+                               + "in order to export its data.")
+                return redirect(redirect_url)
 
         # If destination is GCS
         file_format = request.POST.get('file-format', 'CSV')
@@ -1958,14 +1991,12 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
             proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
             if not len(dataset):
-                messages.error(request, "You must provide a Google Cloud Platform dataset to which your cohort's "
-                    + "data can be exported.")
+                messages.error(request, "You must provide a Google Cloud Platform dataset to which your data can be exported.")
                 return redirect(redirect_url)
 
             gcp = None
             if not len(proj_id):
-                messages.error(request, "You must provide a Google Cloud Project to which your cohort's data "
-                    + "can be exported.")
+                messages.error(request, "You must provide a Google Cloud Project to which your data can be exported.")
                 return redirect(redirect_url)
             else:
                 try:
@@ -2005,8 +2036,11 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     return redirect(redirect_url)
 
         if not table:
-            table = "isb_cgc_cohort_files_{}_{}_{}".format(
-                cohort_id,
+            table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
+            cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
+            table = "{}{}_{}_{}".format(
+                table_str_start,
+                cohort_id_str,
                 re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
                 datetime.datetime.now().strftime("%Y%m%d_%H%M")
             )
@@ -2021,12 +2055,22 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
             raise Exception("Invalid build supplied")
 
         filter_conditions = ""
-        cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
         union_queries = []
         inc_filters = json.loads(request.POST.get('filters', '{}'))
         if inc_filters.get('case_barcode'):
             case_barcode = inc_filters.get('case_barcode')
             inc_filters['case_barcode'] = ["%{}%".format(case_barcode),]
+
+        if cohort_id:
+            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+        else:
+            # for general file list without cohort, "program name can be passed in
+            if inc_filters.get('program_name'):
+                program_name_list = inc_filters.get('program_name')
+                cohort_programs = Program.objects.filter(name__in=program_name_list)
+                del inc_filters['program_name']
+            else:
+                cohort_programs = Program.objects.all()
 
         filter_params = None
         if len(inc_filters):
@@ -2042,27 +2086,44 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
 
         if export_type == 'file_manifest':
-            query_string_base = """
-                 SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
-                  md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                  md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
-                  {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
-                  md.index_file_id as index_file_gdc_uuid,
-                  PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
-                 FROM `{metadata_table}` md
-                 JOIN (SELECT case_barcode, sample_barcode
-                     FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
-                     WHERE cohort_id = {cohort_id}
-                     GROUP BY case_barcode, sample_barcode
-                 ) cs
-                 ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
-                 WHERE TRUE {filter_conditions}
-                 GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
-                  md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                  gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
-                  md.index_file_name_key, md.index_file_id
-                 ORDER BY md.sample_barcode
-            """
+            if cohort_id:
+                query_string_base = """
+                     SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
+                      md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                      md.index_file_id as index_file_gdc_uuid,
+                      PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                     FROM `{metadata_table}` md
+                     JOIN (SELECT case_barcode, sample_barcode
+                         FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}`
+                         WHERE cohort_id = {cohort_id}
+                         GROUP BY case_barcode, sample_barcode
+                     ) cs
+                     ON ((NOT cs.sample_barcode ='' AND cs.sample_barcode=md.sample_barcode) OR (cs.case_barcode=md.case_barcode))
+                     WHERE TRUE {filter_conditions}
+                     GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
+                      md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      md.index_file_name_key, md.index_file_id
+                     ORDER BY md.sample_barcode
+                """
+            else:
+                query_string_base = """
+                     SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
+                      md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                      md.index_file_id as index_file_gdc_uuid,
+                      PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
+                     FROM `{metadata_table}` md
+                     WHERE TRUE {filter_conditions}
+                     GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
+                      md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      md.index_file_name_key, md.index_file_id
+                     ORDER BY md.sample_barcode
+                """
 
             for program in cohort_programs:
                 try:
@@ -2080,6 +2141,7 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                     program_bq_tables.data_table.lower(),
                 )
 
+                cohort_id_str = cohort_id if cohort_id else 0
                 union_queries.append(
                     query_string_base.format(
                         metadata_table=metadata_table,
@@ -2087,12 +2149,13 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                         deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
-                        cohort_id=cohort_id,
+                        cohort_id=cohort_id_str,
                         date_added=date_added,
                         build=build,
                         tz=settings.TIME_ZONE
                     )
                 )
+
             if len(union_queries) > 1:
                 query_string = ") UNION ALL (".join(union_queries)
                 query_string = '(' + query_string + ')'
@@ -2173,25 +2236,32 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
             else:
                 raise Exception("Cohort export destination not recognized.")
 
+        if cohort_id:
+            if export_type == 'file_manifest':
+                msg_cohort_str = "cohort {}'s file manifest".format(cohort_id)
+            else:
+                msg_cohort_str = "cohort {}".format(cohort_id)
+        else:
+            msg_cohort_str = "file manifest"
+
         # If export fails, we warn the user
         if result['status'] == 'error':
             status = 400
             if 'message' not in result:
-                result['message'] = "We were unable to export Cohort {}--please contact the administrator.".format(
-                    str(cohort_id) + (
-                        "'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""
-                    ))
+                result['message'] = "We were unable to export {}--please contact the administrator.".format(
+                    msg_cohort_str)
+
         else:
             # If the export is taking a while, inform the user
             if result['status'] == 'long_running':
-                result['message'] = "The export of cohort {} to {} ".format(
-                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                result['message'] = "The export of {} to {} ".format(
+                    msg_cohort_str,
                     "table {}:{}.{}".format(bq_proj_id, dataset, table)
                     if export_dest == 'table' else "GCS file gs://{}/{}".format(gcs_bucket, file_name)
                 ) + "is underway; check your {} in 1-2 minutes for the results.".format("BQ dataset" if export_dest == 'table' else "GCS bucket")
             else:
-                result['message'] = "Cohort {} was successfully exported to {}.".format(
-                    str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else ""),
+                result['message'] = "{} was successfully exported to {}.".format(
+                    msg_cohort_str,
                     "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
                     if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
                         gcs_bucket, file_name, result['message']
@@ -2199,9 +2269,15 @@ def export_data(request, cohort_id=0, export_type=None, export_sub_type=None):
                 )
 
     except Exception as e:
-        logger.error("[ERROR] While trying to export Cohort {}:".format(
-            str(cohort_id) + ("'s file manifest".format(str(cohort_id)) if export_type == 'file_manifest' else "")
-        ))
+        if cohort_id:
+            if export_type == 'file_manifest':
+                cohort_error_str = "cohort {}'s file manifest".format(cohort_id)
+            else:
+                cohort_error_str = "cohort {}".format(cohort_id)
+        else:
+            cohort_error_str = "file manifest"
+
+        logger.error("[ERROR] While trying to export {}:".format(cohort_error_str))
         logger.exception(e)
         status = 500
         result = {
