@@ -317,6 +317,8 @@ class BigQuerySupport(BigQueryABC):
 
         job_id = query_job['jobReference']['jobId']
 
+        print("[STATUS] jobId {} run as {}".format(job_id,query_job.get('user_email','unknown')))
+
         query_results = None
 
         # Cost Estimates don't actually run as fully-fledged jobs, and won't be inserted as such,
