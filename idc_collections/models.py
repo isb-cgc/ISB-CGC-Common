@@ -173,6 +173,10 @@ class ImagingDataCommonsVersion(models.Model):
     version_number = models.CharField(max_length=128, null=False, blank=False)
     version_uid = models.CharField(max_length=128, null=True)
     date_active = models.DateField(auto_now_add=True, null=False, blank=False)
+    data_volume = models.FloatField(null=False, blank=False, default=0.0)
+    case_count = models.IntegerField(null=False, blank=False, default=0)
+    series_count = models.IntegerField(null=False, blank=False, default=0)
+    collex_count = models.IntegerField(null=False, blank=False, default=0)
     active = models.BooleanField(default=True, null=False, blank=False)
     objects = ImagingDataCommonsVersionManager()
 
