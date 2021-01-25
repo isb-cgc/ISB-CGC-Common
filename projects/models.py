@@ -316,6 +316,7 @@ class DataNodeManager(models.Manager):
 
 class DataNode(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
+    short_name = models.CharField(max_length=16)
     name = models.CharField(max_length=255)
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
