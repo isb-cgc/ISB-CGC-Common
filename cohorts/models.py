@@ -203,10 +203,11 @@ class Cohort(models.Model):
                 if filter.name not in prog_filters:
                     prog_filters[filter.name] = {
                         'id': cohort.id,
-                        'program_obj': filter.program,
                         'program_id': filter.program.id,
                         'values': []
                     }
+                    if not unformatted:
+                        prog_filters[filter.name]['program_obj'] = filter.program
                 prog_filter = prog_filters[filter.name]
                 if prog_filter['id'] == cohort.id:
                     prog_filter['values'].append(filter.value)
