@@ -16,6 +16,8 @@
 
 from django.conf.urls import url, include
 from allauth.socialaccount.providers.google import urls as google_urls, views as google_views
+from allauth.account import views as allauth_views
+from allauth.account import urls as allauth_account_urls
 
 from . import views, dcf_views
 
@@ -25,6 +27,9 @@ urlpatterns = [
     # url(r'^logout', account_views.logout, name='account_logout'),
     url(r'^logout', views.extended_logout_view, name='account_logout'),
     url(r'^login/$', google_views.oauth2_login, name='account_login'),
+    url(r'^local_login/$', allauth_views.login, name='local_account_login'),
+    # Re-route the local account signup to prevent it from happening
+    url(r'^local_login/$', allauth_views.login, name='account_signup'),
     # Following urls for new DCF flows
     url(r'^dcf_login/$', dcf_views.oauth2_login, name='dcf_login'),
     url(r'^dcf_simple_logout/$', dcf_views.dcf_simple_logout, name='dcf_simple_logout'),
