@@ -28,8 +28,8 @@ urlpatterns = [
     url(r'^logout', views.extended_logout_view, name='account_logout'),
     url(r'^login/$', google_views.oauth2_login, name='account_login'),
     url(r'^local_login/$', allauth_views.login, name='local_account_login'),
-    url(r'^local_signup/$', allauth_views.signup, name='account_signup'),
-    url(r'^local_password_reset/$', allauth_views.password_reset, name='account_reset_password'),
+    # Re-route the local account signup to prevent it from happening
+    url(r'^local_login/$', allauth_views.login, name='account_signup'),
     # Following urls for new DCF flows
     url(r'^dcf_login/$', dcf_views.oauth2_login, name='dcf_login'),
     url(r'^dcf_simple_logout/$', dcf_views.dcf_simple_logout, name='dcf_simple_logout'),
