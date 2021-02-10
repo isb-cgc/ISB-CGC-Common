@@ -35,6 +35,7 @@ import django
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.export_support import BigQueryExportFileList
+from google_helpers.stackdriver import StackDriverLogger
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User
@@ -58,6 +59,7 @@ from idc_collections.models import Program, Collection, DataSource, DataVersion,
 from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
+COHORT_CREATION_LOG_NAME = settings.COHORT_CREATION_LOG_NAME
 
 BQ_ATTEMPT_MAX = 10
 
@@ -234,6 +236,13 @@ def save_cohort(request):
             result = _save_cohort(request.user, filters, name, cohort_id, version, desc=desc)
 
             if 'message' not in result:
+                st_logger = StackDriverLogger.build_from_django_settings()
+                log_name = COHORT_CREATION_LOG_NAME
+                user = User.objects.get(id=request.user.id)
+                st_logger.write_text_log_entry(
+                    log_name,
+                    "[COHORT CREATION] User {} created a new cohort at {}".format(user.email, datetime.datetime.utcnow())
+                )
                 redirect_url = reverse('cohort_details', args=[result['cohort_id']])
                 messages.info(request, 'Cohort {} {} successfully.'.format(name, 'created' if not cohort_id else 'updated'))
             else:
