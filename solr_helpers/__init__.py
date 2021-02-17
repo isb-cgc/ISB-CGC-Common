@@ -263,6 +263,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'q': '-{}:[* TO *]'.format(attr.name)
                         }
 
+                        if filter_tags and attr.name in filter_tags:
+                            facets[none_facet_name]['domain'] = {
+                                "excludeTags": filter_tags[attr.name]
+                            }
+
                         if unique:
                             facets[none_facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
         else:
@@ -404,7 +409,11 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
             first_range = attr_ranges.filter(attribute__name=attr_name).first()
             l_boundary = "[" if first_range.include_lower else "{"
             u_boundary = "]" if first_range.include_upper else "}"
-            clause = ""
+            clause_none = ""
+            if 'None' in values:
+                values.remove('None')
+                clause_none = '+(%s:{* TO *})' % (attr_name)
+
             if len(values) > 1 and type(values[0]) is list:
                 clause = " {} ".format(comb_with).join(
                     ["{}:[{}{} TO {}{}]".format(attr_name, l_boundary, str(x[0]), str(x[1]), u_boundary) for x in values])
@@ -420,9 +429,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
                 else:
                     clause = "{}:{}{}{}".format(attr_name, l_boundary, values[0].upper(), u_boundary)
 
-            if 'None' in values:
-                values.remove('None')
-                query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
+            if clause_none:
+                query_str += '-(-(%s) %s)' % (clause, clause_none)
             else:
                 query_str += "(+({}))".format(clause)
         else:
