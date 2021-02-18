@@ -251,6 +251,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'q': "{}:{}{} TO {}]".format(attr.name, l_boundary, str(attr_range.last), "*")
                         }
 
+                        if filter_tags and attr.name in filter_tags:
+                            facets[facet_name]['domain'] = {
+                                "excludeTags": filter_tags[attr.name]
+                            }
+
                         if unique:
                             facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
