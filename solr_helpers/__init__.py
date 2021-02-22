@@ -251,6 +251,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'q': "{}:{}{} TO {}]".format(attr.name, l_boundary, str(attr_range.last), "*")
                         }
 
+                        if filter_tags and attr.name in filter_tags:
+                            facets[facet_name]['domain'] = {
+                                "excludeTags": filter_tags[attr.name]
+                            }
+
                         if unique:
                             facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
@@ -262,6 +267,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'limit': -1,
                             'q': '-{}:[* TO *]'.format(attr.name)
                         }
+
+                        if filter_tags and attr.name in filter_tags:
+                            facets[none_facet_name]['domain'] = {
+                                "excludeTags": filter_tags[attr.name]
+                            }
 
                         if unique:
                             facets[none_facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
@@ -392,9 +402,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
             query_str += '(-%s:{* TO *})' % attr
         # If it's a ranged value, calculate the bins
         elif attr == 'bmi':
-            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values if x != 'None'])
             if 'None' in values:
-                values.remove('None')
                 query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr)
             else:
                 query_str += "(+({}))".format(clause)
@@ -404,16 +413,19 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
             first_range = attr_ranges.filter(attribute__name=attr_name).first()
             l_boundary = "[" if first_range.include_lower else "{"
             u_boundary = "]" if first_range.include_upper else "}"
-            clause = ""
             if len(values) > 1 and type(values[0]) is list:
                 clause = " {} ".format(comb_with).join(
-                    ["{}:[{}{} TO {}{}]".format(attr_name, l_boundary, str(x[0]), str(x[1]), u_boundary) for x in values])
+                    ["{}:[{}{} TO {}{}]".format(attr_name, l_boundary, str(x[0]), str(x[1]), u_boundary) for x in values if x!= 'None'])
             elif len(values) > 1:
-                if type(values[0] is str) and re.search(" [Tt][Oo] ",values[0]):
+                values_temp = values.copy()
+                if 'None' in values_temp:
+                    values_temp.remove('None')
+                if type(values[0] is str) and re.search(" [Tt][Oo] ",values_temp[0]):
                     clause = " {} ".format(comb_with).join(
-                        ["{}:{}{}{}".format(attr_name, l_boundary, x.upper(), u_boundary) for x in values])
+                        ["{}:{}{}{}".format(attr_name, l_boundary, x.upper(), u_boundary) for x in values_temp])
                 else:
-                    clause = "{}:{}{} TO {}{}".format(attr_name, l_boundary, values[0], values[1], u_boundary)
+                    clause = "{}:{}{} TO {}{}".format(attr_name, l_boundary, values_temp[0], values_temp[1], u_boundary)
+
             else:
                 if re.search('_[gl]t[e]',attr):
                     clause = "{}:{}".format(attr_name, values[0])
@@ -421,14 +433,12 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
                     clause = "{}:{}{}{}".format(attr_name, l_boundary, values[0].upper(), u_boundary)
 
             if 'None' in values:
-                values.remove('None')
                 query_str += '-(-(%s) +(%s:{* TO *}))' % (clause, attr_name)
             else:
                 query_str += "(+({}))".format(clause)
         else:
             if 'None' in values:
-                values.remove('None')
-                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr,"\" \"".join([str(y) for y in values]), attr)
+                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr,"\" \"".join([str(y) for y in values if y!= 'None']), attr)
             else:
                 query_str += '(+%s:(%s))' % (attr, " ".join(["{}{}{}".format('"' if "*" not in str(y) else '',str(y),'"' if "*" not in str(y) else '') for y in values]))
 
