@@ -189,8 +189,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'case': entry['case_barcode'],
                         'study_uid': entry['StudyInstanceUID'],
                         'study_desc': entry.get('StudyDescription','N/A'),
-                        'disease_code': entry['disease_code'],
-                        'project_short_name': entry['project_short_name'],
+                        'disease_code': entry.get('disease_code', 'N/A'),
+                        'project_short_name': entry.get('project_short_name', 'N/A'),
                         'program': "TCGA",
                         'file_path': entry.get('file_path', 'N/A')
                     })

@@ -300,6 +300,29 @@ class DataSource(models.Model):
         unique_together = (("name", "version", "source_type"),)
 
 
+class DataNodeeQuerySet(models.QuerySet):
+    def to_dicts(self):
+        return [{
+            "id": ds.id,
+            "name": ds.name
+
+        } for ds in self.select_related('version').all()]
+
+
+class DataNodeManager(models.Manager):
+    def get_queryset(self):
+        return DataSourceQuerySet(self.model, using=self._db)
+
+
+class DataNode(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    short_name = models.CharField(max_length=16)
+    name = models.CharField(max_length=255)
+    description = models.TextField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+    data_sources = models.ManyToManyField(DataSource)
+
+
 class Project(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=255)
