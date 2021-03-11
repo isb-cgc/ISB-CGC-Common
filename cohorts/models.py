@@ -83,7 +83,7 @@ class Cohort(models.Model):
 
     def get_programs(self, is_public=None):
         programs = self.samples_set.select_related('project__program', 'owner').values_list('project__program__id', flat=True).distinct()
-        q_obj = Q(active=True,id__in=programs)
+        q_obj = Q(active=True,id__in=list(programs))
         if is_public is not None:
             q_obj &= Q(is_public=is_public)
         return Program.objects.filter(q_obj).distinct()
@@ -94,10 +94,10 @@ class Cohort(models.Model):
         return [str(x) for x in names]
 
     def only_user_data(self):
-        return bool(Program.objects.filter(id__in=self.get_programs(), is_public=True).count() <= 0)
+        return not Program.objects.filter(id__in=self.get_programs(), is_public=True).exists()
 
     def has_user_data(self):
-        return bool(Program.objects.filter(id__in=self.get_programs(), is_public=False).count() > 0)
+        return Program.objects.filter(id__in=self.get_programs(), is_public=False).exists()
 
     '''
     Sets the last viewed time for a cohort
@@ -203,10 +203,11 @@ class Cohort(models.Model):
                 if filter.name not in prog_filters:
                     prog_filters[filter.name] = {
                         'id': cohort.id,
-                        'program_obj': filter.program,
                         'program_id': filter.program.id,
                         'values': []
                     }
+                    if not unformatted:
+                        prog_filters[filter.name]['program_obj'] = filter.program
                 prog_filter = prog_filters[filter.name]
                 if prog_filter['id'] == cohort.id:
                     prog_filter['values'].append(filter.value)
