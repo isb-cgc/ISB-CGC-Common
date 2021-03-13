@@ -58,6 +58,7 @@ BMI_MAPPING = {
 # }
 DATA_SOURCE_ATTR = {}
 DATA_SOURCE_TYPES = {}
+SOLR_FACETS = {}
 
 TYPE_SCHEMA = {'sample_type': 'STRING',
                'SOPInstanceUID': 'STRING',
@@ -69,9 +70,11 @@ def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
 
     if cache_as:
         if cache_as not in DATA_SOURCE_ATTR:
+            logger.debug("[STATUS] Cache of {} not found, pulling.".format(cache_as))
             DATA_SOURCE_ATTR[cache_as] = sources.get_source_attrs(**fetch_settings)
         source_set = DATA_SOURCE_ATTR[cache_as]
     else:
+        logger.debug("[STATUS] Cache not requested for: {}".format(sources))
         source_set = sources.get_source_attrs(**fetch_settings)
 
     return source_set
@@ -84,6 +87,22 @@ def fetch_data_source_types(sources):
         DATA_SOURCE_TYPES[source_set] = sources.get_source_data_types()
 
     return DATA_SOURCE_TYPES[source_set]
+
+
+def fetch_solr_facets(fetch_settings, cache_as=None):
+    facet_set = None
+
+    if cache_as:
+        if cache_as not in SOLR_FACETS:
+            SOLR_FACETS[cache_as] = build_solr_facets(**fetch_settings)
+        facet_set = SOLR_FACETS[cache_as]
+    else:
+        facet_set = build_solr_facets(**fetch_settings)
+
+    return facet_set
+
+
+
 
 # Helper method which, given a list of attribute names, a set of data version objects,
 # and a data source type, will produce a list of the Attribute ORM objects. Primarily
@@ -492,21 +511,28 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         results['filtered_facets'] = {}
 
     source_versions = sources.get_source_versions()
-    filter_attrs = sources.get_source_attrs(for_ui=True, named_set=[x[:x.rfind('_')] if re.search('_[gl]te?|_e?btwe?',x) else x for x in filters.keys()], with_set_map=False)
+    filter_attrs = fetch_data_source_attr(
+        sources,
+        {
+            'with_set_map': False,
+            'for_ui': True,
+            'named_set': [x[:x.rfind('_')] if re.search('_[gl]te?|_e?btwe?',x) else x for x in filters.keys()]
+        },
+        None if len(filters) else 'empty_filters')
     attrs_for_faceting = None
     if not records_only:
         attrs_for_faceting = fetch_data_source_attr(sources, {'for_ui':True, 'named_set': facets}, cache_as="ui_facet_set")
     all_ui_attrs = fetch_data_source_attr(sources, {'for_ui':True, 'for_faceting': False}, cache_as="all_ui_attr")
 
+    source_data_types = fetch_data_source_types(sources)
+    image_source = sources.filter(id__in=DataSetType.objects.get(data_type=DataSetType.IMAGE_DATA).datasource_set.all()).first()
+
     # Eventually this will need to go per program
     for source in sources:
-        if source.has_data_type(DataSetType.IMAGE_DATA):
-            curUniques = uniques
-        else:
-            curUniques = None
+        curUniques = uniques if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         start = time.time()
         search_child_records = None
-        if source.has_data_type(DataSetType.DERIVED_DATA):
+        if DataSetType.DERIVED_DATA in source_data_types[source.id]:
             search_child_records = filter_attrs['sources'][source.id]['attrs'].get_attr_set_types().get_child_record_searches()
         joined_origin = False
         solr_query = build_solr_query(
@@ -517,13 +543,19 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         solr_facets = None
         solr_facets_filtered = None
         if not records_only:
-            solr_facets = build_solr_facets(attrs_for_faceting['sources'][source.id]['attrs'],
-                                            filter_tags=solr_query['filter_tags'] if solr_query else None,
-                                            unique=source.count_col, min_max=True)
+            if not filters:
+                solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
+                                                'filter_tags': None, 'unique': source.count_col, 'min_max': True},
+                                                'facet_main_{}'.format(source.id))
+            else:
+                solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
+                                                 'filter_tags': solr_query['filter_tags'] if solr_query else None,
+                                                 'unique': source.count_col, 'min_max': True})
 
+            stop = time.time()
+            logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
             if filters:
-                solr_facets_filtered = build_solr_facets(attrs_for_faceting['sources'][source.id]['attrs'], None,
-                                                         unique=source.count_col, min_max=True)
+                solr_facets_filtered = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col, 'min_max': True})
         query_set = []
 
         if solr_query:
@@ -538,25 +570,27 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     else:
                         for ds in sources:
                             if ds.name != source.name and attr_name in all_ui_attrs['sources'][ds.id]['list']:
-                                if source.has_data_type(DataSetType.IMAGE_DATA) or ds.has_data_type(DataSetType.IMAGE_DATA):
+                                if DataSetType.IMAGE_DATA in source_data_types[source.id] or DataSetType.IMAGE_DATA in source_data_types[ds.id]:
                                     joined_origin = True
                                 # DataSource join pairs are unique, so, this should only produce a single record
                                 source_join = DataSourceJoin.objects.get(from_src__in=[ds.id,source.id], to_src__in=[ds.id,source.id])
                                 joined_query = ("{!join %s}" % "from={} fromIndex={} to={}".format(
                                     source_join.get_col(ds.name), ds.name, source_join.get_col(source.name)
                                 )) + solr_query['queries'][attr]
-                                if ds.has_data_type(DataSetType.ANCILLARY_DATA) and not source.has_data_type(DataSetType.ANCILLARY_DATA):
+                                if DataSetType.ANCILLARY_DATA in source_data_types[ds.id] and not DataSetType.ANCILLARY_DATA in source_data_types[source.id]:
                                     joined_query = 'has_related:"False" OR _query_:"%s"' % joined_query.replace("\"","\\\"")
                                 query_set.append(joined_query)
                 else:
                     logger.warning("[WARNING] Attribute {} not found in data sources {}".format(attr_name, ", ".join(list(sources.values_list('name',flat=True)))))
 
-        if not joined_origin and not source.has_data_type(DataSetType.IMAGE_DATA):
-            ds = sources.filter(id__in=DataSetType.objects.get(data_type=DataSetType.IMAGE_DATA).datasource_set.all()).first()
-            source_join = DataSourceJoin.objects.get(from_src__in=[ds.id, source.id], to_src__in=[ds.id, source.id])
+        if not joined_origin and not DataSetType.IMAGE_DATA in source_data_types[source.id]:
+            source_join = DataSourceJoin.objects.get(from_src__in=[image_source.id, source.id], to_src__in=[image_source.id, source.id])
             query_set.append(("{!join %s}" % "from={} fromIndex={} to={}".format(
-                source_join.get_col(ds.name), ds.name, source_join.get_col(source.name)
+                source_join.get_col(image_source.name), image_source.name, source_join.get_col(source.name)
             ))+"*:*")
+
+        stop = time.time()
+        logger.debug("[STATUS] Time to build Solr submission: {}s".format(str(stop-start)))
 
         if not records_only:
             solr_result = query_solr_and_format_result({
@@ -587,7 +621,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
 
-            if source.has_data_type(DataSetType.IMAGE_DATA):
+            if DataSetType.IMAGE_DATA in source_data_types[source.id]:
                 results['total'] = solr_result['numFound']
                 if 'uniques' in solr_result:
                     results['uniques'] = solr_result['uniques']
@@ -601,7 +635,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'facets': solr_count_filtered_result['facets']
                 }
 
-        if source.has_data_type(DataSetType.IMAGE_DATA) and not counts_only:
+        if DataSetType.IMAGE_DATA in source_data_types[source.id] and not counts_only:
             solr_result = query_solr_and_format_result({
                 'collection': source.name,
                 'fields': list(fields),
