@@ -256,6 +256,10 @@ class DataSource(models.Model):
         (SOLR, "Solr Data Collection"),
         (BIGQUERY, "BigQuery Table")
     )
+    SOURCE_TYPE_MAP = {
+        SOLR: "Solr Data Collection",
+        BIGQUERY: "BigQuery Table"
+    }
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
@@ -300,7 +304,7 @@ class DataSource(models.Model):
         unique_together = (("name", "version", "source_type"),)
 
 
-class DataNodeeQuerySet(models.QuerySet):
+class DataNodeQuerySet(models.QuerySet):
     def to_dicts(self):
         return [{
             "id": ds.id,
@@ -308,10 +312,42 @@ class DataNodeeQuerySet(models.QuerySet):
 
         } for ds in self.select_related('version').all()]
 
+    def get_data_sources(self, per_node=False):
+        sources = None
+        for dn in self.all():
+            if per_node:
+                sources = {} if not sources else sources
+                sources[dn.id] = {
+                    'name': dn.short_name,
+                    'full_name': dn.name,
+                    'sources': [{'name': x.name, 'source_type': DataSource.SOURCE_TYPE_MAP[x.source_type]} for x in dn.data_sources.all()]
+                }
+            else:
+                sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
+        return sources
+
+    def get_attrs(self, per_node=False):
+        attrs = None
+        sources = None
+        for dn in self.all():
+            if per_node:
+                attrs = {} if not attrs else attrs
+                src_attrs = dn.data_sources.all().get_source_attrs(for_faceting=False,for_ui=False)
+                attrs[dn.id] = {
+                    'name': dn.short_name,
+                    'full_name': dn.name,
+                    'attrs': [{'name': x.name, 'display_name': x.display_name, 'type': Attribute.DATA_TYPE_MAP[x.data_type] } for x in src_attrs['attrs']]
+                }
+                return attrs
+            else:
+                sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
+                attrs = sources.get_source_attrs(for_faceting=False,for_ui=False)
+        return attrs
+
 
 class DataNodeManager(models.Manager):
     def get_queryset(self):
-        return DataSourceQuerySet(self.model, using=self._db)
+        return DataNodeQuerySet(self.model, using=self._db)
 
 
 class DataNode(models.Model):
@@ -321,6 +357,10 @@ class DataNode(models.Model):
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
     data_sources = models.ManyToManyField(DataSource)
+    objects = DataNodeManager()
+
+    def __str__(self):
+        return "{} - {}".format(self.short_name, self.name)
 
 
 class Project(models.Model):
@@ -566,6 +606,12 @@ class Attribute(models.Model):
         (TEXT, 'Text'),
         (STRING, 'String')
     )
+    DATA_TYPE_MAP = {
+        CONTINUOUS_NUMERIC: 'Continuous Numeric',
+        CATEGORICAL: 'Categorical String',
+        TEXT: 'Text',
+        STRING: 'String'
+    }
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=64, null=False, blank=False)
     display_name = models.CharField(max_length=100)

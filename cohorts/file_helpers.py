@@ -174,9 +174,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 "counts_only": False,
                 "collapse_on": collapse
         }
-        if data_type != 'igv' and data_type != 'dicom':
+        if data_type == 'all' or data_type == 'camic' or data_type == 'pdf':
             query_params.update({
-                "unique": 'file_gdc_id'
+                "unique": 'file_name_key'
             })
         file_query_result = query_solr_and_format_result(query_params)
 
