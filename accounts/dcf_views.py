@@ -91,7 +91,7 @@ def oauth2_login(request):
         if idp:
             dcf_auth_url += "?idp={}".format(idp)
             if settings.DCF_TEST and settings.DCF_UPSTREAM_EXPIRES_IN_SEC:
-                dcf_auth_url += "&upstream_expires_in={}".format(settings.DCF_UPSTREAM_EXPIRES_IN_SEC)
+                dcf_auth_url += "&upstream_expires_in={}&expires_in={}".format(settings.DCF_UPSTREAM_EXPIRES_IN_SEC, settings.DCF_UPSTREAM_EXPIRES_IN_SEC)
 
         logger.info('dcf_auth_url')
         logger.info(dcf_auth_url)
