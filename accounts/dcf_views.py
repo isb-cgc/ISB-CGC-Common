@@ -91,7 +91,7 @@ def oauth2_login(request):
         if idp:
             dcf_auth_url += "?idp={}".format(idp)
             if settings.DCF_TEST and settings.DCF_UPSTREAM_EXPIRES_IN_SEC:
-                dcf_auth_url += "&upstream_expires_in={}&refresh_token_expires_in={}".format(settings.DCF_UPSTREAM_EXPIRES_IN_SEC, settings.DCF_UPSTREAM_EXPIRES_IN_SEC)
+                dcf_auth_url += "&upstream_expires_in={}&refresh_token_expires_in={}".format(settings.DCF_UPSTREAM_EXPIRES_IN_SEC, settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)
         authorization_url, state = oauth.authorization_url(dcf_auth_url)
 
 

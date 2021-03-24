@@ -1192,8 +1192,10 @@ def refresh_at_dcf(user_id):
     # Call DCF to refresh the linkage.
     #
 
+    ## only for testing purpose
+    params_dict = {'expires_in': settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC} if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC else None
     try:
-        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='patch')
+        resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='patch', params_dict=params_dict)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         throw_later = e
     except Exception as e:
