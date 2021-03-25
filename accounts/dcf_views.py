@@ -451,7 +451,9 @@ def oauth2_callback(request):
         link_callback = request.build_absolute_uri(reverse('dcf_link_callback'))
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
-
+        if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC:
+            callback += "&expires_in={}".format(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)
+        print(callback)
         return HttpResponseRedirect(callback)
     finally:
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
