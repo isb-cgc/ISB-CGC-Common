@@ -452,7 +452,7 @@ def oauth2_callback(request):
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
         if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC:
-            callback += "&expires_in={}".format(int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)/4)
+            callback += "&expires_in={}".format(int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)//4)
         print(callback)
         return HttpResponseRedirect(callback)
     finally:
