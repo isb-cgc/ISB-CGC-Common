@@ -1199,7 +1199,7 @@ def refresh_at_dcf(user_id):
     #
 
     ## only for testing purpose
-    params_dict = {'expires_in': settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC/4} if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC else None
+    params_dict = {'expires_in': int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)//4} if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC else None
     try:
         resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='patch', params_dict=params_dict)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
