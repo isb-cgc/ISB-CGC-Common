@@ -55,7 +55,7 @@ from .metadata_counting import *
 from .file_helpers import *
 from sharing.service import create_share
 from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
+from projects.models import Program, Project, Public_Metadata_Tables, Public_Data_Tables, DataNode
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 from .utils import delete_cohort as utils_delete_cohort
 
@@ -1939,6 +1939,10 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 'metadata_counts': results,
                 'program': 0
             }
+
+        by_nodes, by_programs = DataNode.get_node_programs()
+        template_values['nodes'] = by_nodes
+        template_values['all_programs'] = by_programs
 
     except Exception as e:
         logger.error("[ERROR] While building the filter panel:")

@@ -362,6 +362,71 @@ class DataNode(models.Model):
     def __str__(self):
         return "{} - {}".format(self.short_name, self.name)
 
+    @classmethod
+    def get_node_programs(cls):
+        by_node_list = []
+        by_prog_list = []
+        by_prog_dict = {}
+        # sources = cls.objects.prefetch_related('data_sources', 'data_sources__programs').filter(active=True, data_sources__source_type='S').values_list('data_sources__programs__name',flat=True).distinct()
+        nodes = cls.objects.filter(active=True)
+
+        for node in nodes:
+            programs = DataNode.objects.filter(id=node.id).prefetch_related('data_sources', 'data_sources__programs').filter(data_sources__source_type=DataSource.SOLR).values('data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description').distinct()
+            program_list = []
+            for prog in programs:
+                prog_id = prog["data_sources__programs__id"]
+                prog_name = prog["data_sources__programs__name"]
+                prog_desc = prog["data_sources__programs__description"]
+
+                prog_item = {
+                    "id": prog_id,
+                    "name": prog_name,
+                    "description": prog_desc}
+
+                if not by_prog_dict.get(prog_id):
+                    by_prog_dict[prog_id] = prog_item.copy()
+                    by_prog_dict[prog_id]["nodes"] = []
+
+                by_prog_dict[prog_id]["nodes"].append({
+                    "id": node.id,
+                    "name": node.name,
+                    "description": node.description,
+                    "short_name": node.short_name
+                })
+
+                program_list.append(prog_item)
+
+            by_node_list.append({
+                "id": node.id,
+                "name": node.name,
+                "description": node.description,
+                "short_name": node.short_name,
+                "programs": program_list
+                # "programs":[]
+                # "programs": [{
+                #     "id": prog["data_sources__programs__id"],
+                #     "name": prog["data_sources__programs__name"],
+                #     "description": prog["data_sources__programs__description"]} for prog in programs]
+
+            })
+
+        for prog_id, prog_info in by_prog_dict.items():
+            by_prog_list.append({
+                "id": prog_id,
+                "name": prog_info["name"],
+                "description": prog_info["description"],
+                "nodes": prog_info["nodes"]
+            })
+
+        # print(node_list)
+        # cls.objects.filter(active=True)
+        # for nd in cls.objects.filter(active=True):
+        #     node_list.append({'name': nd.name,
+        #                       'descruotion': nd.description,
+        #                       'short_name': nd.short_name
+        #                       })
+        # return node_list
+        return (by_node_list, by_prog_list)
 
 class Project(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
