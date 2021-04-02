@@ -451,12 +451,17 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
+        # TODO: get_node_programs() filter by is_public and owner
+        all_nodes, all_programs = DataNode.get_node_programs()
+
         template_values = {
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'program_prefixes': {x.name: True for x in program_list},
+            'all_nodes': all_nodes,
+            'all_programs': all_programs
         }
 
         if workbook_id and worksheet_id :
@@ -1825,13 +1830,17 @@ def get_metadata(request):
     return JsonResponse(results)
 
 
-def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
+def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
 
     template = 'cohorts/isb-cgc-data.html'
     template_values = {}
     # TODO: Need error template
 
     try:
+        # TODO: Get filter panel based on the combination of node_id and program_id
+
+        logger.info('[INFO] Getting cohort panel for node_id {}, program_id {}'.format(node_id, program_id))
+
         # Check program ID against public programs
         public_program = Program.objects.filter(id=program_id).first()
         user = request.user
@@ -1940,9 +1949,9 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 'program': 0
             }
 
-        by_nodes, by_programs = DataNode.get_node_programs()
-        template_values['nodes'] = by_nodes
-        template_values['all_programs'] = by_programs
+        all_nodes, all_programs = DataNode.get_node_programs()
+        template_values['all_nodes'] = all_nodes
+        template_values['all_programs'] = all_programs
 
     except Exception as e:
         logger.error("[ERROR] While building the filter panel:")
