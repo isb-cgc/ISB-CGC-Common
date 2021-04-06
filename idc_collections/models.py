@@ -221,7 +221,7 @@ class DataVersion(models.Model):
         return DataVersion.objects.get(active=True, name=name).version
 
     def __str__(self):
-        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.all())
+        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.filter(active=True))
 
 
 class CollectionQuerySet(models.QuerySet):
@@ -430,6 +430,7 @@ class DataSource(models.Model):
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     programs = models.ManyToManyField(Program)
     versions = models.ManyToManyField(DataVersion)
+    aggregate_level = models.CharField(max_length=128, null=False, blank=False, default="SeriesInstanceUID")
     objects = DataSourceManager()
 
     def get_attr(self, for_faceting=True, for_ui=False, set_type=None):
