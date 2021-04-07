@@ -659,7 +659,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'fields': list(fields),
                 'fqs': query_set,
                 'query_string': None,
-                'collapse_on': collapse_on,
+                'collapse_on': None if collapse_on == source.aggregate_level else collapse_on,
                 'counts_only': counts_only,
                 'sort': sort,
                 'limit': record_limit,

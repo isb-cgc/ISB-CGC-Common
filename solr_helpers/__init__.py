@@ -91,10 +91,11 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
         if 'stats' in result:
             for attr in result['stats']['stats_fields']:
-                formatted_query_result['facets'][attr]["min_max"] = {
-                    'min': result['stats']['stats_fields'][attr]['min'],
-                    'max': result['stats']['stats_fields'][attr]['max']
-                }
+                if attr in formatted_query_result['facets']:
+                    formatted_query_result['facets'][attr]["min_max"] = {
+                        'min': result['stats']['stats_fields'][attr]['min'] or 0,
+                        'max': result['stats']['stats_fields'][attr]['max'] or 0
+                    }
 
         formatted_query_result['nextCursor'] = result.get('nextCursorMark',None)
 
