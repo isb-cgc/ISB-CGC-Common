@@ -110,7 +110,7 @@ def fetch_solr_stats(fetch_settings,cache_as=None):
             SOLR_FACETS[cache_as] = build_solr_stats(**fetch_settings)
         stat_set = SOLR_FACETS[cache_as]
     else:
-        stat_set = build_solr_statsee(**fetch_settings)
+        stat_set = build_solr_stats(**fetch_settings)
 
     return stat_set
 
