@@ -204,7 +204,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         data_sets = DataSetType.objects.filter(data_type__in=data_types)
         sources = data_sets.get_data_sources().filter(
             source_type=source,
-            aggregate_level__in=["SeriesInstanceUID","case_barcode","sample_barcode"],
+            aggregate_level__in=["StudyInstanceUID","case_barcode","sample_barcode"],
             id__in=versions.get_data_sources().filter(source_type=source).values_list("id", flat=True)
         ).distinct()
 
