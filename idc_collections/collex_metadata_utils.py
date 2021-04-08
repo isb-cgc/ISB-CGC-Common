@@ -193,7 +193,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         if not is_json:
             context['collection_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips(collex_attr_id)
 
-        collectionsList = Collection.objects.filter(active=True).values_list('collection_id',flat=True)
+        collectionSet = Collection.objects.select_related('program').filter(active=True, collection_type=Collection.ORIGINAL_COLLEX)
+        collectionsIdList = collectionSet.values_list('collection_id',flat=True)
 
         versions = versions or DataVersion.objects.filter(active=True)
 
@@ -356,9 +357,9 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                             collex = _attr_by_source[set][source]['attributes']['collection_id']
                             if collex['vals']:
                                 context['collections'] = {a['value']: a['count'] for a in collex['vals'] if
-                                                          a['value'] in collectionsList}
+                                                          a['value'] in collectionsIdList}
                             else:
-                                context['collections'] = {a.name: 0 for a in Collection.objects.filter(active=True, collection_id__in=collectionsList)}
+                                context['collections'] = {a: 0 for a in collectionsIdList}
                             context['collections']['All'] = source_metadata['total']
 
                         _attr_by_source[set][source]['attributes'] = [{
@@ -393,27 +394,19 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         prog_attr_id = Attribute.objects.get(name='program_name').id
 
         programSet = {}
-        for collection in Collection.objects.select_related('program').filter(active=True, collection_type=Collection.ORIGINAL_COLLEX):
-            if collection.program:
-                if collection.program.short_name not in programSet:
-                    programSet[collection.program.short_name] = {
-                        'projects': {},
-                        'val': 0,
-                        'prog_attr_id': prog_attr_id,
-                        'collex_attr_id': collex_attr_id
-                    }
-            else:
-                programSet[collection.name] = {
-                    'projects': {
-                        collection.collection_id: context['collections'][collection.collection_id]
-                    },
-                    'val': context['collections'][collection.collection_id],
+        for collection in collectionSet:
+            name = collection.program.short_name if collection.program else collection.name
+            if name not in programSet:
+                programSet[name] = {
+                    'projects': {},
+                    'val': 0,
                     'prog_attr_id': prog_attr_id,
                     'collex_attr_id': collex_attr_id
                 }
-            if collection.collection_id in context['collections'] and collection.program:
-                programSet[collection.program.short_name]['projects'][collection.collection_id] = context['collections'][collection.collection_id]
-                programSet[collection.program.short_name]['val'] += context['collections'][collection.collection_id]
+            if collection.collection_id in context['collections']:
+                name = collection.program.short_name if collection.program else collection.name
+                programSet[name]['projects'][collection.collection_id] = context['collections'][collection.collection_id]
+                programSet[name]['val'] += context['collections'][collection.collection_id]
 
         if with_related:
             context['tcga_collections'] = Program.objects.get(short_name="TCGA").collection_set.all()
