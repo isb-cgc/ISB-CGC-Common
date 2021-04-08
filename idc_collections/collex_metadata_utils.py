@@ -346,7 +346,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                             if min_max is not None:
                                 _attr_by_source[set][source]['attributes'][x]['min_max'] = min_max
 
-
                         if set == 'origin_set':
                             context['collections'] = {
                             a: _attr_by_source[set][source]['attributes']['collection_id'][a]['count'] for a in
@@ -387,7 +386,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         attr_by_source['file_parts_count'] = file_parts_count
         attr_by_source['display_file_parts_count'] = min(file_parts_count, 10)
 
-
         context['set_attributes'] = attr_by_source
         context['filtered_set_attributes'] = filtered_attr_by_source
         context['filters'] = filters
@@ -395,11 +393,21 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         prog_attr_id = Attribute.objects.get(name='program_name').id
 
         programSet = {}
-        for collection in Collection.objects.select_related('program').filter(active=True):
-            if collection.program and collection.program.short_name not in programSet:
-                programSet[collection.program.short_name] = {
-                    'projects': {},
-                    'val': 0,
+        for collection in Collection.objects.select_related('program').filter(active=True, collection_type=Collection.ORIGINAL_COLLEX):
+            if collection.program:
+                if collection.program.short_name not in programSet:
+                    programSet[collection.program.short_name] = {
+                        'projects': {},
+                        'val': 0,
+                        'prog_attr_id': prog_attr_id,
+                        'collex_attr_id': collex_attr_id
+                    }
+            else:
+                programSet[collection.name] = {
+                    'projects': {
+                        collection.collection_id: context['collections'][collection.collection_id]
+                    },
+                    'val': context['collections'][collection.collection_id],
                     'prog_attr_id': prog_attr_id,
                     'collex_attr_id': collex_attr_id
                 }
@@ -411,18 +419,17 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             context['tcga_collections'] = Program.objects.get(short_name="TCGA").collection_set.all()
 
         context['programs'] = programSet
-        # context['derived_list'] = [{'segmentations:TCIA Segmentation Analysis':'Segmentation'}, {'qualitative_measurements:TCIA Qualitative Analysis': 'Qualitative Analysis'}, {'quantitative_measurements:TCIA Quantitative Analysis':'Quantitative Analysis'}]
 
-        if 'derived_set' in context['set_attributes']:
-            if 'dicom_derived_all:segmentation' in context['set_attributes']['derived_set']:
-                context['set_attributes']['derived_set']['dicom_derived_all:segmentation'].update(
-                    {'display_name': 'Segmentation', 'name': 'segmentation'})
-            if 'dicom_derived_all:qualitative' in context['set_attributes']['derived_set']:
-                context['set_attributes']['derived_set']['dicom_derived_all:qualitative'].update(
-                    {'display_name': 'Qualitative Analysis', 'name': 'qualitative'})
-            if 'dicom_derived_all:quantitative' in context['set_attributes']['derived_set']:
-                context['set_attributes']['derived_set']['dicom_derived_all:quantitative'].update(
-                    {'display_name': 'Quantitative Analysis', 'name': 'quantitative'})
+        derived_display_info = {
+            'segmentation': {'display_name': 'Segmentation', 'name': 'segmentation'},
+            'qualitative': {'display_name': 'Qualitative Analysis', 'name': 'qualitative'},
+            'quantitative': {'display_name': 'Quantitative Analysis', 'name': 'quantitative'}
+        }
+
+        for key in context['set_attributes'].get('derived_set',{}).keys():
+            set_name = key.split(':')[-1]
+            if set_name in derived_display_info:
+                context['set_attributes']['derived_set'].get(key,{}).update(derived_display_info.get(set_name,{}))
 
         if is_json:
             attr_by_source['programs'] = programSet
@@ -431,8 +438,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 attr_by_source['uniques'] = source_metadata['uniques']
             return attr_by_source
         else:
-            context['order'] = {'derived_set': ['dicom_derived_all:segmentation', 'dicom_derived_all:qualitative',
-                                               'dicom_derived_all:quantitative']}
+            context['order'] = {'derived_set': ['dicom_derived_series_v2:segmentation', 'dicom_derived_series_v2:qualitative',
+                                                'dicom_derived_series_v2:quantitative']}
         return context
 
     except Exception as e:
