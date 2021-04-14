@@ -452,7 +452,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
         # TODO: get_node_programs() filter by is_public and owner
-        all_nodes, all_programs = DataNode.get_node_programs()
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
 
         template_values = {
             'request': request,
@@ -496,12 +496,17 @@ def cohort_detail(request, cohort_id):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
+        # TODO: get_node_programs() filter by is_public and owner
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+
         template_values  = {
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'program_prefixes': {x.name: True for x in program_list},
+            'all_nodes': all_nodes,
+            'all_programs': all_programs
         }
 
         shared_with_users = []
@@ -1949,7 +1954,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 'program': 0
             }
 
-        all_nodes, all_programs = DataNode.get_node_programs()
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
         template_values['all_nodes'] = all_nodes
         template_values['all_programs'] = all_programs
 

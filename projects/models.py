@@ -363,7 +363,7 @@ class DataNode(models.Model):
         return "{} - {}".format(self.short_name, self.name)
 
     @classmethod
-    def get_node_programs(cls):
+    def get_node_programs(cls, is_authenticated=False):
         by_node_list = []
         by_prog_list = []
         by_prog_dict = {}
@@ -416,6 +416,30 @@ class DataNode(models.Model):
                 "name": prog_info["name"],
                 "description": prog_info["description"],
                 "nodes": prog_info["nodes"]
+            })
+
+        if is_authenticated:
+            by_node_list.append({
+                "id": 0,
+                "name": "User",
+                "description": "User",
+                "short_name": "User",
+                "programs": [{
+                    "id": 0,
+                    "name": "User Data",
+                    "description": "User Data"
+                    }]
+            })
+            by_prog_list.append({
+                "id": 0,
+                "name": "User Data",
+                "description": "User Data",
+                "nodes": [{
+                    "id": 0,
+                    "name": "User Data",
+                    "description": "User Data",
+                    "short_name": "User"
+                    }]
             })
 
         # print(node_list)
