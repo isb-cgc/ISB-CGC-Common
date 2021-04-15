@@ -412,7 +412,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 }
             if collection.collection_id in context['collections']:
                 name = collection.program.short_name if collection.program else collection.name
-                programSet[name]['projects'][collection.collection_id] = context['collections'][collection.collection_id]
+                programSet[name]['projects'][collection.collection_id] = { 'val' :context['collections'][collection.collection_id], 'display':collection.tcia_collection_id }
                 programSet[name]['val'] += context['collections'][collection.collection_id]
 
         if with_related:
