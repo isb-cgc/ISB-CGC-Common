@@ -283,14 +283,14 @@ class BigQuerySupport(BigQueryABC):
             'configuration': {
                 'query': {
                     'query': query,
-                    'priority': 'INTERACTIVE'
+                    'priority': 'INTERACTIVE',
+                    'useLegacySql': False,
                 }
             }
         }
 
         if parameters:
             job_desc['configuration']['query']['queryParameters'] = parameters
-            job_desc['configuration']['query']['useLegacySql'] = False
 
         if self.project_id and self.dataset_id and self.table_id:
             job_desc['configuration']['query']['destinationTable'] = {
