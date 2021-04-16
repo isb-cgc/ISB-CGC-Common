@@ -1954,6 +1954,11 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 'program': 0
             }
 
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+            cohort_progs = cohort.get_programs()
+            template_values['programs_this_cohort'] = [x.id for x in cohort_progs]
+
         all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
         template_values['all_nodes'] = all_nodes
         template_values['all_programs'] = all_programs
