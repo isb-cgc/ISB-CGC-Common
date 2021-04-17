@@ -145,6 +145,7 @@ def cohorts_list(request, is_public=False):
             'version': "; ".join(cohort.get_data_versions().get_displays())
         })
 
+
     previously_selected_cohort_ids = []
 
     return render(request, 'cohorts/cohort_list.html', {'request': request,
