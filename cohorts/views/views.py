@@ -897,7 +897,8 @@ def create_manifest_bq_table(request, cohort):
                     else:
                         base_filters['bmi_gt'] = BMI_MAPPING[val]
 
-        result = get_bq_metadata(base_filters,field_list,cohort.get_data_versions(active=True),order_by=order_by, output_settings=export_settings)
+        result = get_bq_metadata(base_filters,field_list,cohort.get_data_versions(active=True),order_by=order_by, output_settings=export_settings,
+                                 search_child_records_by=True)
 
         if result['status'] == 'error':
             response = JsonResponse({'status': 400, 'message': result['message']})
