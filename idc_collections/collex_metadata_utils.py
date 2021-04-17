@@ -157,6 +157,7 @@ def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, 
                             'alias': source_name.split(".")[-1].lower().replace("-", "_"),
                             'list': [attr],
                             'attrs': [stripped_attr],
+                            'attr_objs': source['attrs'],
                             'data_type': source['data_sets'].first().data_type,
                             'set_type':  source['data_sets'].first().set_type,
                             'count_col': source['count_col']
@@ -167,7 +168,7 @@ def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, 
         if cache_as:
             DATA_SOURCE_ATTR[cache_as] = attr_by_src
 
-    return  attr_by_src
+    return attr_by_src
 
 
 def sortNum(x):
@@ -682,7 +683,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
 
 # Use BigQuery to fetch the faceted counts and/or records
-def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on, record_limit, offset):
+def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on, record_limit, offset, search_child_records_by=None):
     results = {'docs': None, 'facets': {}}
 
     try:
@@ -928,7 +929,8 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 #   output_settings: is None: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
 #   output_settings is not None: { 'status': <'success'||'error'||'long_running'>, 'full_table_id': <string>, 'message': <string>} 
 def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, 
-                    offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False, output_settings=None):
+                    offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False, output_settings=None,
+                    search_child_records_by=False):
 
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
@@ -945,6 +947,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     filter_attr_by_bq = {}
     field_attr_by_bq = {}
+    child_record_search_field = ""
 
     query_base = """
         SELECT {field_clause}
@@ -956,6 +959,24 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         {limit_clause}
         {offset_clause}
     """
+
+    if search_child_records_by:
+        query_base = """
+            SELECT {field_clause}
+            FROM {table_clause} 
+            {join_clause}
+            WHERE {search_by} IN (
+                SELECT {search_by}
+                FROM {table_clause} 
+                {join_clause}
+                {where_clause}
+                GROUP BY {search_by}    
+            )
+            {group_clause}
+            {order_clause}
+            {limit_clause}
+            {offset_clause}
+        """
 
     join_type = ""
 
@@ -1035,6 +1056,9 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         joins = []
         query_filters = []
         fields = [field_clauses[image_table]] if image_table in field_clauses else []
+        if search_child_records_by:
+            child_record_search_fields = [y for x, y in field_attr_by_bq['sources'][image_table]['attr_objs'].get_attr_set_types().get_child_record_searches().items() if y is not None]
+            child_record_search_field = list(set(child_record_search_fields))[0]
         if image_table in filter_attr_by_bq['sources']:
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
             if len(filter_set):
@@ -1109,7 +1133,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             order_clause="{}".format("ORDER BY {}".format(", ".join(["{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by])) if order_by and len(order_by) else ""),
             group_clause="{}".format("GROUP BY {}".format(", ".join(group_by)) if group_by and len(group_by) else ""),
             limit_clause="{}".format("LIMIT {}".format(str(limit)) if limit > 0 else ""),
-            offset_clause="{}".format("OFFSET {}".format(str(offset)) if offset > 0 else "")
+            offset_clause="{}".format("OFFSET {}".format(str(offset)) if offset > 0 else ""),
+            search_by=child_record_search_field
         ))
 
     full_query_str =  """

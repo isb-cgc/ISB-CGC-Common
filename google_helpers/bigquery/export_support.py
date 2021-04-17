@@ -233,7 +233,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 'query': {
                     'query': query,
                     'priority': 'INTERACTIVE',
-                    'writeDisposition': write_disp
+                    'writeDisposition': write_disp,
+                    'useLegacySql': False
                 }
             }
         }
