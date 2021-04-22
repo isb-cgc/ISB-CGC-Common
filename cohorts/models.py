@@ -328,6 +328,8 @@ class Filter(models.Model):
         (GT, '_gt'),
         (LT, '_lt')
     )
+    DEFAULT_VALUE_DELIMITER = ','
+    ALTERNATIVE_VALUE_DELIMITERS = [';','|','^']
     objects = FilterManager()
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
@@ -335,7 +337,7 @@ class Filter(models.Model):
     filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
     numeric_op = models.CharField(max_length=4, null=True, blank=True, choices=NUMERIC_OPS)
-    value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=',')
+    value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=DEFAULT_VALUE_DELIMITER)
 
     def get_numeric_filter(self):
         if self.numeric_op:

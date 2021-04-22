@@ -128,7 +128,20 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
-            filter_set.append(Filter(resulting_cohort=cohort, attribute=attr, value=",".join([str(x) for x in filter_values]), filter_group=grouping))
+            filter_value_full = "".join([str(x) for x in filter_values])
+            delimiter = Filter.DEFAULT_VALUE_DELIMITER
+            if Filter.DEFAULT_VALUE_DELIMITER in filter_value_full:
+                for delim in Filter.ALTERNATIVE_VALUE_DELIMITERS:
+                    if delim not in filter_value_full:
+                        delimiter = delim
+                        break
+
+            filter_set.append(Filter(
+                resulting_cohort=cohort,
+                attribute=attr, value=delimiter.join([str(x) for x in filter_values]),
+                filter_group=grouping,
+                value_delimiter=delimiter
+            ))
 
         Filter.objects.bulk_create(filter_set)
 
