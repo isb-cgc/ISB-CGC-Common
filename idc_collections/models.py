@@ -221,7 +221,7 @@ class DataVersion(models.Model):
         return DataVersion.objects.get(active=True, name=name).version
 
     def __str__(self):
-        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.all())
+        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.filter(active=True))
 
 
 class CollectionQuerySet(models.QuerySet):
@@ -345,6 +345,7 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['set_map'] = {}
 
         sources = self.all()
+        attr_set_types = Attribute_Set_Type.objects.filter(datasettype=set_type).values_list('attribute',flat=True) if set_type else None
 
         for ds in sources:
             q_objects = Q(active=True)
@@ -353,7 +354,7 @@ class DataSourceQuerySet(models.QuerySet):
             if named_set:
                 q_objects &= Q(name__in=named_set)
             if set_type:
-                q_objects &= Q(id__in=Attribute_Set_Type.objects.filter(datasettype=set_type).values_list('attribute',flat=True))
+                q_objects &= Q(id__in=attr_set_types)
             if for_faceting:
                 q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
                         attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
@@ -380,12 +381,17 @@ class DataSourceQuerySet(models.QuerySet):
                         ).values_list('attribute',flat=True)
                     )
 
-            attrs['list'] = attr_set.values_list('name', flat=True) if not attrs['list'] else (attrs['list'] | attr_set.values_list('name', flat=True))
-            attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
-                        attrs['ids'] | attr_set.values_list('id', flat=True))
+            if not attrs['list']:
+                attrs['list'] = list(attr_set.values_list('name', flat=True))
+            else:
+                attrs['list'].extend(list(attr_set.values_list('name', flat=True)))
+            if not attrs['ids']:
+                attrs['ids'] = list(attr_set.values_list('id', flat=True))
+            else:
+                attrs['ids'].extend(list(attr_set.values_list('id', flat=True)))
 
-        attrs['list'] = attrs['list'] and attrs['list'].distinct()
-        attrs['ids'] = attrs['ids'] and attrs['ids'].distinct()
+        attrs['list'] = attrs['list'] and list(set(attrs['list']))
+        attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
         stop = time.time()
         logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
 
@@ -522,10 +528,10 @@ class AttributeQuerySet(models.QuerySet):
     def get_attr_ranges(self, as_dict=False):
         if as_dict:
             ranges = {}
-            for range in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()):
-                if range.attribute.id not in ranges:
-                    ranges[range.attribute.id] = []
-                ranges[range.attribute.id].append(range)
+            for range in Attribute_Ranges.objects.filter(attribute__in=self.all()):
+                if range.attribute_id not in ranges:
+                    ranges[range.attribute_id] = []
+                ranges[range.attribute_id].append(range)
             return ranges
         return Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all())
 
@@ -614,10 +620,10 @@ class Attribute(models.Model):
 class Attribute_Set_TypeQuerySet(models.QuerySet):
     def get_attr_set_types(self):
         attrs_by_set = {}
-        for set_type in self.select_related('attribute', 'datasettype').all():
-            if set_type.datasettype.id not in attrs_by_set:
-                attrs_by_set[set_type.datasettype.id] = []
-            attrs_by_set[set_type.datasettype.id].append(set_type.attribute.id)
+        for set_type in self.all():
+            if set_type.datasettype_id not in attrs_by_set:
+                attrs_by_set[set_type.datasettype_id] = []
+            attrs_by_set[set_type.datasettype_id].append(set_type.attribute_id)
         return attrs_by_set
 
     def get_child_record_searches(self, data_type=None):
@@ -644,11 +650,11 @@ class Attribute_Set_Type(models.Model):
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):
         dvals = {}
-        dvattrs = self.all().select_related('attribute')
+        dvattrs = self.all()
         for dv in dvattrs:
-            if dv.attribute.id not in dvals:
-                dvals[dv.attribute.id] = {}
-            dvals[dv.attribute.id][dv.raw_value] = dv.display_value
+            if dv.attribute_id not in dvals:
+                dvals[dv.attribute_id] = {}
+            dvals[dv.attribute_id][dv.raw_value] = dv.display_value
 
         return dvals
 

@@ -283,14 +283,14 @@ class BigQuerySupport(BigQueryABC):
             'configuration': {
                 'query': {
                     'query': query,
-                    'priority': 'INTERACTIVE'
+                    'priority': 'INTERACTIVE',
+                    'useLegacySql': False,
                 }
             }
         }
 
         if parameters:
             job_desc['configuration']['query']['queryParameters'] = parameters
-            job_desc['configuration']['query']['useLegacySql'] = False
 
         if self.project_id and self.dataset_id and self.table_id:
             job_desc['configuration']['query']['destinationTable'] = {
@@ -316,8 +316,6 @@ class BigQuerySupport(BigQueryABC):
         logger.debug("query_job: {}".format(query_job))
 
         job_id = query_job['jobReference']['jobId']
-
-        print("[STATUS] jobId {} run as {}".format(job_id,query_job.get('user_email','unknown')))
 
         query_results = None
 
