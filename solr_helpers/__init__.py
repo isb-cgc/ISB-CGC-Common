@@ -31,6 +31,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     formatted_query_result = {}
 
     try:
+
         result = query_solr(**query_settings)
 
         if 'grouped' in result:
@@ -59,7 +60,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
             if normalize_facets:
                 formatted_query_result['facets'] = {}
                 for facet in result['facets']:
-                    if facet != 'count' and facet != 'unique_count' and not (re.search('^unique_',facet)) :
+                    check_facet = re.search('^(unique|total)_(.+)$',facet)
+                    if facet not in ['count', 'unique_count'] and not check_facet :
                         facet_counts = result['facets'][facet]
                         if 'buckets' in facet_counts:
                             # This is a term facet
@@ -78,12 +80,12 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                                 formatted_query_result['facets'][facet_name][facet_range] = facet_counts
                             else:
                                 formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
-                    elif (re.search('^unique_',facet)):
-                        newFacet = facet.replace('^unique_','')
-                        if not('uniques' in formatted_query_result):
-                            formatted_query_result['uniques'] ={}
-                        formatted_query_result['uniques'][newFacet] = result['facets'][facet]
-
+                    elif check_facet:
+                        newFacet = check_facet.group(2)
+                        which = "{}s".format(check_facet.group(1))
+                        if which not in formatted_query_result:
+                            formatted_query_result[which] ={}
+                        formatted_query_result[which][newFacet] = result['facets'][facet]
             else:
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
@@ -108,7 +110,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
 def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True,
-               collapse_on=None, offset=0, limit=1000, uniques=None, with_cursor=None, stats=None):
+               collapse_on=None, offset=0, limit=1000, uniques=None, with_cursor=None, stats=None, totals=None):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -144,6 +146,11 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
                     'unique_count': 'unique({})'.format(x)
                 }
             }
+    if totals:
+        if not facets:
+            payload['facet'] = {}
+        for x in totals:
+            payload['facet']['total_{}'.format(x)] = 'unique({})'.format(x)
 
     if fields:
         payload['fields'] = fields

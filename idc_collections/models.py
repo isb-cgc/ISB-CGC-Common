@@ -179,10 +179,11 @@ class ImagingDataCommonsVersion(models.Model):
     active = models.BooleanField(default=True, null=False, blank=False)
     objects = ImagingDataCommonsVersionManager()
 
-    def get_data_sources(self, active=None):
-        if active is not None:
-            return self.dataversion_set.filter(active=active).distinct().get_data_sources().distinct()
-        return self.dataversion_set.all().distinct().get_data_sources().distinct()
+    def get_data_sources(self, active=None, source_type=None, aggregate_level=None):
+        versions = self.dataversion_set.filter(active=active).distinct() if active is not None else self.dataversion_set.all().distinct()
+
+        return versions.get_data_sources(source_type=source_type, aggregate_level=aggregate_level).distinct()
+
 
     def get_display(self):
         return self.__str__()
@@ -195,19 +196,26 @@ class ImagingDataCommonsVersion(models.Model):
 
 
 class DataVersionQuerySet(models.QuerySet):
-    def get_data_sources(self):
+    def get_data_sources(self, source_type=None, aggregate_level=None):
         sources = None
+        q_objs = Q()
+        if aggregate_level:
+            q_objs &= Q(aggregate_level=aggregate_level)
+        if source_type:
+            q_objs &= Q(source_type=source_type)
         dvs = self.all()
         for dv in dvs:
             if not sources:
-                sources = dv.datasource_set.all()
+                sources = dv.datasource_set.filter(q_objs)
             else:
-                sources = sources | dv.datasource_set.all()
+                sources = sources | dv.datasource_set.filter(q_objs)
         return sources
+
 
 class DataVersionManager(models.Manager):
     def get_queryset(self):
         return DataVersionQuerySet(self.model, using=self._db)
+
 
 class DataVersion(models.Model):
     version = models.CharField(max_length=16, null=False, blank=False)
