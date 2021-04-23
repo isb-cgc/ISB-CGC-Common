@@ -65,6 +65,7 @@ TYPE_SCHEMA = {'sample_type': 'STRING',
                'SeriesInstanceUID': 'STRING',
                'StudyInstanceUID': 'STRING'}
 
+
 def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
     source_set = None
 
@@ -78,6 +79,7 @@ def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
         source_set = sources.get_source_attrs(**fetch_settings)
 
     return source_set
+
 
 def fetch_data_source_types(sources):
     source_ids = [str(x) for x in sources.order_by('id').values_list('id',flat=True)]
@@ -180,6 +182,7 @@ def sortNum(x):
             return float(0)
         else:
             return float(strt)
+
 
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
@@ -460,16 +463,17 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 # order_docs: array for ordering documents
 # sources (optional): List of data sources to query; all active sources will be used if not provided
 # versions (optional): List of data versions to query; all active data versions will be used if not provided
-# facets: array of strings, attributes to faceted count as a list of attribute names; if not provided not faceted counts will be performed
-def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_only=False, with_ancillary = True,
-                        collapse_on = 'PatientID', order_docs=None, sources = None, versions = None, with_derived=True,
-                        facets=None, records_only=False, sort=None, uniques=None, record_source=None):
+# facets: array of strings, attributes to faceted count as a list of attribute names; if not provided no faceted
+#   counts will be performed
+def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_only=False, with_ancillary=True,
+                        collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
+                        facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
 
         if not versions:
-            versions = ImagingDataCommonsVersion.objects.get(active=true).dataversion_set.all().distinct()
+            versions = ImagingDataCommonsVersion.objects.get(active=True).dataversion_set.all().distinct()
         if not versions.first().active and not sources:
             source_type = DataSource.BIGQUERY
 
@@ -495,7 +499,8 @@ def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_onl
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit, offset)
         elif source_type == DataSource.SOLR:
-            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset, facets, records_only, sort, uniques, record_source)
+            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
+                                        facets, records_only, sort, uniques, record_source, totals)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
 
@@ -524,8 +529,10 @@ def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_onl
 
     return results
 
+
 # Use solr to fetch faceted counts and/or records
-def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None, records_only=False, sort=None, uniques=None, record_source=None):
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
+                      records_only=False, sort=None, uniques=None, record_source=None, totals=None):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -542,7 +549,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         },
         None if len(filters) else 'empty_filters')
     attrs_for_faceting = None
-    if not records_only:
+    if not records_only and facets or facets is None:
         attrs_for_faceting = fetch_data_source_attr(sources, {'for_ui':True, 'named_set': facets}, cache_as="ui_facet_set")
     all_ui_attrs = fetch_data_source_attr(sources, {'for_ui':True, 'for_faceting': False}, cache_as="all_ui_attr")
 
@@ -561,7 +568,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         ) if filters else None
         solr_facets = None
         solr_facets_filtered = None
-        if not records_only:
+        solr_stats = None
+        if not records_only and attrs_for_faceting:
             if not filters:
                 solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
                                                 'filter_tags': None, 'unique': source.count_col},
@@ -578,7 +586,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
             stop = time.time()
             logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
-            if filters:
+            if filters and attrs_for_faceting:
                 solr_facets_filtered = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col})
                 solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
         query_set = []
@@ -628,7 +636,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'counts_only': True,
                 'fields': None,
                 'uniques': curUniques,
-                'stats': solr_stats
+                'stats': solr_stats,
+                'totals': totals
             })
 
             solr_count_filtered_result = None
@@ -641,8 +650,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'limit': 0,
                     'counts_only': True,
                     'fields': None,
-                    'stats': solr_stats_filtered
-
+                    'stats': solr_stats_filtered,
+                    'totals': totals
                 })
 
             stop = time.time()
@@ -661,6 +670,9 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
                     'facets': solr_count_filtered_result['facets']
                 }
+
+            if 'totals' in solr_result:
+                results['totals'] = solr_result['totals']
 
         if DataSetType.IMAGE_DATA in source_data_types[source.id] and not counts_only:
             # Get the records

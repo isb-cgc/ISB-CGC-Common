@@ -112,7 +112,6 @@ class Cohort(models.Model):
         return data_versions.distinct()
 
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
-    # Return values can be
     def get_data_sources(self, source_type=DataSource.SOLR, active=None):
 
         cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
