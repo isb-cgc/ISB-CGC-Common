@@ -148,7 +148,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         cohort.case_count = cohort_stats['PatientID']
         cohort.series_count = cohort_stats['SeriesInstanceUID']
         cohort.study_count = cohort_stats['StudyInstanceUID']
-        cohort.collections = cohort_stats['collections'].join('; ')
+        cohort.collections = "; ".join(cohort_stats['collections'])
         cohort.save()
     
         # Set permission for user to be owner
