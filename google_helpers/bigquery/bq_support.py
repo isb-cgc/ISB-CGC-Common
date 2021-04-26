@@ -706,7 +706,7 @@ class BigQuerySupport(BigQueryABC):
                     values = [y for x in values for y in x]
 
             parameter_type = None
-            if type_schema and type_schema.get(attr,None):
+            if type_schema and type_schema.get(attr, None):
                 parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
             else:
                 # If the values are arrays we assume the first value in the first array is indicative of all
@@ -717,7 +717,6 @@ class BigQuerySupport(BigQueryABC):
                         type(type_check) not in [int,float,complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
                     ) else 'NUMERIC'
                 )
-
             filter_string = ''
             param_name = attr + '{}'.format('_{}'.format(param_suffix) if param_suffix else '')
             query_param = {
