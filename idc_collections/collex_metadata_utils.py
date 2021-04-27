@@ -59,10 +59,14 @@ BMI_MAPPING = {
 DATA_SOURCE_ATTR = {}
 DATA_SOURCE_TYPES = {}
 
-TYPE_SCHEMA = {'sample_type': 'STRING',
-               'SOPInstanceUID': 'STRING',
-               'SeriesInstanceUID': 'STRING',
-               'StudyInstanceUID': 'STRING'}
+TYPE_SCHEMA = {
+    'sample_type': 'STRING',
+    'SOPInstanceUID': 'STRING',
+    'SeriesInstanceUID': 'STRING',
+    'StudyInstanceUID': 'STRING',
+    'SOPClassUID': 'STRING'
+}
+
 
 def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
     source_set = None
