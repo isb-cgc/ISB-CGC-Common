@@ -252,7 +252,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         start = time.time()
         source_metadata = get_collex_metadata(
             filters, fields, record_limit=2000, offset=0, counts_only=counts_only, with_ancillary=with_related,
-            collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques, record_source=record_source
+            collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques,
+            record_source=record_source, search_child_records_by=None
         )
         stop = time.time()
         logger.debug("[STATUS] Benchmarking: Time to collect metadata for source type {}: {}s".format(
@@ -470,7 +471,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 #   counts will be performed
 def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_only=False, with_ancillary=True,
                         collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
-                        facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None):
+                        facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None,
+                        search_child_records_by=None):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -500,10 +502,11 @@ def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_onl
                 'filters': sources.get_source_attrs(for_ui=True, for_faceting=False, with_set_map=False),
                 'facets': sources.get_source_attrs(for_ui=True, with_set_map=False),
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
-            }, counts_only, collapse_on, record_limit, offset)
+            }, counts_only, collapse_on, record_limit, offset, search_child_records_by=search_child_records_by)
         elif source_type == DataSource.SOLR:
             results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
-                                        facets, records_only, sort, uniques, record_source, totals)
+                                        facets, records_only, sort, uniques, record_source, totals,
+                                        search_child_records_by=search_child_records_by)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
 
@@ -535,7 +538,8 @@ def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_onl
 
 # Use solr to fetch faceted counts and/or records
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
-                      records_only=False, sort=None, uniques=None, record_source=None, totals=None):
+                      records_only=False, sort=None, uniques=None, record_source=None, totals=None,
+                      search_child_records_by=None):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -543,6 +547,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         results['filtered_facets'] = {}
 
     source_versions = sources.get_source_versions()
+
     filter_attrs = fetch_data_source_attr(
         sources,
         {
@@ -553,11 +558,16 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         None if len(filters) else 'empty_filters')
     attrs_for_faceting = None
     if not records_only and facets or facets is None:
-        attrs_for_faceting = fetch_data_source_attr(sources, {'for_ui':True, 'named_set': facets}, cache_as="ui_facet_set")
-    all_ui_attrs = fetch_data_source_attr(sources, {'for_ui':True, 'for_faceting': False}, cache_as="all_ui_attr")
+        attrs_for_faceting = fetch_data_source_attr(
+            sources, {'for_ui': True, 'named_set': facets},
+            cache_as="ui_facet_set" if not sources.contains_inactive_versions() else None)
+    all_ui_attrs = fetch_data_source_attr(
+        sources, {'for_ui':True, 'for_faceting': False},
+        cache_as="all_ui_attr" if not sources.contains_inactive_versions() else None)
 
     source_data_types = fetch_data_source_types(sources)
-    image_source = sources.filter(id__in=DataSetType.objects.get(data_type=DataSetType.IMAGE_DATA).datasource_set.all()).first()
+    image_source = sources.filter(id__in=DataSetType.objects.get(
+        data_type=DataSetType.IMAGE_DATA).datasource_set.all()).first()
 
     # Eventually this will need to go per program
     for source in sources:
@@ -567,7 +577,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         solr_query = build_solr_query(
             copy.deepcopy(filters),
             with_tags_for_ex=True,
-            search_child_records_by=None
+            search_child_records_by=search_child_records_by
         ) if filters else None
         solr_facets = None
         solr_facets_filtered = None
@@ -698,7 +708,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
 
 # Use BigQuery to fetch the faceted counts and/or records
-def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on, record_limit, offset, search_child_records_by=None):
+def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on, record_limit, offset,
+                    search_child_records_by=None):
     results = {'docs': None, 'facets': {}}
 
     try:
@@ -707,7 +718,8 @@ def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on
         results['total'] = res['facets']['total']
 
         if not counts_only:
-            docs = get_bq_metadata(filters, fields, None, sources_and_attrs, [collapse_on], record_limit, offset)
+            docs = get_bq_metadata(filters, fields, None, sources_and_attrs, [collapse_on], record_limit, offset,
+                                   search_child_records_by=search_child_records_by)
             doc_result_schema = {i: x['name'] for i,x in enumerate(docs['schema']['fields'])}
 
             results['docs'] = [{
@@ -731,10 +743,10 @@ def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on
 # structure as the dict output by _build_attr_by_source.
 #
 # Queries are structured with the 'image' data type sources as the first table, and all 'ancillary' (i.e. non-image)
-# tables as JOINs into the first table. Faceted counts are done on a per attribute basis (though could be restructed into
-# a single call). Filters are handled by BigQuery API parameterization, and disabled for faceted bucket counts based on
-# their presense in a secondary WHERE clause field which resolves to 'true' if that filter's attribute is the attribute
-# currently being counted
+# tables as JOINs into the first table. Faceted counts are done on a per attribute basis (though could be restructed
+# into a single call). Filters are handled by BigQuery API parameterization, and disabled for faceted bucket counts
+# based on their presence in a secondary WHERE clause field which resolves to 'true' if that filter's attribute is the
+# attribute currently being counted
 def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
     filter_attr_by_bq = {}
     facet_attr_by_bq = {}
@@ -936,13 +948,15 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 
     return results
 
+
 # Fetch the related metadata from BigQuery
 # filters: dict filter set
 # fields: list of columns to return, string format only
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
 # returns: 
 #   output_settings: is None: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
-#   output_settings is not None: { 'status': <'success'||'error'||'long_running'>, 'full_table_id': <string>, 'message': <string>} 
+#   output_settings is not None: { 'status': <'success'||'error'||'long_running'>, 'full_table_id': <string>,
+#   'message': <string>}
 def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, 
                     offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False, output_settings=None,
                     search_child_records_by=False):
@@ -1173,6 +1187,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     return results
 
+
 # For faceted counting of continuous numeric fields, ranges must be constructed so the faceted counts are properly
 # bucketed. This method makes use of the Attribute_Ranges ORM object, and requires this be set for an attribute
 # in order to build a range clause.
@@ -1238,7 +1253,7 @@ def _get_bq_range_case_clause(attr, table, alias, count_on, include_nulls=True):
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
 # returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
 def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0,
-                    order_by=None, order_asc=True):
+                    order_by=None, order_asc=True, search_child_records_by=None):
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
 

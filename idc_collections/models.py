@@ -141,9 +141,10 @@ class DataSetType(models.Model):
 class ImagingDataCommonsVersionQuerySet(models.QuerySet):
 
     # Return all the data sources corresponding to this queryset
-    def get_data_sources(self, source_type=None, active=None):
+    def get_data_sources(self, source_type=None, active=None, aggregate_level=None):
         sources = None
         idcdvs = self.all()
+        source_qs = Q()
         for idcdv in idcdvs:
             versions = idcdv.dataversion_set.all().distinct() if active is None else idcdv.dataversion_set.filter(active=active).distinct()
             if not sources:
@@ -151,8 +152,10 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
             else:
                 sources = sources | versions.get_data_sources()
         if source_type:
-            return sources.distinct().filter(source_type=source_type)
-        return sources.distinct()
+            source_qs &= Q(source_type=source_type)
+        if aggregate_level:
+            source_qs &= Q(aggregate_level=aggregate_level)
+        return sources.distinct().filter(source_qs)
 
     # Return all display strings in this queryset
     def get_displays(self):
@@ -324,6 +327,15 @@ class DataSourceQuerySet(models.QuerySet):
                     data_types[ds.id] = []
                 data_types[ds.id].append(data_set_type.data_type)
         return data_types
+
+    def contains_inactive_versions(self):
+        contains_inactive = False
+        sources = self.all()
+        for ds in sources:
+            if len(ds.versions.filter(active=False)) > 0:
+                contains_inactive = True
+                break
+        return contains_inactive
 
     #
     # returns a dictionary of comprehensive information mapping attributes to this set of data sources:
