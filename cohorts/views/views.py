@@ -110,6 +110,8 @@ def public_cohort_list(request):
 def cohorts_list(request, is_public=False):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
+    current_version = str(ImagingDataCommonsVersion.objects.get(active=True))
+
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
     cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
@@ -150,6 +152,7 @@ def cohorts_list(request, is_public=False):
 
     return render(request, 'cohorts/cohort_list.html', {'request': request,
                                                         'cohorts': cohorts,
+                                                        'current_version': current_version,
                                                         'user_list': users,
                                                         'cohorts_listing': cohort_listing,
                                                         'cohort_versions': cohort_data_versions,

@@ -189,7 +189,7 @@ def sortNum(x):
 
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
-                           with_derived, collapse_on, is_json, uniques=None):
+                           with_derived, collapse_on, is_json, uniques=None, totals=None):
     attr_by_source = {}
     attr_sets = {}
     context = {}
@@ -252,7 +252,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         start = time.time()
         source_metadata = get_collex_metadata(
             filters, fields, record_limit=2000, offset=0, counts_only=counts_only, with_ancillary=with_related,
-            collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques, record_source=record_source
+            collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques, record_source=record_source, totals=totals
         )
         stop = time.time()
         logger.debug("[STATUS] Benchmarking: Time to collect metadata for source type {}: {}s".format(
@@ -443,6 +443,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             attr_by_source['filtered_counts'] = filtered_attr_by_source
             if 'uniques' in source_metadata:
                 attr_by_source['uniques'] = source_metadata['uniques']
+            if 'totals' in source_metadata:
+                attr_by_source['totals'] = source_metadata['totals']
             return attr_by_source
         else:
             context['order'] = {'derived_set': ['dicom_derived_series_v2:segmentation', 'dicom_derived_series_v2:qualitative',
