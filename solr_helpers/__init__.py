@@ -382,7 +382,8 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 # satisfy another criteria - eg., records from the same study may not all have the same fields pulled out, but you may
 # still want those records when filtering on this attribute.
 #
-def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None, search_child_records_by=None):
+def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None,
+                     search_child_records_by=None):
     ranged_attrs = Attribute.get_ranged_attrs()
 
     first = True
@@ -525,7 +526,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
         if search_child_records_by.get(attr_name, None):
             query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr_name,
-                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr_name], search_child_records_by[attr_name], query_str.replace("\"", "\\\"")))
+                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr_name], search_child_records_by[attr_name],
+                                                 query_str.replace("\"", "\\\"")))
 
         full_query_str += query_str
 

@@ -34,6 +34,7 @@ from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
+
 class CohortQuerySet(models.QuerySet):
     def to_dicts(self):
         return [{
@@ -43,6 +44,7 @@ class CohortQuerySet(models.QuerySet):
             "file_count": 0,
             "hashes": []
         } for cohort in self.all()]
+
 
 class CohortManager(models.Manager):
     def get_queryset(self):
@@ -140,7 +142,6 @@ class Cohort(models.Model):
 
         return result
 
-
     # Returns a dict of the filters defining this cohort organized by filter group
     def get_filters_as_dict_simple(self):
         result = []
@@ -151,7 +152,6 @@ class Cohort(models.Model):
             filter_group = fg.filter_set.all().get_filter_set()
             result.append(filter_group)
         return result
-
 
     # Returns a dict of the filters defining this cohort organized by filter group
     def get_filters_as_dict(self):
@@ -184,6 +184,9 @@ class Cohort(models.Model):
             ))
 
         return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")
+
+    def get_attrs(self):
+        return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'))
 
     def get_attr_list(self):
         return self.filter_set.select_related('attribute').all().values_list('attribute__id',flat=True)
@@ -310,9 +313,11 @@ class FilterQuerySet(models.QuerySet):
             })
         return filters
 
+
 class FilterManager(models.Manager):
     def get_queryset(self):
         return FilterQuerySet(self.model, using=self._db)
+
 
 class Filter(models.Model):
     BTW = 'B'
@@ -349,10 +354,11 @@ class Filter(models.Model):
         }
 
     def __repr__(self):
-        return "{ \"%s\": [%s] }" % self.attribute.name if not self.numeric_op else self.get_numeric_filter(), self.value
+        return "{ %s }" % ("\"{}\": [{}]".format(self.attribute.name if not self.numeric_op else self.get_numeric_filter(), self.value))
 
     def __str__(self):
         return self.__repr__()
+
 
 class Cohort_Comments(models.Model):
     cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment', on_delete=models.CASCADE)
