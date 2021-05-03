@@ -367,7 +367,6 @@ class DataNode(models.Model):
         by_node_list = []
         by_prog_list = []
         by_prog_dict = {}
-        # sources = cls.objects.prefetch_related('data_sources', 'data_sources__programs').filter(active=True, data_sources__source_type='S').values_list('data_sources__programs__name',flat=True).distinct()
         nodes = cls.objects.filter(active=True)
 
         for node in nodes:
@@ -402,12 +401,6 @@ class DataNode(models.Model):
                 "description": node.description,
                 "short_name": node.short_name,
                 "programs": program_list
-                # "programs":[]
-                # "programs": [{
-                #     "id": prog["data_sources__programs__id"],
-                #     "name": prog["data_sources__programs__name"],
-                #     "description": prog["data_sources__programs__description"]} for prog in programs]
-
             })
 
         for prog_id, prog_info in by_prog_dict.items():
@@ -442,14 +435,6 @@ class DataNode(models.Model):
                     }]
             })
 
-        # print(node_list)
-        # cls.objects.filter(active=True)
-        # for nd in cls.objects.filter(active=True):
-        #     node_list.append({'name': nd.name,
-        #                       'descruotion': nd.description,
-        #                       'short_name': nd.short_name
-        #                       })
-        # return node_list
         return (by_node_list, by_prog_list)
 
 class Project(models.Model):

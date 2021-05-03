@@ -451,7 +451,6 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
-        # TODO: get_node_programs() filter by is_public and owner
         all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
 
         template_values = {
