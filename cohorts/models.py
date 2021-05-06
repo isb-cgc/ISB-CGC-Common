@@ -184,7 +184,7 @@ class Cohort(models.Model):
             group_filters = {x['display_name']: [attr_dvals.get(x['id'],{}).get(y,y) for y in x['values']] for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
-                group_filters, field_prefix=prefix
+                group_filters, field_prefix=prefix, encapsulated=False
             ))
 
         return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")
