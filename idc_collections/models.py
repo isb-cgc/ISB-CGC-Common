@@ -141,12 +141,17 @@ class DataSetType(models.Model):
 class ImagingDataCommonsVersionQuerySet(models.QuerySet):
 
     # Return all the data sources corresponding to this queryset
-    def get_data_sources(self, source_type=None, active=None, aggregate_level=None):
+    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None):
         sources = None
         idcdvs = self.all()
         source_qs = Q()
+        version_qs = Q()
         for idcdv in idcdvs:
-            versions = idcdv.dataversion_set.all().distinct() if active is None else idcdv.dataversion_set.filter(active=active).distinct()
+            if active is not None:
+                version_qs &= Q(active=active)
+            if current is not None:
+                version_qs &= Q(current=current)
+            versions = idcdv.dataversion_set.filter(version_qs).distinct()
             if not sources:
                 sources = versions.get_data_sources()
             else:
@@ -157,13 +162,13 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
             source_qs &= Q(aggregate_level=aggregate_level)
         return sources.distinct().filter(source_qs)
 
-    # Return all display strings in this queryset
-    def get_displays(self):
+    # Return all display strings in this queryset, either as a list (joined=False) or as a string (joined=True)
+    def get_displays(self, joined=False, delimiter="; "):
         displays = []
         idcdvs = self.all()
         for idcdv in idcdvs:
             displays.append(idcdv.get_display())
-        return displays
+        return displays if not joined else delimiter.join(displays)
 
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
@@ -226,6 +231,7 @@ class DataVersion(models.Model):
     programs = models.ManyToManyField(Program)
     idc_versions = models.ManyToManyField(ImagingDataCommonsVersion)
     active = models.BooleanField(default=True)
+    current = models.BooleanField(default=False)
     objects = DataVersionManager()
 
     def get_active_version(self):
@@ -515,12 +521,14 @@ class DataSourceJoin(models.Model):
 
 class AttributeQuerySet(models.QuerySet):
 
-    def get_data_sources(self, versions=None, source_type=None, active=True):
+    def get_data_sources(self, versions=None, source_type=None, active=None, current=True, aggregate_level=None):
         q_objects = Q()
         if versions:
-            q_objects &= Q(id__in=versions.get_data_sources())
+            q_objects &= Q(id__in=versions.get_data_sources(current=current, active=active))
         if source_type:
             q_objects &= Q(source_type=source_type)
+        if aggregate_level:
+            q_objects &= Q(aggregate_level=aggregate_level)
 
         data_sources = None
         attrs = self.all()
