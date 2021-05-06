@@ -54,7 +54,7 @@ from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.utils.html import escape
 
 from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
-from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, cohort_manifest
+from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, cohort_manifest, _get_cohort_stats
 from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion
 from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata
 
@@ -101,6 +101,40 @@ def get_cases_by_cohort(cohort_id):
         return set(cases)
     except (Exception) as e:
         logger.exception(e)
+
+def get_cohort_stats(request,cohort_id):
+    cohort_stats = {}
+    try:
+        req = request.GET if request.GET else request.POST
+        update = (req.get('update', "False").lower() == "true")
+        old_cohort = Cohort.objects.get(id=cohort_id, active=True)
+        old_cohort.perm = old_cohort.get_perm(request)
+
+        if old_cohort.perm:
+            if update:
+                cohort_filters ={}
+                cohort_filters_list = old_cohort.get_filters_as_dict()[0]['filters']
+                for cohort in cohort_filters_list:
+                    cohort_filters[cohort['name']] = cohort['values']
+                cohort_stats = _get_cohort_stats(0, cohort_filters,
+                                ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True, source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID")
+                                             )
+            else:
+                cohort_stats = {'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count, 'SeriesInstanceUID': old_cohort.series_count}
+
+    except ObjectDoesNotExist as e:
+        logger.exception(e)
+        messages.error(request, 'The cohort you were looking for does not exist.')
+        return redirect('cohort_list')
+    except Exception as e:
+        logger.error("[ERROR] Exception while trying to view a cohort:")
+        logger.exception(e)
+        messages.error(request, "There was an error while trying to load that cohort's stats")
+        return redirect('cohort_list')
+    cohort_stats.pop('collections',None)
+    return(JsonResponse(cohort_stats))
+
+
 
 @login_required
 def public_cohort_list(request):

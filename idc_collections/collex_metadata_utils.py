@@ -189,7 +189,7 @@ def sortNum(x):
 
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
-                           with_derived, collapse_on, is_json, uniques=None, totals=None):
+                           with_derived, collapse_on, is_json, uniques=None):
     attr_by_source = {}
     attr_sets = {}
     context = {}
@@ -253,7 +253,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         source_metadata = get_collex_metadata(
             filters, fields, record_limit=2000, offset=0, counts_only=counts_only, with_ancillary=with_related,
             collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques,
-            record_source=record_source, search_child_records_by=None, totals=totals
+            record_source=record_source, search_child_records_by=None
         )
         stop = time.time()
         logger.debug("[STATUS] Benchmarking: Time to collect metadata for source type {}: {}s".format(
