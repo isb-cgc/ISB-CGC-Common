@@ -27,6 +27,8 @@ urlpatterns = [
     url(r'^api/preview/manifest/$', views.cohort_preview_manifest_api, name='cohort_preview_manifest_api'),
     url(r'^api/preview/query/$', views.cohort_preview_query_api, name='cohort_preview_query_api'),
     url(r'^(?P<cohort_id>\d+)/$', views.cohort_detail, name='cohort_details'),
+    url(r'^(?P<cohort_id>\d+)/stats/$', views.get_cohort_stats, name='cohort_stats'),
+
     url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
     url(r'^api/(?P<cohort_id>\d+)/manifest/$', views.cohort_manifest_api, name='cohort_manifest_api'),
     url(r'^api/(?P<cohort_id>\d+)/query/$', views.cohort_query_api, name='cohort_query_api'),
@@ -42,6 +44,7 @@ urlpatterns = [
     url(r'^set_operation/', views.set_operation, name='set_operation'),
     url(r'^save_cohort_comment/', views.save_comment, name='save_cohort_comment'),
     url(r'^download_manifest/(?P<cohort_id>\d+)/', views.download_cohort_manifest, name='cohort_manifest'),
+    url(r'^download_manifest/', views.download_cohort_manifest, name='cohort_manifest_base'),
     url(r'^download_ids/(?P<cohort_id>\d+)/', views.cohort_uuids, name='download_ids'),
     url(r'^get_metadata_ajax/$', views.get_metadata, name='metadata_count_ajax')
 ]
