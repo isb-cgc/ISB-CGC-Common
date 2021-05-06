@@ -165,37 +165,21 @@ def cohorts_list(request, is_public=False):
             if item.shared_with_users and item.owner.id == request.user.id:
                 shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
-    # Used for autocomplete listing
-    cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
-    cohort_listing = []
-    for cohort in cohort_id_names:
-        cohort_listing.append({
-            'value': int(cohort['id']),
-            'label': escape(cohort['name'])
-        })
-
-    cohort_data_versions = []
-    for cohort in cohorts:
-        cohort_data_versions.append({
-            'id': cohort.id,
-            'version': "; ".join(cohort.get_data_versions().get_displays())
-        })
-
-
     previously_selected_cohort_ids = []
 
-    return render(request, 'cohorts/cohort_list.html', {'request': request,
-                                                        'cohorts': cohorts,
-                                                        'current_version': current_version,
-                                                        'user_list': users,
-                                                        'cohorts_listing': cohort_listing,
-                                                        'cohort_versions': cohort_data_versions,
-                                                        'shared_users':  json.dumps(shared_users),
-                                                        'base_url': settings.BASE_URL,
-                                                        'base_api_url': settings.BASE_API_URL,
-                                                        'is_public': is_public,
-                                                        'previously_selected_cohort_ids' : previously_selected_cohort_ids
-                                                        })
+    return render(request, 'cohorts/cohort_list.html',
+                  {'request': request,
+                    'cohorts': cohorts,
+                    'current_version': current_version,
+                    'user_list': users,
+                    'shared_users':  json.dumps(shared_users),
+                    'base_url': settings.BASE_URL,
+                    'base_api_url': settings.BASE_API_URL,
+                    'is_public': is_public,
+                    'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
+                    'previously_selected_cohort_ids' : previously_selected_cohort_ids
+                    }
+                  )
 
 @login_required
 def cohort_detail(request, cohort_id):
@@ -891,20 +875,19 @@ class Echo(object):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
 
-def create_manifest_bq_table(request, cohort):
+def create_manifest_bq_table(request, cohorts):
     response = None
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-        user_table = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
 
         export_settings = {
             'dest': {
                 'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
                 'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
-                'table_id': user_table
+                'table_id': ""
             },
             'email': request.user.email,
-            'cohort_id': cohort.id
+            'cohort_id': ""
         }
 
         order_by = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]
@@ -913,15 +896,16 @@ def create_manifest_bq_table(request, cohort):
         # We can only ORDER BY columns which we've actually requested
         order_by = list(set.intersection(set(order_by),set(field_list)))
 
-        if request.GET.get('header_fields'):
-            selected_header_fields = json.loads(request.GET.get('header_fields'))
-            headers = []
+        all_results = {}
 
-            'cohort_name' in selected_header_fields and headers.append("Manifest for cohort '{}'".format(cohort.name))
-            'user_email' in selected_header_fields and headers.append("User: {}".format(request.user.email))
-            'cohort_filters' in selected_header_fields and headers.append("Filters: {}".format(cohort.get_filter_display_string()))
-
-            export_settings['desc'] = "\n".join(headers)
+        for cohort in cohorts:
+            if request.GET.get('header_fields'):
+                selected_header_fields = json.loads(request.GET.get('header_fields'))
+                headers = []
+                'cohort_name' in selected_header_fields and headers.append("Manifest for cohort '{}' ID#{}".format(cohort.name, cohort.id))
+                'user_email' in selected_header_fields and headers.append("User: {}".format(request.user.email))
+                'cohort_filters' in selected_header_fields and headers.append("Filters: {}".format(cohort.get_filter_display_string()))
+                export_settings['desc'] = "\n".join(headers)
 
             base_filters = cohort.get_filters_as_dict_simple()[0]
             if 'bmi' in base_filters:
@@ -935,17 +919,29 @@ def create_manifest_bq_table(request, cohort):
                     else:
                         base_filters['bmi_gt'] = BMI_MAPPING[val]
 
-        result = get_bq_metadata(base_filters,field_list,cohort.get_data_versions(active=True),order_by=order_by, output_settings=export_settings,
-                                 search_child_records_by=True)
+            export_settings['cohort_id'] = cohort.id
+            table_name = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
+            export_settings['dest']['table_id'] = table_name
+            all_results[cohort.id] = get_bq_metadata(
+                base_filters, field_list, cohort.get_data_versions(),
+                order_by=order_by, output_settings=export_settings,
+                search_child_records_by=True)
+            all_results[cohort.id]['table_id'] = table_name
 
-        if result['status'] == 'error':
-            response = JsonResponse({'status': 400, 'message': result['message']})
+        errors = {x: all_results[x]['message'] for x in all_results if all_results[x]['status'] == 'error'}
+        if bool(len(errors) > 0):
+            response = JsonResponse({'status': 400, 'message': "; ".join(["Cohort ID {}: {}".format(x,errors[x]) for x in errors])})
         else:
             msg_template = get_template('cohorts/bq-manifest-export-msg.html')
             msg = msg_template.render(context={
-                'table_uri': "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(settings.BIGQUERY_USER_DATA_PROJECT_ID, settings.BIGQUERY_USER_MANIFEST_DATASET, user_table),
-                'long_running': True if result['status'] == 'long_running' else False,
-                'full_table_id': result['full_table_id'],
+                'tables': [{
+                    'full_id':  all_results[x]['table_id'],
+                    'uri': "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
+                        settings.BIGQUERY_USER_DATA_PROJECT_ID,
+                        settings.BIGQUERY_USER_MANIFEST_DATASET,
+                        all_results[x]['table_id']
+                    )} for x in all_results],
+                'long_running': bool(len([x for x in all_results if all_results[x]['status'] == 'long_running']) > 0),
                 'email': request.user.email
             })
             response = JsonResponse({
@@ -1081,29 +1077,38 @@ def create_file_manifest(request,cohort):
         
         return response
 
-def download_cohort_manifest(request, cohort_id):
-    if not cohort_id:
+def download_cohort_manifest(request, cohort_id=0):
+    cohort_ids = []
+    req = request.GET if request.GET else request.POST
+    if cohort_id:
+        cohort_ids = [cohort_id]
+    else:
+        cohort_ids = req.get("ids", "").split(",")
+
+    if not len(cohort_ids):
         messages.error(request, "A cohort ID was not provided.")
         return redirect('cohort_list')
 
     try:
-        cohort = Cohort.objects.get(id=cohort_id)
-        Cohort_Perms.objects.get(cohort=cohort, user=request.user)
+        cohorts = Cohort.objects.filter(id__in=[int(x) for x in cohort_ids])
+        for cohort in cohorts:
+            Cohort_Perms.objects.get(cohort=cohort, user=request.user)
 
-        if request.GET.get('manifest-type','file-manifest') == 'bq-manifest':
-            response = create_manifest_bq_table(request,cohort)
+        if req.get('manifest-type','file-manifest') == 'bq-manifest':
+            response = create_manifest_bq_table(request, cohorts)
         else:
-            response = create_file_manifest(request,cohort)
+            response = create_file_manifest(request, cohorts)
 
         return response
     except ObjectDoesNotExist:
-        logger.error("[ERROR] User ID {} attempted to access cohort {}, which they do not have permission to view.".format(request.user.id,cohort.id))
-        messages.error(request,"You don't have permission to view that cohort.")
+        logger.error("[ERROR] User ID {} attempted to access one or more of these cohorts, " +
+                     "which they do not have permission to view: {}".format(request.user.id,cohort_ids.join("; ")))
+        messages.error(request,"You don't have permission to view one or more of these cohorts.")
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the cohort manifest for user {}:".format(str(request.user.id)))
+        logger.error("[ERROR] While downloading the cohort manifest(s) for user {}:".format(str(request.user.id)))
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to download your cohort manifest--please contact the administrator.")
+        messages.error(request,"There was an error while attempting to download your cohort manifest(s)--please contact the administrator.")
 
     return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
 
