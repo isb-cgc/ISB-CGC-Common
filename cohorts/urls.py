@@ -23,11 +23,11 @@ from . import views
 urlpatterns = [
     url(r'^$', views.cohorts_list, name='cohort_list'),
     url(r'^api/$', views.cohort_list_api, name='cohort_list_api'),
-    url(r'^api/preview/$', views.cohort_preview_api, name='cohort_preview_api'),
+#    url(r'^api/preview/$', views.cohort_preview_api, name='cohort_preview_api'),
     url(r'^api/preview/manifest/$', views.cohort_preview_manifest_api, name='cohort_preview_manifest_api'),
     url(r'^api/preview/query/$', views.cohort_preview_query_api, name='cohort_preview_query_api'),
     url(r'^(?P<cohort_id>\d+)/$', views.cohort_detail, name='cohort_details'),
-    url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
+#    url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
     url(r'^api/(?P<cohort_id>\d+)/manifest/$', views.cohort_manifest_api, name='cohort_manifest_api'),
     url(r'^api/(?P<cohort_id>\d+)/query/$', views.cohort_query_api, name='cohort_query_api'),
     url(r'^save_cohort/', views.save_cohort, name='save_cohort'),
