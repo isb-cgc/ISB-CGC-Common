@@ -31,6 +31,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     formatted_query_result = {}
 
     try:
+
         result = query_solr(**query_settings)
 
         if 'grouped' in result:
@@ -59,7 +60,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
             if normalize_facets:
                 formatted_query_result['facets'] = {}
                 for facet in result['facets']:
-                    if facet != 'count' and facet != 'unique_count' and not (re.search('^unique_',facet)) :
+                    check_facet = re.search('^(unique|total)_(.+)$',facet)
+                    if facet not in ['count', 'unique_count'] and not check_facet :
                         facet_counts = result['facets'][facet]
                         if 'buckets' in facet_counts:
                             # This is a term facet
@@ -78,16 +80,24 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                                 formatted_query_result['facets'][facet_name][facet_range] = facet_counts
                             else:
                                 formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
-                    elif (re.search('^unique_',facet)):
-                        newFacet = facet.replace('^unique_','')
-                        if not('uniques' in formatted_query_result):
-                            formatted_query_result['uniques'] ={}
-                        formatted_query_result['uniques'][newFacet] = result['facets'][facet]
-
+                    elif check_facet:
+                        newFacet = check_facet.group(2)
+                        which = "{}s".format(check_facet.group(1))
+                        if which not in formatted_query_result:
+                            formatted_query_result[which] ={}
+                        formatted_query_result[which][newFacet] = result['facets'][facet]
             else:
                 formatted_query_result['facets'] = result['facets']
         elif 'facet_counts' in result:
-                formatted_query_result['facets'] = result['facet_counts']['facet_fields']
+            formatted_query_result['facets'] = result['facet_counts']['facet_fields']
+
+        if 'stats' in result:
+            for attr in result['stats']['stats_fields']:
+                if attr in formatted_query_result['facets']:
+                    formatted_query_result['facets'][attr]["min_max"] = {
+                        'min': result['stats']['stats_fields'][attr]['min'] or 0,
+                        'max': result['stats']['stats_fields'][attr]['max'] or 0
+                    }
 
         formatted_query_result['nextCursor'] = result.get('nextCursorMark',None)
 
@@ -100,7 +110,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
 def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True,
-               collapse_on=None, offset=0, limit=1000, uniques=None, with_cursor=None):
+               collapse_on=None, offset=0, limit=1000, uniques=None, with_cursor=None, stats=None, totals=None):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
     payload = {
@@ -115,6 +125,10 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     if with_cursor:
         payload['params']['cursorMark'] = with_cursor
         del payload['offset']
+
+    if stats:
+        payload['params']['stats'] = True
+        payload['params']['stats.field'] = stats
 
     if facets:
         payload['facet'] = facets
@@ -132,6 +146,11 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
                     'unique_count': 'unique({})'.format(x)
                 }
             }
+    if totals:
+        if not facets:
+            payload['facet'] = {}
+        for x in totals:
+            payload['facet']['total_{}'.format(x)] = 'unique({})'.format(x)
 
     if fields:
         payload['fields'] = fields
@@ -173,9 +192,21 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     return query_result
 
 
+# Generates the Solr stats block of a JSON API request
+def build_solr_stats(attrs,filter_tags=None):
+    stats = []
+    attr_facets = attrs.get_facet_types()
+    for attr in attrs:
+        if attr_facets[attr.id] == 'query':
+            stat = attr.name
+            if filter_tags and attr.name in filter_tags:
+                stat = "{!ex=%s}"%filter_tags[attr.name]+stat
+            stats.append(stat)
+    return stats
+
 # Solr facets are the bucket counting; optionally provide a set of filters to *not* be counted for purposes of
 # providing counts on the query filters
-def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, min_max=False):
+def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, with_stats=False):
     facets = {}
 
     attr_sets = attrs.get_attr_sets()
@@ -307,22 +338,6 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                         facets[none_facet_name]['domain']['filter'] = ""
                     facets[none_facet_name]['domain']['filter'] += "has_{}:True".format(attr_cats[attr.name]['cat_name'].lower())
 
-            if min_max:
-                facets["{}:min_max".format(attr.name)] = {
-                    'type': facet_type,
-                    'field': attr.name,
-                    'limit': -1,
-                    'q': "*:*",
-                    'facet': {
-                        'min': "min({})".format(attr.name),
-                        'max': "max({})".format(attr.name),
-                    }
-                }
-                if filter_tags and attr.name in filter_tags:
-                    min_max_name="{}:min_max".format(attr.name)
-                    if not 'domain' in facets[min_max_name]:
-                        facets[min_max_name]['domain'] = {}
-                    facets[min_max_name]['domain']["excludeTags"] = filter_tags[attr.name]
         else:
             facets[attr.name] = {
                 'type': facet_type,
@@ -367,7 +382,8 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 # satisfy another criteria - eg., records from the same study may not all have the same fields pulled out, but you may
 # still want those records when filtering on this attribute.
 #
-def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None, search_child_records_by=None):
+def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None,
+                     search_child_records_by=None):
     ranged_attrs = Attribute.get_ranged_attrs()
 
     first = True
@@ -510,7 +526,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
         if search_child_records_by.get(attr_name, None):
             query_str = '({} OR ({} +_query_:"{}"))'.format(query_str, '(-%s:{* TO *})' % attr_name,
-                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr_name], search_child_records_by[attr_name], query_str.replace("\"", "\\\"")))
+                    "{!join to=%s from=%s}%s" % (search_child_records_by[attr_name], search_child_records_by[attr_name],
+                                                 query_str.replace("\"", "\\\"")))
 
         full_query_str += query_str
 

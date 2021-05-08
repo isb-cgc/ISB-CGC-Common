@@ -9,7 +9,6 @@ import logging
 from sharing.models import Shared_Resource
 from functools import reduce
 
-
 logger = logging.getLogger('main_logger')
 
 
@@ -142,26 +141,34 @@ class DataSetType(models.Model):
 class ImagingDataCommonsVersionQuerySet(models.QuerySet):
 
     # Return all the data sources corresponding to this queryset
-    def get_data_sources(self, source_type=None, active=None):
+    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None):
         sources = None
         idcdvs = self.all()
+        source_qs = Q()
+        version_qs = Q()
         for idcdv in idcdvs:
-            versions = idcdv.dataversion_set.all().distinct() if active is None else idcdv.dataversion_set.filter(active=active).distinct()
+            if active is not None:
+                version_qs &= Q(active=active)
+            if current is not None:
+                version_qs &= Q(current=current)
+            versions = idcdv.dataversion_set.filter(version_qs).distinct()
             if not sources:
                 sources = versions.get_data_sources()
             else:
                 sources = sources | versions.get_data_sources()
         if source_type:
-            return sources.distinct().filter(source_type=source_type)
-        return sources.distinct()
+            source_qs &= Q(source_type=source_type)
+        if aggregate_level:
+            source_qs &= Q(aggregate_level=aggregate_level)
+        return sources.distinct().filter(source_qs)
 
-    # Return all display strings in this queryset
-    def get_displays(self):
+    # Return all display strings in this queryset, either as a list (joined=False) or as a string (joined=True)
+    def get_displays(self, joined=False, delimiter="; "):
         displays = []
         idcdvs = self.all()
         for idcdv in idcdvs:
             displays.append(idcdv.get_display())
-        return displays
+        return displays if not joined else delimiter.join(displays)
 
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
@@ -173,13 +180,18 @@ class ImagingDataCommonsVersion(models.Model):
     version_number = models.CharField(max_length=128, null=False, blank=False)
     version_uid = models.CharField(max_length=128, null=True)
     date_active = models.DateField(auto_now_add=True, null=False, blank=False)
+    data_volume = models.FloatField(null=False, blank=False, default=0.0)
+    case_count = models.IntegerField(null=False, blank=False, default=0)
+    series_count = models.IntegerField(null=False, blank=False, default=0)
+    collex_count = models.IntegerField(null=False, blank=False, default=0)
     active = models.BooleanField(default=True, null=False, blank=False)
     objects = ImagingDataCommonsVersionManager()
 
-    def get_data_sources(self, active=None):
-        if active is not None:
-            return self.dataversion_set.filter(active=active).distinct().get_data_sources().distinct()
-        return self.dataversion_set.all().distinct().get_data_sources().distinct()
+    def get_data_sources(self, active=None, source_type=None, aggregate_level=None):
+        versions = self.dataversion_set.filter(active=active).distinct() if active is not None else self.dataversion_set.all().distinct()
+
+        return versions.get_data_sources(source_type=source_type, aggregate_level=aggregate_level).distinct()
+
 
     def get_display(self):
         return self.__str__()
@@ -192,19 +204,26 @@ class ImagingDataCommonsVersion(models.Model):
 
 
 class DataVersionQuerySet(models.QuerySet):
-    def get_data_sources(self):
+    def get_data_sources(self, source_type=None, aggregate_level=None):
         sources = None
+        q_objs = Q()
+        if aggregate_level:
+            q_objs &= Q(aggregate_level=aggregate_level)
+        if source_type:
+            q_objs &= Q(source_type=source_type)
         dvs = self.all()
         for dv in dvs:
             if not sources:
-                sources = dv.datasource_set.all()
+                sources = dv.datasource_set.filter(q_objs)
             else:
-                sources = sources | dv.datasource_set.all()
+                sources = sources | dv.datasource_set.filter(q_objs)
         return sources
+
 
 class DataVersionManager(models.Manager):
     def get_queryset(self):
         return DataVersionQuerySet(self.model, using=self._db)
+
 
 class DataVersion(models.Model):
     version = models.CharField(max_length=16, null=False, blank=False)
@@ -212,13 +231,14 @@ class DataVersion(models.Model):
     programs = models.ManyToManyField(Program)
     idc_versions = models.ManyToManyField(ImagingDataCommonsVersion)
     active = models.BooleanField(default=True)
+    current = models.BooleanField(default=False)
     objects = DataVersionManager()
 
     def get_active_version(self):
         return DataVersion.objects.get(active=True, name=name).version
 
     def __str__(self):
-        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.all())
+        return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.filter(active=True))
 
 
 class CollectionQuerySet(models.QuerySet):
@@ -314,6 +334,15 @@ class DataSourceQuerySet(models.QuerySet):
                 data_types[ds.id].append(data_set_type.data_type)
         return data_types
 
+    def contains_inactive_versions(self):
+        contains_inactive = False
+        sources = self.all()
+        for ds in sources:
+            if len(ds.versions.filter(active=False)) > 0:
+                contains_inactive = True
+                break
+        return contains_inactive
+
     #
     # returns a dictionary of comprehensive information mapping attributes to this set of data sources:
     #
@@ -342,6 +371,7 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['set_map'] = {}
 
         sources = self.all()
+        attr_set_types = Attribute_Set_Type.objects.filter(datasettype=set_type).values_list('attribute',flat=True) if set_type else None
 
         for ds in sources:
             q_objects = Q(active=True)
@@ -350,7 +380,7 @@ class DataSourceQuerySet(models.QuerySet):
             if named_set:
                 q_objects &= Q(name__in=named_set)
             if set_type:
-                q_objects &= Q(id__in=Attribute_Set_Type.objects.filter(datasettype=set_type).values_list('attribute',flat=True))
+                q_objects &= Q(id__in=attr_set_types)
             if for_faceting:
                 q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
                         attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
@@ -377,12 +407,17 @@ class DataSourceQuerySet(models.QuerySet):
                         ).values_list('attribute',flat=True)
                     )
 
-            attrs['list'] = attr_set.values_list('name', flat=True) if not attrs['list'] else (attrs['list'] | attr_set.values_list('name', flat=True))
-            attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
-                        attrs['ids'] | attr_set.values_list('id', flat=True))
+            if not attrs['list']:
+                attrs['list'] = list(attr_set.values_list('name', flat=True))
+            else:
+                attrs['list'].extend(list(attr_set.values_list('name', flat=True)))
+            if not attrs['ids']:
+                attrs['ids'] = list(attr_set.values_list('id', flat=True))
+            else:
+                attrs['ids'].extend(list(attr_set.values_list('id', flat=True)))
 
-        attrs['list'] = attrs['list'] and attrs['list'].distinct()
-        attrs['ids'] = attrs['ids'] and attrs['ids'].distinct()
+        attrs['list'] = attrs['list'] and list(set(attrs['list']))
+        attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
         stop = time.time()
         logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
 
@@ -421,6 +456,7 @@ class DataSource(models.Model):
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     programs = models.ManyToManyField(Program)
     versions = models.ManyToManyField(DataVersion)
+    aggregate_level = models.CharField(max_length=128, null=False, blank=False, default="SeriesInstanceUID")
     objects = DataSourceManager()
 
     def get_attr(self, for_faceting=True, for_ui=False, set_type=None):
@@ -485,12 +521,14 @@ class DataSourceJoin(models.Model):
 
 class AttributeQuerySet(models.QuerySet):
 
-    def get_data_sources(self, versions=None, source_type=None, active=True):
+    def get_data_sources(self, versions=None, source_type=None, active=None, current=True, aggregate_level=None):
         q_objects = Q()
         if versions:
-            q_objects &= Q(id__in=versions.get_data_sources())
+            q_objects &= Q(id__in=versions.get_data_sources(current=current, active=active))
         if source_type:
             q_objects &= Q(source_type=source_type)
+        if aggregate_level:
+            q_objects &= Q(aggregate_level=aggregate_level)
 
         data_sources = None
         attrs = self.all()
@@ -519,10 +557,10 @@ class AttributeQuerySet(models.QuerySet):
     def get_attr_ranges(self, as_dict=False):
         if as_dict:
             ranges = {}
-            for range in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()):
-                if range.attribute.id not in ranges:
-                    ranges[range.attribute.id] = []
-                ranges[range.attribute.id].append(range)
+            for range in Attribute_Ranges.objects.filter(attribute__in=self.all()):
+                if range.attribute_id not in ranges:
+                    ranges[range.attribute_id] = []
+                ranges[range.attribute_id].append(range)
             return ranges
         return Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all())
 
@@ -611,10 +649,10 @@ class Attribute(models.Model):
 class Attribute_Set_TypeQuerySet(models.QuerySet):
     def get_attr_set_types(self):
         attrs_by_set = {}
-        for set_type in self.select_related('attribute', 'datasettype').all():
-            if set_type.datasettype.id not in attrs_by_set:
-                attrs_by_set[set_type.datasettype.id] = []
-            attrs_by_set[set_type.datasettype.id].append(set_type.attribute.id)
+        for set_type in self.all():
+            if set_type.datasettype_id not in attrs_by_set:
+                attrs_by_set[set_type.datasettype_id] = []
+            attrs_by_set[set_type.datasettype_id].append(set_type.attribute_id)
         return attrs_by_set
 
     def get_child_record_searches(self, data_type=None):
@@ -641,11 +679,11 @@ class Attribute_Set_Type(models.Model):
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):
         dvals = {}
-        dvattrs = self.all().select_related('attribute')
+        dvattrs = self.all()
         for dv in dvattrs:
-            if dv.attribute.id not in dvals:
-                dvals[dv.attribute.id] = {}
-            dvals[dv.attribute.id][dv.raw_value] = dv.display_value
+            if dv.attribute_id not in dvals:
+                dvals[dv.attribute_id] = {}
+            dvals[dv.attribute_id][dv.raw_value] = dv.display_value
 
         return dvals
 

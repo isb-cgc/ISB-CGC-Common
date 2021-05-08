@@ -34,6 +34,7 @@ from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
+
 class CohortQuerySet(models.QuerySet):
     def to_dicts(self):
         return [{
@@ -43,6 +44,7 @@ class CohortQuerySet(models.QuerySet):
             "file_count": 0,
             "hashes": []
         } for cohort in self.all()]
+
 
 class CohortManager(models.Manager):
     def get_queryset(self):
@@ -68,6 +70,10 @@ class Cohort(models.Model):
     active = models.BooleanField(default=True)
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
+    case_count = models.IntegerField(blank=False, null=False, default=0)
+    series_count = models.IntegerField(blank=False, null=False, default=0)
+    study_count = models.IntegerField(blank=False, null=False, default=0)
+    collections = models.TextField(blank=False, null=False, default="")
 
     # Returns the names only of the collections found in this Cohort
     # Return value is an array of strings
@@ -101,22 +107,25 @@ class Cohort(models.Model):
     # Returns the data versions identified in the filter groups for this cohort
     # Returns a DataVersion QuerySet
     def get_data_versions(self, active=None):
-
         data_versions = ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True)) \
             if active is None else ImagingDataCommonsVersion.objects.filter(active=active, id__in=self.filter_group_set.all().values_list('data_version',flat=True))
 
         return data_versions.distinct()
 
-    # Returns the list of data sources used by this cohort, as a function of the filters which define it
-    # Return values can be
-    def get_data_sources(self, source_type=DataSource.SOLR, active=None):
+    def only_active_versions(self):
+        return bool(len(self.get_data_versions(active=False)) <= 0)
 
+    # Returns the list of data sources used by this cohort, as a function of the filters which define it
+    def get_data_sources(self, source_type=DataSource.SOLR, active=None, current=True, aggregate_level=None):
+
+        # A cohort might be from an inactive data version, in which case, active isn't a valid request,
+        # and we ignore it.
         cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
         attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
 
-        data_versions = self.get_data_versions(active=active)
+        data_versions = self.get_data_versions()
 
-        sources = attributes.get_data_sources(data_versions, source_type)
+        sources = attributes.get_data_sources(data_versions, source_type, active, current, aggregate_level)
 
         return sources
 
@@ -137,7 +146,6 @@ class Cohort(models.Model):
 
         return result
 
-
     # Returns a dict of the filters defining this cohort organized by filter group
     def get_filters_as_dict_simple(self):
         result = []
@@ -148,7 +156,6 @@ class Cohort(models.Model):
             filter_group = fg.filter_set.all().get_filter_set()
             result.append(filter_group)
         return result
-
 
     # Returns a dict of the filters defining this cohort organized by filter group
     def get_filters_as_dict(self):
@@ -177,10 +184,13 @@ class Cohort(models.Model):
             group_filters = {x['display_name']: [attr_dvals.get(x['id'],{}).get(y,y) for y in x['values']] for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
-                group_filters, field_prefix=prefix
+                group_filters, field_prefix=prefix, encapsulated=False
             ))
 
         return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")
+
+    def get_attrs(self):
+        return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'))
 
     def get_attr_list(self):
         return self.filter_set.select_related('attribute').all().values_list('attribute__id',flat=True)
@@ -307,9 +317,11 @@ class FilterQuerySet(models.QuerySet):
             })
         return filters
 
+
 class FilterManager(models.Manager):
     def get_queryset(self):
         return FilterQuerySet(self.model, using=self._db)
+
 
 class Filter(models.Model):
     BTW = 'B'
@@ -324,6 +336,8 @@ class Filter(models.Model):
         (GT, '_gt'),
         (LT, '_lt')
     )
+    DEFAULT_VALUE_DELIMITER = ','
+    ALTERNATIVE_VALUE_DELIMITERS = [';','|','^']
     objects = FilterManager()
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
@@ -331,7 +345,7 @@ class Filter(models.Model):
     filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
     numeric_op = models.CharField(max_length=4, null=True, blank=True, choices=NUMERIC_OPS)
-    value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=',')
+    value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=DEFAULT_VALUE_DELIMITER)
 
     def get_numeric_filter(self):
         if self.numeric_op:
@@ -344,10 +358,11 @@ class Filter(models.Model):
         }
 
     def __repr__(self):
-        return "{ \"%s\": [%s] }" % self.attribute.name if not self.numeric_op else self.get_numeric_filter(), self.value
+        return "{ %s }" % ("\"{}\": [{}]".format(self.attribute.name if not self.numeric_op else self.get_numeric_filter(), self.value))
 
     def __str__(self):
         return self.__repr__()
+
 
 class Cohort_Comments(models.Model):
     cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment', on_delete=models.CASCADE)

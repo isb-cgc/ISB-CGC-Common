@@ -34,9 +34,50 @@ from idc_collections.models import Program, Attribute, ImagingDataCommonsVersion
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from idc_collections.collex_metadata_utils import get_collex_metadata
+from idc_collections.models import DataSetType,DataSource
 
 logger = logging.getLogger('main_logger')
 BLACKLIST_RE = settings.BLACKLIST_RE
+
+
+def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
+    stats = {
+        'PatientID': 0,
+        'StudyInstanceUID': 0,
+        'SeriesInstanceUID': 0,
+        'collections': []
+    }
+
+    try:
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+        elif not filters or not sources:
+            raise Exception("If you don't provide a cohort ID, you must provide "
+                            + "both filters *and* a valid DataSource list!")
+
+        if not filters:
+            filters = cohort.get_filters_as_dict_simple()[0]
+
+        sources = sources or DataSetType.objects.get(data_type=DataSetType.IMAGE_DATA).datasource_set.filter(
+            id__in=cohort.get_data_versions().get_data_sources(
+                source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID"
+            ))
+
+        result = get_collex_metadata(filters, None, sources=sources, facets=["collection_id"], counts_only=True,
+                                     totals=["PatientID", "StudyInstanceUID", "SeriesInstanceUID"])
+        print(result)
+        for total in result['totals']:
+            stats[total] = result['totals'][total]
+
+        for src in result['facets']:
+            if src.split(':')[0] in list(sources.values_list('name',flat=True)):
+                stats['collections'] = [x for x, y in result['facets'][src]['facets']['collection_id'].items() if y > 0]
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching cohort stats:")
+        logger.exception(e)
+
+    return stats
 
 
 def _delete_cohort(user, cohort_id):
@@ -71,7 +112,8 @@ def _delete_cohort(user, cohort_id):
     return cohort_info
 
 
-def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, desc=None, case_insens=True):
+def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, desc=None, case_insens=True,
+                 no_stats=False):
     cohort_info = {}
     cohort = None
     new_cohort = bool(cohort_id is None)
@@ -109,8 +151,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         cohort = Cohort.objects.create(name=name)
         if desc:
             cohort.description = desc
-        cohort.save()
-    
+
         # Set permission for user to be owner
         perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
         perm.save()
@@ -128,9 +169,31 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
-            filter_set.append(Filter(resulting_cohort=cohort, attribute=attr, value=",".join([str(x) for x in filter_values]), filter_group=grouping))
+            filter_value_full = "".join([str(x) for x in filter_values])
+            delimiter = Filter.DEFAULT_VALUE_DELIMITER
+            if Filter.DEFAULT_VALUE_DELIMITER in filter_value_full:
+                for delim in Filter.ALTERNATIVE_VALUE_DELIMITERS:
+                    if delim not in filter_value_full:
+                        delimiter = delim
+                        break
+
+            filter_set.append(Filter(
+                resulting_cohort=cohort,
+                attribute=attr, value=delimiter.join([str(x) for x in filter_values]),
+                filter_group=grouping,
+                value_delimiter=delimiter
+            ))
 
         Filter.objects.bulk_create(filter_set)
+
+        # For backwards compatibility with v1 cohorts
+        if not no_stats:
+            cohort_stats = _get_cohort_stats(cohort.id)
+            cohort.case_count = cohort_stats['PatientID']
+            cohort.series_count = cohort_stats['SeriesInstanceUID']
+            cohort.study_count = cohort_stats['StudyInstanceUID']
+            cohort.collections = "; ".join(cohort_stats['collections'])
+            cohort.save()
 
         cohort_info = {
             'cohort_id': cohort.id,
@@ -147,6 +210,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         cohort_info['message'] = "Failed to save cohort!"
     
     return cohort_info
+
 
 def cohort_manifest(cohort, user, fields, limit, offset):
     try:
