@@ -905,19 +905,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     image_tables = {}
 
-    # The following builds a DataSourceQuerySet consisting of all active sources as the most recent
-    # inactive source. This is to deal with there being both  dicom_pivot_wave0 and dicom_pivot_wave1
-    # inactive sources
-    ids = [id[0] for id in data_version.get_data_sources(active=True,source_type=DataSource.BIGQUERY).values_list('id')]
-    ids.append(
-        sorted([id[0] for id in
-         data_version.get_data_sources(active=False, source_type=DataSource.BIGQUERY).values_list('id')])[-1]
-    )
-    sources = data_version.get_data_sources(source_type=DataSource.BIGQUERY).filter(id__in=ids)
-
-    # sources = data_version.get_data_sources(source_type=DataSource.BIGQUERY).filter().distinct()
-    # # Temporary hack because, for IDC 1.0, we get idc-dev.metadata.dicom_pivot_wave0 and idc-dev.metadata.dicom_pivot_wave1
-    # sources = sources.exclude(name="idc-dev.metadata.dicom_pivot_wave0")
+    sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
@@ -1184,19 +1172,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
 
     image_tables = {}
 
-    # The following builds a DataSourceQuerySet consisting of all active sources as the most recent
-    # inactive source. This is to deal with there being both  dicom_pivot_wave0 and dicom_pivot_wave1
-    # inactive sources
-    ids = [id[0] for id in data_version.get_data_sources(active=True,source_type=DataSource.BIGQUERY).values_list('id')]
-    ids.append(
-        sorted([id[0] for id in
-         data_version.get_data_sources(active=False, source_type=DataSource.BIGQUERY).values_list('id')])[-1]
-    )
-    sources = data_version.get_data_sources(source_type=DataSource.BIGQUERY).filter(id__in=ids)
-
-    # sources = data_version.get_data_sources(source_type=DataSource.BIGQUERY).filter().distinct()
-    # # Temporary hack because, for IDC 1.0, we get idc-dev.metadata.dicom_pivot_wave0 and idc-dev.metadata.dicom_pivot_wave1
-    # sources = sources.exclude(name="idc-dev.metadata.dicom_pivot_wave0")
+    sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
