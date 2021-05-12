@@ -30,7 +30,7 @@ urlpatterns = [
 #    url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
     url(r'^(?P<cohort_id>\d+)/stats/$', views.get_cohort_stats, name='cohort_stats'),
 
-    url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
+#    url(r'^api/(?P<cohort_id>\d+)/$', views.cohort_detail_api, name='cohort_detail_api'),
     url(r'^api/(?P<cohort_id>\d+)/manifest/$', views.cohort_manifest_api, name='cohort_manifest_api'),
     url(r'^api/(?P<cohort_id>\d+)/query/$', views.cohort_query_api, name='cohort_query_api'),
     url(r'^save_cohort/', views.save_cohort, name='save_cohort'),
