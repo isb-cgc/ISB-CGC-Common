@@ -474,7 +474,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_only=False, with_ancillary=True,
                         collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
                         facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None,
-                        search_child_records_by=None):
+                        search_child_records_by=None, filtered_needed = True, custom_facets=None,raw_format=False):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -508,28 +508,28 @@ def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_onl
         elif source_type == DataSource.SOLR:
             results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
                                         facets, records_only, sort, uniques, record_source, totals,
-                                        search_child_records_by=search_child_records_by)
+                                        search_child_records_by=search_child_records_by, filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
+        if not raw_format:
+            for counts in ['facets', 'filtered_facets']:
+                facet_set = results.get(counts,{})
+                for source in facet_set:
+                    facets = facet_set[source]['facets']
+                    if 'BodyPartExamined' in facets:
+                        if 'Kidney' in facets['BodyPartExamined']:
+                            if 'KIDNEY' in facets['BodyPartExamined']:
+                                facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
+                            else:
+                                facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
+                            del facets['BodyPartExamined']['Kidney']
 
-        for counts in ['facets', 'filtered_facets']:
-            facet_set = results.get(counts,{})
-            for source in facet_set:
-                facets = facet_set[source]['facets']
-                if 'BodyPartExamined' in facets:
-                    if 'Kidney' in facets['BodyPartExamined']:
-                        if 'KIDNEY' in facets['BodyPartExamined']:
-                            facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
-                        else:
-                            facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
-                        del facets['BodyPartExamined']['Kidney']
-
-        if not counts_only:
-            if 'SeriesNumber' in fields:
-                for res in results['docs']:
-                    res['SeriesNumber'] = res['SeriesNumber'][0] if 'SeriesNumber' in res else 'None'
-            if order_docs:
-                results['docs'] = sorted(results['docs'], key=lambda x: tuple([x[item] for item in order_docs]))
+            if not counts_only:
+                if 'SeriesNumber' in fields:
+                    for res in results['docs']:
+                        res['SeriesNumber'] = res['SeriesNumber'][0] if 'SeriesNumber' in res else 'None'
+                if order_docs:
+                    results['docs'] = sorted(results['docs'], key=lambda x: tuple([x[item] for item in order_docs]))
 
     except Exception as e:
         logger.error("[ERROR] While fetching metadata:")
@@ -553,7 +553,7 @@ def get_table_data(filters,fields,table_type,sources = None, versions = None, cu
     custom_facets = {'uc': {'type': 'terms', 'field': 'PatientID', 'limit': -1, 'missing': True, 'facet': {'unique_count': 'unique(StudyInstanceUID)'}} }
 
 
-    results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0,custom_facets=custom_facets)
+    results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0,custom_facets=custom_facets,raw_format=False)
 
     return results
 
@@ -611,7 +611,7 @@ def create_query_set(solr_query,sources,source,DataSetType):
 # Use solr to fetch faceted counts and/or records
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
                       records_only=False, sort=None, uniques=None, record_source=None, totals=None,
-                      search_child_records_by=None, filtered_needed=True, custom_facets=None):
+                      search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,raw_format=False):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -681,6 +681,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 if solr_facets is None:
                     solr_facets = {}
                 solr_facets.update(custom_facets)
+                solr_facets = custom_facets
                 if filtered_needed:
                     if solr_facets_filtered is None:
                         solr_facets_filtered = {}
@@ -730,13 +731,14 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'facets': solr_facets,
                 'fqs': query_set,
                 'query_string': None,
-                'limit': 0,
+                'limit': record_limit,
                 'counts_only': True,
                 'fields': None,
                 'uniques': curUniques,
                 'stats': solr_stats,
-                'totals': totals
-            })
+                'totals': totals,
+                'sort': sort,
+            },raw_format=raw_format)
 
             solr_count_filtered_result = None
             if solr_facets_filtered:
@@ -745,29 +747,32 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'facets': solr_facets_filtered,
                     'fqs': query_set,
                     'query_string': None,
-                    'limit': 0,
+                    'limit': record_limit,
+                    'sort': sort_field,
                     'counts_only': True,
                     'fields': None,
                     'stats': solr_stats_filtered,
                     'totals': totals
-                })
+                },raw_format=raw_format)
 
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
 
-            if DataSetType.IMAGE_DATA in source_data_types[source.id]:
+            if DataSetType.IMAGE_DATA in source_data_types[source.id] and 'numFound' in solr_result:
                 results['total'] = solr_result['numFound']
                 if 'uniques' in solr_result:
                     results['uniques'] = solr_result['uniques']
 
-            results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                'facets': solr_result['facets']
-            }
+            if raw_format:
+                results['facets'] = solr_result['facets']
+            else:
+                results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
+                    'facets': solr_result['facets']}
+
 
             if solr_count_filtered_result:
                 results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                    'facets': solr_count_filtered_result['facets']
-                }
+                    'facets': solr_count_filtered_result['facets']}
 
             if 'totals' in solr_result:
                 results['totals'] = solr_result['totals']
