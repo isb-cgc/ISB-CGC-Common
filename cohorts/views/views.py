@@ -876,6 +876,7 @@ class Echo(object):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
 
+
 def create_manifest_bq_table(request, cohorts):
     response = None
     try:
@@ -995,8 +996,9 @@ def create_manifest_bq_table(request, cohorts):
 
     return response
 
+
 # Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
-def create_file_manifest(request,cohort):
+def create_file_manifest(request, cohorts):
     manifest = None
     response = None
     
