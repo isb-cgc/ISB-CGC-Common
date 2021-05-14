@@ -1846,7 +1846,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
         logger.info('[INFO] Getting cohort panel for node_id {}, program_id {}'.format(node_id, program_id))
 
         # Check program ID against public programs
-        public_program = Program.objects.filter(id=program_id).first()
+        public_program = Program.objects.get(id=program_id, active=True)
         user = request.user
 
         if public_program:
