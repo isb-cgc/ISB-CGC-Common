@@ -113,6 +113,7 @@ MOLECULAR_DISPLAY_STRINGS = {
 # }
 # The data is stored to prevent excessive retrieval
 METADATA_ATTR = {}
+METADATA_ATTR_BQ = {}
 
 ### METADATA_DATA_TYPES ###
 # Local storage of the metadata data types, values, and their display strings for a program. This dict takes the form:
@@ -284,7 +285,7 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
                                     if val not in METADATA_DATA_ATTR[build][attr]['values']:
                                         tooltip = ''
                                         if attr == 'disease_code':
-                                            if val in disease_code_dict:
+                                            if disease_code_dict and val in disease_code_dict:
                                                 tooltip = disease_code_dict[val]['tooltip']
 
                                         METADATA_DATA_ATTR[build][attr]['values'][val] = {
@@ -388,7 +389,7 @@ def fetch_program_data_types(program, for_display=False):
 #
 # program: database ID of the program being requested
 #
-def fetch_program_attr(program):
+def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False, data_type_list=None):
     try:
         if not program:
             program = Program.objects.get(name="TCGA")
@@ -397,12 +398,14 @@ def fetch_program_attr(program):
                 program = int(program)
             if type(program) is int:
                 program = Program.objects.get(id=program)
-
-        if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
-
-            METADATA_ATTR[program.id] = program.get_attrs()
-
-        return copy.deepcopy(METADATA_ATTR[program.id]['attrs'])
+        if source_type == DataSource.SOLR:
+            if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
+                METADATA_ATTR[program.id] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
+            return copy.deepcopy(METADATA_ATTR[program.id]['attrs'])
+        else:
+            if program.id not in METADATA_ATTR_BQ or len(METADATA_ATTR_BQ[program.id]) <= 0:
+                METADATA_ATTR_BQ[program.id] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
+            return copy.deepcopy(METADATA_ATTR_BQ[program.id]['attrs'])
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
@@ -434,7 +437,7 @@ def fetch_isbcgc_project_set():
                     ISB_CGC_PROJECTS['list'].append(row[0])
             else:
                 # Otherwise just warn
-                logger.warn("[WARNING] Stored procedure get_isbcgc_project_set was not found!")
+                logger.warning("[WARNING] Stored procedure get_isbcgc_project_set was not found!")
 
         return copy.deepcopy(ISB_CGC_PROJECTS['list'])
 
@@ -493,8 +496,7 @@ def fetch_metadata_value_set(program=None):
         if not program.is_public:
             return {}
 
-        if program.id not in METADATA_ATTR or not METADATA_ATTR[program.id] or len(METADATA_ATTR[program.id]) <= 0:
-            fetch_program_attr(program)
+        fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=True)
 
         if len(METADATA_ATTR[program.id]['attrs'][list(METADATA_ATTR[program.id]['attrs'].keys())[0]]['values']) <= 0:
             for src in METADATA_ATTR[program.id]['by_src']:

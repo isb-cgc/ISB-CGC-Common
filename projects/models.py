@@ -61,10 +61,15 @@ class Program(models.Model):
             ).filter(source_type=source_type)
         return self.datasource_set.select_related('version') if not source_type else self.datasource_set.select_related('version').filter(source_type=source_type)
 
-    def get_attrs(self, for_ui=True):
+    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
         prog_attrs = {'attrs': {}, 'by_src': {}}
-        attrs = self.get_data_sources(source_type=DataSource.SOLR).get_source_attrs(for_ui=for_ui)
-
+        if data_type_list:
+            datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list[0])
+            for data_type in data_type_list[1:]:
+                datasources |= self.get_data_sources(source_type=source_type, data_type=data_type)
+        else:
+            datasources = self.get_data_sources(source_type=source_type)
+        attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
         for attr in attrs['attrs']:
             prog_attrs['attrs'][attr.name] = {'name': attr.name, 'displ_name': attr.display_name, 'values': {}, 'type': attr.data_type, 'preformatted': bool(attr.preformatted_values)}
 
@@ -157,6 +162,7 @@ class DataVersion(models.Model):
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
     name = models.CharField(max_length=128, null=False, blank=False)
     active = models.BooleanField(default=True)
+    build = models.CharField(max_length=16, null=True, blank=False)
     programs = models.ManyToManyField(Program)
 
 
@@ -251,6 +257,10 @@ class DataSource(models.Model):
         (SOLR, "Solr Data Collection"),
         (BIGQUERY, "BigQuery Table")
     )
+    SOURCE_TYPE_MAP = {
+        SOLR: "Solr Data Collection",
+        BIGQUERY: "BigQuery Table"
+    }
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
@@ -294,6 +304,144 @@ class DataSource(models.Model):
     class Meta(object):
         unique_together = (("name", "version", "source_type"),)
 
+
+class DataNodeQuerySet(models.QuerySet):
+    def to_dicts(self):
+        return [{
+            "id": ds.id,
+            "name": ds.name
+
+        } for ds in self.select_related('version').all()]
+
+    def get_data_sources(self, per_node=False):
+        sources = None
+        for dn in self.all():
+            if per_node:
+                sources = {} if not sources else sources
+                sources[dn.id] = {
+                    'name': dn.short_name,
+                    'full_name': dn.name,
+                    'sources': [{'name': x.name, 'source_type': DataSource.SOURCE_TYPE_MAP[x.source_type]} for x in dn.data_sources.all()]
+                }
+            else:
+                sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
+        return sources
+
+    def get_attrs(self, per_node=False):
+        attrs = None
+        sources = None
+        for dn in self.all():
+            if per_node:
+                attrs = {} if not attrs else attrs
+                src_attrs = dn.data_sources.all().get_source_attrs(for_faceting=False,for_ui=False)
+                attrs[dn.id] = {
+                    'name': dn.short_name,
+                    'full_name': dn.name,
+                    'attrs': [{'name': x.name, 'display_name': x.display_name, 'type': Attribute.DATA_TYPE_MAP[x.data_type] } for x in src_attrs['attrs']]
+                }
+                return attrs
+            else:
+                sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
+                attrs = sources.get_source_attrs(for_faceting=False,for_ui=False)
+        return attrs
+
+
+class DataNodeManager(models.Manager):
+    def get_queryset(self):
+        return DataNodeQuerySet(self.model, using=self._db)
+
+
+class DataNode(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    short_name = models.CharField(max_length=16)
+    name = models.CharField(max_length=255)
+    description = models.TextField(null=True, blank=True)
+    active = models.BooleanField(default=True)
+    data_sources = models.ManyToManyField(DataSource)
+    objects = DataNodeManager()
+
+    def __str__(self):
+        return "{} - {}".format(self.short_name, self.name)
+
+    @classmethod
+    def get_node_programs(cls, is_authenticated=False):
+        by_node_list = []
+        by_prog_list = []
+        by_prog_dict = {}
+        nodes = cls.objects.filter(active=True)
+
+        for node in nodes:
+            programs = DataNode.objects.filter(id=node.id).prefetch_related(
+                'data_sources', 'data_sources__programs'
+            ).filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True).values(
+                'data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description'
+            ).distinct()
+
+            program_list = []
+            for prog in programs:
+                prog_id = prog["data_sources__programs__id"]
+                prog_name = prog["data_sources__programs__name"]
+                prog_desc = prog["data_sources__programs__description"]
+
+                prog_item = {
+                    "id": prog_id,
+                    "name": prog_name,
+                    "description": prog_desc}
+
+                if not by_prog_dict.get(prog_id):
+                    by_prog_dict[prog_id] = prog_item.copy()
+                    by_prog_dict[prog_id]["nodes"] = []
+
+                by_prog_dict[prog_id]["nodes"].append({
+                    "id": node.id,
+                    "name": node.name,
+                    "description": node.description,
+                    "short_name": node.short_name
+                })
+
+                program_list.append(prog_item)
+
+            by_node_list.append({
+                "id": node.id,
+                "name": node.name,
+                "description": node.description,
+                "short_name": node.short_name,
+                "programs": program_list
+            })
+
+        for prog_id, prog_info in by_prog_dict.items():
+            by_prog_list.append({
+                "id": prog_id,
+                "name": prog_info["name"],
+                "description": prog_info["description"],
+                "nodes": prog_info["nodes"]
+            })
+
+        if is_authenticated:
+            by_node_list.append({
+                "id": 0,
+                "name": "User",
+                "description": "User",
+                "short_name": "User",
+                "programs": [{
+                    "id": 0,
+                    "name": "User Data",
+                    "description": "User Data"
+                    }]
+            })
+            by_prog_list.append({
+                "id": 0,
+                "name": "User Data",
+                "description": "User Data",
+                "nodes": [{
+                    "id": 0,
+                    "name": "User Data",
+                    "description": "User Data",
+                    "short_name": "User"
+                    }]
+            })
+
+        return (by_node_list, by_prog_list)
 
 class Project(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -538,6 +686,12 @@ class Attribute(models.Model):
         (TEXT, 'Text'),
         (STRING, 'String')
     )
+    DATA_TYPE_MAP = {
+        CONTINUOUS_NUMERIC: 'Continuous Numeric',
+        CATEGORICAL: 'Categorical String',
+        TEXT: 'Text',
+        STRING: 'String'
+    }
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=64, null=False, blank=False)
     display_name = models.CharField(max_length=100)

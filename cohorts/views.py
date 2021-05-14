@@ -55,7 +55,7 @@ from .metadata_counting import *
 from .file_helpers import *
 from sharing.service import create_share
 from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
+from projects.models import Program, Project, Public_Metadata_Tables, Public_Data_Tables, DataNode
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 from .utils import delete_cohort as utils_delete_cohort
 
@@ -109,17 +109,18 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
         start = time.time()
 
         # Divide our filters into 'mutation' and 'non-mutation' sets
-        for key in inc_filters:
-            if 'data_type' in key:
-                    filters[key] = inc_filters[key]
-            elif 'MUT:' in key:
-                if not mutation_filters:
-                    mutation_filters = {}
-                mutation_filters[key] = inc_filters[key]
-                if not mutation_build:
-                    mutation_build = key.split(":")[1]
-            else:
-                filters[key.split(':')[-1]] = inc_filters[key]
+        if inc_filters:
+            for key in inc_filters:
+                if 'data_type' in key:
+                        filters[key] = inc_filters[key]
+                elif 'MUT:' in key:
+                    if not mutation_filters:
+                        mutation_filters = {}
+                    mutation_filters[key] = inc_filters[key]
+                    if not mutation_build:
+                        mutation_build = key.split(":")[1]
+                else:
+                    filters[key.split(':')[-1]] = inc_filters[key]
 
         versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
@@ -194,8 +195,13 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
                         logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
 
             if cohort_id:
-                cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
+                source_name = source.name.lower()
+                if source_name.startswith('files'):
+                    cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
+                    query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
+                else:
+                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
+                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
 
             samples_and_cases = query_solr_and_format_result({
                 'collection': source.name,
@@ -389,7 +395,7 @@ def validate_barcodes(request):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
     try:
-        body_unicode = request.body.decode('utf-8')
+        body_unicode = request.body
         body = json.loads(body_unicode)
         barcodes = body['barcodes']
 
@@ -445,12 +451,16 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+
         template_values = {
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'program_prefixes': {x.name: True for x in program_list},
+            'all_nodes': all_nodes,
+            'all_programs': all_programs
         }
 
         if workbook_id and worksheet_id :
@@ -485,12 +495,17 @@ def cohort_detail(request, cohort_id):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
+        # TODO: get_node_programs() filter by is_public and owner
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+
         template_values  = {
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'program_prefixes': {x.name: True for x in program_list},
+            'all_nodes': all_nodes,
+            'all_programs': all_programs
         }
 
         shared_with_users = []
@@ -1026,7 +1041,7 @@ def set_operation(request):
     try:
 
         if request.POST:
-            name = request.POST.get('name').encode('utf8')
+            name = request.POST.get('name')
             cohorts = []
             base_cohort = None
             subtracted_cohorts = []
@@ -1798,7 +1813,7 @@ def get_metadata(request):
         if cohort:
             results['cohort-total'] = results['samples']
             results['cohort-cases'] = results['cases']
-            cohort_progs = cohort.get_programs()
+            cohort_progs = Program.objects.filter(id__in=Cohort.objects.get(id=cohort).get_programs())
             for prog in cohort_progs:
                 if not prog.is_public:
                     user_prog_res = user_metadata_counts(user, {'0': {'user_program', [prog.id]}}, cohort)
@@ -1819,15 +1834,19 @@ def get_metadata(request):
     return JsonResponse(results)
 
 
-def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
+def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
 
     template = 'cohorts/isb-cgc-data.html'
     template_values = {}
     # TODO: Need error template
 
     try:
+        # TODO: Get filter panel based on the combination of node_id and program_id
+
+        logger.info('[INFO] Getting cohort panel for node_id {}, program_id {}'.format(node_id, program_id))
+
         # Check program ID against public programs
-        public_program = Program.objects.get(id=program_id)
+        public_program = Program.objects.filter(id=program_id).first()
         user = request.user
 
         if public_program:
@@ -1842,7 +1861,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             # case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
             #     version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
             # ).get_source_attrs(for_ui=True)
-            case_sample_attr = fetch_program_attr(program_id)
+            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False)
 
             #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
@@ -1927,12 +1946,21 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             template_values = {
                 'request': request,
                 'attr_counts': results['count'],
-                'total_samples': int(results['samples']),
+                'total_samples': int(results['total']),
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
                 'program': 0
             }
+
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+            cohort_progs = cohort.get_programs()
+            template_values['programs_this_cohort'] = [x.id for x in cohort_progs]
+
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+        template_values['all_nodes'] = all_nodes
+        template_values['all_programs'] = all_programs
 
     except Exception as e:
         logger.error("[ERROR] While building the filter panel:")
