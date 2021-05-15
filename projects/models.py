@@ -370,7 +370,9 @@ class DataNode(models.Model):
         nodes = cls.objects.filter(active=True)
 
         for node in nodes:
-            programs = DataNode.objects.filter(id=node.id).prefetch_related('data_sources', 'data_sources__programs').filter(data_sources__source_type=DataSource.SOLR).values('data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description').distinct()
+            programs = DataNode.objects.filter(id=node.id, active=True).prefetch_related('data_sources', 'data_sources__programs')\
+                .filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True).\
+                values('data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description').distinct()
             program_list = []
             for prog in programs:
                 prog_id = prog["data_sources__programs__id"]
