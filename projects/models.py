@@ -162,6 +162,7 @@ class DataVersion(models.Model):
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
     name = models.CharField(max_length=128, null=False, blank=False)
     active = models.BooleanField(default=True)
+    build = models.CharField(max_length=16, null=True, blank=False)
     programs = models.ManyToManyField(Program)
 
 
@@ -373,6 +374,7 @@ class DataNode(models.Model):
             programs = DataNode.objects.filter(id=node.id, active=True).prefetch_related('data_sources', 'data_sources__programs')\
                 .filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True).\
                 values('data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description').distinct()
+
             program_list = []
             for prog in programs:
                 prog_id = prog["data_sources__programs__id"]
