@@ -977,7 +977,7 @@ def create_manifest_bq_table(request, cohorts):
                     'uri': "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
                         settings.BIGQUERY_USER_DATA_PROJECT_ID,
                         settings.BIGQUERY_USER_MANIFEST_DATASET,
-                        all_results[x]['table_id']
+                        all_results[x]['table_id'].split('.')[-1]
                     )} for x in all_results],
                 'long_running': bool(len([x for x in all_results if all_results[x]['status'] == 'long_running']) > 0),
                 'email': request.user.email
@@ -998,7 +998,7 @@ def create_manifest_bq_table(request, cohorts):
 
 
 # Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
-def create_file_manifest(request, cohorts):
+def create_file_manifest(request, cohort):
     manifest = None
     response = None
     
@@ -1116,6 +1116,7 @@ def create_file_manifest(request, cohorts):
         
         return response
 
+
 def download_cohort_manifest(request, cohort_id=0):
     cohort_ids = []
     req = request.GET if request.GET else request.POST
@@ -1136,7 +1137,7 @@ def download_cohort_manifest(request, cohort_id=0):
         if req.get('manifest-type','file-manifest') == 'bq-manifest':
             response = create_manifest_bq_table(request, cohorts)
         else:
-            response = create_file_manifest(request, cohorts)
+            response = create_file_manifest(request, Cohort.objects.get(id=cohort_id))
 
         return response
     except ObjectDoesNotExist:
