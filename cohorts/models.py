@@ -107,21 +107,25 @@ class Cohort(models.Model):
     # Returns the data versions identified in the filter groups for this cohort
     # Returns a DataVersion QuerySet
     def get_data_versions(self, active=None):
-
         data_versions = ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True)) \
             if active is None else ImagingDataCommonsVersion.objects.filter(active=active, id__in=self.filter_group_set.all().values_list('data_version',flat=True))
 
         return data_versions.distinct()
 
-    # Returns the list of data sources used by this cohort, as a function of the filters which define it
-    def get_data_sources(self, source_type=DataSource.SOLR, active=None):
+    def only_active_versions(self):
+        return bool(len(self.get_data_versions(active=False)) <= 0)
 
+    # Returns the list of data sources used by this cohort, as a function of the filters which define it
+    def get_data_sources(self, source_type=DataSource.SOLR, active=None, current=True, aggregate_level=None):
+
+        # A cohort might be from an inactive data version, in which case, active isn't a valid request,
+        # and we ignore it.
         cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
         attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
 
-        data_versions = self.get_data_versions(active=active)
+        data_versions = self.get_data_versions()
 
-        sources = attributes.get_data_sources(data_versions, source_type)
+        sources = attributes.get_data_sources(data_versions, source_type, active, current, aggregate_level)
 
         return sources
 
@@ -180,7 +184,7 @@ class Cohort(models.Model):
             group_filters = {x['display_name']: [attr_dvals.get(x['id'],{}).get(y,y) for y in x['values']] for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
-                group_filters, field_prefix=prefix
+                group_filters, field_prefix=prefix, encapsulated=False
             ))
 
         return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")

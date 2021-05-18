@@ -841,7 +841,7 @@ class BigQuerySupport(BigQueryABC):
     #
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_where_clause(filters, comb_with='AND', field_prefix=None, type_schema=None):
+    def build_bq_where_clause(filters, comb_with='AND', field_prefix=None, type_schema=None, encapsulated=True):
 
         if field_prefix and field_prefix[-1] != ".":
             field_prefix += "."
@@ -945,6 +945,6 @@ class BigQuerySupport(BigQueryABC):
                     val_list = ",".join(["'{}'".format(x) for x in values]) if parameter_type == "STRING" else ",".join(values)
                     filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr, val_list)
 
-            filter_set.append('({})'.format(filter_string))
+            filter_set.append('{}{}{}'.format("(" if encapsulated else "", filter_string, ")" if encapsulated else ""))
 
         return " {} ".format(comb_with).join(filter_set)
