@@ -17,6 +17,7 @@ from __future__ import absolute_import
 
 import sys
 
+from time import sleep
 from builtins import map
 from builtins import next
 from builtins import str
@@ -875,20 +876,11 @@ class Echo(object):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
 
+
 def create_manifest_bq_table(request, cohorts):
     response = None
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-
-        export_settings = {
-            'dest': {
-                'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
-                'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
-                'table_id': ""
-            },
-            'email': request.user.email,
-            'cohort_id': ""
-        }
 
         order_by = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]
         field_list = json.loads(request.GET.get('columns','["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]'))
@@ -897,15 +889,17 @@ def create_manifest_bq_table(request, cohorts):
         order_by = list(set.intersection(set(order_by),set(field_list)))
 
         all_results = {}
+        export_jobs = {}
 
         for cohort in cohorts:
+            desc = None
             if request.GET.get('header_fields'):
                 selected_header_fields = json.loads(request.GET.get('header_fields'))
                 headers = []
                 'cohort_name' in selected_header_fields and headers.append("Manifest for cohort '{}' ID#{}".format(cohort.name, cohort.id))
                 'user_email' in selected_header_fields and headers.append("User: {}".format(request.user.email))
                 'cohort_filters' in selected_header_fields and headers.append("Filters: {}".format(cohort.get_filter_display_string()))
-                export_settings['desc'] = "\n".join(headers)
+                desc = "\n".join(headers)
 
             base_filters = cohort.get_filters_as_dict_simple()[0]
             if 'bmi' in base_filters:
@@ -919,16 +913,60 @@ def create_manifest_bq_table(request, cohorts):
                     else:
                         base_filters['bmi_gt'] = BMI_MAPPING[val]
 
-            export_settings['cohort_id'] = cohort.id
             table_name = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
-            export_settings['dest']['table_id'] = table_name
-            all_results[cohort.id] = get_bq_metadata(
+            export_jobs[cohort.id] = {
+                'table_id': table_name
+            }
+            query = get_bq_metadata(
                 base_filters, field_list, cohort.get_data_versions(),
-                order_by=order_by, output_settings=export_settings,
-                search_child_records_by=True)
-            all_results[cohort.id]['table_id'] = table_name
+                order_by=order_by, no_submit=True,
+                search_child_records_by=True
+            )
+            export_jobs[cohort.id]['bqs'] = BigQueryExportFileList(**{
+                'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
+                'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
+                'table_id': table_name
+            })
+            export_jobs[cohort.id]['job_id'] = export_jobs[cohort.id]['bqs'].export_file_list_query_to_bq(
+                query['sql_string'], query['params'],
+                cohort.id,
+                user_email=request.user.email,
+                desc=desc or None,
+                for_batch=True
+            )
+
+        not_done = True
+        still_checking = True
+        num_retries = 0
+
+        while still_checking and not_done:
+            not_done = False
+            for cohort in export_jobs:
+                if not BigQuerySupport.check_job_is_done({'jobReference': {'jobId': export_jobs[cohort]['job_id']}}):
+                    not_done = True
+                else:
+                    if cohort not in all_results:
+                        all_results[cohort] = export_jobs[cohort]['bqs'].check_query_to_table_done(
+                            export_jobs[cohort]['job_id'],"cohort file manifest",False
+                        )
+                        all_results[cohort]['table_id'] = all_results[cohort]['full_table_id']
+            if not_done:
+                sleep(1)
+                num_retries += 1
+                still_checking = (num_retries < settings.BQ_MAX_ATTEMPTS)
+
+        if not_done:
+            logger.warning("[WARNING] Not all of the queries completed!")
+
+        for cohort in export_jobs:
+            if not all_results[cohort]:
+                all_results[cohort] = {
+                    'status': 'long_running',
+                    'table_id': export_jobs[cohort]['table_id']
+                }
 
         errors = {x: all_results[x]['message'] for x in all_results if all_results[x]['status'] == 'error'}
+
         if bool(len(errors) > 0):
             response = JsonResponse({'status': 400, 'message': "; ".join(["Cohort ID {}: {}".format(x,errors[x]) for x in errors])})
         else:
@@ -939,7 +977,7 @@ def create_manifest_bq_table(request, cohorts):
                     'uri': "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
                         settings.BIGQUERY_USER_DATA_PROJECT_ID,
                         settings.BIGQUERY_USER_MANIFEST_DATASET,
-                        all_results[x]['table_id']
+                        all_results[x]['table_id'].split('.')[-1]
                     )} for x in all_results],
                 'long_running': bool(len([x for x in all_results if all_results[x]['status'] == 'long_running']) > 0),
                 'email': request.user.email
@@ -958,8 +996,9 @@ def create_manifest_bq_table(request, cohorts):
 
     return response
 
+
 # Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
-def create_file_manifest(request,cohort):
+def create_file_manifest(request, cohort):
     manifest = None
     response = None
     
@@ -1077,6 +1116,7 @@ def create_file_manifest(request,cohort):
         
         return response
 
+
 def download_cohort_manifest(request, cohort_id=0):
     cohort_ids = []
     req = request.GET if request.GET else request.POST
@@ -1097,7 +1137,7 @@ def download_cohort_manifest(request, cohort_id=0):
         if req.get('manifest-type','file-manifest') == 'bq-manifest':
             response = create_manifest_bq_table(request, cohorts)
         else:
-            response = create_file_manifest(request, cohorts)
+            response = create_file_manifest(request, Cohort.objects.get(id=cohort_id))
 
         return response
     except ObjectDoesNotExist:

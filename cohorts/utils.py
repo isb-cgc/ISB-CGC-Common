@@ -65,13 +65,12 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
 
         result = get_collex_metadata(filters, None, sources=sources, facets=["collection_id"], counts_only=True,
                                      totals=["PatientID", "StudyInstanceUID", "SeriesInstanceUID"])
-        print(result)
         for total in result['totals']:
             stats[total] = result['totals'][total]
 
         for src in result['facets']:
             if src.split(':')[0] in list(sources.values_list('name',flat=True)):
-                stats['collections'] = [x for x, y in result['facets'][src]['facets']['collection_id'].items() if y > 0]
+                stats['collections'] = [x for x, y in result['filtered_facets'][src]['facets']['collection_id'].items() if y > 0]
 
     except Exception as e:
         logger.error("[ERROR] While fetching cohort stats:")
