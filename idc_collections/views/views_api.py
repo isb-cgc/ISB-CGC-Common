@@ -104,7 +104,7 @@ def collections_list_api(request):
             data = {
                 "active": collection.active,
                 "cancer_type": collection.cancer_type,
-                "collection_id": collection.nbia_collection_id,
+                "collection_id": collection.collection_id,
                 "date_updated": collection.date_updated,
                 "description": collection.description,
                 "doi": collection.doi,

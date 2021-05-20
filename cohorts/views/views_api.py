@@ -33,8 +33,8 @@ from ..decorators import api_auth
 
 from idc_collections.models import Attribute
 from cohorts.models import Cohort, Cohort_Perms
-from cohorts.utils_api import get_filterSet_api, get_idc_data_version, get_idc_data_version_query_set, \
-    _cohort_detail_api, _cohort_preview_api, _cohort_manifest_api, _cohort_preview_manifest_api, \
+from cohorts.utils_api import get_filterSet_api, get_idc_data_version, \
+    _cohort_manifest_api, _cohort_preview_manifest_api, \
     _cohort_preview_query_api, _cohort_query_api
 from ..views.views import _save_cohort,_delete_cohort
 
@@ -62,22 +62,17 @@ def save_cohort_api(request):
         data = body["request_data"]
         name = data['name']
         description = data['description']
-        filterset = data['filterSet']
-        try:
-            version = get_idc_data_version(filterset['idc_data_version'])
-        except:
-            return JsonResponse(
-                dict(
-                    message = "Invalid IDC version {}".format(data['filterSet']['idc_data_version']),
-                    code = 400
-                )
-            )
+        filters = data['filters']
+        # Create a cohort only against the current version
+        version = get_idc_data_version()
+        # version = get_idc_data_version('1.0')
 
-        filters = filterset['filters']
+        # filters = filterset['filters']
         filters_by_id = {}
         for attr in Attribute.objects.filter(name__in=list(filters.keys())).values('id', 'name'):
             filters_by_id[str(attr['id'])] = filters[attr['name']]
-        response = _save_cohort(user, filters=filters_by_id, name=name, desc=description, version=version)
+        response = _save_cohort(user, filters=filters_by_id, name=name, desc=description, version=version,
+                                no_stats=version.active==False)
         cohort_id = response['cohort_id']
         idc_data_version = Cohort.objects.get(id=cohort_id).get_data_versions()[0].version_number
         # if request.GET['return_filter'] == 'True':

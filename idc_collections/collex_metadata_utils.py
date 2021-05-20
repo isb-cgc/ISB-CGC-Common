@@ -1294,8 +1294,14 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
 
     image_tables = {}
 
-    sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
+
+    if len(data_version.filter(active=False)) <= 0:
+        sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
+    else:
+        sources = data_version.get_data_sources(current=True, source_type=DataSource.BIGQUERY).filter().distinct()
+    # sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
+
 
     if not sources_and_attrs:
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
