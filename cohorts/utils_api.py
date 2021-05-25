@@ -227,19 +227,28 @@ def get_cohort_query(request, filters, data_version, cohort_info):
 def get_manifest_query(request, filters, data_version, manifest_info):
 
     select = []
-    if request.GET['Collection_IDs'] in [True, 'True']:
+    if request.GET['Collection_ID'] in [True, 'True']:
         select.append('collection_id')
-    if request.GET['Patient_IDs'] in [True, 'True']:
+    if request.GET['Patient_ID'] in [True, 'True']:
         select.append('PatientID')
-    if request.GET['StudyInstanceUIDs'] in [True, 'True']:
+    if request.GET['StudyInstanceUID'] in [True, 'True']:
         select.append('StudyInstanceUID')
-    if request.GET['SeriesInstanceUIDs'] in [True, 'True']:
+    if request.GET['SeriesInstanceUID'] in [True, 'True']:
         select.append('SeriesInstanceUID')
-    if request.GET['SOPInstanceUIDs'] in [True, 'True']:
+    if request.GET['SOPInstanceUID'] in [True, 'True']:
         select.append('SOPInstanceUID')
-    if request.GET['Collection_DOIs'] in [True, 'True']:
+    if request.GET['Source_DOI'] in [True, 'True']:
         select.append('source_DOI')
-    select.append('gcs_url' if request.GET['access_method'] == 'url' else 'crdc_instance_uuid')
+    if request.GET['CRDC_Study_GUID'] in [True, 'True']:
+        select.append('crdc_study_uuid')
+    if request.GET['CRDC_Series_GUID'] in [True, 'True']:
+        select.append('crdc_series_uuid')
+    if request.GET['CRDC_Instance_GUID'] in [True, 'True']:
+        select.append('crdc_instance_uuid')
+    if request.GET['GCS_URL'] in [True, 'True']:
+        select.append('gcs_url')
+    #
+    # select.append('gcs_url' if request.GET['access_method'] == 'url' else 'crdc_instance_uuid')
 
     # Get the SQL
     if request.GET['sql'] in [True, 'True']:
