@@ -251,7 +251,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 
         start = time.time()
         source_metadata = get_collex_metadata(
-            filters, fields, record_limit=2000, offset=0, counts_only=counts_only, with_ancillary=with_related,
+            filters, fields, record_limit=3000, offset=0, counts_only=counts_only, with_ancillary=with_related,
             collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques,
             record_source=record_source, search_child_records_by=None
         )
@@ -469,7 +469,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 # versions (optional): List of data versions to query; all active data versions will be used if not provided
 # facets: array of strings, attributes to faceted count as a list of attribute names; if not provided no faceted
 #   counts will be performed
-def get_collex_metadata(filters, fields, record_limit=2000, offset=0, counts_only=False, with_ancillary=True,
+def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_only=False, with_ancillary=True,
                         collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
                         facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None,
                         search_child_records_by=None):
