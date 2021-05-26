@@ -251,7 +251,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 
         start = time.time()
         source_metadata = get_collex_metadata(
-            filters, fields, record_limit=2000, offset=0, counts_only=counts_only, with_ancillary=with_related,
+            filters, fields, record_limit=3000, offset=0, counts_only=counts_only, with_ancillary=with_related,
             collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques,
             record_source=record_source, search_child_records_by=None
         )
