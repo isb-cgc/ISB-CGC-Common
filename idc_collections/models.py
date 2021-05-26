@@ -298,7 +298,7 @@ class Collection(models.Model):
     def __str__(self):
         return "{}, {}, Program: {}".format(
             self.name, "Public" if self.is_public else "Private (owner: {})".format(self.owner.email),
-            str(self.program.short_name)
+            str(self.program)
         )
 
     def get_collection_type(self):
