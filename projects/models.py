@@ -229,9 +229,9 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
                         attrs['ids'] | attr_set.values_list('id', flat=True))
 
-        attrs['list'] = attrs['list'].distinct()
-        attrs['attrs'] = attrs['attrs'].distinct()
-        attrs['ids'] = attrs['ids'].distinct()
+        attrs['list'] = attrs['list'].distinct() if attrs['list'] else None
+        attrs['attrs'] = attrs['attrs'].distinct() if attrs['attrs'] else None
+        attrs['ids'] = attrs['ids'].distinct() if attrs['ids'] else None
 
         return attrs
 
@@ -374,7 +374,7 @@ class DataNode(models.Model):
         nodes = cls.objects.filter(active=True)
 
         for node in nodes:
-            programs = DataNode.objects.filter(id=node.id, active=True).prefetch_related('data_sources', 'data_sources__programs')\
+            programs = node.prefetch_related('data_sources', 'data_sources__programs')\
                 .filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True).\
                 values('data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description').distinct()
 
@@ -745,9 +745,11 @@ class Attribute_Display_ValuesQuerySet(models.QuerySet):
 
         return dvals
 
+
 class Attribute_Display_ValuesManager(models.Manager):
     def get_queryset(self):
         return Attribute_Display_ValuesQuerySet(self.model, using=self._db)
+
 
 # Attributes with specific display value attributes can use this model to record them
 class Attribute_Display_Values(models.Model):
