@@ -143,6 +143,7 @@ class DataVersion(models.Model):
     CLINICAL_DATA = 'C'
     BIOSPECIMEN_DATA = 'B'
     MUTATION_DATA = 'M'
+    PROTEIN_DATA = 'P'
     TYPE_AVAILABILITY_DATA = 'D'
     DATA_TYPES = (
         (FILE_DATA, 'File Data'),
@@ -150,13 +151,15 @@ class DataVersion(models.Model):
         (CLINICAL_DATA, 'Clinical Data'),
         (BIOSPECIMEN_DATA, 'Biospecimen Data'),
         (MUTATION_DATA, 'Mutation Data'),
+        (PROTEIN_DATA, 'Protein} Data'),
         (TYPE_AVAILABILITY_DATA, 'File Data Availability')
     )
     SET_TYPES = {
         CLINICAL_DATA: 'case_data',
         BIOSPECIMEN_DATA: 'case_data',
         TYPE_AVAILABILITY_DATA: 'data_type_data',
-        MUTATION_DATA: 'molecular_data'
+        MUTATION_DATA: 'molecular_data',
+        PROTEIN_DATA: 'protein_data'
     }
     version = models.CharField(max_length=16, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
@@ -265,7 +268,7 @@ class DataSource(models.Model):
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     programs = models.ManyToManyField(Program)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
+    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     objects = DataSourceManager()
 
