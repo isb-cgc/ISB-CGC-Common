@@ -248,12 +248,10 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
             ).distinct()
             source_attrs = data_sources.get_source_attrs(named_set=metadata_data_attrs)
             source_attrs_data = {x.name: {'display_name': x.display_name, 'preformatted': (x.preformatted_values == 1)} for x in source_attrs['attrs']}
-            print(source_attrs_data)
             display_vals = source_attrs['attrs'].get_display_values().to_dict(False)
             tooltips = {x.attribute.name: { x.value: x.tooltip} for x in Attribute_Tooltips.objects.select_related('attribute').filter(attribute__in=source_attrs['attrs'])}
 
             for src in data_sources:
-                print(src.name)
                 solr_query = {
                     'collection': src.name,
                     'facets': None,
