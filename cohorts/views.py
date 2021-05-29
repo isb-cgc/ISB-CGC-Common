@@ -478,7 +478,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
         logger.error("[ERROR] Exception while trying to new a cohort:")
         logger.exception(e)
         messages.error(request, "There was an error while trying to load new cohort's details page.")
-        if request.is_authenticated():
+        if request.user.is_authenticated():
             return redirect('cohort_list')
         else:
             return redirect('')
@@ -1487,6 +1487,7 @@ def filelist(request, cohort_id=None, panel_type=None):
 def filelist_ajax(request, cohort_id=None, panel_type=None):
     status = 200
     try:
+        progs = Program.get_public_programs().values_list('name',flat=True)
         if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
         if cohort_id == 0:
             response_str = '<div class="row">' \
@@ -1540,7 +1541,15 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
+                            # TODO: This needs to be adjusted to not assume values coming out of the attribute fetcher are all that's valid.
+                            if attr != 'program_name':
+                                metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
+                            else:
+                                if val in progs:
+                                    vals = metadata_data_attr.get(attr, {}).get('values', {})
+                                    if val not in vals:
+                                        vals[val] = {'displ_value': val, 'value': val, 'tooltip': '', 'name':val}
+                                    vals[val]['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
             else:
                 for attr in metadata_data_attr:
                     for val in metadata_data_attr[attr]['values']:
