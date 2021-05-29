@@ -181,8 +181,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
         file_query_result = query_solr_and_format_result(query_params)
 
-        print(file_query_result['facets'] if 'facets' in file_query_result else None)
-
         total_file_count = file_query_result.get('numFound', 0)
 
         if 'docs' in file_query_result and len(file_query_result['docs']):
