@@ -69,6 +69,7 @@ class Program(models.Model):
                 datasources |= self.get_data_sources(source_type=source_type, data_type=data_type)
         else:
             datasources = self.get_data_sources(source_type=source_type)
+
         attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
         for attr in attrs['attrs']:
             prog_attrs['attrs'][attr.name] = {'name': attr.name, 'displ_name': attr.display_name, 'values': {}, 'type': attr.data_type, 'preformatted': bool(attr.preformatted_values)}
@@ -143,6 +144,7 @@ class DataVersion(models.Model):
     CLINICAL_DATA = 'C'
     BIOSPECIMEN_DATA = 'B'
     MUTATION_DATA = 'M'
+    PROTEIN_DATA = 'P'
     TYPE_AVAILABILITY_DATA = 'D'
     DATA_TYPES = (
         (FILE_DATA, 'File Data'),
@@ -150,13 +152,15 @@ class DataVersion(models.Model):
         (CLINICAL_DATA, 'Clinical Data'),
         (BIOSPECIMEN_DATA, 'Biospecimen Data'),
         (MUTATION_DATA, 'Mutation Data'),
+        (PROTEIN_DATA, 'Protein} Data'),
         (TYPE_AVAILABILITY_DATA, 'File Data Availability')
     )
     SET_TYPES = {
         CLINICAL_DATA: 'case_data',
         BIOSPECIMEN_DATA: 'case_data',
         TYPE_AVAILABILITY_DATA: 'data_type_data',
-        MUTATION_DATA: 'molecular_data'
+        MUTATION_DATA: 'molecular_data',
+        PROTEIN_DATA: 'protein_data'
     }
     version = models.CharField(max_length=16, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
@@ -226,9 +230,9 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
                         attrs['ids'] | attr_set.values_list('id', flat=True))
 
-        attrs['list'] = attrs['list'].distinct()
-        attrs['attrs'] = attrs['attrs'].distinct()
-        attrs['ids'] = attrs['ids'].distinct()
+        attrs['list'] = attrs['list'].distinct() if attrs['list'] else None
+        attrs['attrs'] = attrs['attrs'].distinct() if attrs['attrs'] else None
+        attrs['ids'] = attrs['ids'].distinct() if attrs['ids'] else None
 
         return attrs
 
@@ -265,7 +269,7 @@ class DataSource(models.Model):
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     programs = models.ManyToManyField(Program)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
+    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     objects = DataSourceManager()
 
@@ -371,9 +375,11 @@ class DataNode(models.Model):
         nodes = cls.objects.filter(active=True)
 
         for node in nodes:
-            programs = DataNode.objects.filter(id=node.id, active=True).prefetch_related('data_sources', 'data_sources__programs')\
-                .filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True).\
-                values('data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description').distinct()
+            programs = nodes.filter(id=node.id).prefetch_related(
+                'data_sources', 'data_sources__programs'
+             ).filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True).values(
+                'data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description'
+            ).distinct()
 
             program_list = []
             for prog in programs:
@@ -668,6 +674,8 @@ class AttributeQuerySet(models.QuerySet):
     def get_display_values(self):
         return Attribute_Display_Values.objects.select_related('attribute').filter(attribute__in=self.all())
 
+
+
 class AttributeManager(models.Manager):
     def get_queryset(self):
         return AttributeQuerySet(self.model, using=self._db)
@@ -733,18 +741,23 @@ class Attribute(models.Model):
 
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
-    def to_dict(self):
+    def to_dict(self, index_by_id=True):
         dvals = {}
         for dv in self.all().select_related('attribute'):
-            if dv.attribute.id not in dvals:
-                dvals[dv.attribute.id] = {}
-            dvals[dv.attribute.id][dv.raw_value] = dv.display_value
+            attr_i = dv.attribute.name
+            if index_by_id:
+                attr_i = dv.attribute.id
+            if attr_i not in dvals:
+                dvals[attr_i] = {}
+            dvals[attr_i][dv.raw_value] = dv.display_value
 
         return dvals
+
 
 class Attribute_Display_ValuesManager(models.Manager):
     def get_queryset(self):
         return Attribute_Display_ValuesQuerySet(self.model, using=self._db)
+
 
 # Attributes with specific display value attributes can use this model to record them
 class Attribute_Display_Values(models.Model):
@@ -752,6 +765,7 @@ class Attribute_Display_Values(models.Model):
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     raw_value = models.CharField(max_length=256, null=False, blank=False)
     display_value = models.CharField(max_length=256, null=False, blank=False)
+    objects=Attribute_Display_ValuesManager()
 
     class Meta(object):
         unique_together = (("raw_value", "attribute"),)
