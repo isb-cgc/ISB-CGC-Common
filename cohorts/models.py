@@ -341,7 +341,7 @@ class Filter(models.Model):
     objects = FilterManager()
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
-    value = models.CharField(max_length=256, null=False, blank=False)
+    value = models.TextField(null=False, blank=False)
     filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
     numeric_op = models.CharField(max_length=4, null=True, blank=True, choices=NUMERIC_OPS)
