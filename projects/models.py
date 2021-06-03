@@ -198,21 +198,24 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #  }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, all=False):
         attrs = { 'list': None, 'attrs': None, 'ids': None }
         if by_source:
             attrs['sources'] = {}
 
         for ds in self.select_related('version').all():
-            q_objects = Q(active=True)
-            if for_ui:
-                q_objects &= Q(default_ui_display=for_ui)
-            if named_set:
-                q_objects &= Q(name__in=named_set)
-            if for_faceting:
-                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
-                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
-                    ).values_list('attribute__id', flat=True)))
+            if all:
+                q_objects = Q()
+            else:
+                q_objects = Q(active=True)
+                if for_ui:
+                    q_objects &= Q(default_ui_display=for_ui)
+                if named_set:
+                    q_objects &= Q(name__in=named_set)
+                if for_faceting:
+                    q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
+                            attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                        ).values_list('attribute__id', flat=True)))
 
             attr_set = ds.attribute_set.filter(q_objects)
 
