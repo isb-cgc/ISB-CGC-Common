@@ -276,19 +276,24 @@ class DataSource(models.Model):
     def get_set_type(self):
         return DataVersion.SET_TYPES[self.version.data_type]
 
-    def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None):
-        q_objects = Q(active=True)
+    def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None, active=True, all=False):
+        if all:
+            attr_set = self.attribute_set.filter()
+        else:
+            q_objects = Q()
 
-        if for_ui:
-            q_objects &= Q(default_ui_display=True)
-        if named_set:
-            q_objects &= Q(name__in=named_set)
-        if for_faceting:
-            q_objects &= (Q(id__in=Attribute_Ranges.objects.filter(
-                attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True)
-            ).values_list('attribute', flat=True)) | Q(data_type=Attribute.CATEGORICAL))
+            if for_ui:
+                q_objects &= Q(default_ui_display=True)
+            if named_set:
+                q_objects &= Q(name__in=named_set)
+            if active is not None:
+                q_objects &= Q(active=active)
+            if for_faceting:
+                q_objects &= (Q(id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute', flat=True)) | Q(data_type=Attribute.CATEGORICAL))
 
-        attr_set = self.attribute_set.filter(q_objects)
+            attr_set = self.attribute_set.filter(q_objects)
 
         return attr_set
 
