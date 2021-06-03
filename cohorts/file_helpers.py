@@ -19,7 +19,7 @@ from builtins import str
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
-from projects.models import DataVersion
+from projects.models import DataVersion, Program
 from cohorts.models import Cohort, Cohort_Perms
 
 from solr_helpers import *
@@ -33,7 +33,8 @@ FILTER_DATA_FORMAT = {
 }
 
 
-def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, data_type=None, do_filter_count=True):
+def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
+                 sort_order=0, build='HG19', access=None, data_type=None, do_filter_count=True):
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
@@ -212,7 +213,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'index_name': entry.get('index_file_name_key', 'N/A'),
                         'access': entry.get('access','N/A'),
                         'user_access': str(entry.get('access','N/A') != 'controlled' or whitelist_found),
-                        'filename': entry['file_name_key'].split("/")[-1] or 'N/A',
+                        'filename': entry.get('file_name_key','').split("/")[-1] or 'N/A',
                         'filesize': entry.get('file_size','N/A'),
                         'exp_strat': entry.get('experimental_strategy', 'N/A'),
                         'platform': entry.get('platform','N/A'),
