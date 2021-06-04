@@ -141,6 +141,8 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
             }
             prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA, DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA])
             list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.BIOSPECIMEN_DATA)
+            if not len(list_versions):
+                list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
             all_sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
             source = prog.get_data_sources(source_type=source_type).filter(version__in=list_versions).first()
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
@@ -734,20 +736,25 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 cohort.save()
 
                 sample_list = []
+                samples_list_simple = []
 
                 for prog in results:
                     items = results[prog]['items']
-
                     for item in items:
                         project = None
                         if 'project_id' in item:
                             project = item['project_id']
-                        sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
+                        if type(item['sample_barcode']) is not list:
+                            item['sample_barcode'] = [item['sample_barcode']]
+                        for sample in item['sample_barcode']:
+                            sample_info = {'sample_barcode': sample, 'case_barcode': item['case_barcode'], 'project_id': project}
+                            samples_list_simple.append(sample_info)
+                            sample_list.append(Samples(cohort=cohort, **sample_info))
 
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
+                logger.debug('[BENCHMARKING] Time to bulk create: ' + str(bulk_stop - bulk_start))
 
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -790,7 +797,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 bq_project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
+                bq_result = bcs.add_cohort_to_bq(cohort.id, samples_list_simple)
 
                 # If BQ insertion fails, we immediately de-activate the cohort and warn the user
                 if 'insertErrors' in bq_result:
@@ -1868,10 +1875,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 # Currently we do not select anything by default
                 filters = None
 
-            # case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
-            #     version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
-            # ).get_source_attrs(for_ui=True)
-            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False)
+            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False, data_type_list=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA])
 
             #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
@@ -1904,7 +1908,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
             data_type_counts = {}
             for set in results['counts']:
                 for attr in results['counts'][set]:
-                    if attr == 'data_type':
+                    if attr == 'data_type_availability':
                         for id,val in results['counts'][set][attr]['values'].items():
                             attr_name = val['displ_value'].split(' - ')[0]
                             attr_val = val['displ_value'].split(' - ')[-1]
