@@ -736,20 +736,25 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 cohort.save()
 
                 sample_list = []
+                samples_list_simple = []
 
                 for prog in results:
                     items = results[prog]['items']
-
                     for item in items:
                         project = None
                         if 'project_id' in item:
                             project = item['project_id']
-                        sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
+                        if type(item['sample_barcode']) is not list:
+                            item['sample_barcode'] = [item['sample_barcode']]
+                        for sample in item['sample_barcode']:
+                            sample_info = {'sample_barcode': sample, 'case_barcode': item['case_barcode'], 'project_id': project}
+                            samples_list_simple.append(sample_info)
+                            sample_list.append(Samples(cohort=cohort, **sample_info))
 
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
+                logger.debug('[BENCHMARKING] Time to bulk create: ' + str(bulk_stop - bulk_start))
 
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -792,7 +797,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 bq_project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
+                bq_result = bcs.add_cohort_to_bq(cohort.id, samples_list_simple)
 
                 # If BQ insertion fails, we immediately de-activate the cohort and warn the user
                 if 'insertErrors' in bq_result:
