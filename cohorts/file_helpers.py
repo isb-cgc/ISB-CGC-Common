@@ -101,8 +101,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             fields.extend(["file_name_key", "index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "index_file_id", "experimental_strategy", "data_format",
-                           "file_gdc_id", "case_gdc_id", "file_size"
+                           "file_node_id", "case_node_id", "file_size", "program_name", "node"
                            ])
+            if build.lower() == 'hg38':
+                fields.append("file_name")
 
             col_map.update({
                 'col-filename': 'file_name_key',
@@ -119,6 +121,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 facet_names = ['disease_code', 'project_short_name']
                 if data_type == 'all':
                     facet_names.extend(['data_format', 'data_category', 'experimental_strategy', 'platform', 'data_type'])
+                    if build.lower() == 'hg38':
+                        facet_names.append('node')
                 elif data_type == 'camic':
                     facet_names.extend(['data_type'])
                 elif data_type == 'igv':
@@ -129,7 +133,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
-            unique="file_name_key"
+            unique="file_name" if build.lower() == 'hg38' else 'file_name_key'
 
         if 'case_barcode' in inc_filters:
             inc_filters['case_barcode'] = ["*{}*".format(x) for x in inc_filters['case_barcode']]
@@ -206,7 +210,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
                     file_list.append({
                         'sample': entry.get('sample_barcode','N/A'),
-                        'case': entry['case_barcode'],
+                        'case': entry.get('case_barcode','N/A'),
                         'disease_code': entry.get('disease_code','N/A'),
                         'build': build.lower(),
                         'cloudstorage_location': entry.get('file_name_key','N/A'),
@@ -220,7 +224,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'datacat': entry.get('data_category','N/A'),
                         'datatype': entry.get('data_type','N/A'),
                         'dataformat': entry.get('data_format','N/A'),
-                        'program': entry.get('project_short_name','').split("-")[0],
+                        'program':  entry.get('program_name',None) or entry.get('project_short_name','').split('-')[0],
                         'case_gdc_id': entry.get('case_gdc_id','N/A'),
                         'file_gdc_id': entry.get('file_gdc_id','N/A'),
                         'index_file_gdc_id': (entry.get('index_file_id', 'N/A')),
