@@ -395,7 +395,7 @@ class Cohort(models.Model):
                     else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) \
                     + ']' \
                     + (")" if 'NOT:' in cohort_filter['name'] else '')
-            elif cohort_filter['name'] == 'data_type':
+            elif cohort_filter['name'] == 'data_type_availability':
                 cohort_filter['displ_name'] = 'Data Type'
                 cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
             else:
