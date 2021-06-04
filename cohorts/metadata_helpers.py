@@ -231,11 +231,11 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
     elif type == 'camic':
         metadata_data_attrs = ['data_type', 'disease_code', 'project_short_name',]
     else:
+        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform', 'disease_code']
+        if build.lower() == 'hg38':
+            metadata_data_attrs.append("node")
         if add_program_name:
-            metadata_data_attrs = ['program_name', 'data_type', 'data_category', 'experimental_strategy', 'data_format',
-                                   'platform', 'disease_code', ]
-        else:
-            metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform', 'disease_code',]
+            metadata_data_attrs.append('program_name')
 
     try:
         if len(METADATA_DATA_ATTR[build]) != len(metadata_data_attrs):
@@ -310,7 +310,7 @@ def fetch_program_data_types(program, for_display=False):
             if type(program) is int:
                 program = Program.objects.get(id=program)
 
-        if program.name in ["FM","OHSU","MMRF"]:
+        if program.name in ["FM","OHSU","MMRF", "GPRP"]:
             logger.info("Data types are not available for these programs.")
             return {}
         if program.id not in METADATA_DATA_TYPES or len(METADATA_DATA_TYPES[program.id]) <= 0:
@@ -327,7 +327,6 @@ def fetch_program_data_types(program, for_display=False):
                 if not row[2] in METADATA_DATA_TYPES[program.id]:
                     METADATA_DATA_TYPES[program.id][row[2]] = {'name': row[2], 'displ_name': format_for_display(row[2]) if row[2] not in preformatted_attr else row[2], 'values': {}}
                 METADATA_DATA_TYPES[program.id][row[2]]['values'][int(row[0])] = ('Available' if row[1] is None else row[1])
-
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
             cursor.callproc('get_program_display_strings', (program.id,))
