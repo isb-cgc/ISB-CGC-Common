@@ -327,7 +327,11 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 'sets': {},
                 'totals': {}
             }
-            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA, DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA])
+            prog_versions = prog.dataversion_set.filter(
+                id__in=versions,
+                data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA,
+                               DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA]
+            )
             sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
             # filter one program as a time.
@@ -337,7 +341,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             count_attrs = sources.filter(
                 version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
             ).get_source_attrs(for_ui=False,for_faceting=False, named_set=['sample_barcode', 'case_barcode'])
-
             for source in sources:
                 solr_query = build_solr_query(prog_filters, with_tags_for_ex=True, subq_join_field=source.shared_id_col) if prog_filters else None
                 solr_mut_query = build_solr_query(
@@ -407,7 +410,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'fqs': query_set,
                     'unique': source.shared_id_col
                 })
-
                 set_type = source.get_set_type()
 
                 if set_type not in results['programs'][prog.id]['sets']:

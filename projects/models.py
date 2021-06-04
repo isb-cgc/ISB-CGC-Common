@@ -52,23 +52,23 @@ class Program(models.Model):
 
         return last_view
 
-    def get_data_sources(self, data_type=None, source_type=None):
+    def get_data_sources(self, data_type=None, source_type=None, active=True):
+        q_objects = Q()
+        if active is not None:
+            q_objects &= Q(version__active=active)
         if data_type:
-            return self.datasource_set.select_related('version').filter(
-                version__in=self.dataversion_set.filter(active=True, data_type=data_type)
-            ) if not source_type else self.datasource_set.select_related('version').filter(
-                version__in=self.dataversion_set.filter(active=True, data_type=data_type)
-            ).filter(source_type=source_type)
-        return self.datasource_set.select_related('version') if not source_type else self.datasource_set.select_related('version').filter(source_type=source_type)
+            if type(data_type) is list:
+                q_objects &= Q(version__data_type__in=data_type)
+            else:
+                q_objects &= Q(version__data_type=data_type)
+        if source_type:
+            q_objects &= Q(source_type=source_type)
+
+        return self.datasource_set.prefetch_related('version').filter(q_objects)
 
     def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
         prog_attrs = {'attrs': {}, 'by_src': {}}
-        if data_type_list:
-            datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list[0])
-            for data_type in data_type_list[1:]:
-                datasources |= self.get_data_sources(source_type=source_type, data_type=data_type)
-        else:
-            datasources = self.get_data_sources(source_type=source_type)
+        datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list)
 
         attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
         for attr in attrs['attrs']:
@@ -198,21 +198,24 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #  }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, all=False):
         attrs = { 'list': None, 'attrs': None, 'ids': None }
         if by_source:
             attrs['sources'] = {}
 
         for ds in self.select_related('version').all():
-            q_objects = Q(active=True)
-            if for_ui:
-                q_objects &= Q(default_ui_display=for_ui)
-            if named_set:
-                q_objects &= Q(name__in=named_set)
-            if for_faceting:
-                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
-                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
-                    ).values_list('attribute__id', flat=True)))
+            if all:
+                q_objects = Q()
+            else:
+                q_objects = Q(active=True)
+                if for_ui:
+                    q_objects &= Q(default_ui_display=for_ui)
+                if named_set:
+                    q_objects &= Q(name__in=named_set)
+                if for_faceting:
+                    q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
+                            attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                        ).values_list('attribute__id', flat=True)))
 
             attr_set = ds.attribute_set.filter(q_objects)
 
@@ -276,19 +279,24 @@ class DataSource(models.Model):
     def get_set_type(self):
         return DataVersion.SET_TYPES[self.version.data_type]
 
-    def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None):
-        q_objects = Q(active=True)
+    def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None, active=True, all=False):
+        if all:
+            attr_set = self.attribute_set.filter()
+        else:
+            q_objects = Q()
 
-        if for_ui:
-            q_objects &= Q(default_ui_display=True)
-        if named_set:
-            q_objects &= Q(name__in=named_set)
-        if for_faceting:
-            q_objects &= (Q(id__in=Attribute_Ranges.objects.filter(
-                attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True)
-            ).values_list('attribute', flat=True)) | Q(data_type=Attribute.CATEGORICAL))
+            if for_ui:
+                q_objects &= Q(default_ui_display=True)
+            if named_set:
+                q_objects &= Q(name__in=named_set)
+            if active is not None:
+                q_objects &= Q(active=active)
+            if for_faceting:
+                q_objects &= (Q(id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute', flat=True)) | Q(data_type=Attribute.CATEGORICAL))
 
-        attr_set = self.attribute_set.filter(q_objects)
+            attr_set = self.attribute_set.filter(q_objects)
 
         return attr_set
 
@@ -376,42 +384,44 @@ class DataNode(models.Model):
 
         for node in nodes:
             programs = nodes.filter(id=node.id).prefetch_related(
-                'data_sources', 'data_sources__programs'
-             ).filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True).values(
+                'data_sources', 'data_sources__programs', 'data_sources__version'
+             ).filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True,
+                      data_sources__version__data_type__in=[DataVersion.CLINICAL_DATA]).values(
                 'data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description'
             ).distinct()
 
-            program_list = []
-            for prog in programs:
-                prog_id = prog["data_sources__programs__id"]
-                prog_name = prog["data_sources__programs__name"]
-                prog_desc = prog["data_sources__programs__description"]
+            if len(programs):
+                program_list = []
+                for prog in programs:
+                    prog_id = prog["data_sources__programs__id"]
+                    prog_name = prog["data_sources__programs__name"]
+                    prog_desc = prog["data_sources__programs__description"]
 
-                prog_item = {
-                    "id": prog_id,
-                    "name": prog_name,
-                    "description": prog_desc}
+                    prog_item = {
+                        "id": prog_id,
+                        "name": prog_name,
+                        "description": prog_desc}
 
-                if not by_prog_dict.get(prog_id):
-                    by_prog_dict[prog_id] = prog_item.copy()
-                    by_prog_dict[prog_id]["nodes"] = []
+                    if not by_prog_dict.get(prog_id):
+                        by_prog_dict[prog_id] = prog_item.copy()
+                        by_prog_dict[prog_id]["nodes"] = []
 
-                by_prog_dict[prog_id]["nodes"].append({
+                    by_prog_dict[prog_id]["nodes"].append({
+                        "id": node.id,
+                        "name": node.name,
+                        "description": node.description,
+                        "short_name": node.short_name
+                    })
+
+                    program_list.append(prog_item)
+
+                by_node_list.append({
                     "id": node.id,
                     "name": node.name,
                     "description": node.description,
-                    "short_name": node.short_name
+                    "short_name": node.short_name,
+                    "programs": program_list
                 })
-
-                program_list.append(prog_item)
-
-            by_node_list.append({
-                "id": node.id,
-                "name": node.name,
-                "description": node.description,
-                "short_name": node.short_name,
-                "programs": program_list
-            })
 
         for prog_id, prog_info in by_prog_dict.items():
             by_prog_list.append({
@@ -726,11 +736,14 @@ class Attribute(models.Model):
 
         return result
 
-    def get_data_sources(self, source_type=None):
-        sources = self.data_sources.select_related('version').all().filter(version__active=True)
+    def get_data_sources(self, source_type=None, all=False):
+        q_obj = Q()
+        if not all:
+            q_obj &= Q(version__active=True)
         if source_type:
-            return sources.filter(source_type=source_type).values_list('name', flat=True)
-        return sources.values_list('name', flat=True)
+            q_obj &= Q(source_type=source_type)
+
+        return self.data_sources.prefetch_related('version').filter(q_obj).values_list('name', flat=True)
 
     def get_ranges(self):
         return self.attribute_ranges_set.all()
