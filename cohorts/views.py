@@ -111,7 +111,7 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
         # Divide our filters into 'mutation' and 'non-mutation' sets
         if inc_filters:
             for key in inc_filters:
-                if 'data_type' in key:
+                if 'data_type_availability' in key:
                         filters[key] = inc_filters[key]
                 elif 'MUT:' in key:
                     if not mutation_filters:
@@ -225,9 +225,25 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
 
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
-
+    filters = {}
     try:
-        samples_cases_projects = get_sample_case_list_solr(user, inc_filters, cohort_id, program_id, comb_mut_filters)
+        if inc_filters is not None:
+            id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id).items()}
+            try:
+                for key in inc_filters:
+                    attr = id_to_name.get(str(key),key)
+                    if not validate_filter_key(attr, program_id):
+                        raise Exception('Invalid filter key received: ' + attr)
+                    this_filter = inc_filters[key]['values']
+                    if attr not in filters:
+                        filters[attr] = {'values': []}
+                    for value in this_filter:
+                        filters[attr]['values'].append(value)
+            except Exception as e:
+                logger.exception(e)
+                raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
+
+        samples_cases_projects = get_sample_case_list_solr(user, filters, cohort_id, program_id, comb_mut_filters)
 
         public_projects = Project.get_public_projects(by_name=True)
 
@@ -1801,7 +1817,7 @@ def get_metadata(request):
         data_type_counts = {}
         for set in results['counts']:
             for attr in results['counts'][set]:
-                if attr == 'data_type':
+                if attr == 'data_type_availability':
                     for id, val in results['counts'][set][attr]['values'].items():
                         attr_name = val['displ_value'].split(' - ')[0]
                         attr_val = val['displ_value'].split(' - ')[-1]
