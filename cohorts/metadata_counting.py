@@ -295,11 +295,10 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
     try:
         start = time.time()
-
         # Divide our filters into 'mutation' and 'non-mutation' sets
         if inc_filters:
             for key in inc_filters:
-                if 'data_type' in key:
+                if 'data_type_availability' in key:
                         filters[key] = inc_filters[key]
                 elif 'MUT:' in key:
                     if not mutation_filters:
@@ -495,18 +494,18 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
 def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None, comb_mut_filters='OR'):
     filters = {}
-
     if req_filters is not None:
+        id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id).items()}
         try:
             for key in req_filters:
-                if not validate_filter_key(key, program_id):
-                    raise Exception('Invalid filter key received: ' + key)
+                attr = id_to_name.get(str(key),key)
+                if not validate_filter_key(attr, program_id):
+                    raise Exception('Invalid filter key received: ' + attr)
                 this_filter = req_filters[key]
-                if key not in filters:
-                    filters[key] = {'values': []}
+                if attr not in filters:
+                    filters[attr] = {'values': []}
                 for value in this_filter:
-                    filters[key]['values'].append(value)
-
+                    filters[attr]['values'].append(value)
         except Exception as e:
             logger.exception(e)
             raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
