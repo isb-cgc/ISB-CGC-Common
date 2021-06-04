@@ -449,25 +449,24 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             for set, set_result in prog_result['sets'].items():
                 facets[set] = {}
                 for source, source_result in set_result.items():
-                    source_attr = DataSource.objects.get(name=source).get_source_attr()
                     if 'facets' in source_result:
                         for attr, vals in source_result['facets'].items():
-                            obj = source_attr.get(name=attr)
-                            dvals = obj.get_display_values()
-                            facets[set][attr] = {'name': attr, 'id': attr, 'values': {}, 'displ_name': obj.display_name}
+                            attr_info = metadata_attr_values['attrs'][attr]
+                            dvals = {x: attr_info['values'][x]['displ_value'] for x in attr_info['values']}
+                            facets[set][attr] = {'name': attr, 'id': attr_info['id'], 'values': {}, 'displ_name': attr_info['displ_name']}
                             for val in vals:
                                 val_index = val
                                 val = str(val)
                                 val_name = val
                                 val_value = val
-                                displ_value = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
-                                displ_name = val if obj.preformatted_values else dvals.get(val,format_for_display(val))
+                                displ_value = val if attr_info['preformatted'] else dvals.get(val,format_for_display(val))
+                                displ_name = val if attr_info['preformatted'] else dvals.get(val,format_for_display(val))
                                 count = vals[val_index]
                                 if "::" in val:
                                     val_name = val.split("::")[0]
                                     val_value = val.split("::")[-1]
-                                    displ_value = val_name if obj.preformatted_values else dvals.get(val_name,format_for_display(val_name))
-                                    displ_name = val_name if obj.preformatted_values else dvals.get(val_name, format_for_display(val_name))
+                                    displ_value = val_name if attr_info['preformatted'] else dvals.get(val_name,format_for_display(val_name))
+                                    displ_name = val_name if attr_info['preformatted'] else dvals.get(val_name, format_for_display(val_name))
                                 facets[set][attr]['values'][val_index] = {
                                     'name': val_name,
                                     'value': val_value,
