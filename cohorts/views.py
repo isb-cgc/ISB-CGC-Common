@@ -244,11 +244,20 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
         samples_cases_projects = get_sample_case_list_solr(user, filters, cohort_id, program_id, comb_mut_filters)
-
         public_projects = Project.get_public_projects(by_name=True)
+        items = []
+        for x in samples_cases_projects['docs']:
+            proj = x['project_short_name']
+            if type(x['project_short_name']) is list:
+                proj = proj[0]
+            if type(x['sample_barcode']) is not list:
+                x['sample_barcode'] = [x['sample_barcode']]
+            for sbc in x['sample_barcode']:
+                item = {'sample_barcode': sbc, 'case_barcode': x['case_barcode'], 'project_id': public_projects[proj]['id']}
+                items.append(item)
 
         samples_and_cases = {
-            'items': [{'sample_barcode': x['sample_barcode'], 'case_barcode': x['case_barcode'], 'project_id': public_projects[x['project_short_name']]['id']} for x in samples_cases_projects['docs']],
+            'items': items,
             'cases': list(set([x['case_barcode'] for x in samples_cases_projects['docs']])),
             'count': samples_cases_projects['numFound']
         }
@@ -539,9 +548,7 @@ def cohort_detail(request, cohort_id):
         cohort.mark_viewed(request)
 
         cohort_progs = cohort.get_programs()
-
         cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
-
         # Do not show shared users for public cohorts
         if not cohort.is_public():
             shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
@@ -760,12 +767,10 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                         project = None
                         if 'project_id' in item:
                             project = item['project_id']
-                        if type(item['sample_barcode']) is not list:
-                            item['sample_barcode'] = [item['sample_barcode']]
-                        for sample in item['sample_barcode']:
-                            sample_info = {'sample_barcode': sample, 'case_barcode': item['case_barcode'], 'project_id': project}
-                            samples_list_simple.append(sample_info)
-                            sample_list.append(Samples(cohort=cohort, **sample_info))
+
+                        sample_info = {'sample_barcode': item['sample_barcode'], 'case_barcode': item['case_barcode'], 'project_id': project}
+                        samples_list_simple.append(sample_info)
+                        sample_list.append(Samples(cohort=cohort, **sample_info))
 
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
