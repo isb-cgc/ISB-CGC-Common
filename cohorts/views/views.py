@@ -959,7 +959,7 @@ def create_manifest_bq_table(request, cohorts):
             logger.warning("[WARNING] Not all of the queries completed!")
 
         for cohort in export_jobs:
-            if not all_results[cohort]:
+            if not all_results.get(cohort,None):
                 all_results[cohort] = {
                     'status': 'long_running',
                     'table_id': export_jobs[cohort]['table_id']
