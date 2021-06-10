@@ -1087,6 +1087,8 @@ def create_file_manifest(request, cohort):
             for row in manifest:
                 if 'collection_id' in row:
                     row['collection_id'] = "; ".join(row['collection_id'])
+                if 'source_DOI' in row:
+                    row['source_DOI'] = ", ".join(row['source_DOI'])
                 this_row = [(row[x] if x in row else "") for x in selected_columns]
                 rows += (this_row,)
             pseudo_buffer = Echo()
