@@ -1050,10 +1050,10 @@ def create_file_manifest(request, cohort):
                            "There was an error while attempting to retrieve this file list - please contact the administrator.")
         return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
 
-    file_type = request.GET.get('file_type')
+    file_type = request.GET.get('file_type','csv').lower()
 
     if len(manifest) > 0:
-        if file_type == 'csv' or file_type == 'tsv':
+        if file_type in ['csv','tsv']:
             # CSV and TSV export
             rows = ()
             if include_header:
@@ -1087,6 +1087,8 @@ def create_file_manifest(request, cohort):
             for row in manifest:
                 if 'collection_id' in row:
                     row['collection_id'] = "; ".join(row['collection_id'])
+                if 'source_DOI' in row:
+                    row['source_DOI'] = ", ".join(row['source_DOI'])
                 this_row = [(row[x] if x in row else "") for x in selected_columns]
                 rows += (this_row,)
             pseudo_buffer = Echo()
@@ -1103,6 +1105,10 @@ def create_file_manifest(request, cohort):
             json_result = ""
 
             for row in manifest:
+                if 'collection_id' in row:
+                    row['collection_id'] = "; ".join(row['collection_id'])
+                if 'source_DOI' in row:
+                    row['source_DOI'] = ", ".join(row['source_DOI'])
                 this_row = {}
                 for key in selected_columns:
                     this_row[key] = row[key] if key in row else ""
