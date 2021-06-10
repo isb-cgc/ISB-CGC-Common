@@ -211,9 +211,9 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
     return cohort_info
 
 
-def cohort_manifest(cohort, user, fields, limit, offset):
+def cohort_manifest(cohort, user, fields, limit, offset, level="SeriesInstanceUID"):
     try:
-        sources = cohort.get_data_sources()
+        sources = cohort.get_data_sources(aggregate_level=level)
         versions = cohort.get_data_versions()
 
         group_filters = cohort.get_filters_as_dict()
@@ -222,7 +222,7 @@ def cohort_manifest(cohort, user, fields, limit, offset):
 
         cohort_records = get_collex_metadata(
             filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
-            collapse_on='SOPInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc, SOPInstanceUID asc")
+            collapse_on='SeriesInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc")
         
         return cohort_records
         
