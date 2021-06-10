@@ -73,10 +73,11 @@ def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
     source_set = None
 
     if cache_as:
-        if cache_as not in DATA_SOURCE_ATTR:
-            logger.debug("[STATUS] Cache of {} not found, pulling.".format(cache_as))
-            DATA_SOURCE_ATTR[cache_as] = sources.get_source_attrs(**fetch_settings)
-        source_set = DATA_SOURCE_ATTR[cache_as]
+        cache_name = "{}_{}".format(cache_as, ":".join([str(x) for x in list(sources.order_by('-id').values_list('id',flat=True))]))
+        if cache_name not in DATA_SOURCE_ATTR:
+            logger.debug("[STATUS] Cache of {} not found, pulling.".format(cache_name))
+            DATA_SOURCE_ATTR[cache_name] = sources.get_source_attrs(**fetch_settings)
+        source_set = DATA_SOURCE_ATTR[cache_name]
     else:
         logger.debug("[STATUS] Cache not requested for: {}".format(sources))
         source_set = sources.get_source_attrs(**fetch_settings)
@@ -189,7 +190,7 @@ def sortNum(x):
 
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
-                           with_derived, collapse_on, is_json, uniques=None):
+                           with_derived, collapse_on, is_json, uniques=None, totals=None):
     attr_by_source = {}
     attr_sets = {}
     context = {}
@@ -253,7 +254,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         source_metadata = get_collex_metadata(
             filters, fields, record_limit=3000, offset=0, counts_only=counts_only, with_ancillary=with_related,
             collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques,
-            record_source=record_source, search_child_records_by=None
+            record_source=record_source, search_child_records_by=None, totals=totals
         )
         stop = time.time()
         logger.debug("[STATUS] Benchmarking: Time to collect metadata for source type {}: {}s".format(
@@ -396,10 +397,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         source_set.pop(key)
 
         attr_by_source['total'] = source_metadata['total']
-        file_parts_count = math.ceil(source_metadata['total'] / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
-        attr_by_source['file_parts_count'] = file_parts_count
-        attr_by_source['display_file_parts_count'] = min(file_parts_count, 10)
-
         context['set_attributes'] = attr_by_source
         context['filtered_set_attributes'] = filtered_attr_by_source
         context['filters'] = filters
@@ -572,6 +569,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
     # Eventually this will need to go per program
     for source in sources:
         curUniques = uniques if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
+        curTotals = totals if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         start = time.time()
         joined_origin = False
         solr_query = build_solr_query(
@@ -650,7 +648,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'fields': None,
                 'uniques': curUniques,
                 'stats': solr_stats,
-                'totals': totals
+                'totals': curTotals
             })
 
             solr_count_filtered_result = None
@@ -664,7 +662,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'counts_only': True,
                     'fields': None,
                     'stats': solr_stats_filtered,
-                    'totals': totals
+                    'totals': curTotals
                 })
 
             stop = time.time()

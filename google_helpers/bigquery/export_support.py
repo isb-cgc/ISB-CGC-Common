@@ -41,6 +41,9 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'collection_id',
             'type': 'STRING'
         }, {
+            'name': 'source_DOI',
+            'type': 'STRING'
+        }, {
             'name': 'StudyInstanceUID',
             'type': 'STRING',
         }, {
@@ -50,7 +53,10 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'SOPInstanceUID',
             'type': 'STRING'
         }, {
-            'name': 'source_DOI',
+            'name': 'crdc_study_uuid',
+            'type': 'STRING'
+        }, {
+            'name': 'crdc_series_uuid',
             'type': 'STRING'
         }, {
             'name': 'crdc_instance_uuid',
@@ -291,8 +297,15 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['status'] = 'error'
                         result['message'] = msg + "--please contact the administrator."
             else:
-                # TODO: Check for 'too large'
-                result['status'] = 'success'
+                result = {
+                    'status': 'success',
+                    'full_table_id': '{}.{}.{}'.format(
+                        self.project_id,
+                        job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                        job_is_done['configuration']['query']['destinationTable']['tableId']
+                    ),
+                    'jobId': job_id
+                }
 
         else:
             logger.warning("[WARNING] Export is taking a long time to run, informing user.")
