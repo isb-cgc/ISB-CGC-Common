@@ -124,7 +124,8 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         if not name:
             name = "Cohort created on {}".format(datetime.datetime.now().strftime('%d-%m-%Y %H:%M'))
-    
+
+        cohort_details = {}
         if name or desc:
             blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
             check = {'name': {'val': name, 'match': blacklist.search(str(name))},
@@ -135,6 +136,10 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
                 vals = ", ".join([y for x in check if check[x]['match'] is not None for y in blacklist.findall(str(check[x]['val']))])
                 logger.error('[ERROR] While saving a cohort, saw a malformed {}: characters: {}'.format(mal,s,vals))
                 return {'message': "Your cohort's {} contain{} invalid characters; please choose another name.".format(mal,s)}
+            else:
+                cohort_details['name'] = name
+                if desc:
+                    cohort_details['description'] = desc
 
         # If we're only changing the name/desc, just edit the cohort and update it
         if cohort_id and not filters:
@@ -147,9 +152,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
             return {'cohort_id': cohort.id}
     
         # Make and save cohort
-        cohort = Cohort.objects.create(name=name)
-        if desc:
-            cohort.description = desc
+        cohort = Cohort.objects.create(**cohort_details)
 
         # Set permission for user to be owner
         perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
