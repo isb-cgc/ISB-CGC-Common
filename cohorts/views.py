@@ -700,8 +700,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     val = tmp['value']['name']
                     program_id = tmp['program']['id']
 
-                    if 'id' in tmp['feature'] and tmp['feature']['id']:
-                        key = tmp['feature']['id']
+                    # Note:
+                    # Id used to be same to name, such as [id: 'vital_status', name: 'vital_status']
+                    # Now Id is number, such as [id: 171, name: 'vital_status']
+                    # Commenting out the code below, otherwise filter will be displayed as "171: Alive" to user
+                    # if 'id' in tmp['feature'] and tmp['feature']['id']:
+                    #     key = tmp['feature']['id']
 
                     if 'id' in tmp['value'] and tmp['value']['id']:
                         val = tmp['value']['id']
