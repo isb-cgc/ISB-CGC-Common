@@ -218,14 +218,16 @@ def cohort_manifest(cohort, user, fields, limit, offset, level="SeriesInstanceUI
     try:
         sources = cohort.get_data_sources(aggregate_level=level)
         versions = cohort.get_data_versions()
-
         group_filters = cohort.get_filters_as_dict()
 
         filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
+        search_by = {x: "StudyInstanceUID" for x in filters} if level == "SeriesInstanceUID" else None
+
 
         cohort_records = get_collex_metadata(
             filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
-            collapse_on='SeriesInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc")
+            collapse_on='SeriesInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc",
+        search_child_records_by=search_by)
         
         return cohort_records
         
