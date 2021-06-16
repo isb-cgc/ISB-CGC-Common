@@ -1033,7 +1033,7 @@ def create_file_manifest(request, cohort):
     include_header = (request.GET.get('include_header','false').lower() == 'true')
 
     offset = 0
-    if len(request.GET.get('file_part','')) > 0:
+    if len(request.GET.get('file_part','0')) > 0:
         selected_file_part = json.loads(request.GET.get('file_part'))
         selected_file_part = min(selected_file_part, 9)
         offset = selected_file_part * MAX_FILE_LIST_ENTRIES
@@ -1131,39 +1131,47 @@ def create_file_manifest(request, cohort):
 
 
 def download_cohort_manifest(request, cohort_id=0):
-    cohort_ids = []
-    req = request.GET if request.GET else request.POST
-    if cohort_id:
-        cohort_ids = [cohort_id]
-    else:
-        cohort_ids = [int(x) for x in req.get("ids", "").split(",")]
-
-    if not len(cohort_ids):
-        messages.error(request, "A cohort ID was not provided.")
-        return redirect('cohort_list')
-
     try:
-        cohorts = Cohort.objects.filter(id__in=cohort_ids)
-        for cohort in cohorts:
-            Cohort_Perms.objects.get(cohort=cohort, user=request.user)
-
-        if req.get('manifest-type','file-manifest') == 'bq-manifest':
-            response = create_manifest_bq_table(request, cohorts)
+        cohort_ids = []
+        req = request.GET if request.GET else request.POST
+        if cohort_id:
+            cohort_ids = [cohort_id]
         else:
-            response = create_file_manifest(request, cohorts.first())
+            cohort_ids = [int(x) for x in req.get("ids", "").split(",")]
 
-        return response
-    except ObjectDoesNotExist:
-        logger.error("[ERROR] User ID {} attempted to access one or more of these cohorts, " +
-                     "which they do not have permission to view: {}".format(request.user.id,cohort_ids.join("; ")))
-        messages.error(request,"You don't have permission to view one or more of these cohorts.")
+        if not len(cohort_ids):
+            messages.error(request, "A cohort ID was not provided.")
+            return redirect('cohort_list')
+
+        try:
+            cohorts = Cohort.objects.filter(id__in=cohort_ids)
+            for cohort in cohorts:
+                Cohort_Perms.objects.get(cohort=cohort, user=request.user)
+
+            if req.get('manifest-type','file-manifest') == 'bq-manifest':
+                response = create_manifest_bq_table(request, cohorts)
+            else:
+                response = create_file_manifest(request, cohorts.first())
+
+            if not response:
+                raise Exception("Response from manifest creation was None!")
+
+            return response
+        except ObjectDoesNotExist:
+            logger.error("[ERROR] User ID {} attempted to access one or more of these cohorts, " +
+                         "which they do not have permission to view: {}".format(request.user.id,cohort_ids.join("; ")))
+            messages.error(request,"You don't have permission to view one or more of these cohorts.")
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the cohort manifest(s) for user {}:".format(str(request.user.id)))
+        logger.error("[ERROR] While downloading the cohort manifest(s) for user {}:".format(str(request.user.email)))
         logger.exception(e)
         messages.error(request,"There was an error while attempting to download your cohort manifest(s)--please contact the administrator.")
 
-    return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+    if cohort_id:
+        return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+
+    return redirect('cohort_list')
+
 
 @login_required
 def unshare_cohort(request, cohort_id=0):
