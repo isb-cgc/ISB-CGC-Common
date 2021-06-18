@@ -17,6 +17,7 @@ from __future__ import absolute_import
 
 import sys
 
+from time import sleep
 from builtins import map
 from builtins import next
 from builtins import str
@@ -30,6 +31,7 @@ import re
 import datetime
 import time
 import logging
+import math
 
 import django
 from google_helpers.bigquery.cohort_support import BigQuerySupport
@@ -150,20 +152,24 @@ def cohorts_list(request, is_public=False):
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
     cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
 
-    cohorts.has_private_cohorts = False
+    cohorts.has_private_cohorts = True
     shared_users = {}
 
     for item in cohorts:
-        item.perm = item.get_perm(request).get_perm_display()
-        item.owner = item.get_owner()
-        shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user', flat=True)
-        item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
-        if not item.owner.is_superuser:
-            cohorts.has_private_cohorts = True
-            # if it is not a public cohort and it has been shared with other users
-            # append the list of shared users to the shared_users array
-            if item.shared_with_users and item.owner.id == request.user.id:
-                shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
+        file_parts_count = math.ceil(item.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
+        item.file_parts_count = file_parts_count
+        item.display_file_parts_count = min(file_parts_count, 10)
+
+    #     item.perm = item.get_perm(request).get_perm_display()
+    #     item.owner = item.get_owner()
+    #     shared_with_ids = Cohort_Perms.objects.filter(cohort=item, perm=Cohort_Perms.READER).values_list('user', flat=True)
+    #     item.shared_with_users = User.objects.filter(id__in=shared_with_ids)
+    #     if not item.owner.is_superuser:
+    #         cohorts.has_private_cohorts = True
+    #         # if it is not a public cohort and it has been shared with other users
+    #         # append the list of shared users to the shared_users array
+    #         if item.shared_with_users and item.owner.id == request.user.id:
+    #             shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
     previously_selected_cohort_ids = []
 
@@ -211,7 +217,11 @@ def cohort_detail(request, cohort_id):
         cohort_versions = cohort.get_data_versions()
         initial_filters = {}
 
-        template_values = build_explorer_context(is_dicofdic, source, cohort_versions, initial_filters, fields, order_docs, counts_only, with_related, with_derived, collapse_on, False)
+        template_values = build_explorer_context(
+            is_dicofdic, source, cohort_versions, initial_filters, fields, order_docs, counts_only, with_related,
+            with_derived, collapse_on, False)
+
+        file_parts_count = math.ceil(cohort.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
 
         template_values.update({
             'request': request,
@@ -221,7 +231,9 @@ def cohort_detail(request, cohort_id):
             'cohort_filters': cohort_filters,
             'cohort_version': "; ".join(cohort_versions.get_displays()),
             'cohort_id': cohort_id,
-            'is_social': bool(len(request.user.socialaccount_set.all()) > 0)
+            'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
+            'file_parts_count': file_parts_count,
+            'display_file_parts_count': min(file_parts_count, 10)
         })
 
         template = 'cohorts/cohort_details.html'
@@ -875,37 +887,33 @@ class Echo(object):
         """Write the value by returning it, instead of storing in a buffer."""
         return value
 
+
 def create_manifest_bq_table(request, cohorts):
     response = None
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
 
-        export_settings = {
-            'dest': {
-                'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
-                'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
-                'table_id': ""
-            },
-            'email': request.user.email,
-            'cohort_id': ""
-        }
-
-        order_by = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]
-        field_list = json.loads(request.GET.get('columns','["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI", "crdc_instance_uuid", "gcs_url"]'))
+        order_by = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
+        # field_list = json.loads(request.GET.get('columns',
+        #    '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]'))
+        # TODO: Allow users to specify the columns
+        field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
 
         # We can only ORDER BY columns which we've actually requested
         order_by = list(set.intersection(set(order_by),set(field_list)))
 
         all_results = {}
+        export_jobs = {}
 
         for cohort in cohorts:
+            desc = None
             if request.GET.get('header_fields'):
                 selected_header_fields = json.loads(request.GET.get('header_fields'))
                 headers = []
                 'cohort_name' in selected_header_fields and headers.append("Manifest for cohort '{}' ID#{}".format(cohort.name, cohort.id))
                 'user_email' in selected_header_fields and headers.append("User: {}".format(request.user.email))
                 'cohort_filters' in selected_header_fields and headers.append("Filters: {}".format(cohort.get_filter_display_string()))
-                export_settings['desc'] = "\n".join(headers)
+                desc = "\n".join(headers)
 
             base_filters = cohort.get_filters_as_dict_simple()[0]
             if 'bmi' in base_filters:
@@ -919,18 +927,64 @@ def create_manifest_bq_table(request, cohorts):
                     else:
                         base_filters['bmi_gt'] = BMI_MAPPING[val]
 
-            export_settings['cohort_id'] = cohort.id
             table_name = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
-            export_settings['dest']['table_id'] = table_name
-            all_results[cohort.id] = get_bq_metadata(
+            export_jobs[cohort.id] = {
+                'table_id': table_name
+            }
+            query = get_bq_metadata(
                 base_filters, field_list, cohort.get_data_versions(),
-                order_by=order_by, output_settings=export_settings,
-                search_child_records_by=True)
-            all_results[cohort.id]['table_id'] = table_name
+                order_by=order_by, no_submit=True,
+                search_child_records_by=True
+            )
+            export_jobs[cohort.id]['bqs'] = BigQueryExportFileList(**{
+                'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
+                'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
+                'table_id': table_name
+            })
+            export_jobs[cohort.id]['job_id'] = export_jobs[cohort.id]['bqs'].export_file_list_query_to_bq(
+                query['sql_string'], query['params'],
+                cohort.id,
+                user_email=request.user.email,
+                desc=desc or None,
+                for_batch=True
+            )
+
+        not_done = True
+        still_checking = True
+        num_retries = 0
+
+        while still_checking and not_done:
+            not_done = False
+            for cohort in export_jobs:
+                if not BigQuerySupport.check_job_is_done({'jobReference': {'jobId': export_jobs[cohort]['job_id']}}):
+                    not_done = True
+                else:
+                    if cohort not in all_results:
+                        all_results[cohort] = export_jobs[cohort]['bqs'].check_query_to_table_done(
+                            export_jobs[cohort]['job_id'],"cohort file manifest",False
+                        )
+                        all_results[cohort]['table_id'] = export_jobs[cohort]['table_id'] \
+                            if all_results[cohort]['status'] == 'error' \
+                            else all_results[cohort]['full_table_id']
+            if not_done:
+                sleep(1)
+                num_retries += 1
+                still_checking = (num_retries < settings.BQ_MAX_ATTEMPTS)
+
+        if not_done:
+            logger.warning("[WARNING] Not all of the queries completed!")
+
+        for cohort in export_jobs:
+            if not all_results.get(cohort,None):
+                all_results[cohort] = {
+                    'status': 'long_running',
+                    'table_id': export_jobs[cohort]['table_id']
+                }
 
         errors = {x: all_results[x]['message'] for x in all_results if all_results[x]['status'] == 'error'}
+
         if bool(len(errors) > 0):
-            response = JsonResponse({'status': 400, 'message': "; ".join(["Cohort ID {}: {}".format(x,errors[x]) for x in errors])})
+            response = JsonResponse({'status': 400, 'message': "<br />".join(["Cohort ID {}: {}".format(x,errors[x]) for x in errors])})
         else:
             msg_template = get_template('cohorts/bq-manifest-export-msg.html')
             msg = msg_template.render(context={
@@ -939,9 +993,11 @@ def create_manifest_bq_table(request, cohorts):
                     'uri': "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
                         settings.BIGQUERY_USER_DATA_PROJECT_ID,
                         settings.BIGQUERY_USER_MANIFEST_DATASET,
-                        all_results[x]['table_id']
-                    )} for x in all_results],
+                        all_results[x]['table_id'].split('.')[-1]
+                    ),
+                    'error': all_results[x]['status'] == 'error'} for x in all_results],
                 'long_running': bool(len([x for x in all_results if all_results[x]['status'] == 'long_running']) > 0),
+                'errors': bool(len([x for x in all_results if all_results[x]['status'] == 'error']) > 0),
                 'email': request.user.email
             })
             response = JsonResponse({
@@ -958,14 +1014,14 @@ def create_manifest_bq_table(request, cohorts):
 
     return response
 
+
 # Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
-def create_file_manifest(request,cohort):
+def create_file_manifest(request, cohort):
     manifest = None
-    response = None
-    
+
     # Fields we need to fetch
-    field_list = ["PatientID", "collection_id", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "source_DOI",
-                  "gcs_generation", "gcs_bucket", "crdc_instance_uuid"]
+    field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
+                  "crdc_study_uuid", "crdc_series_uuid"]
 
     # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
     if request.GET.get('columns'):
@@ -977,7 +1033,7 @@ def create_file_manifest(request,cohort):
     include_header = (request.GET.get('include_header','false').lower() == 'true')
 
     offset = 0
-    if len(request.GET.get('file_part','')) > 0:
+    if len(request.GET.get('file_part','0')) > 0:
         selected_file_part = json.loads(request.GET.get('file_part'))
         selected_file_part = min(selected_file_part, 9)
         offset = selected_file_part * MAX_FILE_LIST_ENTRIES
@@ -994,10 +1050,10 @@ def create_file_manifest(request,cohort):
                            "There was an error while attempting to retrieve this file list - please contact the administrator.")
         return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
 
-    file_type = request.GET.get('file_type')
+    file_type = request.GET.get('file_type','csv').lower()
 
     if len(manifest) > 0:
-        if file_type == 'csv' or file_type == 'tsv':
+        if file_type in ['csv','tsv']:
             # CSV and TSV export
             rows = ()
             if include_header:
@@ -1029,12 +1085,11 @@ def create_file_manifest(request,cohort):
                 rows += (selected_columns,)
 
             for row in manifest:
-                this_row = [(row[x] if x in row else "") for x in selected_columns if x != 'gcs_url']
-                if 'gcs_url' in selected_columns:
-                    this_row.append("{}{}/dicom/{}/{}/{}.dcm#{}".format(
-                        "gs://", row['gcs_bucket'], row['StudyInstanceUID'], row['SeriesInstanceUID'],
-                        row['SOPInstanceUID'], row['gcs_generation'])
-                    )
+                if 'collection_id' in row:
+                    row['collection_id'] = "; ".join(row['collection_id'])
+                if 'source_DOI' in row:
+                    row['source_DOI'] = ", ".join(row['source_DOI'])
+                this_row = [(row[x] if x in row else "") for x in selected_columns]
                 rows += (this_row,)
             pseudo_buffer = Echo()
 
@@ -1050,13 +1105,10 @@ def create_file_manifest(request,cohort):
             json_result = ""
 
             for row in manifest:
-                if 'gcs_url' in selected_columns:
-                    gcs_url = ("{}{}/dicom/{}/{}/{}.dcm#{}".format(
-                        "gs://", row['gcs_bucket'], row['StudyInstanceUID'], row['SeriesInstanceUID'],
-                        row['SOPInstanceUID'], row['gcs_generation'])
-                    )
-                    row['gcs_url'] = gcs_url
-
+                if 'collection_id' in row:
+                    row['collection_id'] = "; ".join(row['collection_id'])
+                if 'source_DOI' in row:
+                    row['source_DOI'] = ", ".join(row['source_DOI'])
                 this_row = {}
                 for key in selected_columns:
                     this_row[key] = row[key] if key in row else ""
@@ -1077,40 +1129,49 @@ def create_file_manifest(request,cohort):
         
         return response
 
+
 def download_cohort_manifest(request, cohort_id=0):
-    cohort_ids = []
-    req = request.GET if request.GET else request.POST
-    if cohort_id:
-        cohort_ids = [cohort_id]
-    else:
-        cohort_ids = req.get("ids", "").split(",")
-
-    if not len(cohort_ids):
-        messages.error(request, "A cohort ID was not provided.")
-        return redirect('cohort_list')
-
     try:
-        cohorts = Cohort.objects.filter(id__in=[int(x) for x in cohort_ids])
-        for cohort in cohorts:
-            Cohort_Perms.objects.get(cohort=cohort, user=request.user)
-
-        if req.get('manifest-type','file-manifest') == 'bq-manifest':
-            response = create_manifest_bq_table(request, cohorts)
+        cohort_ids = []
+        req = request.GET if request.GET else request.POST
+        if cohort_id:
+            cohort_ids = [cohort_id]
         else:
-            response = create_file_manifest(request, cohorts)
+            cohort_ids = [int(x) for x in req.get("ids", "").split(",")]
 
-        return response
-    except ObjectDoesNotExist:
-        logger.error("[ERROR] User ID {} attempted to access one or more of these cohorts, " +
-                     "which they do not have permission to view: {}".format(request.user.id,cohort_ids.join("; ")))
-        messages.error(request,"You don't have permission to view one or more of these cohorts.")
+        if not len(cohort_ids):
+            messages.error(request, "A cohort ID was not provided.")
+            return redirect('cohort_list')
+
+        try:
+            cohorts = Cohort.objects.filter(id__in=cohort_ids)
+            for cohort in cohorts:
+                Cohort_Perms.objects.get(cohort=cohort, user=request.user)
+
+            if req.get('manifest-type','file-manifest') == 'bq-manifest':
+                response = create_manifest_bq_table(request, cohorts)
+            else:
+                response = create_file_manifest(request, cohorts.first())
+
+            if not response:
+                raise Exception("Response from manifest creation was None!")
+
+            return response
+        except ObjectDoesNotExist:
+            logger.error("[ERROR] User ID {} attempted to access one or more of these cohorts, " +
+                         "which they do not have permission to view: {}".format(request.user.id,cohort_ids.join("; ")))
+            messages.error(request,"You don't have permission to view one or more of these cohorts.")
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the cohort manifest(s) for user {}:".format(str(request.user.id)))
+        logger.error("[ERROR] While downloading the cohort manifest(s) for user {}:".format(str(request.user.email)))
         logger.exception(e)
         messages.error(request,"There was an error while attempting to download your cohort manifest(s)--please contact the administrator.")
 
-    return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+    if cohort_id:
+        return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+
+    return redirect('cohort_list')
+
 
 @login_required
 def unshare_cohort(request, cohort_id=0):

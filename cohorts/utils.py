@@ -65,13 +65,13 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
 
         result = get_collex_metadata(filters, None, sources=sources, facets=["collection_id"], counts_only=True,
                                      totals=["PatientID", "StudyInstanceUID", "SeriesInstanceUID"], filtered_needed=False)
-        print(result)
+
         for total in result['totals']:
             stats[total] = result['totals'][total]
 
         for src in result['facets']:
             if src.split(':')[0] in list(sources.values_list('name',flat=True)):
-                stats['collections'] = [x for x, y in result['facets'][src]['facets']['collection_id'].items() if y > 0]
+                stats['collections'] = [x for x, y in result['filtered_facets'][src]['facets']['collection_id'].items() if y > 0]
 
     except Exception as e:
         logger.error("[ERROR] While fetching cohort stats:")
@@ -125,7 +125,8 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         if not name:
             name = "Cohort created on {}".format(datetime.datetime.now().strftime('%d-%m-%Y %H:%M'))
-    
+
+        cohort_details = {}
         if name or desc:
             blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
             check = {'name': {'val': name, 'match': blacklist.search(str(name))},
@@ -136,6 +137,10 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
                 vals = ", ".join([y for x in check if check[x]['match'] is not None for y in blacklist.findall(str(check[x]['val']))])
                 logger.error('[ERROR] While saving a cohort, saw a malformed {}: characters: {}'.format(mal,s,vals))
                 return {'message': "Your cohort's {} contain{} invalid characters; please choose another name.".format(mal,s)}
+            else:
+                cohort_details['name'] = name
+                if desc:
+                    cohort_details['description'] = desc
 
         # If we're only changing the name/desc, just edit the cohort and update it
         if cohort_id and not filters:
@@ -148,9 +153,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
             return {'cohort_id': cohort.id}
     
         # Make and save cohort
-        cohort = Cohort.objects.create(name=name)
-        if desc:
-            cohort.description = desc
+        cohort = Cohort.objects.create(**cohort_details)
 
         # Set permission for user to be owner
         perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
@@ -212,18 +215,20 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
     return cohort_info
 
 
-def cohort_manifest(cohort, user, fields, limit, offset):
+def cohort_manifest(cohort, user, fields, limit, offset, level="SeriesInstanceUID"):
     try:
-        sources = cohort.get_data_sources()
+        sources = cohort.get_data_sources(aggregate_level=level)
         versions = cohort.get_data_versions()
-
         group_filters = cohort.get_filters_as_dict()
 
         filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
+        search_by = {x: "StudyInstanceUID" for x in filters} if level == "SeriesInstanceUID" else None
+
 
         cohort_records = get_collex_metadata(
             filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
-            collapse_on='SOPInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc, SOPInstanceUID asc")
+            collapse_on='SeriesInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc",
+        search_child_records_by=search_by)
         
         return cohort_records
         

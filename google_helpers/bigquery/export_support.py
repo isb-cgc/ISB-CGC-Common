@@ -41,6 +41,9 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'collection_id',
             'type': 'STRING'
         }, {
+            'name': 'source_DOI',
+            'type': 'STRING'
+        }, {
             'name': 'StudyInstanceUID',
             'type': 'STRING',
         }, {
@@ -50,7 +53,10 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'SOPInstanceUID',
             'type': 'STRING'
         }, {
-            'name': 'source_DOI',
+            'name': 'crdc_study_uuid',
+            'type': 'STRING'
+        }, {
+            'name': 'crdc_series_uuid',
             'type': 'STRING'
         }, {
             'name': 'crdc_instance_uuid',
@@ -220,48 +226,16 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         return result
 
-    def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False):
-        bq_service = get_bigquery_service()
-        job_id = str(uuid4())
-
-        query_data = {
-            'jobReference': {
-                'projectId': settings.BIGQUERY_PROJECT_ID,
-                'jobId': job_id
-            },
-            'configuration': {
-                'query': {
-                    'query': query,
-                    'priority': 'INTERACTIVE',
-                    'writeDisposition': write_disp,
-                    'useLegacySql': False
-                }
-            }
-        }
-
-        if not to_temp:
-            query_data['configuration']['query']['destinationTable'] = {
-                'projectId': self.project_id,
-                'datasetId': self.dataset_id,
-                'tableId': self.table_id
-            }
-
-        if parameters:
-            query_data['configuration']['query']['queryParameters'] = parameters
-
-        query_job = bq_service.jobs().insert(
-            projectId=settings.BIGQUERY_PROJECT_ID,
-            body=query_data).execute(num_retries=5)
-
-        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
+    def check_query_to_table_done(self, job_id, export_type, to_temp):
+        job_is_done = self.bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
 
         retries = 0
 
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
-                              jobId=job_id).execute()
+            job_is_done = self.bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
+                                                jobId=job_id).execute()
 
         result = {
             'status': None,
@@ -287,12 +261,12 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 logger.error("[ERROR] {}".format(msg))
             elif not to_temp:
                 # Check the table
-                export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
+                export_table = self.bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
                 if not export_table:
                     msg = "Export table {}:{}.{} not found".format(self.project_id,self.dataset_id,self.table_id)
                     logger.error("[ERROR] ".format({msg}))
-                    bq_result = bq_service.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_ID,
-                                  jobId=job_id).execute()
+                    bq_result = self.bq_service.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_ID,
+                                                                  jobId=job_id).execute()
                     if 'errors' in bq_result:
                         logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
                     result['status'] = 'error'
@@ -323,11 +297,18 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         result['status'] = 'error'
                         result['message'] = msg + "--please contact the administrator."
             else:
-                #Check for 'too large'
-                result['status'] = 'success'
+                result = {
+                    'status': 'success',
+                    'full_table_id': '{}.{}.{}'.format(
+                        self.project_id,
+                        job_is_done['configuration']['query']['destinationTable']['datasetId'],
+                        job_is_done['configuration']['query']['destinationTable']['tableId']
+                    ),
+                    'jobId': job_id
+                }
 
         else:
-            logger.warn("[WARNING] Export is taking a long time to run, informing user.")
+            logger.warning("[WARNING] Export is taking a long time to run, informing user.")
             result = {
                 'status': 'long_running',
                 'full_table_id': '{}.{}.{}'.format(
@@ -337,10 +318,45 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 ),
                 'jobId': job_id
             }
-
         return result
 
-    def export_query_to_bq(self, desc, query, parameters, type, is_temp=False):
+    def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False, for_batch=False):
+        job_id = str(uuid4())
+
+        query_data = {
+            'jobReference': {
+                'projectId': settings.BIGQUERY_PROJECT_ID,
+                'jobId': job_id
+            },
+            'configuration': {
+                'query': {
+                    'query': query,
+                    'priority': 'INTERACTIVE',
+                    'writeDisposition': write_disp,
+                    'useLegacySql': False
+                }
+            }
+        }
+
+        if not to_temp:
+            query_data['configuration']['query']['destinationTable'] = {
+                'projectId': self.project_id,
+                'datasetId': self.dataset_id,
+                'tableId': self.table_id
+            }
+
+        if parameters:
+            query_data['configuration']['query']['queryParameters'] = parameters
+
+        self.bq_service.jobs().insert(
+            projectId=settings.BIGQUERY_PROJECT_ID,
+            body=query_data).execute(num_retries=5)
+
+        if for_batch:
+            return job_id
+        return self.check_query_to_table_done(job_id, export_type, to_temp)
+
+    def export_query_to_bq(self, desc, query, parameters, type, is_temp=False, for_batch=False):
         write_disp = 'WRITE_EMPTY'
 
         if not is_temp:
@@ -348,9 +364,11 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             if 'tableErrors' in check_dataset_table:
                 return check_dataset_table
             elif 'status' in check_dataset_table and check_dataset_table['status'] == 'TABLE_EXISTS':
-                return {'status': 'error', 'message': 'Unable to export file manifest: table {} already exists.'.format('{}.{}.{}'.format(self.project_id,self.dataset_id,self.table_id))}
+                return {'status': 'error', 'message': 'Unable to export file manifest: table {} already exists.'.format(
+                    '{}.{}.{}'.format(self.project_id,self.dataset_id,self.table_id)
+                )}
 
-        return self._query_to_table(query, parameters, type, write_disp, is_temp)
+        return self._query_to_table(query, parameters, type, write_disp, is_temp, for_batch)
 
     # Export data to the BQ table referenced by project_id:dataset_id:table_id
     def export_rows_to_bq(self, desc, rows):
@@ -415,11 +433,12 @@ class BigQueryExportFileList(BigQueryExport):
         return self.export_rows_to_bq(desc, self._build_rows(files))
 
     # Create the BQ table referenced by project_id:dataset_id:table_id from a parameterized BQ query
-    def export_file_list_query_to_bq(self, query, parameters, cohort_id, desc=None, user_email=None):
+    def export_file_list_query_to_bq(self, query, parameters, cohort_id, desc=None, user_email=None,
+                                     for_batch=False):
         if not desc:
             desc = "File Manifest export for cohort ID {}".format(str(cohort_id))
 
-        result = self.export_query_to_bq(desc, query, parameters, "cohort file manifest")
+        result = self.export_query_to_bq(desc, query, parameters, "cohort file manifest", for_batch=for_batch)
 
         self.set_table_access(user_email)
 
