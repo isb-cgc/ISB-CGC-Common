@@ -1964,6 +1964,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 'data_types': data_types,
                 'metadata_filters': filters or {},
                 'program': public_program,
+                'node_id': node_id,
                 'metadata_counts': results
             }
 
@@ -1990,7 +1991,8 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
-                'program': 0
+                'program': 0,
+                'node_id': 0
             }
 
         if cohort_id:
