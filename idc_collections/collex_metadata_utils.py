@@ -732,14 +732,10 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'fields': None,
                 'uniques': curUniques,
                 'stats': solr_stats,
-<<<<<<< HEAD
                 'totals': totals,
                 'sort': sort,
             },raw_format=raw_format)
-=======
-                'totals': curTotals
-            })
->>>>>>> 7cf68fc4969701791b2014b815e111c0a987af67
+
 
             solr_count_filtered_result = None
             if solr_facets_filtered:
@@ -753,13 +749,9 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'counts_only': True,
                     'fields': None,
                     'stats': solr_stats_filtered,
-<<<<<<< HEAD
                     'totals': totals
                 },raw_format=raw_format)
-=======
-                    'totals': curTotals
-                })
->>>>>>> 7cf68fc4969701791b2014b815e111c0a987af67
+
 
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
