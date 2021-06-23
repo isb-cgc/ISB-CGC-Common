@@ -701,8 +701,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     val = tmp['value']['name']
                     program_id = tmp['program']['id']
 
-                    if 'id' in tmp['feature'] and tmp['feature']['id']:
-                        key = tmp['feature']['id']
+                    # Note:
+                    # Id used to be same to name, such as [id: 'vital_status', name: 'vital_status']
+                    # Now Id is number, such as [id: 171, name: 'vital_status']
+                    # Commenting out the code below, otherwise filter will be displayed as "171: Alive" to user
+                    # if 'id' in tmp['feature'] and tmp['feature']['id']:
+                    #     key = tmp['feature']['id']
 
                     if 'id' in tmp['value'] and tmp['value']['id']:
                         val = tmp['value']['id']
@@ -1962,6 +1966,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 'data_types': data_types,
                 'metadata_filters': filters or {},
                 'program': public_program,
+                'node_id': node_id,
                 'metadata_counts': results
             }
 
@@ -1988,7 +1993,8 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
-                'program': 0
+                'program': 0,
+                'node_id': 0
             }
 
         if cohort_id:
