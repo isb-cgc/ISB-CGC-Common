@@ -426,7 +426,7 @@ def validate_barcodes(request):
         body = json.loads(body_unicode)
         barcodes = body['barcodes']
 
-        status = 500
+        status = 200
 
         valid_entries = []
         invalid_entries = []
@@ -436,15 +436,15 @@ def validate_barcodes(request):
 
         for entry in barcodes:
             entry_split = entry.split('{}')
-            barcode_entry = {'case': entry_split[0], 'sample': entry_split[1], 'program': entry_split[2]}
-            if (barcode_entry['sample'] == '' and barcode_entry['case'] == '') or barcode_entry['program'] == '':
+            barcode_entry = {'case_barcode': entry_split[0], 'sample_barcode': entry_split[1], 'program': entry_split[2]}
+            if (barcode_entry['sample_barcode'] == '' and barcode_entry['case_barcode'] == '') or barcode_entry['program'] == '':
                 # Case barcode is required - this entry isn't valid
                 invalid_entries.append(barcode_entry)
             else:
                 entries_to_check.append(barcode_entry)
 
         if len(entries_to_check):
-            result = validate_and_count_barcodes(entries_to_check,request.user.id)
+            result = validate_and_count_barcodes_solr(entries_to_check,request.user)
             if len(result['valid_barcodes']):
                 valid_entries = result['valid_barcodes']
                 valid_counts = result['counts']
@@ -455,13 +455,13 @@ def validate_barcodes(request):
             if len(result['messages']):
                 messages = result['messages']
 
-        # If there were any valid entries, we can call it 200, otherwise we send back 500
-        if len(valid_entries):
-            status = 200
+        # If there were any valid entries, we can call it 200, otherwise we send back 404
+        status = 200 if len(valid_entries) else 404
 
     except Exception as e:
         logger.error("[ERROR] While validating barcodes: ")
         logger.exception(e)
+        status=500
 
     return JsonResponse({
         'valid_entries': valid_entries,
@@ -477,6 +477,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
     try:
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
+        print(program_list)
 
         all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
 
@@ -772,6 +773,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                         samples_list_simple.append(sample_info)
                         sample_list.append(Samples(cohort=cohort, **sample_info))
 
+                print(samples_list_simple)
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
@@ -1715,7 +1717,7 @@ def streaming_csv_view(request, cohort_id=None):
                       "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
-                          file['datatype'], file['dataformat'], file['file_gdc_id'], file['cloudstorage_location'], file['index_file_gdc_id'], file['index_name'],
+                          file['datatype'], file['dataformat'], file['file_node_id'], file['cloudstorage_location'], file['index_file_id'], file['index_name'],
                           file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
@@ -2148,7 +2150,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
                       {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
                       md.index_file_id as index_file_gdc_uuid,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
@@ -2170,7 +2172,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
                       {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
                       md.index_file_id as index_file_gdc_uuid,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
@@ -2234,7 +2236,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # Exporting Cohort Records
         elif export_type == 'cohort':
             query_string_base = """
-                SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_gdc_id as case_gdc_uuid, clin.project_short_name,
+                SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
                 {biospec_clause}

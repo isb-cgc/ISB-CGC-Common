@@ -1662,7 +1662,7 @@ def get_acls_by_uuid(uuids):
         GROUP BY acl
     """
 
-    uuid_filters = {'file_gdc_id': uuids}
+    uuid_filters = {'file_node_id': uuids}
 
     where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
 
@@ -1688,12 +1688,12 @@ def get_paths_by_uuid(uuids):
     paths = []
 
     query_base = """
-        SELECT file_gdc_id, file_name_key, index_file_name_key
+        SELECT file_node_id, file_name_key, index_file_name_key
         FROM `{bq_project}.{bq_dataset}.{table_name}`
         WHERE {where_clause}
     """
 
-    uuid_filters = {'file_gdc_id': uuids}
+    uuid_filters = {'file_node_id': uuids}
 
     where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
 

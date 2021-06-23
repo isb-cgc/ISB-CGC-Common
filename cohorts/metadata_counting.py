@@ -170,126 +170,19 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
         if cursor: cursor.close()
         if db and db.open: db.close()
 
-
-def count_public_data_type(user, data_query, inc_filters, program_list, filter_format=False, build='HG19', type=None):
-    db = None
-    cursor = None
-    counts = {}
-    filter_clauses = {}
-    built_clause = None
-
-    QUERY_BASE = """
-        SELECT {attr}, COUNT(*) AS count
-        FROM ({data_query_clause}) AS qc
-        WHERE TRUE {where_clause}
-        GROUP BY {attr};
-    """
-
-    try:
-
-        db = get_sql_connection()
-        cursor = db.cursor()
-
-        metadata_data_attr = fetch_build_data_attr(build, type)
-
-        case_barcode = None
-        case_barcode_condition = ""
-        case_barcode_param = None
-        # Pull out the case barcode filter, if there is one
-        if 'case_barcode' in inc_filters:
-            case_barcode = inc_filters['case_barcode']
-            del inc_filters['case_barcode']
-            if type == 'dicom':
-                case_barcode_built_clause = BigQuerySupport.build_bq_filter_and_params({'case_barcode': case_barcode})
-                case_barcode_param = case_barcode_built_clause['parameters']
-                case_barcode_condition = 'AND ' + case_barcode_built_clause['filter_string']
-            else:
-                case_barcode_condition = " AND ( LOWER (case_barcode) LIKE LOWER(%s) )"
-
-        # Make our where clauses
-        if type != 'dicom':
-            for filter in inc_filters:
-                for prog in program_list:
-                    if not validate_filter_key(filter, prog.id, build):
-                        raise Exception("Filters must be in valid JSON format and conform to metadata_data columns.")
-                filter_clauses[filter] = {'where_clause': None, 'parameters': None}
-
-                subfilter = {}
-                subfilter[filter] = inc_filters[filter]
-
-                built_clause = build_where_clause(subfilter, for_files=True)
-                filter_clauses[filter]['where_clause'] = built_clause['query_str']
-                filter_clauses[filter]['parameters'] = built_clause['value_tuple']
-        else:
-            if len(inc_filters):
-                built_clause = BigQuerySupport.build_bq_filter_and_params(inc_filters, with_count_toggle=True)
-
-        for attr in metadata_data_attr:
-            counts[attr] = {x: 0 for x in metadata_data_attr[attr]['values']}
-            if type == 'dicom':
-                where_clause = ''
-                parameters = None
-                count_params = None
-                if case_barcode:
-                    where_clause += case_barcode_condition
-                    parameters = case_barcode_param
-                if built_clause:
-                    where_clause += " AND ( {} )".format(built_clause['filter_string'])
-                    if parameters:
-                        parameters.extend(built_clause['parameters'])
-                    else:
-                        parameters = built_clause['parameters']
-                    count_params = built_clause['count_params']
-                query = """
-                    #standardSQL
-                    {query}
-                """.format(query=QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr))
-
-                if count_params and attr in count_params:
-                    count_params[attr]['parameterValue']['value'] = 'not_filtering'
-                results = BigQuerySupport.execute_query_and_fetch_results(query, parameters)
-                if count_params and attr in count_params:
-                    count_params[attr]['parameterValue']['value'] = 'filtering'
-            else:
-                where_clause = ""
-                filter_clause = ') AND ('.join([filter_clauses[x]['where_clause'] for x in filter_clauses if x != attr or (filter_format and attr == 'data_format')])
-                if len(filter_clause):
-                    where_clause = "AND ( {} )".format(filter_clause)
-                parameter_tuple = tuple(y for x in filter_clauses for y in filter_clauses[x]['parameters'] if
-                                       x != attr or (filter_format and attr == 'data_format'))
-                if case_barcode:
-                    where_clause += case_barcode_condition
-                    case_barcode = "".join(case_barcode)
-                    parameter_tuple += (case_barcode, )
-                query = QUERY_BASE.format(data_query_clause=data_query, where_clause=where_clause, attr=attr)
-                cursor.execute(query, parameter_tuple)
-                results = cursor.fetchall()
-
-            for row in results:
-                if type == 'dicom':
-                    val = row['f'][0]['v']
-                    cnt = int(row['f'][1]['v'])
-                else:
-                    val = "None" if not row[0] else row[0]
-                    cnt = row[1]
-                counts[attr][val] = cnt
-        return counts
-
-    except Exception as e:
-        logger.error('[ERROR] Exception while counting metadata data attributes:')
-        logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-
-def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_id=None, versions=None, source_type=DataSource.SOLR, comb_mut_filters='OR'):
+def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_id=None, versions=None,
+                               source_type=DataSource.SOLR, comb_mut_filters='OR', with_records=False, with_counts=True,
+                               fields=None, data_type=None, with_totals=True, fq_operand='AND', with_tags=True):
 
     logger.info("[STATUS] Entering Solr metadata counter")
     comb_mut_filters = comb_mut_filters.upper()
     mutation_filters = None
     filters = {}
+    solr_facets = None
+    solr_fields = None
     mutation_build = None
+    data_type = data_type or [DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA,
+                              DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA]
 
     results = { 'programs': {} }
 
@@ -328,20 +221,25 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             }
             prog_versions = prog.dataversion_set.filter(
                 id__in=versions,
-                data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA,
-                               DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA]
+                data_type__in=data_type
             )
             sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
             # filter one program as a time.
             prog_filters = filters
             prog_mut_filters = mutation_filters
-            attrs = sources.get_source_attrs(for_ui=True)
+            facet_attrs = sources.get_source_attrs(for_ui=True)
+            prog_attrs = sources.get_source_attrs(for_ui=False,for_faceting=False)
             count_attrs = sources.filter(
-                version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
+                version__data_type__in=data_type
             ).get_source_attrs(for_ui=False,for_faceting=False, named_set=['sample_barcode', 'case_barcode'])
+            field_attr = None if not fields else sources.filter(
+                version__data_type__in=data_type
+            ).get_source_attrs(for_ui=False,for_faceting=False, named_set=fields)
             for source in sources:
-                solr_query = build_solr_query(prog_filters, with_tags_for_ex=True, subq_join_field=source.shared_id_col) if prog_filters else None
+                solr_query = build_solr_query(
+                    prog_filters, with_tags_for_ex=with_tags, subq_join_field=source.shared_id_col
+                ) if prog_filters else None
                 solr_mut_query = build_solr_query(
                     prog_mut_filters, with_tags_for_ex=False, subq_join_field=source.shared_id_col,
                     comb_with=comb_mut_filters
@@ -359,24 +257,30 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 total_counts = None
                 if source.id in count_attrs['sources']:
                     total_counts = count_attrs['sources'][source.id]['list']
-                solr_facets = build_solr_facets(
-                    attrs['sources'][source.id]['attrs'],
-                    filter_tags=solr_query.get('filter_tags', None) if solr_query else None, unique='case_barcode',
-                    total_facets=total_counts
-                )
-                query_set = []
 
+                if with_counts and with_totals:
+                    solr_facets = build_solr_facets(
+                        facet_attrs['sources'][source.id]['attrs'],
+                        filter_tags=solr_query.get('filter_tags', None) if solr_query else None, unique='case_barcode',
+                        total_facets=total_counts
+                    )
+                elif with_totals:
+                    solr_facets = build_solr_facets({},None,total_facets=total_counts)
+                if with_records and field_attr:
+                    solr_fields = list(set(field_attr['list']))
+                query_set = []
+                join_clauses = []
                 if solr_query:
                     for attr in solr_query['queries']:
                         attr_name = 'Variant_Classification' if 'MUT:' in attr else re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
                         # If an attribute is not in this program's attribute listing, then it's ignored
-                        if attr_name in attrs['list']:
+                        if attr_name in prog_attrs['list']:
                             # If the attribute is from this source, just add the query
                             mutation_filter_matches_source = (
                                     (source.version.data_type != DataVersion.MUTATION_DATA) or
                                     (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower()))
                             )
-                            if attr_name in attrs['sources'][source.id]['list'] and mutation_filter_matches_source:
+                            if attr_name in prog_attrs['sources'][source.id]['list'] and mutation_filter_matches_source:
                                 query_set.append(solr_query['queries'][attr])
                             # If it's in another source for this program, we need to join on that source
                             else:
@@ -386,12 +290,19 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                                            attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), ds.name.lower())
                                         )
                                     )
-                                    if ds.id != source.id and attr_name in attrs['sources'][ds.id]['list'] and mutation_filter_matches_source:
-                                        query_set.append(("{!join %s}" % "from={} fromIndex={} to={}".format(
+                                    if ds.id != source.id and attr_name in prog_attrs['sources'][ds.id]['list'] and mutation_filter_matches_source:
+                                        join_clause = ("{!join %s}" % "from={} fromIndex={} to={}".format(
                                             ds.shared_id_col, ds.name, source.shared_id_col
-                                        )) + solr_query['queries'][attr])
+                                        ))
+                                        if fq_operand == 'OR' and len(solr_query['queries'].keys()) > 1:
+                                            join_clauses.append(join_clause)
+                                            query_set.append(solr_query['queries'][attr])
+                                        else:
+                                            query_set.append(join_clause + solr_query['queries'][attr])
                         else:
                             logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
+                    if fq_operand == 'OR' and len(query_set) > 1:
+                        query_set = ["{}({})".format("".join(join_clauses)," OR ".join(query_set))]
 
                 if cohort_id:
                     source_name = source.name.lower()
@@ -407,8 +318,12 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'collection': source.name,
                     'facets': solr_facets,
                     'fqs': query_set,
-                    'unique': source.shared_id_col
+                    'unique': source.shared_id_col,
+                    'fields': solr_fields,
+                    'counts_only': False,
+                    'limit': 5000
                 })
+
                 set_type = source.get_set_type()
 
                 if set_type not in results['programs'][prog.id]['sets']:
@@ -719,5 +634,135 @@ def validate_and_count_barcodes(barcodes, user_id):
         if db and db.open: db.close()
 
     return result
+
+
+def validate_and_count_barcodes_solr(barcodes, user):
+
+    try:
+        result = {
+            'valid_barcodes': [],
+            'invalid_barcodes': [],
+            'counts': [],
+            'messages': []
+        }
+        programs = set([x['program'] for x in barcodes])
+        projects_to_lookup = {}
+        found_in_prog = {}
+
+        for program in programs:
+            try:
+                prog_obj = Program.objects.get(name=program, active=1, is_public=True)
+            except ObjectDoesNotExist:
+                logger.info("[STATUS] While validating barcodes for cohort creation, saw an invalid program: {}".format(program))
+                result['messages'].append('An invalid program was supplied: {}'.format(program))
+                continue
+
+            filters = {
+                'sample_barcode': [],
+                'case_barcode': []
+            }
+            for item in [x for x in barcodes if x['program'] == program]:
+                if item.get('sample_barcode',None):
+                    filters['sample_barcode'].append(item['sample_barcode'])
+                if item.get('case_barcode',None):
+                    filters['case_barcode'].append(item['case_barcode'])
+
+            if not len(filters['case_barcode']):
+                del filters['case_barcode']
+            if not len(filters['sample_barcode']):
+                del filters['sample_barcode']
+
+            solr_res = count_public_metadata_solr(
+                user,None,filters,prog_obj.id,with_counts=False,with_records=True,
+                data_type=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA],
+                fields=["case_barcode","sample_barcode","program_name","project_short_name"],
+                fq_operand='OR', with_tags=False
+            )
+
+            for i, p in solr_res['programs'].items():
+                for j, dataset in p['sets'].items():
+                    for k, src in dataset.items():
+                        if src.get('numFound',0):
+                            for item in src.get('docs', []):
+                                if type(item['project_short_name']) is not list:
+                                    item['project_short_name'] = [item['project_short_name']]
+                                if type(item['project_short_name']) is list:
+                                    if len(item['project_short_name']) > 1:
+                                        logger.warning("Case/sample has multiple projects associated with it - choosing the first one:")
+                                        logger.warning("{}, {}, {}".format(item['case_basecode'],item['sample_basecode'],item['project_short_name'][0]))
+                                    item['project_short_name'] = item['project_short_name'][0]
+                                project_suffix = item['project_short_name'].split('-',1)[-1]
+                                if program not in found_in_prog:
+                                    found_in_prog[program] = {
+                                        'cases': {},
+                                        'samples': {}
+                                    }
+                                if item['case_barcode'] not in found_in_prog[program]['cases']:
+                                    found_in_prog[program]['cases'][item['case_barcode']] = {}
+                                case = found_in_prog[program]['cases'][item['case_barcode']]
+                                if item.get('sample_barcode',None):
+                                    if type(item['sample_barcode']) is not list:
+                                        item['sample_barcode'] = [item['sample_barcode']]
+                                    for sample in item['sample_barcode']:
+                                        if sample not in case:
+                                            case[sample] = {
+                                                'case': item['case_barcode'],
+                                                'sample': sample,
+                                                'program': program,
+                                                'program_id': prog_obj.id,
+                                                'project': project_suffix
+                                            }
+                                        if sample not in found_in_prog[program]['samples']:
+                                            found_in_prog[program]['samples'][sample] = {
+                                                'case': item['case_barcode'],
+                                                'sample': sample,
+                                                'program': program,
+                                                'program_id': prog_obj.id,
+                                                'project': project_suffix
+                                            }
+
+                                if program not in projects_to_lookup:
+                                    projects_to_lookup[program] = {}
+                                projects_to_lookup[program][project_suffix] = None
+
+                result['counts'].append({
+                    'cases': p['totals']['case_barcode_count'],
+                    'samples': p['totals']['sample_barcode_count'],
+                    'program': program
+                })
+
+        # Convert the project names into project IDs
+        for prog in projects_to_lookup:
+            proj_names = list(projects_to_lookup[prog].keys())
+            projects = Project.objects.filter(name__in=proj_names, program=Program.objects.get(name=prog, active=1))
+            for proj in projects:
+                projects_to_lookup[prog][proj.name] = proj.id
+
+        for barcode in barcodes:
+            found_case = found_in_prog.get(barcode['program'],{})['cases'].get(barcode['case_barcode'],None)
+            found_sample = found_in_prog.get(barcode['program'],{})['samples'].get(barcode['sample_barcode'],None)
+            if found_case:
+                if not barcode['sample_barcode'] or barcode['sample_barcode'] == '' or barcode['sample_barcode'] == barcode['case_barcode']:
+                    for sample,found_barcode in found_case.items():
+                        found_barcode['project'] = projects_to_lookup[found_barcode['program']][found_barcode['project']]
+                        result['valid_barcodes'].append(found_barcode)
+                else:
+                    found_barcode = found_case.get(barcode['sample_barcode'],None)
+                    if found_barcode:
+                        found_barcode['project'] = projects_to_lookup[found_barcode['program']][found_barcode['project']]
+                        result['valid_barcodes'].append(found_barcode)
+            elif found_sample:
+                found_sample['project'] = projects_to_lookup[found_sample['program']][found_sample['project']]
+                result['valid_barcodes'].append(found_sample)
+            else:
+                result['invalid_barcodes'].append(barcode)
+
+    except Exception as e:
+        logger.error("[ERROR] While validating barcodes: ")
+        logger.exception(e)
+
+    return result
+
+
 
 '''------------------------------------- End metadata counting methods -------------------------------------'''
