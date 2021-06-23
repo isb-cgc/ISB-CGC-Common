@@ -101,7 +101,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             fields.extend(["file_name_key", "index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "experimental_strategy", "data_format",
-                           "file_node_id", "case_node_id", "file_size", "program_name", "node"
+                           "file_node_id", "file_gdc_id", "case_gdc_id", "case_node_id", "file_size",
+                           "program_name", "node"
                            ])
             if build.lower() == 'hg38':
                 fields.append("file_name")
@@ -225,10 +226,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'datatype': entry.get('data_type','N/A'),
                         'dataformat': entry.get('data_format','N/A'),
                         'program':  entry.get('program_name',None) or entry.get('project_short_name','').split('-')[0],
-                        'case_node_id': entry.get('case_node_id','N/A'),
-                        'file_node_id': entry.get('file_node_id','N/A'),
+                        'case_node_id': entry.get('case_node_id',None) or entry.get('case_gdc_id','N/A'),
+                        'file_node_id': entry.get('file_node_id',None) or entry.get('file_gdc_id','N/A'),
                         'index_file_id': (entry.get('index_file_id', 'N/A')),
                         'project_short_name': entry.get('project_short_name','N/A'),
+                        'node': entry.get('node','GDC'),
                         'cohort_id': cohort_id
                     })
 

@@ -37,6 +37,7 @@ from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days
 from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from django.contrib.auth.models import User
+from django.db.models import Q
 
 from uuid import uuid4
 from django.conf import settings
@@ -246,8 +247,11 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
         if not len(METADATA_DATA_ATTR[build]):
             data_sources = DataSource.objects.prefetch_related('programs', 'version').filter(
                 programs__active=True, version__in=DataVersion.objects.filter(
-                    active=True,build__in=[build.lower(),None],data_type=(DataVersion.IMAGE_DATA if type == 'dicom' else DataVersion.FILE_DATA),
-                ), source_type=DataSource.SOLR
+                    Q(build__isnull=True) | Q(build=build.lower()),
+                    Q(active=True),
+                    Q(data_type=(DataVersion.IMAGE_DATA if type == 'dicom' else DataVersion.FILE_DATA))
+                ),
+                source_type=DataSource.SOLR
             ).distinct()
             source_attrs = data_sources.get_source_attrs(named_set=metadata_data_attrs)
             source_attrs_data = {x.name: {'display_name': x.display_name, 'preformatted': (x.preformatted_values == 1)} for x in source_attrs['attrs']}
