@@ -158,9 +158,18 @@ class DataVersion(models.Model):
         (CLINICAL_DATA, 'Clinical Data'),
         (BIOSPECIMEN_DATA, 'Biospecimen Data'),
         (MUTATION_DATA, 'Mutation Data'),
-        (PROTEIN_DATA, 'Protein} Data'),
+        (PROTEIN_DATA, 'Protein Data'),
         (TYPE_AVAILABILITY_DATA, 'File Data Availability')
     )
+    DATA_TYPE_DICT = {
+        FILE_DATA: 'File Data',
+        IMAGE_DATA: 'Image Data',
+        CLINICAL_DATA: 'Clinical Data',
+        BIOSPECIMEN_DATA: 'Biospecimen Data',
+        MUTATION_DATA: 'Mutation Data',
+        PROTEIN_DATA: 'Protein Data',
+        TYPE_AVAILABILITY_DATA: 'File Data Availability'
+    }
     SET_TYPES = {
         CLINICAL_DATA: 'case_data',
         BIOSPECIMEN_DATA: 'case_data',
@@ -175,6 +184,13 @@ class DataVersion(models.Model):
     build = models.CharField(max_length=16, null=True, blank=False)
     programs = models.ManyToManyField(Program)
 
+    def __str__(self):
+        return "{}: {} {} ({})".format(
+            self.name,
+            DataVersion.DATA_TYPE_DICT[self.data_type],
+            self.version,
+            "Active" if self.active else "Inactive"
+        )
 
 class DataSourceQuerySet(models.QuerySet):
     def to_dicts(self):

@@ -419,6 +419,8 @@ class Samples(models.Model):
     case_barcode = models.CharField(max_length=45, null=True, blank=False, default=None)
     project = models.ForeignKey(Project, null=True, blank=True, on_delete=models.CASCADE)
 
+    def __str__(self):
+        return "Project {} : Case {} : Sample {}".format(self.project,self.case_barcode,self.sample_barcode)
 
 class Source(models.Model):
     FILTERS = 'FILTERS'
