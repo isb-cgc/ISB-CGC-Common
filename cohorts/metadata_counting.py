@@ -321,7 +321,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'unique': source.shared_id_col,
                     'fields': solr_fields,
                     'counts_only': False,
-                    'limit': 5000
+                    'limit': 65000
                 })
 
                 set_type = source.get_set_type()
