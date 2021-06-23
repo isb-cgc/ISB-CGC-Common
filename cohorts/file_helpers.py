@@ -19,7 +19,7 @@ from builtins import str
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 
-from projects.models import DataVersion
+from projects.models import DataVersion, Program
 from cohorts.models import Cohort, Cohort_Perms
 
 from solr_helpers import *
@@ -33,7 +33,8 @@ FILTER_DATA_FORMAT = {
 }
 
 
-def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program', sort_order=0, build='HG19', access=None, data_type=None, do_filter_count=True):
+def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
+                 sort_order=0, build='HG19', access=None, data_type=None, do_filter_count=True):
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
@@ -99,9 +100,12 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 })
 
             fields.extend(["file_name_key", "index_file_name_key", "access", "acl", "platform",
-                           "data_type", "data_category", "index_file_id", "experimental_strategy", "data_format",
-                           "file_gdc_id", "case_gdc_id", "file_size"
+                           "data_type", "data_category", "experimental_strategy", "data_format",
+                           "file_node_id", "file_gdc_id", "case_gdc_id", "case_node_id", "file_size",
+                           "program_name", "node"
                            ])
+            if build.lower() == 'hg38':
+                fields.append("file_name")
 
             col_map.update({
                 'col-filename': 'file_name_key',
@@ -118,6 +122,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 facet_names = ['disease_code', 'project_short_name']
                 if data_type == 'all':
                     facet_names.extend(['data_format', 'data_category', 'experimental_strategy', 'platform', 'data_type'])
+                    if build.lower() == 'hg38':
+                        facet_names.append('node')
                 elif data_type == 'camic':
                     facet_names.extend(['data_type'])
                 elif data_type == 'igv':
@@ -128,7 +134,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
-            unique="file_name_key"
+            unique="file_name" if build.lower() == 'hg38' else 'file_name_key'
 
         if 'case_barcode' in inc_filters:
             inc_filters['case_barcode'] = ["*{}*".format(x) for x in inc_filters['case_barcode']]
@@ -205,25 +211,26 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
                     file_list.append({
                         'sample': entry.get('sample_barcode','N/A'),
-                        'case': entry['case_barcode'],
+                        'case': entry.get('case_barcode','N/A'),
                         'disease_code': entry.get('disease_code','N/A'),
                         'build': build.lower(),
                         'cloudstorage_location': entry.get('file_name_key','N/A'),
                         'index_name': entry.get('index_file_name_key', 'N/A'),
                         'access': entry.get('access','N/A'),
                         'user_access': str(entry.get('access','N/A') != 'controlled' or whitelist_found),
-                        'filename': entry['file_name_key'].split("/")[-1] or 'N/A',
+                        'filename': entry.get('file_name_key','').split("/")[-1] or 'N/A',
                         'filesize': entry.get('file_size','N/A'),
                         'exp_strat': entry.get('experimental_strategy', 'N/A'),
                         'platform': entry.get('platform','N/A'),
                         'datacat': entry.get('data_category','N/A'),
                         'datatype': entry.get('data_type','N/A'),
                         'dataformat': entry.get('data_format','N/A'),
-                        'program': entry.get('project_short_name','').split("-")[0],
-                        'case_gdc_id': entry.get('case_gdc_id','N/A'),
-                        'file_gdc_id': entry.get('file_gdc_id','N/A'),
-                        'index_file_gdc_id': (entry.get('index_file_id', 'N/A')),
+                        'program':  entry.get('program_name',None) or entry.get('project_short_name','').split('-')[0],
+                        'case_node_id': entry.get('case_node_id',None) or entry.get('case_gdc_id','N/A'),
+                        'file_node_id': entry.get('file_node_id',None) or entry.get('file_gdc_id','N/A'),
+                        'index_file_id': (entry.get('index_file_id', 'N/A')),
                         'project_short_name': entry.get('project_short_name','N/A'),
+                        'node': entry.get('node','GDC'),
                         'cohort_id': cohort_id
                     })
 
