@@ -37,6 +37,7 @@ from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days
 from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from django.contrib.auth.models import User
+from django.db.models import Q
 
 from uuid import uuid4
 from django.conf import settings
@@ -100,15 +101,18 @@ MOLECULAR_DISPLAY_STRINGS = {
 # Local storage of the metadata attributes, values, and their display names for a program. This dict takes the form:
 # {
 #   <program id>: {
-#       <attr name>: {
-#           'displ_name': <attr display name>,
-#           'values': {
-#               <metadata attr value>: {
-#                   'displ_value': <metadata attr display value>,
-#                   'tooltip': <tooltip value>
-#               }
+#       'attrs':
+#           <attr name>: {
+#               'displ_name': <attr display name>,
+#               'values': {
+#                   <metadata attr value>: {
+#                       'displ_value': <metadata attr display value>,
+#                       'tooltip': <tooltip value>
+#                   },
+#               }, [...]
 #           }, [...]
-#       }, [...]
+#        },
+#        'values_cached': <Boolean>
 #   }, [...]
 # }
 # The data is stored to prevent excessive retrieval
@@ -231,95 +235,64 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
     elif type == 'camic':
         metadata_data_attrs = ['data_type', 'disease_code', 'project_short_name',]
     else:
+        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform', 'disease_code']
+        if build.lower() == 'hg38':
+            metadata_data_attrs.append("node")
         if add_program_name:
-            metadata_data_attrs = ['program_name', 'data_type', 'data_category', 'experimental_strategy', 'data_format',
-                                   'platform', 'disease_code', ]
-        else:
-            metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform', 'disease_code',]
+            metadata_data_attrs.append('program_name')
 
     try:
         if len(METADATA_DATA_ATTR[build]) != len(metadata_data_attrs):
             METADATA_DATA_ATTR[build]={}
         if not len(METADATA_DATA_ATTR[build]):
-            db = get_sql_connection()
-            cursor = db.cursor()
+            data_sources = DataSource.objects.prefetch_related('programs', 'version').filter(
+                programs__active=True, version__in=DataVersion.objects.filter(
+                    Q(build__isnull=True) | Q(build=build.lower()),
+                    Q(active=True),
+                    Q(data_type=(DataVersion.IMAGE_DATA if type == 'dicom' else DataVersion.FILE_DATA))
+                ),
+                source_type=DataSource.SOLR
+            ).distinct()
+            source_attrs = data_sources.get_source_attrs(named_set=metadata_data_attrs)
+            source_attrs_data = {x.name: {'display_name': x.display_name, 'preformatted': (x.preformatted_values == 1)} for x in source_attrs['attrs']}
+            display_vals = source_attrs['attrs'].get_display_values().to_dict(False)
+            tooltips = {x.attribute.name: { x.value: x.tooltip} for x in Attribute_Tooltips.objects.select_related('attribute').filter(attribute__in=source_attrs['attrs'])}
 
-            for program in Program.objects.filter(is_public=True,active=True):
-                program_metadata = fetch_metadata_value_set(program)
-                disease_code_dict = None
+            for src in data_sources:
+                solr_query = {
+                    'collection': src.name,
+                    'facets': None,
+                    'fields': None,
+                    'distincts': metadata_data_attrs
+                }
 
-                if program_metadata and 'disease_code' in program_metadata and 'values' in program_metadata['disease_code']:
-                    disease_code_dict =  program_metadata['disease_code']['values']
-                # MySQL text searches are case-insensitive, so even if our database has 'hg' and not 'HG' this will
-                # return the right tables, should they exist
-                program_data_tables = Public_Data_Tables.objects.filter(program=program, build=build)
+                values = query_solr_and_format_result(solr_query)
 
-                # If a program+build combination has no data table, no need to worry about it
-                if program_data_tables.count():
-                    data_table = program_data_tables[0].data_table
-
-                    for attr in metadata_data_attrs:
-                        if attr not in METADATA_DATA_ATTR[build]:
-                            METADATA_DATA_ATTR[build][attr] = {
-                                'displ_name': format_for_display(attr),
-                                'name': attr,
-                                'values': {}
+                for attr in values['values']:
+                    if attr not in METADATA_DATA_ATTR[build]:
+                        METADATA_DATA_ATTR[build][attr] = {
+                            'values': {},
+                            'name': attr,
+                            'displ_name': source_attrs_data[attr]['display_name']
+                        }
+                    for val in values['values'][attr]:
+                        if val not in METADATA_DATA_ATTR[build][attr]['values']:
+                            METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                                'displ_value': display_vals.get(attr,{}).get(val,None) or (format_for_display(str(val)) if not source_attrs_data[attr]['preformatted'] else str(val)),
+                                'value': re.sub(r"[^A-Za-z0-9_\-]", "", re.sub(r"\s+", "-", val)),
+                                'name': val
                             }
-                        if type == 'dicom':
-                            if len(program.get_data_sources(data_type=DataVersion.IMAGE_DATA)):
-                                tcia_images_source = DataSource.objects.select_related('version').get(
-                                    version__active=True,version__data_type=DataVersion.IMAGE_DATA,source_type=DataSource.SOLR
-                                )
-                                source_attrs = tcia_images_source.get_source_attr(named_set=[attr],for_faceting=False)
-                                METADATA_DATA_ATTR[build][attr]['displ_name'] = source_attrs.first().display_name
-                                facets = build_solr_facets(source_attrs)
-                                # We fetch the DICOM range from Solr
-                                result = query_solr_and_format_result({
-                                    "collection": tcia_images_source.name,
-                                    "query_string": "*:*",
-                                    "facets": facets,
-                                    "limit": 0,
-                                    "counts_only": True
-                                })
-                                for val in result['facets'][attr]:
-                                    if val not in METADATA_DATA_ATTR[build][attr]['values']:
-                                        tooltip = ''
-                                        if attr == 'disease_code':
-                                            if disease_code_dict and val in disease_code_dict:
-                                                tooltip = disease_code_dict[val]['tooltip']
+                            if attr in tooltips and val in tooltips[attr]:
+                                METADATA_DATA_ATTR[build][attr]['values'][val]['tooltip'] =  tooltips[attr][val]
 
-                                        METADATA_DATA_ATTR[build][attr]['values'][val] = {
-                                            'displ_value': val,
-                                            'value': re.sub(r"[^A-Za-z0-9_\-]", "", re.sub(r"\s+", "-", val)),
-                                            'name': val,
-                                            'tooltip': tooltip
-                                        }
-                        else:
-                            query = """
-                                    SELECT DISTINCT {attr}
-                                    FROM {data_table};
-                                """.format(attr=attr, data_table=data_table)
-                            cursor.execute(query)
-                            for row in cursor.fetchall():
-                                val = "None" if not row[0] else row[0]
-                                tooltip = ''
-                                if attr == 'disease_code' and disease_code_dict and val in disease_code_dict and 'tooltip' in disease_code_dict[val]:
-                                    tooltip = disease_code_dict[val]['tooltip']
-                                if val not in METADATA_DATA_ATTR[build][attr]['values']:
-                                    METADATA_DATA_ATTR[build][attr]['values'][val] = {
-                                        'displ_value': val,
-                                        'value': re.sub(r"[^A-Za-z0-9_\-]","",re.sub(r"\s+","-", val)),
-                                        'name': val,
-                                        'tooltip': tooltip
-                                    }
+                    if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
+                        METADATA_DATA_ATTR[build][attr]['values']['None'] = {
+                            'displ_value': 'None',
+                            'value': 'None',
+                            'name': 'None',
+                            'tooltip': ''
+                        }
 
-                        if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
-                            METADATA_DATA_ATTR[build][attr]['values']['None'] = {
-                                'displ_value': 'None',
-                                'value': 'None',
-                                'name': 'None',
-                                'tooltip': ''
-                            }
         return copy.deepcopy(METADATA_DATA_ATTR[build])
 
     except Exception as e:
@@ -344,6 +317,9 @@ def fetch_program_data_types(program, for_display=False):
             if type(program) is int:
                 program = Program.objects.get(id=program)
 
+        if program.name in ["FM","OHSU","MMRF", "GPRP"]:
+            logger.info("Data types are not available for these programs.")
+            return {}
         if program.id not in METADATA_DATA_TYPES or len(METADATA_DATA_TYPES[program.id]) <= 0:
 
             METADATA_DATA_TYPES[program.id] = {}
@@ -358,7 +334,6 @@ def fetch_program_data_types(program, for_display=False):
                 if not row[2] in METADATA_DATA_TYPES[program.id]:
                     METADATA_DATA_TYPES[program.id][row[2]] = {'name': row[2], 'displ_name': format_for_display(row[2]) if row[2] not in preformatted_attr else row[2], 'values': {}}
                 METADATA_DATA_TYPES[program.id][row[2]]['values'][int(row[0])] = ('Available' if row[1] is None else row[1])
-
             cursor.close()
             cursor = db.cursor(MySQLdb.cursors.DictCursor)
             cursor.callproc('get_program_display_strings', (program.id,))
@@ -398,6 +373,8 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
                 program = int(program)
             if type(program) is int:
                 program = Program.objects.get(id=program)
+        if not data_type_list:
+            data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.TYPE_AVAILABILITY_DATA,DataVersion.MUTATION_DATA]
         if source_type == DataSource.SOLR:
             if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
                 METADATA_ATTR[program.id] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
@@ -482,7 +459,7 @@ def get_public_program_id(program):
 # values in a program's metadata_samples table
 # Program ID defaults to TCGA if one is not provided
 def fetch_metadata_value_set(program=None):
-
+    start = time.time()
     try:
         if not program:
             program = Program.objects.get(name="TCGA")
@@ -497,8 +474,10 @@ def fetch_metadata_value_set(program=None):
             return {}
 
         fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=True)
+        stop = time.time()
+        logger.info("BENCHMARKING: Time to get Program attr: {}".format(stop-start))
 
-        if len(METADATA_ATTR[program.id]['attrs'][list(METADATA_ATTR[program.id]['attrs'].keys())[0]]['values']) <= 0:
+        if not METADATA_ATTR[program.id].get('values_cached',None):
             for src in METADATA_ATTR[program.id]['by_src']:
                 solr_query = {
                     'collection': METADATA_ATTR[program.id]['by_src'][src]['name'],
@@ -520,6 +499,7 @@ def fetch_metadata_value_set(program=None):
                         METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values'][dv.raw_value] = {}
                     METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
 
+
             # Fetch the tooltip strings for Disease Codes
             tooltips = Attribute_Tooltips.objects.select_related('attribute').filter(attribute__active=1)
 
@@ -527,7 +507,10 @@ def fetch_metadata_value_set(program=None):
                 value_data = METADATA_ATTR[program.id]['attrs'].get(tip.attribute.name,{}).get('values',{}).get(tip.value, None)
                 if value_data is not None:
                     value_data['tooltip'] = tip.tooltip
+            METADATA_ATTR[program.id]['values_cached'] = True
 
+        stop = time.time()
+        logger.info("BENCHMARKING: Time to get metadata attr values: {}".format(stop-start))
         return copy.deepcopy(METADATA_ATTR[program.id])
 
     except Exception as e:
@@ -619,7 +602,9 @@ def validate_filter_key(col, program, build='HG19'):
     if ':' in col:
         col = col.split(':')[1]
 
-    return col in METADATA_ATTR[program]['attrs'] or METADATA_DATA_TYPES[program] or col in METADATA_DATA_ATTR[build]
+    return col in METADATA_ATTR[program]['attrs'] \
+           or (col == 'data_type_availability' and METADATA_DATA_TYPES.get(program,None)) \
+           or col in METADATA_DATA_ATTR[build]
 
 
 # Make standard adjustments to a string for display: replace _ with ' ', title case (except for 'to')
@@ -661,7 +646,7 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
         if alt_key_map and key in alt_key_map:
             key = alt_key_map[key]
 
-        if key == 'data_type' and not for_files:
+        if key == 'data_type_availability' and not for_files:
             key = 'metadata_data_type_availability_id'
 
         # Multitable where's will come in with : in the name. Only grab the column piece for now
@@ -1254,7 +1239,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
                 user_data_filters = {}
             user_data_filters[key] = inc_filters[key]
         else:
-            if 'data_type' in key:
+            if 'data_type_availability' in key:
                 data_type_filters = True
             filters[key] = inc_filters[key]
 
@@ -1681,7 +1666,7 @@ def get_acls_by_uuid(uuids):
         GROUP BY acl
     """
 
-    uuid_filters = {'file_gdc_id': uuids}
+    uuid_filters = {'file_node_id': uuids}
 
     where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
 
@@ -1707,12 +1692,12 @@ def get_paths_by_uuid(uuids):
     paths = []
 
     query_base = """
-        SELECT file_gdc_id, file_name_key, index_file_name_key
+        SELECT file_node_id, file_name_key, index_file_name_key
         FROM `{bq_project}.{bq_dataset}.{table_name}`
         WHERE {where_clause}
     """
 
-    uuid_filters = {'file_gdc_id': uuids}
+    uuid_filters = {'file_node_id': uuids}
 
     where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
 

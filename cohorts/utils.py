@@ -287,7 +287,7 @@ def get_sample_case_list_bq(cohort_id=None, inc_filters=None, comb_mut_filters='
                         if not mutation_filters:
                             mutation_filters = {}
                         mutation_filters[key] = inc_filters[prog][key]
-                    elif 'data_type' in key:
+                    elif 'data_type_availability' in key:
                         data_type_filters[key.split(':')[-1]] = inc_filters[prog][key]
                     else:
                         # The field names are case sensitive, so we need to normalize for improper casing
