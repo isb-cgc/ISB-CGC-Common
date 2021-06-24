@@ -172,7 +172,8 @@ def count_user_metadata(user, inc_filters=None, cohort_id=None):
 
 def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_id=None, versions=None,
                                source_type=DataSource.SOLR, comb_mut_filters='OR', with_records=False, with_counts=True,
-                               fields=None, data_type=None, with_totals=True, fq_operand='AND', with_tags=True):
+                               fields=None, data_type=None, with_totals=True, fq_operand='AND', with_tags=True,
+                               limit=1000):
 
     logger.info("[STATUS] Entering Solr metadata counter")
     comb_mut_filters = comb_mut_filters.upper()
@@ -321,7 +322,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'unique': source.shared_id_col,
                     'fields': solr_fields,
                     'counts_only': False,
-                    'limit': 65000
+                    'limit': limit if with_records else 0
                 })
 
                 set_type = source.get_set_type()
@@ -676,7 +677,7 @@ def validate_and_count_barcodes_solr(barcodes, user):
                 user,None,filters,prog_obj.id,with_counts=False,with_records=True,
                 data_type=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA],
                 fields=["case_barcode","sample_barcode","program_name","project_short_name"],
-                fq_operand='OR', with_tags=False
+                fq_operand='OR', with_tags=False, limit=65000
             )
 
             for i, p in solr_res['programs'].items():
