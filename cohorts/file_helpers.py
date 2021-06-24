@@ -218,7 +218,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'index_name': entry.get('index_file_name_key', 'N/A'),
                         'access': entry.get('access','N/A'),
                         'user_access': str(entry.get('access','N/A') != 'controlled' or whitelist_found),
-                        'filename': entry.get('file_name_key','').split("/")[-1] or 'N/A',
+                        'filename': entry.get('file_name',None) or entry.get('file_name_key','').split("/")[-1] or 'N/A',
                         'filesize': entry.get('file_size','N/A'),
                         'exp_strat': entry.get('experimental_strategy', 'N/A'),
                         'platform': entry.get('platform','N/A'),
