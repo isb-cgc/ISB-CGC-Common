@@ -94,7 +94,8 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
     return formatted_query_result
 
 # Execute a POST request to the solr server available available at settings.SOLR_URI
-def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True, collapse_on=None, offset=0, limit=1000, unique=None, distincts=None):
+def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets=None, sort=None, counts_only=True,
+               collapse_on=None, offset=0, limit=1000, unique=None, distincts=None):
 
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 

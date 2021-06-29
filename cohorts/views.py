@@ -55,7 +55,7 @@ from .metadata_counting import *
 from .file_helpers import *
 from sharing.service import create_share
 from .models import Cohort, Samples, Cohort_Perms, Source, Filters, Cohort_Comments
-from projects.models import Program, Project, User_Data_Tables, Public_Metadata_Tables, Public_Data_Tables
+from projects.models import Program, Project, Public_Metadata_Tables, Public_Data_Tables, DataNode
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 from .utils import delete_cohort as utils_delete_cohort
 
@@ -111,7 +111,7 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
         # Divide our filters into 'mutation' and 'non-mutation' sets
         if inc_filters:
             for key in inc_filters:
-                if 'data_type' in key:
+                if 'data_type_availability' in key:
                         filters[key] = inc_filters[key]
                 elif 'MUT:' in key:
                     if not mutation_filters:
@@ -141,6 +141,8 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
             }
             prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA, DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA])
             list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.BIOSPECIMEN_DATA)
+            if not len(list_versions):
+                list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
             all_sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
             source = prog.get_data_sources(source_type=source_type).filter(version__in=list_versions).first()
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
@@ -223,14 +225,39 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
 
 
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
-
+    filters = {}
     try:
-        samples_cases_projects = get_sample_case_list_solr(user, inc_filters, cohort_id, program_id, comb_mut_filters)
+        if inc_filters is not None:
+            id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id).items()}
+            try:
+                for key in inc_filters:
+                    attr = id_to_name.get(str(key),key)
+                    if not validate_filter_key(attr, program_id):
+                        raise Exception('Invalid filter key received: ' + attr)
+                    this_filter = inc_filters[key]['values']
+                    if attr not in filters:
+                        filters[attr] = {'values': []}
+                    for value in this_filter:
+                        filters[attr]['values'].append(value)
+            except Exception as e:
+                logger.exception(e)
+                raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
 
+        samples_cases_projects = get_sample_case_list_solr(user, filters, cohort_id, program_id, comb_mut_filters)
         public_projects = Project.get_public_projects(by_name=True)
+        items = []
+        for x in samples_cases_projects['docs']:
+            proj = x['project_short_name']
+            if type(x['project_short_name']) is list:
+                proj = proj[0]
+            if type(x['sample_barcode']) is not list:
+                x['sample_barcode'] = [x['sample_barcode']]
+            for sbc in x['sample_barcode']:
+                item = {'sample_barcode': sbc, 'case_barcode': x['case_barcode'], 'project_id': public_projects[proj]['id']}
+                items.append(item)
 
         samples_and_cases = {
-            'items': [{'sample_barcode': x['sample_barcode'], 'case_barcode': x['case_barcode'], 'project_id': public_projects[x['project_short_name']]['id']} for x in samples_cases_projects['docs']],
+            'items': items,
             'cases': list(set([x['case_barcode'] for x in samples_cases_projects['docs']])),
             'count': samples_cases_projects['numFound']
         }
@@ -399,7 +426,7 @@ def validate_barcodes(request):
         body = json.loads(body_unicode)
         barcodes = body['barcodes']
 
-        status = 500
+        status = 200
 
         valid_entries = []
         invalid_entries = []
@@ -409,15 +436,15 @@ def validate_barcodes(request):
 
         for entry in barcodes:
             entry_split = entry.split('{}')
-            barcode_entry = {'case': entry_split[0], 'sample': entry_split[1], 'program': entry_split[2]}
-            if (barcode_entry['sample'] == '' and barcode_entry['case'] == '') or barcode_entry['program'] == '':
+            barcode_entry = {'case_barcode': entry_split[0], 'sample_barcode': entry_split[1], 'program': entry_split[2]}
+            if (barcode_entry['sample_barcode'] == '' and barcode_entry['case_barcode'] == '') or barcode_entry['program'] == '':
                 # Case barcode is required - this entry isn't valid
                 invalid_entries.append(barcode_entry)
             else:
                 entries_to_check.append(barcode_entry)
 
         if len(entries_to_check):
-            result = validate_and_count_barcodes(entries_to_check,request.user.id)
+            result = validate_and_count_barcodes_solr(entries_to_check,request.user)
             if len(result['valid_barcodes']):
                 valid_entries = result['valid_barcodes']
                 valid_counts = result['counts']
@@ -428,13 +455,13 @@ def validate_barcodes(request):
             if len(result['messages']):
                 messages = result['messages']
 
-        # If there were any valid entries, we can call it 200, otherwise we send back 500
-        if len(valid_entries):
-            status = 200
+        # If there were any valid entries, we can call it 200, otherwise we send back 404
+        status = 200 if len(valid_entries) else 404
 
     except Exception as e:
         logger.error("[ERROR] While validating barcodes: ")
         logger.exception(e)
+        status=500
 
     return JsonResponse({
         'valid_entries': valid_entries,
@@ -450,13 +477,18 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
     try:
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
+        print(program_list)
+
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
 
         template_values = {
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'program_prefixes': {x.name: True for x in program_list},
+            'all_nodes': all_nodes,
+            'all_programs': all_programs
         }
 
         if workbook_id and worksheet_id :
@@ -474,7 +506,7 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
         logger.error("[ERROR] Exception while trying to new a cohort:")
         logger.exception(e)
         messages.error(request, "There was an error while trying to load new cohort's details page.")
-        if request.is_authenticated():
+        if request.user.is_authenticated():
             return redirect('cohort_list')
         else:
             return redirect('')
@@ -491,12 +523,17 @@ def cohort_detail(request, cohort_id):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
 
+        # TODO: get_node_programs() filter by is_public and owner
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+
         template_values  = {
             'request': request,
             'base_url': settings.BASE_URL,
             'base_api_url': settings.BASE_API_URL,
             'programs': program_list,
-            'program_prefixes': {x.name: True for x in program_list}
+            'program_prefixes': {x.name: True for x in program_list},
+            'all_nodes': all_nodes,
+            'all_programs': all_programs
         }
 
         shared_with_users = []
@@ -512,9 +549,7 @@ def cohort_detail(request, cohort_id):
         cohort.mark_viewed(request)
 
         cohort_progs = cohort.get_programs()
-
         cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
-
         # Do not show shared users for public cohorts
         if not cohort.is_public():
             shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
@@ -666,8 +701,12 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                     val = tmp['value']['name']
                     program_id = tmp['program']['id']
 
-                    if 'id' in tmp['feature'] and tmp['feature']['id']:
-                        key = tmp['feature']['id']
+                    # Note:
+                    # Id used to be same to name, such as [id: 'vital_status', name: 'vital_status']
+                    # Now Id is number, such as [id: 171, name: 'vital_status']
+                    # Commenting out the code below, otherwise filter will be displayed as "171: Alive" to user
+                    # if 'id' in tmp['feature'] and tmp['feature']['id']:
+                    #     key = tmp['feature']['id']
 
                     if 'id' in tmp['value'] and tmp['value']['id']:
                         val = tmp['value']['id']
@@ -725,20 +764,24 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 cohort.save()
 
                 sample_list = []
+                samples_list_simple = []
 
                 for prog in results:
                     items = results[prog]['items']
-
                     for item in items:
                         project = None
                         if 'project_id' in item:
                             project = item['project_id']
-                        sample_list.append(Samples(cohort=cohort, sample_barcode=item['sample_barcode'], case_barcode=item['case_barcode'], project_id=project))
 
+                        sample_info = {'sample_barcode': item['sample_barcode'], 'case_barcode': item['case_barcode'], 'project_id': project}
+                        samples_list_simple.append(sample_info)
+                        sample_list.append(Samples(cohort=cohort, **sample_info))
+
+                print(samples_list_simple)
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
+                logger.debug('[BENCHMARKING] Time to bulk create: ' + str(bulk_stop - bulk_start))
 
                 # Set permission for user to be owner
                 perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
@@ -781,7 +824,7 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                 bq_project_id = settings.BIGQUERY_PROJECT_ID
                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
                 bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                bq_result = bcs.add_cohort_to_bq(cohort.id, [item for sublist in [results[x]['items'] for x in list(results.keys())] for item in sublist])
+                bq_result = bcs.add_cohort_to_bq(cohort.id, samples_list_simple)
 
                 # If BQ insertion fails, we immediately de-activate the cohort and warn the user
                 if 'insertErrors' in bq_result:
@@ -1478,6 +1521,7 @@ def filelist(request, cohort_id=None, panel_type=None):
 def filelist_ajax(request, cohort_id=None, panel_type=None):
     status = 200
     try:
+        progs = Program.get_public_programs().values_list('name',flat=True)
         if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
         if cohort_id == 0:
             response_str = '<div class="row">' \
@@ -1531,7 +1575,15 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
+                            # TODO: This needs to be adjusted to not assume values coming out of the attribute fetcher are all that's valid.
+                            if attr != 'program_name':
+                                metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
+                            else:
+                                if val in progs:
+                                    vals = metadata_data_attr.get(attr, {}).get('values', {})
+                                    if val not in vals:
+                                        vals[val] = {'displ_value': val, 'value': val, 'tooltip': '', 'name':val}
+                                    vals[val]['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
             else:
                 for attr in metadata_data_attr:
                     for val in metadata_data_attr[attr]['values']:
@@ -1669,7 +1721,7 @@ def streaming_csv_view(request, cohort_id=None):
                       "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
-                          file['datatype'], file['dataformat'], file['file_gdc_id'], file['cloudstorage_location'], file['index_file_gdc_id'], file['index_name'],
+                          file['datatype'], file['dataformat'], file['file_node_id'], file['cloudstorage_location'], file['index_file_id'], file['index_name'],
                           file['filesize'], file['access'].replace("-", " ")],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
@@ -1776,7 +1828,7 @@ def get_metadata(request):
         data_type_counts = {}
         for set in results['counts']:
             for attr in results['counts'][set]:
-                if attr == 'data_type':
+                if attr == 'data_type_availability':
                     for id, val in results['counts'][set][attr]['values'].items():
                         attr_name = val['displ_value'].split(' - ')[0]
                         attr_val = val['displ_value'].split(' - ')[-1]
@@ -1825,15 +1877,20 @@ def get_metadata(request):
     return JsonResponse(results)
 
 
-def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
+def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
 
     template = 'cohorts/isb-cgc-data.html'
     template_values = {}
     # TODO: Need error template
 
     try:
+        # TODO: Get filter panel based on the combination of node_id and program_id
+
+        logger.info('[INFO] Getting cohort panel for node_id {}, program_id {}'.format(node_id, program_id))
+
         # Check program ID against public programs
-        public_program = Program.objects.filter(id=program_id).first()
+        # Program_id == 0 for User Data
+        public_program = None if program_id == '0' else Program.objects.get(id=program_id, active=True)
         user = request.user
 
         if public_program:
@@ -1845,10 +1902,8 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 # Currently we do not select anything by default
                 filters = None
 
-            # case_sample_attr = public_program.get_data_sources(source_type=DataSource.SOLR).filter(
-            #     version__data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA]
-            # ).get_source_attrs(for_ui=True)
-            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False)
+            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False,
+                data_type_list=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA, DataVersion.MUTATION_DATA])
 
             #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
@@ -1881,7 +1936,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
             data_type_counts = {}
             for set in results['counts']:
                 for attr in results['counts'][set]:
-                    if attr == 'data_type':
+                    if attr == 'data_type_availability':
                         for id,val in results['counts'][set][attr]['values'].items():
                             attr_name = val['displ_value'].split(' - ')[0]
                             attr_val = val['displ_value'].split(' - ')[-1]
@@ -1911,6 +1966,7 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 'data_types': data_types,
                 'metadata_filters': filters or {},
                 'program': public_program,
+                'node_id': node_id,
                 'metadata_counts': results
             }
 
@@ -1937,8 +1993,18 @@ def get_cohort_filter_panel(request, cohort_id=0, program_id=0):
                 'total_cases': int(results['cases']),
                 'metadata_filters': filters or {},
                 'metadata_counts': results,
-                'program': 0
+                'program': 0,
+                'node_id': 0
             }
+
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+            cohort_progs = cohort.get_programs()
+            template_values['programs_this_cohort'] = [x.id for x in cohort_progs]
+
+        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+        template_values['all_nodes'] = all_nodes
+        template_values['all_programs'] = all_programs
 
     except Exception as e:
         logger.error("[ERROR] While building the filter panel:")
@@ -2090,7 +2156,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
                       {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
                       md.index_file_id as index_file_gdc_uuid,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
@@ -2112,7 +2178,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_gdc_id as gdc_file_uuid, md.case_gdc_id as gdc_case_uuid, md.project_short_name,
+                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
                       {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
                       md.index_file_id as index_file_gdc_uuid,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
@@ -2176,7 +2242,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # Exporting Cohort Records
         elif export_type == 'cohort':
             query_string_base = """
-                SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_gdc_id as case_gdc_uuid, clin.project_short_name,
+                SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
                 {biospec_clause}
