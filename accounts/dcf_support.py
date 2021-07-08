@@ -27,6 +27,7 @@ import pytz
 from django.conf import settings
 from django.contrib.auth.models import User
 
+from google_helpers.stackdriver import StackDriverLogger
 from .models import DCFToken, NIH_User
 from requests_oauthlib.oauth2_session import OAuth2Session
 from oauthlib.oauth2 import MissingTokenError
@@ -44,6 +45,7 @@ DCF_GOOGLE_SA_MONITOR_URL = settings.DCF_GOOGLE_SA_MONITOR_URL
 DCF_GOOGLE_SA_URL = settings.DCF_GOOGLE_SA_URL
 DCF_URL_URL = settings.DCF_URL_URL
 DCF_REVOKE_URL = settings.DCF_REVOKE_URL
+DCF_REFRESH_LOG_NAME = settings.DCF_REFRESH_LOG_NAME
 
 class DCFCommFailure(Exception):
     """Thrown if we have problems communicating with DCF """
@@ -1225,6 +1227,14 @@ def refresh_at_dcf(user_id):
         raise throw_later
     elif not success:
         raise DCFCommFailure()
+    if success:
+        st_logger = StackDriverLogger.build_from_django_settings()
+        st_logger.write_text_log_entry(
+            DCF_REFRESH_LOG_NAME, "[DCF REFRESH] User {} has refreshed DCF for 24 hours at {}".format(
+                User.objects.get(id=user_id).email,
+                datetime.datetime.utcnow()
+            )
+        )
 
     return err_msg, returned_expiration_str, massaged_string
 

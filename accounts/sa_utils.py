@@ -52,7 +52,7 @@ GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
 IDP = settings.IDP
-
+DCF_SA_REG_LOG_NAME = settings.DCF_SA_REG_LOG_NAME
 
 class SAModes(object):
     REMOVE_ALL = 1
@@ -623,6 +623,13 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
             # failure, it is their responsiblity to detect that the project is out of bounds and respond appropriately.
             # So we *do not* issue a call the remove all datasets!
             #
+        if success:
+            st_logger.write_text_log_entry(
+                DCF_SA_REG_LOG_NAME, "[DCF SA REG] User {} has registered service account using DCF at {}".format(
+                    User.objects.get(id=user_id).email,
+                    datetime.datetime.utcnow()
+                )
+            )
 
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Exception while registering ServiceAccount {} for project {}:".format(user_sa,gcp_id))
