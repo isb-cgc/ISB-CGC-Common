@@ -600,12 +600,16 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
             success = False
             messages = ["This cannot happen"]
         elif sa_mode == SAModes.REMOVE_ALL:
+            activity = "removed all"
             success, messages = remove_sa_datasets_at_dcf(user_id, gcp_id, user_sa, phs_map)
         elif sa_mode == SAModes.ADJUST:
+            activity = "adjusted"
             success, messages = adjust_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
         elif sa_mode == SAModes.EXTEND:
+            activity = "extended"
             success, messages = extend_sa_at_dcf(user_id, gcp_id, user_sa, phs_map)
         elif sa_mode == SAModes.REGISTER:
+            activity = "registered"
             success, messages = register_sa_at_dcf(user_id, gcp_id, user_sa, datasets, phs_map)
 
         logger.info("[INFO] messages from DCF {}".format(str(messages)))
@@ -623,10 +627,15 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
             # failure, it is their responsiblity to detect that the project is out of bounds and respond appropriately.
             # So we *do not* issue a call the remove all datasets!
             #
+
+        # Log user activity
         if success:
             st_logger.write_text_log_entry(
-                DCF_SA_REG_LOG_NAME, "[DCF SA REG] User {} has registered service account using DCF at {}".format(
-                    User.objects.get(id=user_id).email,
+                DCF_SA_REG_LOG_NAME, "[DCF SA REG] User {} has {} service account {} for GCP {} using DCF at {}".format(
+                    user_email,
+                    activity,
+                    user_sa,
+                    user_gcp,
                     datetime.datetime.utcnow()
                 )
             )
