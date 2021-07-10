@@ -69,7 +69,9 @@ class Program(models.Model):
     def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
         prog_attrs = {'attrs': {}, 'by_src': {}}
         datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list)
+        print(datasources)
         attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
+        print(attrs)
         for attr in attrs['attrs']:
             prog_attrs['attrs'][attr.name] = {
                 'id': attr.id,
