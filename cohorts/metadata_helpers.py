@@ -193,7 +193,6 @@ def make_id(length):
 def hash_program_attrs(prog_name,source_type,for_faceting,data_type_list=None):
     if not data_type_list:
         data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.TYPE_AVAILABILITY_DATA,DataVersion.MUTATION_DATA]
-    print("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list)))
     return str(hash("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list))))
 
 

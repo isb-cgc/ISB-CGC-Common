@@ -477,7 +477,6 @@ def new_cohort(request, workbook_id=0, worksheet_id=0, create_workbook=False):
     try:
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
-        print(program_list)
 
         all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
 
@@ -777,7 +776,6 @@ def save_cohort(request, workbook_id=None, worksheet_id=None, create_workbook=Fa
                         samples_list_simple.append(sample_info)
                         sample_list.append(Samples(cohort=cohort, **sample_info))
 
-                print(samples_list_simple)
                 bulk_start = time.time()
                 Samples.objects.bulk_create(sample_list)
                 bulk_stop = time.time()
