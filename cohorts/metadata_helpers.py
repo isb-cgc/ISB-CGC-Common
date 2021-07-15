@@ -385,7 +385,7 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
             logger.debug("Program attrs for {} not found (hash: {}), building cache".format(program.name,attr_set))
             METADATA_ATTR[attr_set] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
         else:
-            logger.debug("Hash {} found for program {} attributes".format(program.name))
+            logger.debug("Hash {} found for program {} attributes".format(attr_set,program.name))
         return copy.deepcopy(METADATA_ATTR[attr_set]['attrs'])
 
     except Exception as e:
