@@ -228,7 +228,7 @@ def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None
     filters = {}
     try:
         if inc_filters is not None:
-            id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id).items()}
+            id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id, return_copy=False).items()}
             try:
                 for key in inc_filters:
                     attr = id_to_name.get(str(key),key)
@@ -1900,8 +1900,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 # Currently we do not select anything by default
                 filters = None
 
-            case_sample_attr = fetch_program_attr(program_id, source_type=DataSource.SOLR, for_faceting=False,
-                data_type_list=[DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA, DataVersion.MUTATION_DATA])
+            case_sample_attr = fetch_program_attr(program_id, return_copy=False)
 
             #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
             molecular_attr = {}
