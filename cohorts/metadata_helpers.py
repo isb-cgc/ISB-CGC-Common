@@ -369,7 +369,7 @@ def fetch_program_data_types(program, for_display=False):
 #
 # program: database ID of the program being requested
 #
-def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False, data_type_list=None):
+def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False, data_type_list=None, return_copy=True):
     try:
         if not program:
             program = Program.objects.get(name="TCGA")
@@ -386,7 +386,9 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
             METADATA_ATTR[attr_set] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
         else:
             logger.debug("Hash {} found for program {} attributes".format(attr_set,program.name))
-        return copy.deepcopy(METADATA_ATTR[attr_set]['attrs'])
+        if return_copy:
+            return copy.deepcopy(METADATA_ATTR[attr_set]['attrs'])
+        return METADATA_ATTR[attr_set]['attrs']
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
@@ -477,7 +479,7 @@ def fetch_metadata_value_set(program=None):
         if not program.is_public:
             return {}
 
-        fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=True)
+        fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=True, return_copy=False)
         attr_set = hash_program_attrs(program.name,DataSource.SOLR,for_faceting=True)
         stop = time.time()
         logger.info("BENCHMARKING: Time to get Program attr: {}".format(stop-start))
@@ -592,8 +594,7 @@ def get_preformatted_values(program=None):
 
 # Confirm that a filter key is a valid column in the attribute and data type sets or a valid mutation filter
 def validate_filter_key(col, program, build='HG19'):
-    if not program in METADATA_ATTR:
-        fetch_program_attr(program)
+    prog_attr = fetch_program_attr(program, return_copy=False)
 
     if not program in METADATA_DATA_TYPES:
         fetch_program_data_types(program)
@@ -607,7 +608,7 @@ def validate_filter_key(col, program, build='HG19'):
     if ':' in col:
         col = col.split(':')[1]
 
-    return col in METADATA_ATTR[program]['attrs'] \
+    return col in prog_attr \
            or (col == 'data_type_availability' and METADATA_DATA_TYPES.get(program,None)) \
            or col in METADATA_DATA_ATTR[build]
 
