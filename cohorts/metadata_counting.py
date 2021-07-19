@@ -411,7 +411,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None, comb_mut_filters='OR'):
     filters = {}
     if req_filters is not None:
-        id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id).items()}
+        id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id, return_copy=False).items()}
         try:
             for key in req_filters:
                 attr = id_to_name.get(str(key),key)
