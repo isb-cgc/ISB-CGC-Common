@@ -117,7 +117,6 @@ MOLECULAR_DISPLAY_STRINGS = {
 # }
 # The data is stored to prevent excessive retrieval
 METADATA_ATTR = {}
-METADATA_ATTR_BQ = {}
 
 ### METADATA_DATA_TYPES ###
 # Local storage of the metadata data types, values, and their display strings for a program. This dict takes the form:
@@ -189,6 +188,12 @@ BQ_MOLECULAR_ATTR_TABLES = {
 # Get a set of random characters of 'length'
 def make_id(length):
     return ''.join(random.sample(string.ascii_lowercase, length))
+
+
+def hash_program_attrs(prog_name,source_type,for_faceting,data_type_list=None):
+    if not data_type_list:
+        data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.TYPE_AVAILABILITY_DATA,DataVersion.MUTATION_DATA]
+    return str(hash("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list))))
 
 
 # Database connection
@@ -364,7 +369,7 @@ def fetch_program_data_types(program, for_display=False):
 #
 # program: database ID of the program being requested
 #
-def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False, data_type_list=None):
+def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False, data_type_list=None, return_copy=True):
     try:
         if not program:
             program = Program.objects.get(name="TCGA")
@@ -375,14 +380,15 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
                 program = Program.objects.get(id=program)
         if not data_type_list:
             data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.TYPE_AVAILABILITY_DATA,DataVersion.MUTATION_DATA]
-        if source_type == DataSource.SOLR:
-            if program.id not in METADATA_ATTR or len(METADATA_ATTR[program.id]) <= 0:
-                METADATA_ATTR[program.id] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
-            return copy.deepcopy(METADATA_ATTR[program.id]['attrs'])
+        attr_set = hash_program_attrs(program.name,source_type,for_faceting,data_type_list)
+        if attr_set not in METADATA_ATTR or len(METADATA_ATTR[attr_set]) <= 0:
+            logger.debug("Program attrs for {} not found (hash: {}), building cache".format(program.name,attr_set))
+            METADATA_ATTR[attr_set] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
         else:
-            if program.id not in METADATA_ATTR_BQ or len(METADATA_ATTR_BQ[program.id]) <= 0:
-                METADATA_ATTR_BQ[program.id] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
-            return copy.deepcopy(METADATA_ATTR_BQ[program.id]['attrs'])
+            logger.debug("Hash {} found for program {} attributes".format(attr_set,program.name))
+        if return_copy:
+            return copy.deepcopy(METADATA_ATTR[attr_set]['attrs'])
+        return METADATA_ATTR[attr_set]['attrs']
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get attributes for program #%s:' % str(program))
@@ -473,45 +479,46 @@ def fetch_metadata_value_set(program=None):
         if not program.is_public:
             return {}
 
-        fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=True)
+        fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=True, return_copy=False)
+        attr_set = hash_program_attrs(program.name,DataSource.SOLR,for_faceting=True)
         stop = time.time()
         logger.info("BENCHMARKING: Time to get Program attr: {}".format(stop-start))
 
-        if not METADATA_ATTR[program.id].get('values_cached',None):
-            for src in METADATA_ATTR[program.id]['by_src']:
+        if not METADATA_ATTR[attr_set].get('values_cached',None):
+            for src in METADATA_ATTR[attr_set]['by_src']:
                 solr_query = {
-                    'collection': METADATA_ATTR[program.id]['by_src'][src]['name'],
+                    'collection': METADATA_ATTR[attr_set]['by_src'][src]['name'],
                     'facets': None,
                     'fields': None,
-                    'distincts': list(METADATA_ATTR[program.id]['by_src'][src]['attrs'].filter(data_type=Attribute.CATEGORICAL).values_list('name',flat=True))
+                    'distincts': list(METADATA_ATTR[attr_set]['by_src'][src]['attrs'].filter(data_type=Attribute.CATEGORICAL).values_list('name',flat=True))
                 }
 
                 values = query_solr_and_format_result(solr_query)
 
                 for attr in values['values']:
                     for val in values['values'][attr]:
-                        METADATA_ATTR[program.id]['attrs'][attr]['values'][val] = {
-                            'displ_value': format_for_display(str(val)) if not METADATA_ATTR[program.id]['attrs'][attr]['preformatted'] else str(val),
+                        METADATA_ATTR[attr_set]['attrs'][attr]['values'][val] = {
+                            'displ_value': format_for_display(str(val)) if not METADATA_ATTR[attr_set]['attrs'][attr]['preformatted'] else str(val),
                         }
 
-                for dv in METADATA_ATTR[program.id]['by_src'][src]['attrs'].get_display_values():
-                    if dv.raw_value not in METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values']:
-                        METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values'][dv.raw_value] = {}
-                    METADATA_ATTR[program.id]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
+                for dv in METADATA_ATTR[attr_set]['by_src'][src]['attrs'].get_display_values():
+                    if dv.raw_value not in METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values']:
+                        METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value] = {}
+                    METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
 
 
             # Fetch the tooltip strings for Disease Codes
             tooltips = Attribute_Tooltips.objects.select_related('attribute').filter(attribute__active=1)
 
             for tip in tooltips:
-                value_data = METADATA_ATTR[program.id]['attrs'].get(tip.attribute.name,{}).get('values',{}).get(tip.value, None)
+                value_data = METADATA_ATTR[attr_set]['attrs'].get(tip.attribute.name,{}).get('values',{}).get(tip.value, None)
                 if value_data is not None:
                     value_data['tooltip'] = tip.tooltip
-            METADATA_ATTR[program.id]['values_cached'] = True
+            METADATA_ATTR[attr_set]['values_cached'] = True
 
         stop = time.time()
         logger.info("BENCHMARKING: Time to get metadata attr values: {}".format(stop-start))
-        return copy.deepcopy(METADATA_ATTR[program.id])
+        return copy.deepcopy(METADATA_ATTR[attr_set])
 
     except Exception as e:
         logger.error('[ERROR] Exception when fetching the metadata value set:')
@@ -587,8 +594,7 @@ def get_preformatted_values(program=None):
 
 # Confirm that a filter key is a valid column in the attribute and data type sets or a valid mutation filter
 def validate_filter_key(col, program, build='HG19'):
-    if not program in METADATA_ATTR:
-        fetch_program_attr(program)
+    prog_attr = fetch_program_attr(program, return_copy=False)
 
     if not program in METADATA_DATA_TYPES:
         fetch_program_data_types(program)
@@ -602,7 +608,7 @@ def validate_filter_key(col, program, build='HG19'):
     if ':' in col:
         col = col.split(':')[1]
 
-    return col in METADATA_ATTR[program]['attrs'] \
+    return col in prog_attr \
            or (col == 'data_type_availability' and METADATA_DATA_TYPES.get(program,None)) \
            or col in METADATA_DATA_ATTR[build]
 
