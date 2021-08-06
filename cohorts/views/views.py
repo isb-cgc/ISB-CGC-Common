@@ -152,7 +152,7 @@ def cohorts_list(request, is_public=False):
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
     cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
 
-    cohorts.has_private_cohorts = True
+    cohorts.has_private_cohorts = True if len(cohorts) else False
     shared_users = {}
 
     for item in cohorts:
