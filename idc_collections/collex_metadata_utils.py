@@ -509,7 +509,7 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
         for counts in ['facets', 'filtered_facets']:
             facet_set = results.get(counts,{})
             for source in facet_set:
-                facets = facet_set[source]['facets']
+                facets = facet_set[source].get('facets',{}) or {}
                 if 'BodyPartExamined' in facets:
                     if 'Kidney' in facets['BodyPartExamined']:
                         if 'KIDNEY' in facets['BodyPartExamined']:
@@ -673,7 +673,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     results['uniques'] = solr_result['uniques']
 
             results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                'facets': solr_result['facets']
+                'facets': solr_result.get('facets',None)
             }
 
             if solr_count_filtered_result:
