@@ -567,8 +567,6 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
     image_source = sources.filter(id__in=DataSetType.objects.get(
         data_type=DataSetType.IMAGE_DATA).datasource_set.all()).first()
 
-    print(sources)
-
     # Eventually this will need to go per program
     for source in sources:
         # Uniques and totals are only read from Image Data sources; set the actual field names to None for
