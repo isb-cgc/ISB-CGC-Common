@@ -208,7 +208,8 @@ class DataVersionQuerySet(models.QuerySet):
         sources = None
         q_objs = Q()
         if aggregate_level:
-            q_objs &= Q(aggregate_level=aggregate_level)
+            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            q_objs &= Q(aggregate_level__in=aggregate_level)
         if source_type:
             q_objs &= Q(source_type=source_type)
         dvs = self.all()
@@ -521,6 +522,8 @@ class DataSourceJoin(models.Model):
 
 class AttributeQuerySet(models.QuerySet):
 
+    # Parameters:
+    # versions: ImagingDataCommonsVersion QuerySet these data sources should be associated with
     def get_data_sources(self, versions=None, source_type=None, active=None, current=True, aggregate_level=None):
         q_objects = Q()
         if versions:
@@ -528,7 +531,8 @@ class AttributeQuerySet(models.QuerySet):
         if source_type:
             q_objects &= Q(source_type=source_type)
         if aggregate_level:
-            q_objects &= Q(aggregate_level=aggregate_level)
+            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            q_objects &= Q(aggregate_level__in=aggregate_level)
 
         data_sources = None
         attrs = self.all()
@@ -566,7 +570,10 @@ class AttributeQuerySet(models.QuerySet):
 
     def get_facet_types(self):
         facet_types = {}
-        attr_with_ranges = {x[0]: x[1] for x in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()).values_list('attribute__id','attribute__data_type')}
+        attr_with_ranges = {x[0]: x[1] for x in Attribute_Ranges.objects.select_related('attribute').filter(
+            attribute__in=self.all()
+        ).values_list('attribute__id','attribute__data_type')}
+
         attrs = self.all()
         for attr in attrs:
             facet_types[attr.id] = DataSource.QUERY if attr.data_type == Attribute.CONTINUOUS_NUMERIC and attr.id in attr_with_ranges else DataSource.TERMS
