@@ -58,6 +58,9 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
         if not filters:
             filters = cohort.get_filters_as_dict_simple()[0]
 
+        # Note that the default DataSource set fetched out does NOT include Related/Ancillary data sources! If your
+        # filters include data sources of that type, you MUST provide them to the method; the method defaults to
+        # to only a SINGLE DataSource.
         sources = sources or DataSetType.objects.get(data_type=DataSetType.IMAGE_DATA).datasource_set.filter(
             id__in=cohort.get_data_versions().get_data_sources(
                 source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID"
@@ -68,7 +71,7 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
         for total in result['totals']:
             stats[total] = result['totals'][total]
 
-        for src in result['facets']:
+        for src in result['filtered_facets']:
             if src.split(':')[0] in list(sources.values_list('name',flat=True)):
                 stats['collections'] = [x for x, y in result['filtered_facets'][src]['facets']['collection_id'].items() if y > 0]
 

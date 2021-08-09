@@ -557,6 +557,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         attrs_for_faceting = fetch_data_source_attr(
             sources, {'for_ui': True, 'named_set': facets},
             cache_as="ui_facet_set" if not sources.contains_inactive_versions() else None)
+
+    # Fetch the entire set of UI attributes for checking against the filters; this is just a sanity check
     all_ui_attrs = fetch_data_source_attr(
         sources, {'for_ui':True, 'for_faceting': False},
         cache_as="all_ui_attr" if not sources.contains_inactive_versions() else None)
@@ -567,6 +569,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
     # Eventually this will need to go per program
     for source in sources:
+        # Uniques and totals are only read from Image Data sources; set the actual field names to None for
+        # other set types
         curUniques = uniques if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         curTotals = totals if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         start = time.time()
@@ -681,8 +685,9 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'facets': solr_count_filtered_result['facets']
                 }
 
-            if 'totals' in solr_result:
-                results['totals'] = solr_result['totals']
+            totals_source = solr_count_filtered_result or solr_result
+            if 'totals' in totals_source:
+                results['totals'] = totals_source['totals']
 
         if DataSetType.IMAGE_DATA in source_data_types[source.id] and not counts_only:
             # Get the records

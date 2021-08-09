@@ -57,7 +57,7 @@ from django.utils.html import escape
 
 from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, cohort_manifest, _get_cohort_stats
-from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion
+from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion, Attribute
 from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -104,6 +104,7 @@ def get_cases_by_cohort(cohort_id):
     except (Exception) as e:
         logger.exception(e)
 
+
 def get_cohort_stats(request,cohort_id):
     cohort_stats = {}
     try:
@@ -118,9 +119,17 @@ def get_cohort_stats(request,cohort_id):
                 cohort_filters_list = old_cohort.get_filters_as_dict()[0]['filters']
                 for cohort in cohort_filters_list:
                     cohort_filters[cohort['name']] = cohort['values']
-                cohort_stats = _get_cohort_stats(0, cohort_filters,
-                                ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True, source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID")
-                                             )
+                sources = Attribute.objects.filter(name__in=list(cohort_filters.keys())).get_data_sources(
+                    ImagingDataCommonsVersion.objects.filter(active=True),
+                    source_type=DataSource.SOLR,
+                    active=True,
+                    aggregate_level=["case_barcode","SeriesInstanceUID","sample_barcode"]
+                )
+                cohort_stats = _get_cohort_stats(
+                    0,
+                    cohort_filters,
+                    sources
+                )
             else:
                 cohort_stats = {'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count, 'SeriesInstanceUID': old_cohort.series_count}
 
