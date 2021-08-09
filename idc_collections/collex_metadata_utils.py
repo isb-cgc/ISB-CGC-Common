@@ -261,7 +261,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             "BigQuery" if sources.first().source_type == DataSource.BIGQUERY else "Solr",
             str((stop - start))
         ))
-
         filtered_attr_by_source = copy.deepcopy(attr_by_source)
 
         for which, _attr_by_source in {'filtered_facets': filtered_attr_by_source,
@@ -443,8 +442,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 attr_by_source['totals'] = source_metadata['totals']
             return attr_by_source
         else:
-            context['order'] = {'derived_set': ['dicom_derived_series_v2:segmentation', 'dicom_derived_series_v2:qualitative',
-                                                'dicom_derived_series_v2:quantitative']}
+            context['order'] = {'derived_set': ['dicom_derived_study_v3:segmentation', 'dicom_derived_study_v3:qualitative',
+                                                'dicom_derived_study_v3:quantitative']}
         return context
 
     except Exception as e:
@@ -510,7 +509,7 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
         for counts in ['facets', 'filtered_facets']:
             facet_set = results.get(counts,{})
             for source in facet_set:
-                facets = facet_set[source]['facets']
+                facets = facet_set[source].get('facets',{}) or {}
                 if 'BodyPartExamined' in facets:
                     if 'Kidney' in facets['BodyPartExamined']:
                         if 'KIDNEY' in facets['BodyPartExamined']:
@@ -558,6 +557,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         attrs_for_faceting = fetch_data_source_attr(
             sources, {'for_ui': True, 'named_set': facets},
             cache_as="ui_facet_set" if not sources.contains_inactive_versions() else None)
+
+    # Fetch the entire set of UI attributes for checking against the filters; this is just a sanity check
     all_ui_attrs = fetch_data_source_attr(
         sources, {'for_ui':True, 'for_faceting': False},
         cache_as="all_ui_attr" if not sources.contains_inactive_versions() else None)
@@ -568,6 +569,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
     # Eventually this will need to go per program
     for source in sources:
+        # Uniques and totals are only read from Image Data sources; set the actual field names to None for
+        # other set types
         curUniques = uniques if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         curTotals = totals if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         start = time.time()
@@ -674,7 +677,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     results['uniques'] = solr_result['uniques']
 
             results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                'facets': solr_result['facets']
+                'facets': solr_result.get('facets',None)
             }
 
             if solr_count_filtered_result:
@@ -682,8 +685,9 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'facets': solr_count_filtered_result['facets']
                 }
 
-            if 'totals' in solr_result:
-                results['totals'] = solr_result['totals']
+            totals_source = solr_count_filtered_result or solr_result
+            if 'totals' in totals_source:
+                results['totals'] = totals_source['totals']
 
         if DataSetType.IMAGE_DATA in source_data_types[source.id] and not counts_only:
             # Get the records
