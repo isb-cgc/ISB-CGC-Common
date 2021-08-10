@@ -116,7 +116,7 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     payload = {
         "query": query_string or "*:*",
         "limit": 0 if counts_only else limit,
-        "offset": offset,
+        "offset": offset if not with_cursor else 0,
         "params": {
             "debugQuery": "on"
         }
@@ -124,7 +124,6 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
     if with_cursor:
         payload['params']['cursorMark'] = with_cursor
-        del payload['offset']
 
     if stats:
         payload['params']['stats'] = True
@@ -155,7 +154,8 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     if fields:
         payload['fields'] = fields
     if sort:
-        payload['sort'] = sort
+        # If we're using a cursor, we must include the uniqueKey in the sorting priority
+        payload['sort'] = ("{}, id asc".format(sort) if cursor else sort)
     if fqs:
         payload['filter'] = fqs if type(fqs) is list else [fqs]
 

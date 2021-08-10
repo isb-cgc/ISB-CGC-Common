@@ -534,7 +534,7 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
 
 # Use solr to fetch faceted counts and/or records
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
-                      records_only=False, sort=None, uniques=None, record_source=None, totals=None,
+                      records_only=False, sort=None, uniques=None, record_source=None, totals=None, cursor=None,
                       search_child_records_by=None):
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
@@ -700,8 +700,10 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'counts_only': counts_only,
                 'sort': sort,
                 'limit': record_limit,
-                'offset': offset
+                'offset': offset if not cursor else 0,
+                'with_cursor': cursor
             })
+
             results['docs'] = solr_result['docs']
             if records_only:
                 results['total'] = solr_result['numFound']
