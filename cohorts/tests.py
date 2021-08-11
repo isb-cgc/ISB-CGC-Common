@@ -23,11 +23,21 @@ class ModelTest(TestCase):
     def setUp(self):
         # We need 2 users to test permissions
         self.test_cohort_owner = User.objects.create_user(username='test_user', email='test_user_email@isb-cgc.org',
-                                                      password='itsasecrettoeveryone')
+                                                      password='Itsasecrettoeveryone!2')
 
         self.test_other_user = User.objects.create_user(username='test_user_2', email='test_user_2_email@isb-cgc.org',
-                                                      password='itsasecrettoeveryone')
+                                                      password='Itsasecrettoeveryone!2')
 
     def test_make_cohort(self):
         print("A test to make a cohort!")
         self.assertEqual(self.test_cohort_owner.username, 'test_user')
+        cohort_details = {}
+        cohort_details['name']='testname'
+        cohort_details['description']='testdescription'
+        cohort = Cohort.objects.create(**cohort_details)
+        self.assertEqual(cohort.name,'testname')
+        self.assertEqual(cohort.description, 'testdescription')
+        cohort.save()
+        i=1
+
+
