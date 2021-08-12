@@ -334,7 +334,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 if solr_facets_filtered:
                     solr_result_filtered = query_solr_and_format_result({
                         'collection': source.name,
-                        'facets': solr_facets,
+                        'facets': solr_facets_filtered,
                         'fqs': query_set,
                         'unique': source.shared_id_col,
                         'counts_only': False,
