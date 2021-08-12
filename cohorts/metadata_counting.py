@@ -221,8 +221,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 'sets': {},
                 'totals': {}
             }
-            if filters:
-                results['programs'][prog.id]['filtered_totals'] = {}
             prog_versions = prog.dataversion_set.filter(
                 id__in=versions,
                 data_type__in=data_type
