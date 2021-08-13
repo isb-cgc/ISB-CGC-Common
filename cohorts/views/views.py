@@ -451,11 +451,11 @@ def create_manifest_bq_table(request, cohorts):
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
 
-        order_by = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
+        order_by = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "study_uuid", "series_uuid", "instance_uuid", "gcs_url"]
         # field_list = json.loads(request.GET.get('columns',
         #    '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]'))
         # TODO: Allow users to specify the columns
-        field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
+        field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "study_uuid", "series_uuid", "instance_uuid", "gcs_url"]
 
         # We can only ORDER BY columns which we've actually requested
         order_by = list(set.intersection(set(order_by),set(field_list)))
@@ -579,7 +579,7 @@ def create_file_manifest(request, cohort):
 
     # Fields we need to fetch
     field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
-                  "crdc_study_uuid", "crdc_series_uuid"]
+                  "study_uuid", "series_uuid"]
 
     # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
     if request.GET.get('columns'):
