@@ -18,6 +18,8 @@ from django.test import TestCase
 from django.contrib.auth.models import AnonymousUser, User
 
 from cohorts.models import Cohort
+from idc_collections.models import ImagingDataCommonsVersion
+from cohorts.utils import _save_cohort
 
 class ModelTest(TestCase):
     def setUp(self):
@@ -37,7 +39,37 @@ class ModelTest(TestCase):
         cohort = Cohort.objects.create(**cohort_details)
         self.assertEqual(cohort.name,'testname')
         self.assertEqual(cohort.description, 'testdescription')
-        cohort.save()
+
+    def test_save_cohort_util(self):
+        print("Try to make cohort from util with no filter")
+        _save_cohort( self.test_cohort_owner, name='testd2', desc='testd2')
+        mkCohort = True
+        try:
+            cohort = Cohort.objects.get(name='testd2')
+            mkCohort = True
+        except Exception as e:
+            mkCohort = False
+        self.assertEqual(mkCohort, False)
+        print("Try to make cohort from util with no filter and none in DB")
+        filters={'120': ['4d_lung']}
+        cohort_info=_save_cohort(self.test_cohort_owner, filters=filters,name='testd3', desc='Create 4d')
+        try:
+            cohort = Cohort.objects.get(name='testd3')
+            mkCohort = True
+        except Exception as e:
+            mkCohort = False
+        self.assertEqual(mkCohort, False)
+        version_details={}
+        version_details['name'] = 'Imaging Data Commons Data Release'
+        version_details['data_volume']=2.0
+        version_details['active']=True
+        version = ImagingDataCommonsVersion.objects.create(**version_details)
+        cohort_info = _save_cohort(self.test_cohort_owner, filters=filters, version=version,name='testd3', desc='Create 4d')
+
+
         i=1
+
+
+
 
 
