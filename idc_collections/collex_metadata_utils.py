@@ -1162,7 +1162,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     )
                 param_sfx += 1
                 # If there were non-derived filters made, append them to the relevant lists
-                if filter_clauses.get('image_table',None):
+                if filter_clauses.get(image_table,None):
                     query_filters.append(filter_clauses[image_table]['filter_string'])
                     params.append(filter_clauses[image_table]['parameters'])
         tables_in_query.append(image_table)
