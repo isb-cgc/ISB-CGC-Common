@@ -153,9 +153,9 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 
     if fields:
         payload['fields'] = fields
-    if sort:
+    if sort or with_cursor:
         # If we're using a cursor, we must include the uniqueKey in the sorting priority
-        payload['sort'] = ("{}, id asc".format(sort) if cursor and sort else sort if sort else "id asc")
+        payload['sort'] = "{}".format("{}, id asc".format(sort) if with_cursor and sort else sort if sort else "id asc")
     if fqs:
         payload['filter'] = fqs if type(fqs) is list else [fqs]
 
