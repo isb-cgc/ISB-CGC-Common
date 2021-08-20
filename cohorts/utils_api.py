@@ -240,11 +240,11 @@ def get_manifest_query(request, filters, data_version, manifest_info):
     if request.GET['Source_DOI'] in [True, 'True']:
         select.append('source_DOI')
     if request.GET['CRDC_Study_GUID'] in [True, 'True']:
-        select.append('study_uuid')
+        select.append('crdc_study_uuid')
     if request.GET['CRDC_Series_GUID'] in [True, 'True']:
-        select.append('series_uuid')
+        select.append('crdc_series_uuid')
     if request.GET['CRDC_Instance_GUID'] in [True, 'True']:
-        select.append('instance_uuid')
+        select.append('crdc_instance_uuid')
     if request.GET['GCS_URL'] in [True, 'True']:
         select.append('gcs_url')
 
