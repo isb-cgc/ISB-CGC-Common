@@ -53,13 +53,13 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'SOPInstanceUID',
             'type': 'STRING'
         }, {
-            'name': 'study_uuid',
+            'name': 'crdc_study_uuid',
             'type': 'STRING'
         }, {
-            'name': 'series_uuid',
+            'name': 'crdc_series_uuid',
             'type': 'STRING'
         }, {
-            'name': 'instance_uuid',
+            'name': 'crdc_instance_uuid',
             'type': 'STRING'
         }, {
             'name': 'gcs_url',
