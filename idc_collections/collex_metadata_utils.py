@@ -1054,19 +1054,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             if attr_set['sources'][source]['data_type'] == DataSetType.IMAGE_DATA:
                 image_tables[source] = 1
 
-    # If more than one filter is in the derived set and from the same data source, we must do our filters as a set of
-    # intersection queries (each derived filter, and one which encompasses all image filters joined to any related
-    # filters). This is because derived data is often contained in separate instances but would be in the same series
-    # or study.
-
-    derived_filters = Attribute_Set_Type.objects.select_related('attribute','datasettype').filter(
-        attribute__name__in=list(filters.keys()),
-        datasettype__data_type=DataSetType.DERIVED_DATA
-    ).values_list('attribute__name',flat=True)
-    may_need_intersect = bool(len(derived_filters) > 1)
-    if may_need_intersect:
-        intersect_filter_clauses = {}
-    print("Derived filters seen: {}".format(derived_filters))
+    # If search_by_child_records is true--meaning we want all members of a study or series
+    # rather than just the instances--our query is a set of intersections to ensure we find the right
+    # series or study
+    may_need_intersect = bool(len(filters.keys()) > 1)
 
     table_info = {
         x: {
@@ -1099,6 +1090,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     break
         order_by = new_order
 
+    # Failures to find grouping tables typically means the wrong version is being polled for the data sources.
+    # Make sure the right version is being used!
     if group_by:
         new_groups = []
         for grouping in group_by:
@@ -1131,18 +1124,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         if image_table in filter_attr_by_bq['sources']:
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
             if len(filter_set):
-                derived_filters_this_source = set(filter_set.keys()).intersection(derived_filters)
-                if may_need_intersect and len(derived_filters_this_source) > 1:
-                    intersected_filters = {x: filter_set[x] for x in filter_set if x in derived_filters_this_source}
-                    regular_filters = {x: filter_set[x] for x in filter_set if x not in derived_filters_this_source}
-                    if len(regular_filters):
-                        filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
-                            regular_filters, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
-                            case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
-                        )
-                    for filter in intersected_filters:
+                if may_need_intersect and len(filter_set.keys()) > 1:
+                    for filter in filter_set:
                         bq_filter = BigQuerySupport.build_bq_filter_and_params(
-                            {filter: intersected_filters[filter]}, param_suffix=str(param_sfx),
+                            {filter: filter_set[filter]}, param_suffix=str(param_sfx),
                             field_prefix=table_info[image_table]['alias'],
                             case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                         )
