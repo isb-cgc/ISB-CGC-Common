@@ -966,7 +966,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 #     'params': <BigQuery API v2 compatible parameter set> }
 def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, 
                     offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False,
-                    search_child_records_by=False):
+                    search_child_records_by=None):
 
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
@@ -1057,7 +1057,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     # If search_by_child_records is true--meaning we want all members of a study or series
     # rather than just the instances--our query is a set of intersections to ensure we find the right
     # series or study
-    may_need_intersect = bool(len(filters.keys()) > 1)
+    may_need_intersect = search_by_child_records and bool(len(filters.keys()) > 1)
 
     table_info = {
         x: {
