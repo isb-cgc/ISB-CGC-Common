@@ -1054,10 +1054,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             if attr_set['sources'][source]['data_type'] == DataSetType.IMAGE_DATA:
                 image_tables[source] = 1
 
-    # If search_by_child_records is true--meaning we want all members of a study or series
+    # If search_child_records_by isn't None--meaning we want all members of a study or series
     # rather than just the instances--our query is a set of intersections to ensure we find the right
     # series or study
-    may_need_intersect = search_by_child_records and bool(len(filters.keys()) > 1)
+    may_need_intersect = search_child_records_by and bool(len(filters.keys()) > 1)
 
     table_info = {
         x: {
