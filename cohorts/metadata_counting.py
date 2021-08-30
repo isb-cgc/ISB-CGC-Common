@@ -180,6 +180,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
     mutation_filters = None
     filters = {}
     solr_facets = None
+    solr_facets_filtered = None
     solr_fields = None
     mutation_build = None
     data_type = data_type or [DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA,
@@ -265,6 +266,10 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         filter_tags=solr_query.get('filter_tags', None) if solr_query else None, unique='case_barcode',
                         total_facets=total_counts
                     )
+                    if solr_query:
+                        solr_facets_filtered = build_solr_facets(
+                            facet_attrs['sources'][source.id]['attrs'], unique='case_barcode', total_facets=total_counts
+                        )
                 elif with_totals:
                     solr_facets = build_solr_facets({},None,total_facets=total_counts)
                 if with_records and field_attr:
@@ -324,16 +329,28 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'counts_only': False,
                     'limit': limit if with_records else 0
                 })
+                if solr_facets_filtered:
+                    solr_result_filtered = query_solr_and_format_result({
+                        'collection': source.name,
+                        'facets': solr_facets_filtered,
+                        'fqs': query_set,
+                        'unique': source.shared_id_col,
+                        'counts_only': False,
+                        'limit': 0
+                    })
 
                 set_type = source.get_set_type()
 
                 if set_type not in results['programs'][prog.id]['sets']:
                     results['programs'][prog.id]['sets'][set_type] = {}
                 results['programs'][prog.id]['sets'][set_type][source.name] = solr_result
+                if solr_facets_filtered:
+                    solr_result['filtered_facets'] = solr_result_filtered['facets']
                 for attr in count_attrs['list']:
                     prog_totals = results['programs'][prog.id]['totals']
                     if "{}_count".format(attr) not in prog_totals or prog_totals["{}_count".format(attr)] == 0:
                         prog_totals["{}_count".format(attr)] = solr_result["{}_count".format(attr)] if "{}_count".format(attr) in solr_result else 0
+
         stop = time.time()
 
         results['elapsed_time'] = "{}s".format(str(stop-start))
@@ -353,7 +370,12 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
     try:
         logger.info("[STATUS] Entering count_public_metadata")
         solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
-        facets = {}
+        facet_types = {
+            'facets': {},
+            'filtered_facets': None if not inc_filters else {}
+        }
+        facets = facet_types['facets']
+        filtered_facets = facet_types['filtered_facets']
         sample_count = 0
         case_count = 0
 
@@ -363,46 +385,49 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
             case_count = prog_result['totals']['case_barcode_count']
             for set, set_result in prog_result['sets'].items():
                 facets[set] = {}
+                if filtered_facets is not None:
+                    filtered_facets[set] = {}
                 for source, source_result in set_result.items():
-                    if 'facets' in source_result:
-                        for attr, vals in source_result['facets'].items():
-                            attr_info = metadata_attr_values['attrs'][attr]
-                            dvals = {x: attr_info['values'][x]['displ_value'] for x in attr_info['values']}
-                            facets[set][attr] = {'name': attr, 'id': attr_info['id'], 'values': {}, 'displ_name': attr_info['displ_name']}
-                            for val in vals:
-                                val_index = val
-                                val = str(val)
-                                val_name = val
-                                val_value = val
-                                displ_value = val if attr_info['preformatted'] else dvals.get(val,format_for_display(val))
-                                displ_name = val if attr_info['preformatted'] else dvals.get(val,format_for_display(val))
-                                count = vals[val_index]
-                                if "::" in val:
-                                    val_name = val.split("::")[0]
-                                    val_value = val.split("::")[-1]
-                                    displ_value = val_name if attr_info['preformatted'] else dvals.get(val_name,format_for_display(val_name))
-                                    displ_name = val_name if attr_info['preformatted'] else dvals.get(val_name, format_for_display(val_name))
-                                facets[set][attr]['values'][val_index] = {
-                                    'name': val_name,
-                                    'value': val_value,
-                                    'displ_value': displ_value,
-                                    'displ_name': displ_name,
-                                    'count': count,
-                                    'id': val_value,
-                                    # Supports #2018. This value object is the only information that gets used to
-                                    # stock cohort checkboxes in the template. To support clicking on a treemap to
-                                    # trigger the checkbox, we need have an id that glues the attribute name to the
-                                    # value in a standard manner, and we really don't want to have to construct this
-                                    # with a unwieldy template statement. So we do it here:
-                                    'full_id': (re.sub('\s+', '_', (attr + "-" + str(val_value)))).upper()
-                                }
-                                value_data = metadata_attr_values['attrs'].get(attr,{}).get('values', {}).get(val_index, None)
-                                if value_data is not None and 'tooltip' in value_data:
-                                    facets[set][attr]['values'][val_index]['tooltip'] = value_data['tooltip']
+                    for facet_type, these_facets in facet_types.items():
+                        if facet_type in source_result:
+                            for attr, vals in source_result[facet_type].items():
+                                attr_info = metadata_attr_values['attrs'][attr]
+                                dvals = {x: attr_info['values'][x]['displ_value'] for x in attr_info['values']}
+                                these_facets[set][attr] = {'name': attr, 'id': attr_info['id'], 'values': {}, 'displ_name': attr_info['displ_name']}
+                                for val in vals:
+                                    val_index = val
+                                    val = str(val)
+                                    val_name = val
+                                    val_value = val
+                                    displ_value = val if attr_info['preformatted'] else dvals.get(val,format_for_display(val))
+                                    displ_name = val if attr_info['preformatted'] else dvals.get(val,format_for_display(val))
+                                    count = vals[val_index]
+                                    if "::" in val:
+                                        val_name = val.split("::")[0]
+                                        val_value = val.split("::")[-1]
+                                        displ_value = val_name if attr_info['preformatted'] else dvals.get(val_name,format_for_display(val_name))
+                                        displ_name = val_name if attr_info['preformatted'] else dvals.get(val_name, format_for_display(val_name))
+                                    these_facets[set][attr]['values'][val_index] = {
+                                        'name': val_name,
+                                        'value': val_value,
+                                        'displ_value': displ_value,
+                                        'displ_name': displ_name,
+                                        'count': count,
+                                        'id': val_value,
+                                        # Supports #2018. This value object is the only information that gets used to
+                                        # stock cohort checkboxes in the template. To support clicking on a treemap to
+                                        # trigger the checkbox, we need have an id that glues the attribute name to the
+                                        # value in a standard manner, and we really don't want to have to construct this
+                                        # with a unwieldy template statement. So we do it here:
+                                        'full_id': (re.sub('\s+', '_', (attr + "-" + str(val_value)))).upper()
+                                    }
+                                    value_data = metadata_attr_values['attrs'].get(attr,{}).get('values', {}).get(val_index, None)
+                                    if value_data is not None and 'tooltip' in value_data:
+                                        these_facets[set][attr]['values'][val_index]['tooltip'] = value_data['tooltip']
 
         logger.info("[STATUS] Exiting count_public_metadata")
 
-        return {'counts': facets, 'samples': sample_count, 'cases': case_count}
+        return {'counts': facets, 'samples': sample_count, 'cases': case_count, 'filtered_counts': filtered_facets}
     except Exception as e:
         logger.error("[ERROR] While counting public metadata: ")
         logger.exception(e)
