@@ -500,7 +500,7 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit, offset, search_child_records_by=search_child_records_by)
         elif source_type == DataSource.SOLR:
-            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
+            results =get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
                                         facets, records_only, sort, uniques, record_source, totals,
                                         search_child_records_by=search_child_records_by)
         stop = time.time()
