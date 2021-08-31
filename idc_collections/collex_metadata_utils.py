@@ -521,18 +521,6 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                                 facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
                             del facets['BodyPartExamined']['Kidney']
 
-        for counts in ['facets', 'filtered_facets']:
-            facet_set = results.get(counts,{})
-            for source in facet_set:
-                facets = facet_set[source].get('facets',{}) or {}
-                if 'BodyPartExamined' in facets:
-                    if 'Kidney' in facets['BodyPartExamined']:
-                        if 'KIDNEY' in facets['BodyPartExamined']:
-                            facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
-                        else:
-                            facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
-                        del facets['BodyPartExamined']['Kidney']
-
         if not counts_only:
             if 'SeriesNumber' in fields:
                 for res in results['docs']:
@@ -619,7 +607,7 @@ def create_query_set(solr_query,sources,source,DataSetType):
 
 # Use solr to fetch faceted counts and/or records
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
-                      records_only=False, sort=None, uniques=None, record_source=None, totals=None,
+                      records_only=False, sort=None, uniques=None, record_source=None, totals=None, cursor=None,
                       search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,raw_format=False):
 
     filters = filters or {}
