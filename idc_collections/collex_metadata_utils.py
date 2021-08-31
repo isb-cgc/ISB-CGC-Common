@@ -19,7 +19,10 @@ import time
 import copy
 import re
 from time import sleep
-from idc_collections.models import Collection, Attribute_Tooltips, DataSource, Attribute, Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, ImagingDataCommonsVersion
+from idc_collections.models import Collection, Attribute_Tooltips, DataSource, Attribute, \
+    Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, Attribute_Set_Type, \
+    ImagingDataCommonsVersion
+
 from solr_helpers import *
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from google_helpers.bigquery.export_support import BigQueryExportFileList
@@ -518,12 +521,24 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                                 facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
                             del facets['BodyPartExamined']['Kidney']
 
-            if not counts_only:
-                if 'SeriesNumber' in fields:
-                    for res in results['docs']:
-                        res['SeriesNumber'] = res['SeriesNumber'][0] if 'SeriesNumber' in res else 'None'
-                if order_docs:
-                    results['docs'] = sorted(results['docs'], key=lambda x: tuple([x[item] for item in order_docs]))
+        for counts in ['facets', 'filtered_facets']:
+            facet_set = results.get(counts,{})
+            for source in facet_set:
+                facets = facet_set[source].get('facets',{}) or {}
+                if 'BodyPartExamined' in facets:
+                    if 'Kidney' in facets['BodyPartExamined']:
+                        if 'KIDNEY' in facets['BodyPartExamined']:
+                            facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
+                        else:
+                            facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
+                        del facets['BodyPartExamined']['Kidney']
+
+        if not counts_only:
+            if 'SeriesNumber' in fields:
+                for res in results['docs']:
+                    res['SeriesNumber'] = res['SeriesNumber'][0] if 'SeriesNumber' in res else 'None'
+            if order_docs:
+                results['docs'] = sorted(results['docs'], key=lambda x: tuple([x[item] for item in order_docs]))
 
     except Exception as e:
         logger.error("[ERROR] While fetching metadata:")
@@ -606,6 +621,7 @@ def create_query_set(solr_query,sources,source,DataSetType):
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
                       records_only=False, sort=None, uniques=None, record_source=None, totals=None,
                       search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,raw_format=False):
+
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -639,6 +655,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
     # Eventually this will need to go per program
     for source in sources:
+        # Uniques and totals are only read from Image Data sources; set the actual field names to None for
+        # other set types
         curUniques = uniques if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         curTotals = totals if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         start = time.time()
@@ -764,15 +782,16 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 results['facets'] = solr_result['facets']
             else:
                 results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                    'facets': solr_result['facets']}
+                    'facets': solr_result.get('facets',None)}
 
 
             if solr_count_filtered_result:
                 results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
                     'facets': solr_count_filtered_result['facets']}
 
-            if 'totals' in solr_result:
-                results['totals'] = solr_result['totals']
+            totals_source = solr_count_filtered_result or solr_result
+            if 'totals' in totals_source:
+                results['totals'] = totals_source['totals']
 
         if DataSetType.IMAGE_DATA in source_data_types[source.id] and not counts_only:
             # Get the records
@@ -785,8 +804,10 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'counts_only': counts_only,
                 'sort': sort,
                 'limit': record_limit,
-                'offset': offset
+                'offset': offset if not cursor else 0,
+                'with_cursor': cursor
             })
+
             results['docs'] = solr_result['docs']
             if records_only:
                 results['total'] = solr_result['numFound']
@@ -1046,7 +1067,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 #     'params': <BigQuery API v2 compatible parameter set> }
 def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, 
                     offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False,
-                    search_child_records_by=False):
+                    search_child_records_by=None):
 
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
@@ -1070,6 +1091,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         FROM {table_clause} 
         {join_clause}
         {where_clause}
+        {intersect_clause}
         {group_clause}
         {order_clause}
         {limit_clause}
@@ -1086,6 +1108,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                 FROM {table_clause} 
                 {join_clause}
                 {where_clause}
+                {intersect_clause}
                 GROUP BY {search_by}    
             )
             {group_clause}
@@ -1093,6 +1116,14 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             {limit_clause}
             {offset_clause}
         """
+
+    intersect_base = """
+        SELECT {search_by}
+        FROM {table_clause} 
+        {join_clause}
+        {where_clause}
+        GROUP BY {search_by}  
+    """
 
     join_type = ""
 
@@ -1102,6 +1133,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     """
 
     image_tables = {}
+    filter_clauses = {}
+    field_clauses = {}
 
     if len(data_version.filter(active=False)) <= 0:
         sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
@@ -1122,6 +1155,11 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             if attr_set['sources'][source]['data_type'] == DataSetType.IMAGE_DATA:
                 image_tables[source] = 1
 
+    # If search_child_records_by isn't None--meaning we want all members of a study or series
+    # rather than just the instances--our query is a set of intersections to ensure we find the right
+    # series or study
+    may_need_intersect = search_child_records_by and bool(len(filters.keys()) > 1)
+
     table_info = {
         x: {
             'name': y['sources'][x]['name'],
@@ -1133,13 +1171,13 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         } for y in [field_attr_by_bq, filter_attr_by_bq] for x in y['sources']
     }
 
-    filter_clauses = {}
-    field_clauses = {}
-
     for bqtable in field_attr_by_bq['sources']:
-        field_clauses[bqtable] = ",".join(["{}.{}".format(table_info[bqtable]['alias'], x) for x in field_attr_by_bq['sources'][bqtable]['list']])
+        field_clauses[bqtable] = ",".join(
+            ["{}.{}".format(table_info[bqtable]['alias'], x) for x in field_attr_by_bq['sources'][bqtable]['list']]
+        )
 
     for_union = []
+    intersect_statements = []
     params = []
     param_sfx = 0
 
@@ -1153,6 +1191,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     break
         order_by = new_order
 
+    # Failures to find grouping tables typically means the wrong version is being polled for the data sources.
+    # Make sure the right version is being used!
     if group_by:
         new_groups = []
         for grouping in group_by:
@@ -1160,7 +1200,9 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             if sources_and_attrs:
                 source_set = list(sources_and_attrs['filters']['sources'].keys())
                 source_set.extend(list(sources_and_attrs['fields']['sources'].keys()))
-                group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(id__in=set(source_set)).distinct().first()
+                group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(
+                    id__in=set(source_set)
+                ).distinct().first()
             else:
                 for id, source in attr_data['sources'].items():
                     if grouping in source['list']:
@@ -1175,6 +1217,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         tables_in_query = []
         joins = []
         query_filters = []
+        regular_filters = {}
         fields = [field_clauses[image_table]] if image_table in field_clauses else []
         if search_child_records_by:
             child_record_search_fields = [y for x, y in field_attr_by_bq['sources'][image_table]['attr_objs'].get_attr_set_types().get_child_record_searches().items() if y is not None]
@@ -1182,13 +1225,32 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         if image_table in filter_attr_by_bq['sources']:
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
             if len(filter_set):
-                filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
-                    filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
-                    case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
-                )
+                if may_need_intersect and len(filter_set.keys()) > 1:
+                    for filter in filter_set:
+                        bq_filter = BigQuerySupport.build_bq_filter_and_params(
+                            {filter: filter_set[filter]}, param_suffix=str(param_sfx),
+                            field_prefix=table_info[image_table]['alias'],
+                            case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                        )
+                        intersect_statements.append(intersect_base.format(
+                            search_by=child_record_search_field,
+                            table_clause="`{}` {}".format(
+                                table_info[image_table]['name'], table_info[image_table]['alias']
+                            ),
+                            join_clause="",
+                            where_clause="WHERE {}".format(bq_filter['filter_string'])
+                        ))
+                        params.append(bq_filter['parameters'])
+                else:
+                    filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
+                        filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
+                        case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                    )
                 param_sfx += 1
-                query_filters.append(filter_clauses[image_table]['filter_string'])
-                params.append(filter_clauses[image_table]['parameters'])
+                # If there were non-derived filters made, append them to the relevant lists
+                if filter_clauses.get(image_table,None):
+                    query_filters.append(filter_clauses[image_table]['filter_string'])
+                    params.append(filter_clauses[image_table]['parameters'])
         tables_in_query.append(image_table)
         for filter_bqtable in filter_attr_by_bq['sources']:
             if filter_bqtable not in image_tables and filter_bqtable not in tables_in_query:
@@ -1245,11 +1307,21 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     filter_join_id=source_join.get_col(table_info[field_bqtable]['name'])
                 ))
 
+        intersect_clause = ""
+        if len(intersect_statements):
+            intersect_clause = """
+                INTERSECT DISTINCT
+            """.join(intersect_statements)
+
         for_union.append(query_base.format(
             field_clause= ",".join(fields),
             table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),
             join_clause=""" """.join(joins),
-            where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters)) if len(query_filters) else ""),
+            where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters) if len(query_filters) else "") if len(filters) else ""),
+            intersect_clause="{}".format("" if not len(intersect_statements) else "{}{}".format(
+                " AND " if len(regular_filters) else "","{} IN ({})".format(
+                    child_record_search_field,intersect_clause
+            ))),
             order_clause="{}".format("ORDER BY {}".format(", ".join(["{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by])) if order_by and len(order_by) else ""),
             group_clause="{}".format("GROUP BY {}".format(", ".join(group_by)) if group_by and len(group_by) else ""),
             limit_clause="{}".format("LIMIT {}".format(str(limit)) if limit > 0 else ""),

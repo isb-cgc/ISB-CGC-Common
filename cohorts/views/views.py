@@ -57,7 +57,7 @@ from django.utils.html import escape
 
 from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, cohort_manifest, _get_cohort_stats
-from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion
+from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion, Attribute
 from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -104,25 +104,37 @@ def get_cases_by_cohort(cohort_id):
     except (Exception) as e:
         logger.exception(e)
 
-def get_cohort_stats(request,cohort_id):
+
+def get_cohort_stats(request, cohort_id):
     cohort_stats = {}
     try:
         req = request.GET if request.GET else request.POST
-        update = (req.get('update', "False").lower() == "true")
+        update = bool(req.get('update', "False").lower() == "true")
         old_cohort = Cohort.objects.get(id=cohort_id, active=True)
         old_cohort.perm = old_cohort.get_perm(request)
 
         if old_cohort.perm:
             if update:
-                cohort_filters ={}
+                cohort_filters = {}
                 cohort_filters_list = old_cohort.get_filters_as_dict()[0]['filters']
                 for cohort in cohort_filters_list:
                     cohort_filters[cohort['name']] = cohort['values']
-                cohort_stats = _get_cohort_stats(0, cohort_filters,
-                                ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True, source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID")
-                                             )
+                # For now we always require at least one filter coming from the 'ImageData' table type,
+                # so it's safe to case the sources only on the filters for purposes of stat counting
+                sources = Attribute.objects.filter(name__in=list(cohort_filters.keys())).get_data_sources(
+                    ImagingDataCommonsVersion.objects.filter(active=True),
+                    source_type=DataSource.SOLR,
+                    active=True,
+                    aggregate_level=["case_barcode", "StudyInstanceUID", "sample_barcode"]
+                )
+                cohort_stats = _get_cohort_stats(
+                    0,
+                    cohort_filters,
+                    sources
+                )
             else:
-                cohort_stats = {'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count, 'SeriesInstanceUID': old_cohort.series_count}
+                cohort_stats = {'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count,
+                                'SeriesInstanceUID': old_cohort.series_count}
 
     except ObjectDoesNotExist as e:
         logger.exception(e)
@@ -131,11 +143,11 @@ def get_cohort_stats(request,cohort_id):
     except Exception as e:
         logger.error("[ERROR] Exception while trying to view a cohort:")
         logger.exception(e)
-        messages.error(request, "There was an error while trying to load that cohort's stats")
+        messages.error(request, "There was an error while trying to load that cohort's stats.")
         return redirect('cohort_list')
     cohort_stats.pop('collections',None)
-    return(JsonResponse(cohort_stats))
 
+    return JsonResponse(cohort_stats)
 
 
 @login_required
@@ -152,7 +164,7 @@ def cohorts_list(request, is_public=False):
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
     cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-name')
 
-    cohorts.has_private_cohorts = True
+    cohorts.has_private_cohorts = True if len(cohorts) else False
     shared_users = {}
 
     for item in cohorts:
@@ -313,458 +325,6 @@ def delete_cohort(request):
 
 @login_required
 @csrf_protect
-def share_cohort(request, cohort_id=0):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-
-    status = None
-    result = None
-
-    try:
-        emails = re.split('\s*,\s*', request.POST['share_users'].strip())
-        users_not_found = []
-        users = []
-        req_user = None
-
-        try:
-            req_user = User.objects.get(id=request.user.id)
-        except ObjectDoesNotExist as e:
-            raise Exception("{} is not a user ID in this database!".format(str(request.user.id)))
-
-        for email in emails:
-            try:
-                user = User.objects.get(email=email)
-                users.append(user)
-            except ObjectDoesNotExist as e:
-                users_not_found.append(email)
-
-        if len(users_not_found) > 0:
-            status = 'error'
-            result = {
-                'msg': 'The following user emails could not be found; please ask them to log into the site first: ' + ", ".join(users_not_found)
-            }
-        else:
-            if cohort_id == 0:
-                cohort_ids = request.POST.getlist('cohort-ids')
-                cohorts = Cohort.objects.filter(id__in=cohort_ids)
-            else:
-                cohorts = Cohort.objects.filter(id=cohort_id)
-
-            already_shared = {}
-            newly_shared = {}
-            owner_cohort_names = []
-            for user in users:
-                for cohort in cohorts:
-                    # Check to make sure this user has authority to grant sharing permission
-                    try:
-                        owner_perms = Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
-                    except ObjectDoesNotExist as e:
-                        raise Exception("User {} is not the owner of cohort(s) {} and so cannot alter the permissions.".format(req_user.email, str(cohort.id)))
-
-                    # Check for pre-existing share for this user
-                    check = None
-                    try:
-                        check = Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-                    except ObjectDoesNotExist:
-                        if user.email != req_user.email:
-                            obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
-                            obj.save()
-                            if cohort.id not in newly_shared:
-                                newly_shared[cohort.id] = []
-                            newly_shared[cohort.id].append(user.email)
-                        else:
-                            owner_cohort_names.append(cohort.name)
-                    if check:
-                        if cohort.id not in already_shared:
-                            already_shared[cohort.id] = []
-                        already_shared[cohort.id].append(user.email)
-
-            status = 'success'
-            success_msg = ""
-            note = ""
-
-            if len(list(newly_shared.keys())):
-                user_set = set([y for x in newly_shared for y in newly_shared[x]])
-                success_msg = ('Cohort ID {} has'.format(str(list(newly_shared.keys())[0])) if len(list(newly_shared.keys())) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in list(newly_shared.keys())]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
-
-            if len(already_shared):
-                user_set = set([y for x in already_shared for y in already_shared[x]])
-                note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in list(already_shared.keys())])) if len(list(already_shared.keys())) > 1 else "Cohort ID {} was".format(str(list(already_shared.keys())[0]))), "; ".join(user_set))
-
-            if len(owner_cohort_names):
-                note = "NOTE: User {} is the owner of cohort(s) [{}] and does not need to be added to the share email list to view.".format(req_user.email, ", ".join(owner_cohort_names))
-
-            if not len(success_msg):
-                success_msg = note
-                note = None
-
-            result = {
-                'msg': success_msg,
-                'note': note
-            }
-
-    except Exception as e:
-        logger.error("[ERROR] While trying to share a cohort:")
-        logger.exception(e)
-        status = 'error'
-        result = {
-            'msg': 'There was an error while trying to share this cohort. Please contact the administrator.'
-        }
-    finally:
-        if not status:
-            status = 'error'
-            result = {
-                'msg': 'An unknown error has occurred while sharing this cohort. Please contact the administrator.'
-            }
-
-    return JsonResponse({
-        'status': status,
-        'result': result
-    })
-
-
-@login_required
-@csrf_protect
-def clone_cohort(request, cohort_id):
-    if debug: logger.debug('[STATUS] Called '+sys._getframe().f_code.co_name)
-    redirect_url = 'cohort_details'
-    return_to = None
-    try:
-
-        parent_cohort = Cohort.objects.get(id=cohort_id)
-        new_name = 'Copy of %s' % parent_cohort.name
-        cohort = Cohort.objects.create(name=new_name)
-        cohort.save()
-
-        # If there are sample ids
-        samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_barcode', 'case_barcode', 'project_id')
-        sample_list = []
-        for sample in samples:
-            sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
-        bulk_start = time.time()
-        Samples.objects.bulk_create(sample_list)
-        bulk_stop = time.time()
-        logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
-
-        # Clone the filters
-        filters = Filter.objects.filter(resulting_cohort=parent_cohort)
-        # ...but only if there are any (there may not be)
-        if filters.__len__() > 0:
-            filters_list = []
-            for filter_pair in filters:
-                filters_list.append(Filters(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
-            Filter.objects.bulk_create(filters_list)
-
-        # Set source
-        source = Source(parent=parent_cohort, cohort=cohort, type=Source.CLONE)
-        source.save()
-
-        # Set permissions
-        perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-        perm.save()
-
-        # BQ needs an explicit case-per-sample dataset; get that now
-
-        cohort_progs = parent_cohort.get_programs()
-
-        samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
-
-        # Store cohort to BigQuery
-        bq_project_id = settings.BIGQUERY_PROJECT_ID
-        cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-        bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-        bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
-
-        return_to = reverse(redirect_url,args=[cohort.id])
-
-    except Exception as e:
-        messages.error(request, 'There was an error while trying to clone this cohort. It may not have been properly created.')
-        logger.error('[ERROR] While trying to clone cohort {}:')
-        logger.exception(e)
-        return_to = reverse(redirect_url, args=[parent_cohort.id])
-
-    return redirect(return_to)
-
-
-@login_required
-@csrf_protect
-def set_operation(request):
-    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
-    redirect_url = '/cohorts/'
-
-    db = None
-    cursor = None
-
-    name = None
-
-    try:
-
-        if request.POST:
-            name = request.POST.get('name').encode('utf8')
-            cohorts = []
-            base_cohort = None
-            subtracted_cohorts = []
-            notes = ''
-            samples = []
-
-            op = request.POST.get('operation')
-            if op == 'union':
-                notes = 'Union of '
-                cohort_ids = request.POST.getlist('selected-ids')
-                cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
-                first = True
-                ids = ()
-                for cohort in cohorts:
-                    if first:
-                        notes += cohort.name
-                        first = False
-                    else:
-                        notes += ', ' + cohort.name
-                    ids += (cohort.id,)
-
-                start = time.time()
-                union_samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_barcode', 'case_barcode', 'project_id')
-                samples = [{'id': x[0], 'case': x[1], 'project': x[2]} for x in union_samples]
-
-                stop = time.time()
-                logger.debug('[BENCHMARKING] Time to build union sample set: ' + str(stop - start))
-
-            elif op == 'intersect':
-
-                start = time.time()
-                cohort_ids = request.POST.getlist('selected-ids')
-                cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
-                request.user.cohort_perms_set.all()
-
-                if len(cohorts):
-
-                    project_list = []
-                    cohorts_projects = {}
-                    sample_project_map = {}
-
-                    cohort_list = tuple(int(i) for i in cohort_ids)
-                    params = ('%s,' * len(cohort_ids))[:-1]
-
-                    db = get_sql_connection()
-                    cursor = db.cursor()
-
-                    intersect_and_proj_list_def = """
-                        SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id SEPARATOR ';')
-                        FROM cohorts_samples cs
-                        WHERE cs.cohort_id IN ({0})
-                        GROUP BY cs.sample_barcode,cs.case_barcode
-                        HAVING COUNT(DISTINCT cs.cohort_id) = %s;
-                    """.format(params)
-
-                    cohort_list += (len(cohorts),)
-
-                    cursor.execute(intersect_and_proj_list_def, cohort_list)
-
-                    for row in cursor.fetchall():
-                        if row[0] not in sample_project_map:
-                            projs = row[2]
-                            if projs[-1] == ';':
-                                projs = projs[:-1]
-
-                            projs = [ int(x) if len(x) > 0 else -1 for x in projs.split(';') ]
-
-                            project_list += projs
-
-                            sample_project_map[row[0]] = {'case': row[1], 'projects': projs,}
-
-                    if cursor: cursor.close()
-                    if db and db.open: db.close()
-
-                    project_list = list(set(project_list))
-                    project_models = Project.objects.filter(id__in=project_list)
-
-                    for project in project_models:
-                        cohorts_projects[project.id] = project.get_my_root_and_depth()
-
-                    cohort_sample_list = []
-
-                    for sample_id in sample_project_map:
-                        sample = sample_project_map[sample_id]
-                        # If multiple copies of this sample from different studies were found, we need to examine
-                        # their studies' inheritance chains
-                        if len(sample['projects']) > 1:
-                            projects = sample['projects']
-                            no_match = False
-                            root = -1
-                            max_depth = -1
-                            deepest_project = -1
-                            for project in projects:
-                                project_rd = cohorts_projects[project]
-
-                                if root < 0:
-                                    root = project_rd['root']
-                                    max_depth = project_rd['depth']
-                                    deepest_project = project
-                                else:
-                                    if root != project_rd['root']:
-                                        no_match = True
-                                    else:
-                                        if max_depth < 0 or project_rd['depth'] > max_depth:
-                                            max_depth = project_rd['depth']
-                                            deepest_project = project
-
-                            if not no_match:
-                                cohort_sample_list.append({'id':sample_id, 'case':sample['case'], 'project':deepest_project, })
-                        # If only one project was found, all copies of this sample implicitly match
-                        else:
-                            # If a project's ID is <= 0 it's a null project ID, so just record None
-                            project = (None if sample['projects'][0] <=0 else sample['projects'][0])
-                            cohort_sample_list.append({'id': sample_id, 'case': sample['case'], 'project':project})
-
-                    samples = cohort_sample_list
-
-                    stop = time.time()
-
-                    logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + str(stop - start))
-
-            elif op == 'complement':
-                base_id = request.POST.get('base-id')
-                subtract_ids = request.POST.getlist('subtract-ids')
-
-                cohort_list = tuple(int(i) for i in subtract_ids)
-                params = ('%s,' * len(subtract_ids))[:-1]
-
-                db = get_sql_connection()
-                cursor = db.cursor()
-
-                complement_cohort_list_def = """
-                    SELECT base.sample_barcode,base.case_barcode,base.project_id
-                    FROM cohorts_samples base
-                    LEFT JOIN (
-                        SELECT DISTINCT cs.sample_barcode,cs.case_barcode,cs.project_id
-                        FROM cohorts_samples cs
-                        WHERE cs.cohort_id IN ({0})
-                    ) AS subtract
-                    ON subtract.sample_barcode = base.sample_barcode AND subtract.case_barcode = base.case_barcode AND subtract.project_id = base.project_id
-                    WHERE base.cohort_id = %s AND subtract.sample_barcode IS NULL;
-                """.format(params)
-
-                cohort_list += (int(base_id),)
-
-                cursor.execute(complement_cohort_list_def, cohort_list)
-
-                for row in cursor.fetchall():
-                    samples.append({'id': row[0], 'case': row[1], 'project': row[2]})
-
-                notes = 'Subtracted '
-                base_cohort = Cohort.objects.get(id=base_id)
-                subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
-                first = True
-                for item in subtracted_cohorts:
-                    if first:
-                        notes += item.name
-                        first = False
-                    else:
-                        notes += ', ' + item.name
-                notes += ' from %s.' % base_cohort.name
-
-            if len(samples):
-                start = time.time()
-                new_cohort = Cohort.objects.create(name=name)
-                perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
-                perm.save()
-
-                # Store cohort samples to CloudSQL
-                sample_list = []
-                for sample in samples:
-                    sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
-
-                bulk_start = time.time()
-                Samples.objects.bulk_create(sample_list)
-                bulk_stop = time.time()
-                logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
-
-                # get the full resulting sample and case ID set
-                samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
-
-                # Store cohort to BigQuery
-                project_id = settings.BIGQUERY_PROJECT_ID
-                cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
-                bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
-                bcs.add_cohort_to_bq(new_cohort.id, samples_and_cases['items'])
-
-                # Create Sources
-                if op == 'union' or op == 'intersect':
-                    for cohort in cohorts:
-                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                        source.save()
-                elif op == 'complement':
-                    source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                    source.save()
-                    for cohort in subtracted_cohorts:
-                        source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
-                        source.save()
-
-                stop = time.time()
-                logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+str(stop - start))
-                messages.info(request, 'Cohort "%s" created successfully.' % escape(new_cohort.name))
-            else:
-                message = 'Operation resulted in empty set of samples. Cohort not created.'
-                messages.warning(request, message)
-                redirect_url = 'cohort_list'
-
-    except Exception as e:
-        logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
-        logger.exception(e)
-        redirect_url = 'cohort_list'
-        message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % escape(name)) if name else '')
-        messages.error(request, message)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-    return redirect(redirect_url)
-
-
-@login_required
-@csrf_protect
-def union_cohort(request):
-    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
-    redirect_url = '/cohorts/'
-
-    return redirect(redirect_url)
-
-
-@login_required
-@csrf_protect
-def intersect_cohort(request):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-    redirect_url = '/cohorts/'
-    return redirect(redirect_url)
-
-
-@login_required
-@csrf_protect
-def set_minus_cohort(request):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-    redirect_url = '/cohorts/'
-
-    return redirect(redirect_url)
-
-
-@login_required
-@csrf_protect
-def save_comment(request):
-    if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
-    content = request.POST.get('content').encode('utf-8')
-    cohort = Cohort.objects.get(id=int(request.POST.get('cohort_id')))
-    obj = Cohort_Comments.objects.create(user=request.user, cohort=cohort, content=content)
-    obj.save()
-    return_obj = {
-        'first_name': request.user.first_name,
-        'last_name': request.user.last_name,
-        'date_created': formats.date_format(obj.date_created, 'DATETIME_FORMAT'),
-        'content': escape(obj.content)
-    }
-    return HttpResponse(json.dumps(return_obj), status=200)
-
-
-@login_required
-@csrf_protect
 def cohort_filelist(request, cohort_id=0, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
@@ -846,6 +406,7 @@ def cohort_filelist(request, cohort_id=0, panel_type=None):
         logger.exception(e)
         messages.error(request, "There was an error while trying to view the file list. Please contact the administrator for help.")
         return redirect(reverse('cohort_details', args=[cohort_id]))
+
 
 @login_required
 @csrf_protect
@@ -1174,65 +735,6 @@ def download_cohort_manifest(request, cohort_id=0):
 
 
 @login_required
-def unshare_cohort(request, cohort_id=0):
-
-    cohort_set = None
-    status = None
-    result = None
-    redirect_url = None
-
-    try:
-        if request.POST.get('cohorts'):
-            cohort_set = json.loads(request.POST.get('cohorts'))
-        else:
-            if cohort_id == 0:
-                raise Exception("No cohort ID was provided!")
-            else:
-                cohort_set = [cohort_id]
-
-        for cohort in cohort_set:
-            owner = str(Cohort.objects.get(id=cohort).get_owner().id)
-            req_user = str(request.user.id)
-            # If a user_id wasn't provided, this is a user asking to remove themselves from a cohort
-            unshare_user = str(request.POST.get('user_id') or request.user.id)
-
-            # You can't remove someone from a cohort if you're not the owner,
-            # unless you're removing yourself from someone else's cohort
-            if req_user != owner and req_user != unshare_user:
-                raise Exception('Cannot make changes to sharing on a cohort if you are not the owner.')
-
-            cohort_perms = Cohort_Perms.objects.filter(cohort=cohort, user=unshare_user)
-
-            for resc in cohort_perms:
-                # Don't try to delete your own permissions as owner
-                if str(resc.perm) != 'OWNER':
-                    resc.delete()
-
-            if req_user != owner and req_user == unshare_user:
-                messages.info(request, "You have been successfully removed from cohort ID {}.".format(str(cohort_id)))
-                redirect_url = 'cohort_list'
-            else:
-                unshared = User.objects.get(id=unshare_user)
-                status = 'success'
-                result = { 'msg': ('User {} was successfully removed from cohort'.format(unshared.email) +
-                   ('s' if len(cohort_set) > 1 else '') + ' {}.'.format(", ".join([str(x) for x in cohort_set])))
-                }
-
-    except Exception as e:
-        logger.error("[ERROR] While trying to unshare a cohort:")
-        logger.exception(e)
-        messages.error(request, 'There was an error while attempting to unshare the cohort(s).')
-        redirect_url = 'cohort_list'
-
-    if redirect_url:
-        return redirect(redirect_url)
-    else:
-        return JsonResponse({
-            'status': status,
-            'result': result
-        })
-
-@login_required
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
     comb_mut_filters = request.GET.get('mut_filter_combine', 'OR')
@@ -1272,3 +774,517 @@ def get_metadata(request):
         results = {}
 
     return JsonResponse(results)
+
+
+
+# @login_required
+# @csrf_protect
+# def share_cohort(request, cohort_id=0):
+#     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+#
+#     status = None
+#     result = None
+#
+#     try:
+#         emails = re.split('\s*,\s*', request.POST['share_users'].strip())
+#         users_not_found = []
+#         users = []
+#         req_user = None
+#
+#         try:
+#             req_user = User.objects.get(id=request.user.id)
+#         except ObjectDoesNotExist as e:
+#             raise Exception("{} is not a user ID in this database!".format(str(request.user.id)))
+#
+#         for email in emails:
+#             try:
+#                 user = User.objects.get(email=email)
+#                 users.append(user)
+#             except ObjectDoesNotExist as e:
+#                 users_not_found.append(email)
+#
+#         if len(users_not_found) > 0:
+#             status = 'error'
+#             result = {
+#                 'msg': 'The following user emails could not be found; please ask them to log into the site first: ' + ", ".join(users_not_found)
+#             }
+#         else:
+#             if cohort_id == 0:
+#                 cohort_ids = request.POST.getlist('cohort-ids')
+#                 cohorts = Cohort.objects.filter(id__in=cohort_ids)
+#             else:
+#                 cohorts = Cohort.objects.filter(id=cohort_id)
+#
+#             already_shared = {}
+#             newly_shared = {}
+#             owner_cohort_names = []
+#             for user in users:
+#                 for cohort in cohorts:
+#                     # Check to make sure this user has authority to grant sharing permission
+#                     try:
+#                         owner_perms = Cohort_Perms.objects.get(user=req_user, cohort=cohort, perm=Cohort_Perms.OWNER)
+#                     except ObjectDoesNotExist as e:
+#                         raise Exception("User {} is not the owner of cohort(s) {} and so cannot alter the permissions.".format(req_user.email, str(cohort.id)))
+#
+#                     # Check for pre-existing share for this user
+#                     check = None
+#                     try:
+#                         check = Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+#                     except ObjectDoesNotExist:
+#                         if user.email != req_user.email:
+#                             obj = Cohort_Perms.objects.create(user=user, cohort=cohort, perm=Cohort_Perms.READER)
+#                             obj.save()
+#                             if cohort.id not in newly_shared:
+#                                 newly_shared[cohort.id] = []
+#                             newly_shared[cohort.id].append(user.email)
+#                         else:
+#                             owner_cohort_names.append(cohort.name)
+#                     if check:
+#                         if cohort.id not in already_shared:
+#                             already_shared[cohort.id] = []
+#                         already_shared[cohort.id].append(user.email)
+#
+#             status = 'success'
+#             success_msg = ""
+#             note = ""
+#
+#             if len(list(newly_shared.keys())):
+#                 user_set = set([y for x in newly_shared for y in newly_shared[x]])
+#                 success_msg = ('Cohort ID {} has'.format(str(list(newly_shared.keys())[0])) if len(list(newly_shared.keys())) <= 1 else 'Cohort IDs {} have'.format(", ".join([str(x) for x in list(newly_shared.keys())]))) +' been successfully shared with the following user(s): {}'.format(", ".join(user_set))
+#
+#             if len(already_shared):
+#                 user_set = set([y for x in already_shared for y in already_shared[x]])
+#                 note = "NOTE: {} already shared with the following user(s): {}".format(("Cohort IDs {} were".format(", ".join([str(x) for x in list(already_shared.keys())])) if len(list(already_shared.keys())) > 1 else "Cohort ID {} was".format(str(list(already_shared.keys())[0]))), "; ".join(user_set))
+#
+#             if len(owner_cohort_names):
+#                 note = "NOTE: User {} is the owner of cohort(s) [{}] and does not need to be added to the share email list to view.".format(req_user.email, ", ".join(owner_cohort_names))
+#
+#             if not len(success_msg):
+#                 success_msg = note
+#                 note = None
+#
+#             result = {
+#                 'msg': success_msg,
+#                 'note': note
+#             }
+#
+#     except Exception as e:
+#         logger.error("[ERROR] While trying to share a cohort:")
+#         logger.exception(e)
+#         status = 'error'
+#         result = {
+#             'msg': 'There was an error while trying to share this cohort. Please contact the administrator.'
+#         }
+#     finally:
+#         if not status:
+#             status = 'error'
+#             result = {
+#                 'msg': 'An unknown error has occurred while sharing this cohort. Please contact the administrator.'
+#             }
+#
+#     return JsonResponse({
+#         'status': status,
+#         'result': result
+#     })
+#
+#
+# @login_required
+# @csrf_protect
+# def clone_cohort(request, cohort_id):
+#     if debug: logger.debug('[STATUS] Called '+sys._getframe().f_code.co_name)
+#     redirect_url = 'cohort_details'
+#     return_to = None
+#     try:
+#
+#         parent_cohort = Cohort.objects.get(id=cohort_id)
+#         new_name = 'Copy of %s' % parent_cohort.name
+#         cohort = Cohort.objects.create(name=new_name)
+#         cohort.save()
+#
+#         # If there are sample ids
+#         samples = Samples.objects.filter(cohort=parent_cohort).values_list('sample_barcode', 'case_barcode', 'project_id')
+#         sample_list = []
+#         for sample in samples:
+#             sample_list.append(Samples(cohort=cohort, sample_barcode=sample[0], case_barcode=sample[1], project_id=sample[2]))
+#         bulk_start = time.time()
+#         Samples.objects.bulk_create(sample_list)
+#         bulk_stop = time.time()
+#         logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
+#
+#         # Clone the filters
+#         filters = Filter.objects.filter(resulting_cohort=parent_cohort)
+#         # ...but only if there are any (there may not be)
+#         if filters.__len__() > 0:
+#             filters_list = []
+#             for filter_pair in filters:
+#                 filters_list.append(Filters(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
+#             Filter.objects.bulk_create(filters_list)
+#
+#         # Set source
+#         source = Source(parent=parent_cohort, cohort=cohort, type=Source.CLONE)
+#         source.save()
+#
+#         # Set permissions
+#         perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
+#         perm.save()
+#
+#         # BQ needs an explicit case-per-sample dataset; get that now
+#
+#         cohort_progs = parent_cohort.get_programs()
+#
+#         samples_and_cases = get_sample_case_list(request.user, None, cohort.id)
+#
+#         # Store cohort to BigQuery
+#         bq_project_id = settings.BIGQUERY_PROJECT_ID
+#         cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+#         bcs = BigQueryCohortSupport(bq_project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+#         bcs.add_cohort_to_bq(cohort.id, samples_and_cases['items'])
+#
+#         return_to = reverse(redirect_url,args=[cohort.id])
+#
+#     except Exception as e:
+#         messages.error(request, 'There was an error while trying to clone this cohort. It may not have been properly created.')
+#         logger.error('[ERROR] While trying to clone cohort {}:')
+#         logger.exception(e)
+#         return_to = reverse(redirect_url, args=[parent_cohort.id])
+#
+#     return redirect(return_to)
+#
+#
+# @login_required
+# @csrf_protect
+# def set_operation(request):
+#     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+#     redirect_url = '/cohorts/'
+#
+#     db = None
+#     cursor = None
+#
+#     name = None
+#
+#     try:
+#
+#         if request.POST:
+#             name = request.POST.get('name').encode('utf8')
+#             cohorts = []
+#             base_cohort = None
+#             subtracted_cohorts = []
+#             notes = ''
+#             samples = []
+#
+#             op = request.POST.get('operation')
+#             if op == 'union':
+#                 notes = 'Union of '
+#                 cohort_ids = request.POST.getlist('selected-ids')
+#                 cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
+#                 first = True
+#                 ids = ()
+#                 for cohort in cohorts:
+#                     if first:
+#                         notes += cohort.name
+#                         first = False
+#                     else:
+#                         notes += ', ' + cohort.name
+#                     ids += (cohort.id,)
+#
+#                 start = time.time()
+#                 union_samples = Samples.objects.filter(cohort_id__in=ids).distinct().values_list('sample_barcode', 'case_barcode', 'project_id')
+#                 samples = [{'id': x[0], 'case': x[1], 'project': x[2]} for x in union_samples]
+#
+#                 stop = time.time()
+#                 logger.debug('[BENCHMARKING] Time to build union sample set: ' + str(stop - start))
+#
+#             elif op == 'intersect':
+#
+#                 start = time.time()
+#                 cohort_ids = request.POST.getlist('selected-ids')
+#                 cohorts = Cohort.objects.filter(id__in=cohort_ids, active=True, cohort_perms__in=request.user.cohort_perms_set.all())
+#                 request.user.cohort_perms_set.all()
+#
+#                 if len(cohorts):
+#
+#                     project_list = []
+#                     cohorts_projects = {}
+#                     sample_project_map = {}
+#
+#                     cohort_list = tuple(int(i) for i in cohort_ids)
+#                     params = ('%s,' * len(cohort_ids))[:-1]
+#
+#                     db = get_sql_connection()
+#                     cursor = db.cursor()
+#
+#                     intersect_and_proj_list_def = """
+#                         SELECT cs.sample_barcode, cs.case_barcode, GROUP_CONCAT(DISTINCT cs.project_id SEPARATOR ';')
+#                         FROM cohorts_samples cs
+#                         WHERE cs.cohort_id IN ({0})
+#                         GROUP BY cs.sample_barcode,cs.case_barcode
+#                         HAVING COUNT(DISTINCT cs.cohort_id) = %s;
+#                     """.format(params)
+#
+#                     cohort_list += (len(cohorts),)
+#
+#                     cursor.execute(intersect_and_proj_list_def, cohort_list)
+#
+#                     for row in cursor.fetchall():
+#                         if row[0] not in sample_project_map:
+#                             projs = row[2]
+#                             if projs[-1] == ';':
+#                                 projs = projs[:-1]
+#
+#                             projs = [ int(x) if len(x) > 0 else -1 for x in projs.split(';') ]
+#
+#                             project_list += projs
+#
+#                             sample_project_map[row[0]] = {'case': row[1], 'projects': projs,}
+#
+#                     if cursor: cursor.close()
+#                     if db and db.open: db.close()
+#
+#                     project_list = list(set(project_list))
+#                     project_models = Project.objects.filter(id__in=project_list)
+#
+#                     for project in project_models:
+#                         cohorts_projects[project.id] = project.get_my_root_and_depth()
+#
+#                     cohort_sample_list = []
+#
+#                     for sample_id in sample_project_map:
+#                         sample = sample_project_map[sample_id]
+#                         # If multiple copies of this sample from different studies were found, we need to examine
+#                         # their studies' inheritance chains
+#                         if len(sample['projects']) > 1:
+#                             projects = sample['projects']
+#                             no_match = False
+#                             root = -1
+#                             max_depth = -1
+#                             deepest_project = -1
+#                             for project in projects:
+#                                 project_rd = cohorts_projects[project]
+#
+#                                 if root < 0:
+#                                     root = project_rd['root']
+#                                     max_depth = project_rd['depth']
+#                                     deepest_project = project
+#                                 else:
+#                                     if root != project_rd['root']:
+#                                         no_match = True
+#                                     else:
+#                                         if max_depth < 0 or project_rd['depth'] > max_depth:
+#                                             max_depth = project_rd['depth']
+#                                             deepest_project = project
+#
+#                             if not no_match:
+#                                 cohort_sample_list.append({'id':sample_id, 'case':sample['case'], 'project':deepest_project, })
+#                         # If only one project was found, all copies of this sample implicitly match
+#                         else:
+#                             # If a project's ID is <= 0 it's a null project ID, so just record None
+#                             project = (None if sample['projects'][0] <=0 else sample['projects'][0])
+#                             cohort_sample_list.append({'id': sample_id, 'case': sample['case'], 'project':project})
+#
+#                     samples = cohort_sample_list
+#
+#                     stop = time.time()
+#
+#                     logger.debug('[BENCHMARKING] Time to create intersecting sample set: ' + str(stop - start))
+#
+#             elif op == 'complement':
+#                 base_id = request.POST.get('base-id')
+#                 subtract_ids = request.POST.getlist('subtract-ids')
+#
+#                 cohort_list = tuple(int(i) for i in subtract_ids)
+#                 params = ('%s,' * len(subtract_ids))[:-1]
+#
+#                 db = get_sql_connection()
+#                 cursor = db.cursor()
+#
+#                 complement_cohort_list_def = """
+#                     SELECT base.sample_barcode,base.case_barcode,base.project_id
+#                     FROM cohorts_samples base
+#                     LEFT JOIN (
+#                         SELECT DISTINCT cs.sample_barcode,cs.case_barcode,cs.project_id
+#                         FROM cohorts_samples cs
+#                         WHERE cs.cohort_id IN ({0})
+#                     ) AS subtract
+#                     ON subtract.sample_barcode = base.sample_barcode AND subtract.case_barcode = base.case_barcode AND subtract.project_id = base.project_id
+#                     WHERE base.cohort_id = %s AND subtract.sample_barcode IS NULL;
+#                 """.format(params)
+#
+#                 cohort_list += (int(base_id),)
+#
+#                 cursor.execute(complement_cohort_list_def, cohort_list)
+#
+#                 for row in cursor.fetchall():
+#                     samples.append({'id': row[0], 'case': row[1], 'project': row[2]})
+#
+#                 notes = 'Subtracted '
+#                 base_cohort = Cohort.objects.get(id=base_id)
+#                 subtracted_cohorts = Cohort.objects.filter(id__in=subtract_ids)
+#                 first = True
+#                 for item in subtracted_cohorts:
+#                     if first:
+#                         notes += item.name
+#                         first = False
+#                     else:
+#                         notes += ', ' + item.name
+#                 notes += ' from %s.' % base_cohort.name
+#
+#             if len(samples):
+#                 start = time.time()
+#                 new_cohort = Cohort.objects.create(name=name)
+#                 perm = Cohort_Perms(cohort=new_cohort, user=request.user, perm=Cohort_Perms.OWNER)
+#                 perm.save()
+#
+#                 # Store cohort samples to CloudSQL
+#                 sample_list = []
+#                 for sample in samples:
+#                     sample_list.append(Samples(cohort=new_cohort, sample_barcode=sample['id'], case_barcode=sample['case'], project_id=sample['project']))
+#
+#                 bulk_start = time.time()
+#                 Samples.objects.bulk_create(sample_list)
+#                 bulk_stop = time.time()
+#                 logger.debug('[BENCHMARKING] Time to builk create: ' + str(bulk_stop - bulk_start))
+#
+#                 # get the full resulting sample and case ID set
+#                 samples_and_cases = get_sample_case_list(request.user, None, new_cohort.id)
+#
+#                 # Store cohort to BigQuery
+#                 project_id = settings.BIGQUERY_PROJECT_ID
+#                 cohort_settings = settings.GET_BQ_COHORT_SETTINGS()
+#                 bcs = BigQueryCohortSupport(project_id, cohort_settings.dataset_id, cohort_settings.table_id)
+#                 bcs.add_cohort_to_bq(new_cohort.id, samples_and_cases['items'])
+#
+#                 # Create Sources
+#                 if op == 'union' or op == 'intersect':
+#                     for cohort in cohorts:
+#                         source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+#                         source.save()
+#                 elif op == 'complement':
+#                     source = Source.objects.create(parent=base_cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+#                     source.save()
+#                     for cohort in subtracted_cohorts:
+#                         source = Source.objects.create(parent=cohort, cohort=new_cohort, type=Source.SET_OPS, notes=notes)
+#                         source.save()
+#
+#                 stop = time.time()
+#                 logger.debug('[BENCHMARKING] Time to make cohort in set ops: '+str(stop - start))
+#                 messages.info(request, 'Cohort "%s" created successfully.' % escape(new_cohort.name))
+#             else:
+#                 message = 'Operation resulted in empty set of samples. Cohort not created.'
+#                 messages.warning(request, message)
+#                 redirect_url = 'cohort_list'
+#
+#     except Exception as e:
+#         logger.error('[ERROR] Exception in Cohorts/views.set_operation:')
+#         logger.exception(e)
+#         redirect_url = 'cohort_list'
+#         message = 'There was an error while creating your cohort%s. It may have been only partially created.' % ((', "%s".' % escape(name)) if name else '')
+#         messages.error(request, message)
+#     finally:
+#         if cursor: cursor.close()
+#         if db and db.open: db.close()
+#
+#     return redirect(redirect_url)
+#
+#
+# @login_required
+# @csrf_protect
+# def union_cohort(request):
+#     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+#     redirect_url = '/cohorts/'
+#
+#     return redirect(redirect_url)
+#
+#
+# @login_required
+# @csrf_protect
+# def intersect_cohort(request):
+#     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+#     redirect_url = '/cohorts/'
+#     return redirect(redirect_url)
+#
+#
+# @login_required
+# @csrf_protect
+# def set_minus_cohort(request):
+#     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+#     redirect_url = '/cohorts/'
+#
+#     return redirect(redirect_url)
+#
+#
+# @login_required
+# @csrf_protect
+# def save_comment(request):
+#     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
+#     content = request.POST.get('content').encode('utf-8')
+#     cohort = Cohort.objects.get(id=int(request.POST.get('cohort_id')))
+#     obj = Cohort_Comments.objects.create(user=request.user, cohort=cohort, content=content)
+#     obj.save()
+#     return_obj = {
+#         'first_name': request.user.first_name,
+#         'last_name': request.user.last_name,
+#         'date_created': formats.date_format(obj.date_created, 'DATETIME_FORMAT'),
+#         'content': escape(obj.content)
+#     }
+#     return HttpResponse(json.dumps(return_obj), status=200)
+
+
+
+# @login_required
+# def unshare_cohort(request, cohort_id=0):
+#
+#     cohort_set = None
+#     status = None
+#     result = None
+#     redirect_url = None
+#
+#     try:
+#         if request.POST.get('cohorts'):
+#             cohort_set = json.loads(request.POST.get('cohorts'))
+#         else:
+#             if cohort_id == 0:
+#                 raise Exception("No cohort ID was provided!")
+#             else:
+#                 cohort_set = [cohort_id]
+#
+#         for cohort in cohort_set:
+#             owner = str(Cohort.objects.get(id=cohort).get_owner().id)
+#             req_user = str(request.user.id)
+#             # If a user_id wasn't provided, this is a user asking to remove themselves from a cohort
+#             unshare_user = str(request.POST.get('user_id') or request.user.id)
+#
+#             # You can't remove someone from a cohort if you're not the owner,
+#             # unless you're removing yourself from someone else's cohort
+#             if req_user != owner and req_user != unshare_user:
+#                 raise Exception('Cannot make changes to sharing on a cohort if you are not the owner.')
+#
+#             cohort_perms = Cohort_Perms.objects.filter(cohort=cohort, user=unshare_user)
+#
+#             for resc in cohort_perms:
+#                 # Don't try to delete your own permissions as owner
+#                 if str(resc.perm) != 'OWNER':
+#                     resc.delete()
+#
+#             if req_user != owner and req_user == unshare_user:
+#                 messages.info(request, "You have been successfully removed from cohort ID {}.".format(str(cohort_id)))
+#                 redirect_url = 'cohort_list'
+#             else:
+#                 unshared = User.objects.get(id=unshare_user)
+#                 status = 'success'
+#                 result = { 'msg': ('User {} was successfully removed from cohort'.format(unshared.email) +
+#                    ('s' if len(cohort_set) > 1 else '') + ' {}.'.format(", ".join([str(x) for x in cohort_set])))
+#                 }
+#
+#     except Exception as e:
+#         logger.error("[ERROR] While trying to unshare a cohort:")
+#         logger.exception(e)
+#         messages.error(request, 'There was an error while attempting to unshare the cohort(s).')
+#         redirect_url = 'cohort_list'
+#
+#     if redirect_url:
+#         return redirect(redirect_url)
+#     else:
+#         return JsonResponse({
+#             'status': status,
+#             'result': result
+#         })
