@@ -262,62 +262,6 @@ def project_edit(request, program_id=0, project_id=0):
         'status': 'success'
     })
 
-def project_data_success(request, program_id=0, project_id=0, dataset_id=0):
-    program = Program.objects.get(id=program_id)
-    project = program.project_set.get(id=project_id)
-    datatables = project.user_data_tables_set.get(id=dataset_id)
-
-    if not datatables.data_upload.key == request.GET.get('key'):
-        raise Exception("Invalid data key when marking data success")
-
-    ufds = User_Feature_Definitions.objects.filter(project_id=project.id)
-    cursor = connection.cursor()
-
-    for user_feature in ufds:
-        if ' ' in user_feature.feature_name:
-            # Molecular data will not be column names but rather names of features
-            continue
-        col_name = filter_column_name(user_feature.feature_name)
-
-        cursor.execute('SELECT COUNT(1) AS "count", '+ col_name +' AS "val" FROM ' + datatables.metadata_samples_table +' GROUP BY '+col_name+';')
-        values = cursor.fetchall()
-
-        for value in values:
-            ufc = User_Feature_Counts.objects.create(feature=user_feature, value=value[1], count=value[0])
-            ufc.save()
-
-    cursor.close()
-
-    datatables.data_upload.status = 'Complete'
-    datatables.data_upload.save()
-
-    return JsonResponse({
-        'status': 'success'
-    })
-
-def project_data_error(request, program_id=0, project_id=0, dataset_id=0):
-    program = Program.objects.get(id=program_id)
-    project = program.project_set.get(id=project_id)
-    datatables = project.user_data_tables_set.get(id=dataset_id)
-
-    if not datatables.data_upload.key == request.GET.get('key'):
-        raise Exception("Invalid data key when marking data success")
-
-    #
-    # New! We can get an error message back from the UDU server:
-    #
-
-    err_msg = request.GET.get('errmsg')
-    if err_msg:
-        datatables.data_upload.message = err_msg
-
-    datatables.data_upload.status = 'Error'
-
-    datatables.data_upload.save()
-
-    return JsonResponse({
-        'status': 'success'
-    })
 
 def system_data_dict(request):
 
