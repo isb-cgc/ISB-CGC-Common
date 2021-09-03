@@ -544,14 +544,14 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
     source_versions = sources.get_source_versions()
 
-    filter_attrs = fetch_data_source_attr(
+    '''filter_attrs = fetch_data_source_attr(
         sources,
         {
             'with_set_map': False,
             'for_ui': True,
             'named_set': [x[:x.rfind('_')] if re.search('_[gl]te?|_e?btwe?',x) else x for x in filters.keys()]
         },
-        None if len(filters) else 'empty_filters')
+        None if len(filters) else 'empty_filters')'''
     attrs_for_faceting = None
     if not records_only and facets or facets is None:
         attrs_for_faceting = fetch_data_source_attr(
