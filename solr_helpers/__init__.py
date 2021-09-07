@@ -27,79 +27,79 @@ BMI_MAPPING = {
 
 # Combined query and result formatter method
 # optionally will normalize facet counting so the response structure is the same for facets+docs and just facets
-def query_solr_and_format_result(query_settings, normalize_facets=True, normalize_groups=True):
+def query_solr_and_format_result(query_settings, normalize_facets=True, normalize_groups=True, raw_format=False):
     formatted_query_result = {}
-
     try:
-
         result = query_solr(**query_settings)
-
-        if 'grouped' in result:
-            formatted_query_result['numFound'] = result['grouped'][list(result['grouped'].keys())[0]]['matches']
-            if normalize_groups:
-                formatted_query_result['groups'] = []
-                for group in result['grouped']:
-                    for val in result['grouped'][group]['groups']:
-                        for doc in val['doclist']['docs']:
-                            doc[group] = val['groupValue']
-                            formatted_query_result['groups'].append(doc)
+        if raw_format:
+            formatted_query_result = result
+        else:
+            if 'grouped' in result:
+                formatted_query_result['numFound'] = result['grouped'][list(result['grouped'].keys())[0]]['matches']
+                if normalize_groups:
+                    formatted_query_result['groups'] = []
+                    for group in result['grouped']:
+                        for val in result['grouped'][group]['groups']:
+                            for doc in val['doclist']['docs']:
+                                doc[group] = val['groupValue']
+                                formatted_query_result['groups'].append(doc)
+                else:
+                    formatted_query_result['groups'] = result['grouped']
             else:
-                formatted_query_result['groups'] = result['grouped']
-        else:
-            formatted_query_result['numFound'] = result['response']['numFound']
+                formatted_query_result['numFound'] = result['response']['numFound']
 
-        if 'response' in result and 'docs' in result['response'] and len(result['response']['docs']):
-            formatted_query_result['docs'] = result['response']['docs']
-        else:
-            formatted_query_result['docs'] = []
+            if 'response' in result and 'docs' in result['response'] and len(result['response']['docs']):
+                formatted_query_result['docs'] = result['response']['docs']
+            else:
+                formatted_query_result['docs'] = []
 
-        if 'facets' in result:
-            if 'unique_count' in result['facets']:
-                formatted_query_result['totalNumFound'] = formatted_query_result['numFound']
-                formatted_query_result['numFound'] = result['facets']['unique_count']
-            if normalize_facets:
-                formatted_query_result['facets'] = {}
-                for facet in result['facets']:
-                    check_facet = re.search('^(unique|total)_(.+)$',facet)
-                    if facet not in ['count', 'unique_count'] and not check_facet :
-                        facet_counts = result['facets'][facet]
-                        if 'buckets' in facet_counts:
-                            # This is a term facet
-                            formatted_query_result['facets'][facet] = {}
-                            if 'missing' in facet_counts:
-                                formatted_query_result['facets'][facet]['None'] = facet_counts['missing']['unique_count'] if 'unique_count' in facet_counts['missing'] else facet_counts['missing']['count']
-                            for bucket in facet_counts['buckets']:
-                                formatted_query_result['facets'][facet][bucket['val']] = bucket['unique_count'] if 'unique_count' in bucket else bucket['count']
-                        else:
-                            # This is a query facet
-                            facet_name = facet.split(":")[0]
-                            facet_range = facet.split(":")[-1]
-                            if facet_name not in formatted_query_result['facets']:
-                                formatted_query_result['facets'][facet_name] = {}
-                            if facet_range == 'min_max':
-                                formatted_query_result['facets'][facet_name][facet_range] = facet_counts
+            if 'facets' in result:
+                if 'unique_count' in result['facets']:
+                    formatted_query_result['totalNumFound'] = formatted_query_result['numFound']
+                    formatted_query_result['numFound'] = result['facets']['unique_count']
+                if normalize_facets:
+                    formatted_query_result['facets'] = {}
+                    for facet in result['facets']:
+                        check_facet = re.search('^(unique|total)_(.+)$',facet)
+                        if facet not in ['count', 'unique_count'] and not check_facet :
+                            facet_counts = result['facets'][facet]
+                            if 'buckets' in facet_counts:
+                                # This is a term facet
+                                formatted_query_result['facets'][facet] = {}
+                                if 'missing' in facet_counts:
+                                    formatted_query_result['facets'][facet]['None'] = facet_counts['missing']['unique_count'] if 'unique_count' in facet_counts['missing'] else facet_counts['missing']['count']
+                                for bucket in facet_counts['buckets']:
+                                    formatted_query_result['facets'][facet][bucket['val']] = bucket['unique_count'] if 'unique_count' in bucket else bucket['count']
                             else:
-                                formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
-                    elif check_facet:
-                        newFacet = check_facet.group(2)
-                        which = "{}s".format(check_facet.group(1))
-                        if which not in formatted_query_result:
-                            formatted_query_result[which] ={}
-                        formatted_query_result[which][newFacet] = result['facets'][facet]
-            else:
-                formatted_query_result['facets'] = result['facets']
-        elif 'facet_counts' in result:
-            formatted_query_result['facets'] = result['facet_counts']['facet_fields']
+                                # This is a query facet
+                                facet_name = facet.split(":")[0]
+                                facet_range = facet.split(":")[-1]
+                                if facet_name not in formatted_query_result['facets']:
+                                    formatted_query_result['facets'][facet_name] = {}
+                                if facet_range == 'min_max':
+                                    formatted_query_result['facets'][facet_name][facet_range] = facet_counts
+                                else:
+                                    formatted_query_result['facets'][facet_name][facet_range] = facet_counts['unique_count'] if 'unique_count' in facet_counts else facet_counts['count']
+                        elif check_facet:
+                            newFacet = check_facet.group(2)
+                            which = "{}s".format(check_facet.group(1))
+                            if which not in formatted_query_result:
+                                formatted_query_result[which] ={}
+                            formatted_query_result[which][newFacet] = result['facets'][facet]
+                else:
+                    formatted_query_result['facets'] = result['facets']
+            elif 'facet_counts' in result:
+                formatted_query_result['facets'] = result['facet_counts']['facet_fields']
 
-        if 'stats' in result:
-            for attr in result['stats']['stats_fields']:
-                if attr in formatted_query_result['facets']:
-                    formatted_query_result['facets'][attr]["min_max"] = {
-                        'min': result['stats']['stats_fields'][attr]['min'] or 0,
-                        'max': result['stats']['stats_fields'][attr]['max'] or 0
-                    }
+            if 'stats' in result:
+                for attr in result['stats']['stats_fields']:
+                    if attr in formatted_query_result['facets']:
+                        formatted_query_result['facets'][attr]["min_max"] = {
+                            'min': result['stats']['stats_fields'][attr]['min'] or 0,
+                            'max': result['stats']['stats_fields'][attr]['max'] or 0
+                        }
 
-        formatted_query_result['nextCursor'] = result.get('nextCursorMark',None)
+            formatted_query_result['nextCursor'] = result.get('nextCursorMark',None)
 
     except Exception as e:
         logger.error("[ERROR] While querying solr and formatting result:")
