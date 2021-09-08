@@ -1,5 +1,5 @@
 ###
-# Copyright 2015-2020, Institute for Systems Biology
+# Copyright 2015-2021, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -28,16 +28,14 @@ logger = logging.getLogger('main_logger')
 # https://github.com/encode/django-rest-framework/blob/master/rest_framework/authentication.py
 def api_auth(function):
     def wrap(request, *args, **kwargs):
+        logger.info("[STATUS] Called api_auth decorator. Request info:")
+        logger.info(request.META)
         try:
             auth_header = request.META.get('HTTP_AUTHORIZATION',None)
             if not auth_header:
                 logger.error("No Authorization header found for API call!")
                 return JsonResponse({'message': 'No API authorization header - please be sure to provide an API token for API calls.'}, status=403)
 
-            # Force local dev to behave like deployed system
-            # if settings.DEBUG:
-            #     if isinstance(auth_header,str):
-            #         auth_header = auth_header.encode('iso-8859-1')
             auth_header = auth_header.split()
 
             # Make sure our Auth Header is the expected size
