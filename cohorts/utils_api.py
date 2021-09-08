@@ -247,8 +247,6 @@ def get_manifest_query(request, filters, data_version, manifest_info):
         select.append('crdc_instance_uuid')
     if request.GET['GCS_URL'] in [True, 'True']:
         select.append('gcs_url')
-    #
-    # select.append('gcs_url' if request.GET['access_method'] == 'url' else 'crdc_instance_uuid')
 
     # Get the SQL
     if request.GET['sql'] in [True, 'True']:

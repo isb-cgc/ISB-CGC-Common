@@ -105,25 +105,27 @@ def get_cases_by_cohort(cohort_id):
         logger.exception(e)
 
 
-def get_cohort_stats(request,cohort_id):
+def get_cohort_stats(request, cohort_id):
     cohort_stats = {}
     try:
         req = request.GET if request.GET else request.POST
-        update = (req.get('update', "False").lower() == "true")
+        update = bool(req.get('update', "False").lower() == "true")
         old_cohort = Cohort.objects.get(id=cohort_id, active=True)
         old_cohort.perm = old_cohort.get_perm(request)
 
         if old_cohort.perm:
             if update:
-                cohort_filters ={}
+                cohort_filters = {}
                 cohort_filters_list = old_cohort.get_filters_as_dict()[0]['filters']
                 for cohort in cohort_filters_list:
                     cohort_filters[cohort['name']] = cohort['values']
+                # For now we always require at least one filter coming from the 'ImageData' table type,
+                # so it's safe to case the sources only on the filters for purposes of stat counting
                 sources = Attribute.objects.filter(name__in=list(cohort_filters.keys())).get_data_sources(
                     ImagingDataCommonsVersion.objects.filter(active=True),
                     source_type=DataSource.SOLR,
                     active=True,
-                    aggregate_level=["case_barcode","SeriesInstanceUID","sample_barcode"]
+                    aggregate_level=["case_barcode", "StudyInstanceUID", "sample_barcode"]
                 )
                 cohort_stats = _get_cohort_stats(
                     0,
@@ -131,7 +133,8 @@ def get_cohort_stats(request,cohort_id):
                     sources
                 )
             else:
-                cohort_stats = {'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count, 'SeriesInstanceUID': old_cohort.series_count}
+                cohort_stats = {'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count,
+                                'SeriesInstanceUID': old_cohort.series_count}
 
     except ObjectDoesNotExist as e:
         logger.exception(e)
@@ -140,11 +143,11 @@ def get_cohort_stats(request,cohort_id):
     except Exception as e:
         logger.error("[ERROR] Exception while trying to view a cohort:")
         logger.exception(e)
-        messages.error(request, "There was an error while trying to load that cohort's stats")
+        messages.error(request, "There was an error while trying to load that cohort's stats.")
         return redirect('cohort_list')
     cohort_stats.pop('collections',None)
-    return(JsonResponse(cohort_stats))
 
+    return JsonResponse(cohort_stats)
 
 
 @login_required
