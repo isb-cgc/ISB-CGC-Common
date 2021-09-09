@@ -16,7 +16,7 @@
 
 from django.test import TestCase
 from django.contrib.auth.models import AnonymousUser, User
-from idc_collections.collex_metadata_utils import build_explorer_context, get_collex_metadata, get_metadata_solr, fetch_data_source_attr
+from idc_collections.collex_metadata_utils import build_explorer_context, get_collex_metadata, get_metadata_solr, fetch_data_source_attr, fetch_solr_facets
 from idc_collections.models import Program, Project, ImagingDataCommonsVersion, DataSource, DataSetType
 
 
@@ -58,7 +58,7 @@ class CollexMetaDataUtilsTests(TestCase):
                                                   id__in=versions.get_data_sources().filter(
                                                       source_type=source_type).values_list("id",
                                                                                            flat=True)).distinct()
-    attrs_for_faceting_data = fetch_data_source_attr(
+    attrs_for_faceting = fetch_data_source_attr(
         sources, {"for_ui": True, "with_set_map":True, "named_set": []},
         cache_as="ui_facet_set")
 
@@ -137,7 +137,7 @@ class CollexMetaDataUtilsTests(TestCase):
             fetch_src_data=self.fetch_data_source_attr_data[i]
             attr_for_faceting=fetch_data_source_attr(**fetch_src_data)
             self.assertEqual(fetch_src_data['sources'].count(),len(attr_for_faceting['sources']))
-            if fetch_src_data['fetch_settings']['named_set'] is not None and (len(fetch_src_data['fetch_settings']['named_set'])>0):
+            if 'named_set' in fetch_src_data['fetch_settings'] and (len(fetch_src_data['fetch_settings']['named_set'])>0):
                self.assertEqual(len(fetch_src_data['fetch_settings']['named_set']), len(attr_for_faceting['list']))
             pass
 
