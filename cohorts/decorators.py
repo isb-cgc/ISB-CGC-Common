@@ -29,8 +29,7 @@ logger = logging.getLogger('main_logger')
 # https://github.com/encode/django-rest-framework/blob/master/rest_framework/authentication.py
 def api_auth(function):
     def wrap(request, *args, **kwargs):
-        logger.info("[STATUS] Called api_auth decorator. Request info:")
-        logger.info(request.META)
+        logger.info("[STATUS] Called api_auth decorator.")
         try:
             auth_header = request.META.get(settings.API_AUTH_HEADER, None)
             if not auth_header:
