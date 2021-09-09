@@ -24,6 +24,7 @@ from django.http import JsonResponse
 import logging
 logger = logging.getLogger('main_logger')
 
+
 # Adapted from the Django REST Framework's TokenAuthentization class
 # https://github.com/encode/django-rest-framework/blob/master/rest_framework/authentication.py
 def api_auth(function):
@@ -31,23 +32,26 @@ def api_auth(function):
         logger.info("[STATUS] Called api_auth decorator. Request info:")
         logger.info(request.META)
         try:
-            auth_header = request.META.get('HTTP_AUTHORIZATION',None)
+            auth_header = request.META.get(settings.API_AUTH_HEADER, None)
             if not auth_header:
-                logger.error("No Authorization header found for API call!")
-                return JsonResponse({'message': 'No API authorization header - please be sure to provide an API token for API calls.'}, status=403)
+                logger.error("No Authorization header '{}' found for API call!".format(settings.API_AUTH_HEADER))
+                return JsonResponse({
+                        'message': 'No API authorization header - please be sure to provide the appropriate header and'
+                        + ' API token for API calls.'
+                }, status=403)
 
             auth_header = auth_header.split()
 
             # Make sure our Auth Header is the expected size
             if len(auth_header) == 1 or len(auth_header) > 2:
                 logger.error("Malformed Authorization header: {}".format(auth_header))
-                return JsonResponse({'message': 'Received malformed API authorization header.'},status=403)
+                return JsonResponse({'message': 'Received malformed API authorization header.'}, status=403)
 
             # Check for our Auth Header Token key
             if auth_header[0].lower() != settings.API_AUTH_KEY.lower():
                 logger.error("Invalid API Token key; received: {} - expected {}".format(
                     auth_header[0].lower(), settings.API_AUTH_KEY.lower()))
-                return JsonResponse({'message':'API Auth token key not recognized.'},status=403)
+                return JsonResponse({'message': 'API Auth token key not recognized.'}, status=403)
 
             # Now actually validate with the token
             token = auth_header[1]
