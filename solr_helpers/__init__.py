@@ -474,6 +474,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             else:
                 values = [values]
 
+        # All values MUST be cast to string; numbers cannot be combined using join
+        values = [str(x) for x in values]
         # If it's first in the list, don't append an "and"
         if first:
             first = False
