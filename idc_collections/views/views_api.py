@@ -31,18 +31,11 @@ logger = logging.getLogger('main_logger')
 BLACKLIST_RE = settings.BLACKLIST_RE
 
 # Return a list of defined IDC versions
-# **** Currently the version is a tuple of (name, version), that identifies the version of ancillary, original and
-# **** derived data. We assume that eventually the IDC version will be a single identifier, and which maps to such a
-# **** tuple. For continuity, we currently return a single IDC version, "1", and the underlying tuple.
 @api_auth
 @require_http_methods(["GET"])
 def versions_list_api(request):
 
     idc_data_versions = ImagingDataCommonsVersion.objects.all()
-    # versions = DataVersion.objects.get_queryset()
-
-    # programs = Program.get_public_programs()
-
     versions_info = {"versions": []}
     for version in idc_data_versions:
         version_data = dict(
@@ -63,11 +56,6 @@ def versions_list_api(request):
             )
             version_data['data_sources'].append(data_source_data)
 
-        # version_data["programs"]= [{
-        #     "name": program.name,
-        #     "short_name": program.short_name,
-        #     "description": program.description} for program in programs]
-
         versions_info["versions"].append(version_data)
 
     return JsonResponse(versions_info)
@@ -76,45 +64,29 @@ def versions_list_api(request):
 @api_auth
 @require_http_methods(["GET"])
 def collections_list_api(request):
-    # **** Hack warning ****
-    # The webap DB does not currently map collections to IDC versions
-    # Until that mapping is included, we do that here
-
-    try:
-        data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
-    except:
-        return JsonResponse(
-            dict(
-                message="Invalid IDC version {}".format(request.GET.get('idc_data_version', '')),
-                code=400
-            )
-        )
 
     collections_info = {"collections": []}
     programs = Program.objects.all()
 
     try:
 
-        if data_version.version_number == '1.0':
-            collections = Collection.objects.filter(collection_type='O')[0:25]
-        else:
-            collections = Collection.objects.filter(collection_type='O')
+        collections = Collection.objects.filter(collection_type='O')
 
         for collection in collections:
-            data = {
-                "active": collection.active,
-                "cancer_type": collection.cancer_type,
-                "collection_id": collection.collection_id,
-                "date_updated": collection.date_updated,
-                "description": collection.description,
-                "doi": collection.doi,
-                "image_types": collection.image_types,
-                "location": collection.location,
-                "species": collection.species,
-                "subject_count": collection.subject_count,
-                "supporting_data": collection.supporting_data,
-                "idc_data_versions": ["1.0"] if data_version.version_number=='1.0' else ["1.0","2.0"]}
-            collections_info['collections'].append(data)
+            if collection.active:
+                data = {
+                    "cancer_type": collection.cancer_type,
+                    "collection_id": collection.collection_id,
+                    "date_updated": collection.date_updated,
+                    "description": collection.description,
+                    "doi": collection.doi,
+                    "image_types": collection.image_types,
+                    "location": collection.location,
+                    "species": collection.species,
+                    "subject_count": collection.subject_count,
+                    "supporting_data": collection.supporting_data
+                }
+                collections_info['collections'].append(data)
 
 
     except Exception as e:
