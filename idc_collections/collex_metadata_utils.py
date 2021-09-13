@@ -445,8 +445,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 attr_by_source['totals'] = source_metadata['totals']
             return attr_by_source
         else:
-            context['order'] = {'derived_set': ['dicom_derived_study_v3:segmentation', 'dicom_derived_study_v3:qualitative',
-                                                'dicom_derived_study_v3:quantitative']}
+            context['order'] = {'derived_set': ['dicom_derived_study_v4:segmentation', 'dicom_derived_study_v4:qualitative',
+                                                'dicom_derived_study_v4:quantitative']}
         return context
 
     except Exception as e:
@@ -471,7 +471,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_only=False, with_ancillary=True,
                         collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
                         facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None,
-                        search_child_records_by=None):
+                        search_child_records_by=None, filtered_needed = True, custom_facets=None,raw_format=False):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -505,21 +505,21 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
         elif source_type == DataSource.SOLR:
             results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
                                         facets, records_only, sort, uniques, record_source, totals,
-                                        search_child_records_by=search_child_records_by)
+                                        search_child_records_by=search_child_records_by, filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
-
-        for counts in ['facets', 'filtered_facets']:
-            facet_set = results.get(counts,{})
-            for source in facet_set:
-                facets = facet_set[source].get('facets',{}) or {}
-                if 'BodyPartExamined' in facets:
-                    if 'Kidney' in facets['BodyPartExamined']:
-                        if 'KIDNEY' in facets['BodyPartExamined']:
-                            facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
-                        else:
-                            facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
-                        del facets['BodyPartExamined']['Kidney']
+        if not raw_format:
+            for counts in ['facets', 'filtered_facets']:
+                facet_set = results.get(counts,{})
+                for source in facet_set:
+                    facets = facet_set[source]['facets']
+                    if 'BodyPartExamined' in facets:
+                        if 'Kidney' in facets['BodyPartExamined']:
+                            if 'KIDNEY' in facets['BodyPartExamined']:
+                                facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
+                            else:
+                                facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
+                            del facets['BodyPartExamined']['Kidney']
 
         if not counts_only:
             if 'SeriesNumber' in fields:
@@ -534,11 +534,78 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
 
     return results
 
+def get_table_data(filters,fields,table_type,sources = None, versions = None, custom_facets = None):
+    source_type = sources.first().source_type if sources else DataSource.SOLR
+    if not versions:
+        versions = ImagingDataCommonsVersion.objects.get(active=True).dataversion_set.all().distinct()
+    if not sources:
+        sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True, source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID")
+
+    custom_facets = None
+    collapse_on = 'PatientID'
+    record_limit = 2000
+    offset = 0
+    counts_only = True
+
+    custom_facets = {'uc': {'type': 'terms', 'field': 'PatientID', 'limit': -1, 'missing': True, 'facet': {'unique_count': 'unique(StudyInstanceUID)'}} }
+
+
+    results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0,custom_facets=custom_facets,raw_format=False)
+
+    return results
+
+
+# Based on a solr query array, set of sources, and UI attributes, produce a Solr-compattible queryset
+def create_query_set(solr_query, sources, source, all_ui_attrs, image_source, DataSetType):
+    query_set = []
+    joined_origin = False
+    source_data_types = fetch_data_source_types(sources)
+
+    if solr_query:
+        for attr in solr_query['queries']:
+            attr_name = re.sub("(_ebtwe|_ebtw|_btwe|_btw|_lte|_lt|_gte|_gt)", "", attr)
+            # If an attribute from the filters isn't in the attribute listing, just warn and continue
+            if attr_name in all_ui_attrs['list']:
+                # If the attribute is from this source, just add the query
+                if attr_name in all_ui_attrs['sources'][source.id]['list']:
+                    query_set.append(solr_query['queries'][attr])
+                # If it's in another source for this program, we need to join on that source
+                else:
+                    for ds in sources:
+                        if ds.name != source.name and attr_name in all_ui_attrs['sources'][ds.id]['list']:
+                            if DataSetType.IMAGE_DATA in source_data_types[source.id] or DataSetType.IMAGE_DATA in \
+                                    source_data_types[ds.id]:
+                                joined_origin = True
+                            # DataSource join pairs are unique, so, this should only produce a single record
+                            source_join = DataSourceJoin.objects.get(from_src__in=[ds.id, source.id],
+                                                                     to_src__in=[ds.id, source.id])
+                            joined_query = ("{!join %s}" % "from={} fromIndex={} to={}".format(
+                                source_join.get_col(ds.name), ds.name, source_join.get_col(source.name)
+                            )) + solr_query['queries'][attr]
+                            if DataSetType.ANCILLARY_DATA in source_data_types[
+                                ds.id] and not DataSetType.ANCILLARY_DATA in source_data_types[source.id]:
+                                joined_query = 'has_related:"False" OR _query_:"%s"' % joined_query.replace("\"",
+                                                                                                            "\\\"")
+                            query_set.append(joined_query)
+            else:
+                logger.warning("[WARNING] Attribute {} not found in data sources {}".format(attr_name, ", ".join(
+                    list(sources.values_list('name', flat=True)))))
+
+    if not joined_origin and not DataSetType.IMAGE_DATA in source_data_types[source.id]:
+        source_join = DataSourceJoin.objects.get(from_src__in=[image_source.id, source.id],
+                                                 to_src__in=[image_source.id, source.id])
+        query_set.append(("{!join %s}" % "from={} fromIndex={} to={}".format(
+            source_join.get_col(image_source.name), image_source.name, source_join.get_col(source.name)
+        )) + "*:*")
+
+    return query_set
+
 
 # Use solr to fetch faceted counts and/or records
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
                       records_only=False, sort=None, uniques=None, record_source=None, totals=None, cursor=None,
-                      search_child_records_by=None):
+                      search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,raw_format=False):
+
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
 
@@ -547,26 +614,19 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
     source_versions = sources.get_source_versions()
 
-    filter_attrs = fetch_data_source_attr(
-        sources,
-        {
-            'with_set_map': False,
-            'for_ui': True,
-            'named_set': [x[:x.rfind('_')] if re.search('_[gl]te?|_e?btwe?',x) else x for x in filters.keys()]
-        },
-        None if len(filters) else 'empty_filters')
     attrs_for_faceting = None
     if not records_only and facets or facets is None:
         attrs_for_faceting = fetch_data_source_attr(
             sources, {'for_ui': True, 'named_set': facets},
-            cache_as="ui_facet_set" if not sources.contains_inactive_versions() else None)
+            cache_as="ui_facet_set" if not sources.contains_inactive_versions() and not facets else None
+        )
 
-    # Fetch the entire set of UI attributes for checking against the filters; this is just a sanity check
     all_ui_attrs = fetch_data_source_attr(
-        sources, {'for_ui':True, 'for_faceting': False},
+        sources, {'for_ui': True, 'for_faceting': False},
         cache_as="all_ui_attr" if not sources.contains_inactive_versions() else None)
 
     source_data_types = fetch_data_source_types(sources)
+
     image_source = sources.filter(id__in=DataSetType.objects.get(
         data_type=DataSetType.IMAGE_DATA).datasource_set.all()).first()
 
@@ -577,7 +637,6 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         curUniques = uniques if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         curTotals = totals if DataSetType.IMAGE_DATA in source_data_types[source.id] else None
         start = time.time()
-        joined_origin = False
         solr_query = build_solr_query(
             copy.deepcopy(filters),
             with_tags_for_ex=True,
@@ -603,41 +662,21 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
 
             stop = time.time()
             logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
-            if filters and attrs_for_faceting:
+            if filters and attrs_for_faceting and filtered_needed:
                 solr_facets_filtered = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col})
                 solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
-        query_set = []
 
-        if solr_query:
-            for attr in solr_query['queries']:
-                attr_name = re.sub("(_ebtwe|_ebtw|_btwe|_btw|_lte|_lt|_gte|_gt)", "", attr)
-                # If an attribute from the filters isn't in the attribute listing, just warn and continue
-                if attr_name in all_ui_attrs['list']:
-                    # If the attribute is from this source, just add the query
-                    if attr_name in all_ui_attrs['sources'][source.id]['list']:
-                        query_set.append(solr_query['queries'][attr])
-                    # If it's in another source for this program, we need to join on that source
-                    else:
-                        for ds in sources:
-                            if ds.name != source.name and attr_name in all_ui_attrs['sources'][ds.id]['list']:
-                                if DataSetType.IMAGE_DATA in source_data_types[source.id] or DataSetType.IMAGE_DATA in source_data_types[ds.id]:
-                                    joined_origin = True
-                                # DataSource join pairs are unique, so, this should only produce a single record
-                                source_join = DataSourceJoin.objects.get(from_src__in=[ds.id,source.id], to_src__in=[ds.id,source.id])
-                                joined_query = ("{!join %s}" % "from={} fromIndex={} to={}".format(
-                                    source_join.get_col(ds.name), ds.name, source_join.get_col(source.name)
-                                )) + solr_query['queries'][attr]
-                                if DataSetType.ANCILLARY_DATA in source_data_types[ds.id] and not DataSetType.ANCILLARY_DATA in source_data_types[source.id]:
-                                    joined_query = 'has_related:"False" OR _query_:"%s"' % joined_query.replace("\"","\\\"")
-                                query_set.append(joined_query)
-                else:
-                    logger.warning("[WARNING] Attribute {} not found in data sources {}".format(attr_name, ", ".join(list(sources.values_list('name',flat=True)))))
+            if custom_facets is not None:
+                if solr_facets is None:
+                    solr_facets = {}
+                solr_facets.update(custom_facets)
+                solr_facets = custom_facets
+                if filtered_needed:
+                    if solr_facets_filtered is None:
+                        solr_facets_filtered = {}
+                    solr_facets_filtered.update(custom_facets)
 
-        if not joined_origin and not DataSetType.IMAGE_DATA in source_data_types[source.id]:
-            source_join = DataSourceJoin.objects.get(from_src__in=[image_source.id, source.id], to_src__in=[image_source.id, source.id])
-            query_set.append(("{!join %s}" % "from={} fromIndex={} to={}".format(
-                source_join.get_col(image_source.name), image_source.name, source_join.get_col(source.name)
-            ))+"*:*")
+        query_set = create_query_set(solr_query, sources, source, all_ui_attrs, image_source, DataSetType)
 
         stop = time.time()
         logger.debug("[STATUS] Time to build Solr submission: {}s".format(str(stop-start)))
@@ -649,13 +688,14 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'facets': solr_facets,
                 'fqs': query_set,
                 'query_string': None,
-                'limit': 0,
+                'limit': record_limit,
                 'counts_only': True,
                 'fields': None,
                 'uniques': curUniques,
                 'stats': solr_stats,
-                'totals': curTotals
-            })
+                'totals': curTotals,
+                'sort': sort,
+            },raw_format=raw_format)
 
             solr_count_filtered_result = None
             if solr_facets_filtered:
@@ -664,29 +704,31 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'facets': solr_facets_filtered,
                     'fqs': query_set,
                     'query_string': None,
-                    'limit': 0,
+                    'limit': record_limit,
+                    'sort': sort_field,
                     'counts_only': True,
                     'fields': None,
                     'stats': solr_stats_filtered,
                     'totals': curTotals
-                })
+                },raw_format=raw_format)
 
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
 
-            if DataSetType.IMAGE_DATA in source_data_types[source.id]:
+            if DataSetType.IMAGE_DATA in source_data_types[source.id] and 'numFound' in solr_result:
                 results['total'] = solr_result['numFound']
                 if 'uniques' in solr_result:
                     results['uniques'] = solr_result['uniques']
 
-            results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                'facets': solr_result.get('facets',None)
-            }
+            if raw_format:
+                results['facets'] = solr_result['facets']
+            else:
+                results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
+                    'facets': solr_result.get('facets',None)}
 
             if solr_count_filtered_result:
                 results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                    'facets': solr_count_filtered_result['facets']
-                }
+                    'facets': solr_count_filtered_result['facets']}
 
             totals_source = solr_count_filtered_result or solr_result
             if 'totals' in totals_source:
@@ -1146,7 +1188,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                         case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                     )
                 param_sfx += 1
-                # If there were non-derived filters made, append them to the relevant lists
+                # If we weren't running on intersected sets, append them here as simple filters
                 if filter_clauses.get(image_table,None):
                     query_filters.append(filter_clauses[image_table]['filter_string'])
                     params.append(filter_clauses[image_table]['parameters'])
@@ -1219,9 +1261,11 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters) if len(query_filters) else "") if len(filters) else ""),
             intersect_clause="{}".format("" if not len(intersect_statements) else "{}{}".format(
                 " AND " if len(regular_filters) else "","{} IN ({})".format(
-                    child_record_search_field,intersect_clause
+                    child_record_search_field, intersect_clause
             ))),
-            order_clause="{}".format("ORDER BY {}".format(", ".join(["{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by])) if order_by and len(order_by) else ""),
+            order_clause="{}".format("ORDER BY {}".format(", ".join([
+                "{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by
+            ])) if order_by and len(order_by) else ""),
             group_clause="{}".format("GROUP BY {}".format(", ".join(group_by)) if group_by and len(group_by) else ""),
             limit_clause="{}".format("LIMIT {}".format(str(limit)) if limit > 0 else ""),
             offset_clause="{}".format("OFFSET {}".format(str(offset)) if offset > 0 else ""),
@@ -1235,7 +1279,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     settings.DEBUG and logger.debug("[STATUS] get_bq_metadata: {}".format(full_query_str))
 
     if no_submit:
-        results = {"sql_string":full_query_str, "params":params}
+        results = {"sql_string": full_query_str, "params": params}
     else:
         results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
 
