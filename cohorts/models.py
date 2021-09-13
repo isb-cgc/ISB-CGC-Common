@@ -112,6 +112,9 @@ class Cohort(models.Model):
 
         return data_versions.distinct()
 
+    def get_idc_data_version(self):
+        return ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True))
+
     def only_active_versions(self):
         return bool(len(self.get_data_versions(active=False)) <= 0)
 
