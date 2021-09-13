@@ -104,7 +104,7 @@ def _delete_cohort(user, cohort_id):
                 }
             except ObjectDoesNotExist:
                 cohort_info = {
-                    'message': 'Cohort ID {} was not found.'.format(cohort_id)
+                    'message': 'Cohort ID {} was not found - it may already be deleted.'.format(cohort_id)
                 }
         except ObjectDoesNotExist:
             cohort_info = {
