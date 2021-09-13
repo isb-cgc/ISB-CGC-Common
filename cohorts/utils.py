@@ -51,6 +51,7 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
     try:
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id)
+            sources = cohort.get_data_sources(aggregate_level=["StudyInstanceUID", "case_barcode", "sample_barcode"])
         elif not filters or not sources:
             raise Exception("If you don't provide a cohort ID, you must provide "
                             + "both filters *and* a valid DataSource list!")
@@ -67,7 +68,9 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
             ))
 
         result = get_collex_metadata(filters, None, sources=sources, facets=["collection_id"], counts_only=True,
-                                     totals=["PatientID", "StudyInstanceUID", "SeriesInstanceUID"], filtered_needed=False)
+                                     totals=["PatientID", "StudyInstanceUID", "SeriesInstanceUID"], filtered_needed=True)
+
+        print(result)
 
         for total in result['totals']:
             stats[total] = result['totals'][total]
