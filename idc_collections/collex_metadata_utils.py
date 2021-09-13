@@ -444,9 +444,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             if 'totals' in source_metadata:
                 attr_by_source['totals'] = source_metadata['totals']
             return attr_by_source
-        #else:
-        #    context['order'] = {'derived_set': ['dicom_derived_study_v3:segmentation', 'dicom_derived_study_v3:qualitative',
-        #                                        'dicom_derived_study_v3:quantitative']}
+        
         return context
 
     except Exception as e:
