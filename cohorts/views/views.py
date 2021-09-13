@@ -466,13 +466,14 @@ def create_manifest_bq_table(request, cohorts):
 
         for cohort in cohorts:
             desc = None
+            headers = []
             if request.GET.get('header_fields'):
                 selected_header_fields = json.loads(request.GET.get('header_fields'))
-                headers = []
                 'cohort_name' in selected_header_fields and headers.append("Manifest for cohort '{}' ID#{}".format(cohort.name, cohort.id))
                 'user_email' in selected_header_fields and headers.append("User: {}".format(request.user.email))
                 'cohort_filters' in selected_header_fields and headers.append("Filters: {}".format(cohort.get_filter_display_string()))
-                desc = "\n".join(headers)
+            headers.append("IDC Data Version(s): {}".format("; ".join([str(x) for x in cohort.get_idc_data_version()])))
+            desc = "\n".join(headers)
 
             base_filters = cohort.get_filters_as_dict_simple()[0]
             if 'bmi' in base_filters:
@@ -641,6 +642,8 @@ def create_file_manifest(request, cohort):
                               + " Your cohort's total entries exceeded this number. This part of {} entries has been ".format(
                         str(MAX_FILE_LIST_ENTRIES))
                               + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
+
+                rows += (["IDC Data Version(s): {}".format("; ".join([str(x) for x in cohort.get_idc_data_version()]))],)
 
                 # Column headers
                 rows += (selected_columns,)
