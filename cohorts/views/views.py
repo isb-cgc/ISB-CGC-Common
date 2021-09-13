@@ -490,7 +490,9 @@ def create_manifest_bq_table(request, cohorts):
 
             table_name = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
             export_jobs[cohort.id] = {
-                'table_id': table_name
+                'table_id': '{}.{}.{}'.format(settings.BIGQUERY_USER_DATA_PROJECT_ID,
+                                              settings.BIGQUERY_USER_MANIFEST_DATASET,
+                                              table_name)
             }
             query = get_bq_metadata(
                 base_filters, field_list, cohort.get_data_versions(),
