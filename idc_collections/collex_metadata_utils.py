@@ -1186,7 +1186,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                         case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                     )
                 param_sfx += 1
-                # If there were non-derived filters made, append them to the relevant lists
+                # If we weren't running on intersected sets, append them here as simple filters
                 if filter_clauses.get(image_table,None):
                     query_filters.append(filter_clauses[image_table]['filter_string'])
                     params.append(filter_clauses[image_table]['parameters'])
@@ -1259,9 +1259,11 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters) if len(query_filters) else "") if len(filters) else ""),
             intersect_clause="{}".format("" if not len(intersect_statements) else "{}{}".format(
                 " AND " if len(regular_filters) else "","{} IN ({})".format(
-                    child_record_search_field,intersect_clause
+                    child_record_search_field, intersect_clause
             ))),
-            order_clause="{}".format("ORDER BY {}".format(", ".join(["{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by])) if order_by and len(order_by) else ""),
+            order_clause="{}".format("ORDER BY {}".format(", ".join([
+                "{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by
+            ])) if order_by and len(order_by) else ""),
             group_clause="{}".format("GROUP BY {}".format(", ".join(group_by)) if group_by and len(group_by) else ""),
             limit_clause="{}".format("LIMIT {}".format(str(limit)) if limit > 0 else ""),
             offset_clause="{}".format("OFFSET {}".format(str(offset)) if offset > 0 else ""),
@@ -1275,7 +1277,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
     settings.DEBUG and logger.debug("[STATUS] get_bq_metadata: {}".format(full_query_str))
 
     if no_submit:
-        results = {"sql_string":full_query_str, "params":params}
+        results = {"sql_string": full_query_str, "params": params}
     else:
         results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
 
