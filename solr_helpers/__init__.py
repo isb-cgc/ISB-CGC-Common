@@ -113,6 +113,8 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
                collapse_on=None, offset=0, limit=1000, uniques=None, with_cursor=None, stats=None, totals=None):
     query_uri = "{}{}/query".format(SOLR_URI, collection)
 
+    print(fqs)
+
     payload = {
         "query": query_string or "*:*",
         "limit": 0 if counts_only else limit,
