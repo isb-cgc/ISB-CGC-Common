@@ -474,8 +474,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             else:
                 values = [values]
 
-        # All values MUST be cast to string; numbers cannot be combined using join
-        values = [str(x) for x in values]
+        # All individual (nonlist) values MUST be cast to string; numbers cannot be combined using join
+        values = [str(x) if not isinstance(x,list) else x for x in values]
         # If it's first in the list, don't append an "and"
         if first:
             first = False
@@ -485,9 +485,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
         # If it's looking for a single None value
         if len(values) == 1 and values[0] == 'None':
-            query_str += '(-%s:{* TO *})' % attr
+            query_str += '(-%s:{* TO *})' % attr_name
         # If it's a ranged value, calculate the bins
-        elif attr == 'bmi':
+        elif attr_name == 'bmi':
             with_none = False
             if 'None' in values:
                 values.remove('None')
@@ -495,7 +495,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
             query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
 
-        elif attr in ranged_attrs or attr[:attr.rfind('_')] in ranged_attrs:
+        elif attr_name in ranged_attrs:
             bounds = ("[" if re.search('^ebtwe?',attr_rng) else "{{","]" if re.search('e?btwe$',attr_rng) else "}}",)
             rngTemp = "{}:%s{} TO {}%s" % bounds
 
@@ -507,7 +507,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
             if len(values) >= 1 and type(values[0]) is str and re.match(r'\d+ [tT][oO] \d+', values[0]):
                 values[0] = values[0].lower().split(" to ")
-            elif len(values) >= 1 and type(values[0]) is list:
+
+            if len(values) >= 1 and type(values[0]) is list:
                 clause = " {} ".format(comb_with).join(
                     [rngTemp.format(attr_name, str(x[0]), str(x[1])) for x in values])
             elif len(values) > 1 :
@@ -520,9 +521,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
         else:
             if 'None' in values:
                 values.remove('None')
-                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr,"\" \"".join(values), attr)
+                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr_name,"\" \"".join(values), attr_name)
             else:
-                query_str += '(+%s:("%s"))' % (attr, "\" \"".join(values))
+                query_str += '(+%s:("%s"))' % (attr_name, "\" \"".join(values))
 
         query_set = query_set or {}
 
