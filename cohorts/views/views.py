@@ -480,12 +480,14 @@ def create_manifest_bq_table(request, cohorts):
                 vals = base_filters['bmi']
                 del base_filters['bmi']
                 for val in vals:
-                    if val != 'obese':
+                    if val not in ('None','obese'):
                         if 'bmi_btw' not in base_filters:
                             base_filters['bmi_btw'] = []
                         base_filters['bmi_btw'].append(BMI_MAPPING[val])
-                    else:
+                    elif val == 'obese':
                         base_filters['bmi_gt'] = BMI_MAPPING[val]
+                    else:
+                        base_filters['bmi'] = 'None'
 
             table_name = "manifest_cohort_{}_{}".format(str(cohort.id), timestamp)
             export_jobs[cohort.id] = {
