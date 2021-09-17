@@ -628,6 +628,8 @@ class BigQuerySupport(BigQueryABC):
             'attr_params': {}
         }
 
+        attr_filters = {}
+
         if with_count_toggle:
             result['count_params'] = {}
 
@@ -697,7 +699,13 @@ class BigQuerySupport(BigQueryABC):
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
             attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
-            # We require out attributes to be value lists
+            if attr_name not in attr_filters:
+                attr_filters[attr_name] = {
+                    'OP': 'OR',
+                    'filters': []
+                }
+            attr_filter_set = attr_filters[attr_name]['filters']
+            # We require our attributes to be value lists
             if type(values) is not list:
                 values = [values]
             # However, *only* ranged numerics can be a list of lists; all others must be a single list
@@ -813,13 +821,14 @@ class BigQuerySupport(BigQueryABC):
                 result['attr_params'][attr].append(param_name)
                 result['parameters'].append(result['count_params'][param_name])
 
-            filter_set.append('({})'.format(filter_string))
+            attr_filter_set.append('{}'.format(filter_string))
 
             if type(query_param) is list:
                 result['parameters'].extend(query_param)
             else:
                 result['parameters'].append(query_param)
 
+        filter_set = ["(({}))".format(") {} (".format(attr_filters[x]['OP']).join(attr_filters[x]['filters'])) for x in attr_filters]
         result['filter_string'] = " {} ".format(comb_with).join(filter_set)
 
         return result
