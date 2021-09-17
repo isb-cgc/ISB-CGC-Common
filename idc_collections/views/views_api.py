@@ -47,15 +47,6 @@ def versions_list_api(request):
                 # active = version.active,
                 # data_sources = []
         )
-        # for data_source in version.get_data_sources().filter(source_type='B').distinct():
-        #     if data_source.name == "idc-dev.metadata.dicom_pivot_wave0":
-        #         continue
-        #     data_source_data = dict(
-        #         name = data_source.name,
-        #         data_type = dict(DataSetType.DATA_TYPES)[data_source.get_data_types().first()]
-        #
-        #     )
-        #     version_data['data_sources'].append(data_source_data)
 
         versions_info["versions"].append(version_data)
 
@@ -111,16 +102,6 @@ def analysis_results_list_api(request):
 
     data_version = get_idc_data_version('')
 
-    # try:
-    #     data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
-    # except:
-    #     return JsonResponse(
-    #         dict(
-    #             message="Invalid IDC version {}".format(request.GET.get('idc_data_version', '')),
-    #             code=400
-    #         )
-    #     )
-    #
     collections_info = {"analysisResults": []}
     programs = Program.objects.all()
 
@@ -162,15 +143,6 @@ def analysis_results_list_api(request):
 def attributes_list_api(request):
 
     data_version = get_idc_data_version('')
-    # try:
-    #     data_version = get_idc_data_version(request.GET.get('idc_data_version', ''))
-    # except:
-    #     return JsonResponse(
-    #         dict(
-    #             message="Invalid IDC version {}".format(request.GET.get('idc_data_version')),
-    #             code=400
-    #         )
-    #     )
 
     try:
         data_source_name = request.GET.get('data_source')
@@ -192,7 +164,6 @@ def attributes_list_api(request):
     response = {"idc_data_version": data_version.version_number,
                 "data_sources": []}
 
-    # attr_data = source.get_source_attrs(with_set_map=False, for_faceting=False)
     if data_version.active:
         if data_source_name:
             sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B') \
@@ -211,8 +182,7 @@ def attributes_list_api(request):
 
 
     for source in sources:
-        # attributes = Attribute.objects.all()
-        attributes = source.get_attr(for_faceting=False).filter(default_ui_display=True) 
+        attributes = source.get_attr(for_faceting=False).filter(default_ui_display=True)
 
         attributes_info = []
         for attribute in attributes:
