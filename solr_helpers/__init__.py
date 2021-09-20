@@ -397,6 +397,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     main_filters = {}
     search_child_records_by = search_child_records_by or {}
 
+    date_attrs = ['StudyDate']
+
     # Because mutation filters can have their operation specified, split them out separately:
     for attr, values in list(filters.items()):
         if 'MUT:' in attr:
@@ -496,8 +498,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 with_none = True
             clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
             query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
-
-        elif attr_name in ranged_attrs:
+        elif attr_name in ranged_attrs or attr_name in date_attrs:
             bounds = ("[" if re.search('^ebtwe?',attr_rng) else "{{","]" if re.search('e?btwe$',attr_rng) else "}}",)
             rngTemp = "{}:%s{} TO {}%s" % bounds
 
@@ -510,13 +511,26 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             if len(values) >= 1 and type(values[0]) is str and re.match(r'\d+ [tT][oO] \d+', values[0]):
                 values[0] = values[0].lower().split(" to ")
 
-            if len(values) >= 1 and type(values[0]) is list:
-                clause = " {} ".format(comb_with).join(
-                    [rngTemp.format(attr_name, str(x[0]), str(x[1])) for x in values])
-            elif len(values) > 1 :
-                clause = rngTemp.format(attr_name, values[0], values[1])
+            if attr_name in date_attrs:
+                date_temp_first = "{}T:00:00:00Z"
+                date_temp_second = "{}T:11:59:99Z"
+                if len(values) >= 1 and type(values[0]) is list:
+                    clause = " {} ".format(comb_with).join(
+                        [rngTemp.format(attr_name, date_temp_first.format(x[0]),date_temp_second.format(x[1])) for x in values])
+                else:
+                    clause = rngTemp.format(
+                        attr_name,
+                        date_temp_first.format(values[0]),
+                        date_temp_second.format(values[-1])
+                    )
             else:
-                clause = "{}:{}".format(attr_name, values[0])
+                if len(values) >= 1 and type(values[0]) is list:
+                    clause = " {} ".format(comb_with).join(
+                        [rngTemp.format(attr_name, str(x[0]), str(x[1])) for x in values])
+                elif len(values) > 1 :
+                    clause = rngTemp.format(attr_name, values[0], values[1])
+                else:
+                    clause = "{}:{}".format(attr_name, values[0])
 
             query_str += (('(-(-(%s) +(%s:{* TO *})))' % (clause, attr_name)) if with_none else "(+({}))".format(clause))
 
