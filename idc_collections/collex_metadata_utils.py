@@ -509,6 +509,7 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                                         custom_facets=custom_facets, raw_format=raw_format)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
+        logger.debug(results)
         if not raw_format:
             for counts in ['facets', 'filtered_facets']:
                 facet_set = results.get(counts, {})
