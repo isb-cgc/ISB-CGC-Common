@@ -511,9 +511,9 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
         logger.debug("Metadata received: {}".format(stop-start))
         if not raw_format:
             for counts in ['facets', 'filtered_facets']:
-                facet_set = results.get(counts,{})
-                logger.debug(facet_set.keys())
+                facet_set = results.get(counts, {})
                 for source in facet_set:
+                    logger.debug(facet_set[source].keys())
                     facets = facet_set[source]['facets']
                     if facets and 'BodyPartExamined' in facets:
                         if 'Kidney' in facets['BodyPartExamined']:
