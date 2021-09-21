@@ -505,12 +505,14 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
         elif source_type == DataSource.SOLR:
             results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
                                         facets, records_only, sort, uniques, record_source, totals,
-                                        search_child_records_by=search_child_records_by, filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format)
+                                        search_child_records_by=search_child_records_by, filtered_needed=filtered_needed,
+                                        custom_facets=custom_facets, raw_format=raw_format)
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
         if not raw_format:
             for counts in ['facets', 'filtered_facets']:
                 facet_set = results.get(counts,{})
+                logger.debug(facet_set.keys())
                 for source in facet_set:
                     facets = facet_set[source]['facets']
                     if facets and 'BodyPartExamined' in facets:
