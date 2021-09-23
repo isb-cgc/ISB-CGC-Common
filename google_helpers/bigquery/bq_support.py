@@ -853,7 +853,10 @@ class BigQuerySupport(BigQueryABC):
     #
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_where_clause(filters, comb_with='AND', field_prefix=None, type_schema=None, encapsulated=True):
+    def build_bq_where_clause(filters, join_with_space=False, comb_with='AND', field_prefix=None, type_schema=None, encapsulated=True):
+        join_str = ","
+        if join_with_space:
+            join_str = ", "
 
         if field_prefix and field_prefix[-1] != ".":
             field_prefix += "."
@@ -861,7 +864,6 @@ class BigQuerySupport(BigQueryABC):
             field_prefix = ""
 
         filter_set = []
-
         mutation_filters = {}
         other_filters = {}
 
@@ -890,7 +892,7 @@ class BigQuerySupport(BigQueryABC):
                 filter_string += '{}Variant_Classification {}IN ({})'.format(
                     '' if not field_prefix else field_prefix,
                     'NOT ' if invert else '',
-                    ",".join(["'{}'".format(x) for x in values])
+                    join_str.join(["'{}'".format(x) for x in values])
                 )
 
             filter_set.append('({})'.format(filter_string))
@@ -954,7 +956,7 @@ class BigQuerySupport(BigQueryABC):
                         values[1]
                     )
                 else:
-                    val_list = ",".join(["'{}'".format(x) for x in values]) if parameter_type == "STRING" else ",".join(values)
+                    val_list = join_str.join(["'{}'".format(x) for x in values]) if parameter_type == "STRING" else join_str.join(values)
                     filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr, val_list)
 
             filter_set.append('{}{}{}'.format("(" if encapsulated else "", filter_string, ")" if encapsulated else ""))
