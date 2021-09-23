@@ -384,6 +384,8 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 #
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None,
                      search_child_records_by=None):
+
+    # subq_join not currently used in IDC
     ranged_attrs = Attribute.get_ranged_attrs()
 
     first = True
@@ -404,7 +406,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
         else:
             main_filters[attr] = values
 
-    # Mutation filters
+    # Mutation filters, not currently applicable in IDC
     for attr, values in list(mutation_filters.items()):
         if type(values) is dict and 'values' in values:
             values = values['values']

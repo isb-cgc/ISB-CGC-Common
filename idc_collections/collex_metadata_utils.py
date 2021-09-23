@@ -444,9 +444,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             if 'totals' in source_metadata:
                 attr_by_source['totals'] = source_metadata['totals']
             return attr_by_source
-        else:
-            context['order'] = {'derived_set': ['dicom_derived_study_v4:segmentation', 'dicom_derived_study_v4:qualitative',
-                                                'dicom_derived_study_v4:quantitative']}
+        
         return context
 
     except Exception as e:
@@ -503,6 +501,7 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit, offset, search_child_records_by=search_child_records_by)
         elif source_type == DataSource.SOLR:
+
             results = get_metadata_solr(
                 filters, fields, sources, counts_only, collapse_on, record_limit, offset, facets, records_only, sort,
                 uniques, record_source, totals, search_child_records_by=search_child_records_by,
