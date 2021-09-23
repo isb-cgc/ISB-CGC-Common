@@ -29,15 +29,16 @@ logger = logging.getLogger('main_logger')
 MAX_INSERT = settings.MAX_BQ_INSERT
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
 
-COHORT_DATASETS = {
-    'prod': 'cloud_deployment_cohorts',
-    'staging': 'cloud_deployment_cohorts',
-    'dev': 'dev_deployment_cohorts'
-}
 
-COHORT_TABLES = {
-    'prod': 'prod_cohorts',
-    'staging': 'staging_cohorts'
+# Some attribute types will fool the type checker due to their content; we hard code
+# these as STRING
+FIXED_TYPES = {
+    'SeriesInstanceUID': 'STRING',
+    'StudyInstanceUID': 'STRING',
+    'PatientID': 'STRING',
+    'Manufacturer': 'STRING',
+    'Manufacturer Model Name': 'STRING',
+    'StudyDate': 'DATE'
 }
 
 MOLECULAR_CATEGORIES = {
@@ -714,8 +715,10 @@ class BigQuerySupport(BigQueryABC):
                     values = [y for x in values for y in x]
 
             parameter_type = None
-            if type_schema and type_schema.get(attr, None):
+            if (type_schema and type_schema.get(attr, None)):
                 parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
+            elif FIXED_TYPES.get(attr, None):
+                parameter_type = FIXED_TYPES.get(attr)
             else:
                 # If the values are arrays we assume the first value in the first array is indicative of all
                 # other values (since we don't support multi-typed fields)
