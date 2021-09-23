@@ -37,7 +37,7 @@ FIXED_TYPES = {
     'StudyInstanceUID': 'STRING',
     'PatientID': 'STRING',
     'Manufacturer': 'STRING',
-    'Manufacturer Model Name': 'STRING',
+    'ManufacturerModelName': 'STRING',
     'StudyDate': 'DATE'
 }
 
