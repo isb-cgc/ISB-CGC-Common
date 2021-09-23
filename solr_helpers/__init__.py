@@ -385,7 +385,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None,
                      search_child_records_by=None):
 
-    # subq_join seems to be unused in IDC??
+    # subq_join not currently used in IDC
     ranged_attrs = Attribute.get_ranged_attrs()
 
     first = True
@@ -405,8 +405,8 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             mutation_filters[attr] = values
         else:
             main_filters[attr] = values
-    #ISB-CGC legacy??? Is this applicable in IDC??? Might lead to problems
-    # Mutation filters
+
+    # Mutation filters, not currently applicable in IDC
     for attr, values in list(mutation_filters.items()):
         if type(values) is dict and 'values' in values:
             values = values['values']
@@ -558,9 +558,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             count += 1
 
         query_set[attr_name] = query_str
-    #filter_tags ==None in IDC
-    i=1
-    pass
+
     return {
         'queries': query_set,
         'full_query_str': full_query_str,
