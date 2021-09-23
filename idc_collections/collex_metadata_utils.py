@@ -471,7 +471,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_only=False, with_ancillary=True,
                         collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
                         facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None,
-                        search_child_records_by=None, filtered_needed = True, custom_facets=None,raw_format=False):
+                        search_child_records_by=None, filtered_needed=True, custom_facets=None, raw_format=False):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -503,9 +503,11 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit, offset, search_child_records_by=search_child_records_by)
         elif source_type == DataSource.SOLR:
-            results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset,
-                                        facets, records_only, sort, uniques, record_source, totals,
-                                        search_child_records_by=search_child_records_by, filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format)
+            results = get_metadata_solr(
+                filters, fields, sources, counts_only, collapse_on, record_limit, offset, facets, records_only, sort,
+                uniques, record_source, totals, search_child_records_by=search_child_records_by,
+                filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format
+            )
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
         if not raw_format:
@@ -606,7 +608,8 @@ def create_query_set(solr_query, sources, source, all_ui_attrs, image_source, Da
 # Use solr to fetch faceted counts and/or records
 def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
                       records_only=False, sort=None, uniques=None, record_source=None, totals=None, cursor=None,
-                      search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,raw_format=False):
+                      search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,
+                      raw_format=False):
 
     filters = filters or {}
     results = {'docs': None, 'facets': {}}

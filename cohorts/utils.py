@@ -228,11 +228,12 @@ def cohort_manifest(cohort, user, fields, limit, offset, level="SeriesInstanceUI
         filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
         search_by = {x: "StudyInstanceUID" for x in filters} if level == "SeriesInstanceUID" else None
 
-
         cohort_records = get_collex_metadata(
             filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
-            collapse_on='SeriesInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc",
-        search_child_records_by=search_by)
+            collapse_on='SeriesInstanceUID', records_only=True,
+            sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc",
+            search_child_records_by=search_by
+        )
         
         return cohort_records
         
@@ -286,8 +287,6 @@ def get_uuids_bq(inc_filters=None, tables=None, comb_mut_filters='OR', case_inse
     try:
         if not inc_filters or not tables:
             raise Exception("Filters and tables not provided")
-
-
 
     except Exception as e:
         logger.error("[ERROR] While queueing up program case/sample list jobs: ")
