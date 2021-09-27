@@ -1162,13 +1162,14 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         tables_in_query = []
         joins = []
         query_filters = []
-        regular_filters = {}
+        non_related_filters = {}
         fields = [field_clauses[image_table]] if image_table in field_clauses else []
         if search_child_records_by:
             child_record_search_fields = [y for x, y in field_attr_by_bq['sources'][image_table]['attr_objs'].get_attr_set_types().get_child_record_searches().items() if y is not None]
             child_record_search_field = list(set(child_record_search_fields))[0]
         if image_table in filter_attr_by_bq['sources']:
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
+            non_related_filters = filter_set
             if len(filter_set):
                 if may_need_intersect and len(filter_set.keys()) > 1:
                     for filter in filter_set:
@@ -1193,7 +1194,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     )
                 param_sfx += 1
                 # If we weren't running on intersected sets, append them here as simple filters
-                if filter_clauses.get(image_table,None):
+                if filter_clauses.get(image_table, None):
                     query_filters.append(filter_clauses[image_table]['filter_string'])
                     params.append(filter_clauses[image_table]['parameters'])
         tables_in_query.append(image_table)
@@ -1264,7 +1265,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             join_clause=""" """.join(joins),
             where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters) if len(query_filters) else "") if len(filters) else ""),
             intersect_clause="{}".format("" if not len(intersect_statements) else "{}{}".format(
-                " AND " if len(regular_filters) else "","{} IN ({})".format(
+                " AND " if len(non_related_filters) and len(query_filters) else "", "{} IN ({})".format(
                     child_record_search_field, intersect_clause
             ))),
             order_clause="{}".format("ORDER BY {}".format(", ".join([
@@ -1276,7 +1277,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             search_by=child_record_search_field
         ))
 
-    full_query_str =  """
+    full_query_str = """
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
 
