@@ -1865,7 +1865,6 @@ def get_metadata(request):
                         prog_res = public_metadata_counts(filters[str(prog.id)], cohort, user, prog.id, limit)
                         results['cohort-total'] += prog_res['samples']
                         results['cohort-cases'] += prog_res['cases']
-
     else:
         results = user_metadata_counts(user, filters, cohort)
 
