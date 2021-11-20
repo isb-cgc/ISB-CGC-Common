@@ -288,6 +288,7 @@ class Collection(models.Model):
     collection_type = models.CharField(max_length=1, blank=False, null=False, choices=COLLEX_TYPES, default=ORIGINAL_COLLEX)
     objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    access = models.CharField(max_length=16, null=False, blank=False, default="Public")
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
     # We make this many to many in case a collection is part of one program, thoug  h it may not be
