@@ -356,7 +356,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             return job_id
         return self.check_query_to_table_done(job_id, export_type, to_temp)
 
-    def export_query_to_bq(self, desc, query, parameters, type, is_temp=False, for_batch=False):
+    def export_query_to_bq(self, desc, query, parameters, type, is_temp=False, for_batch=False, schema=None):
         write_disp = 'WRITE_EMPTY'
 
         if not is_temp:
@@ -398,8 +398,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
 class BigQueryExportFileList(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None):
-        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA)
+    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None, schema=None):
+        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, schema or FILE_LIST_EXPORT_SCHEMA)
 
     def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -434,11 +434,11 @@ class BigQueryExportFileList(BigQueryExport):
 
     # Create the BQ table referenced by project_id:dataset_id:table_id from a parameterized BQ query
     def export_file_list_query_to_bq(self, query, parameters, cohort_id, desc=None, user_email=None,
-                                     for_batch=False):
+                                     for_batch=False, schema=None):
         if not desc:
             desc = "File Manifest export for cohort ID {}".format(str(cohort_id))
 
-        result = self.export_query_to_bq(desc, query, parameters, "cohort file manifest", for_batch=for_batch)
+        result = self.export_query_to_bq(desc, query, parameters, "cohort file manifest", for_batch=for_batch, schema=None)
 
         self.set_table_access(user_email)
 

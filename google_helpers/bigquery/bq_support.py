@@ -198,14 +198,14 @@ class BigQuerySupport(BigQueryABC):
                 ))
 
     # Insert an table, optionally providing a list of cohort IDs to include in the description
-    def _insert_table(self, desc):
+    def _insert_table(self, desc, schema=None):
         tables = self.bq_service.tables()
 
         response = tables.insert(projectId=self.project_id, datasetId=self.dataset_id, body={
             'friendlyName': self.table_id,
             'description': desc,
             'kind': 'bigquery#table',
-            'schema': self.table_schema,
+            'schema': schema or self.table_schema,
             'tableReference': {
                 'datasetId': self.dataset_id,
                 'projectId': self.project_id,
@@ -215,14 +215,14 @@ class BigQuerySupport(BigQueryABC):
 
         return response
 
-    def _confirm_dataset_and_table(self, desc):
+    def _confirm_dataset_and_table(self, desc, schema=None):
         # Get the dataset (make if not exists)
         if not self._dataset_exists():
             self._insert_dataset()
 
         # Get the table (make if not exists)
         if not self._table_exists():
-            table_result = self._insert_table(desc)
+            table_result = self._insert_table(desc, schema)
             if 'tableReference' not in table_result:
                 return {
                     'tableErrors': "Unable to create table {} in project {} and dataset {} - please ".format(

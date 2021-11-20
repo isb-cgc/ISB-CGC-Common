@@ -37,7 +37,7 @@ import django
 from request_logging.decorators import no_logging
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
-from google_helpers.bigquery.export_support import BigQueryExportFileList
+from google_helpers.bigquery.export_support import BigQueryExportFileList, FILE_LIST_EXPORT_SCHEMA
 from google_helpers.stackdriver import StackDriverLogger
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -454,17 +454,22 @@ def create_manifest_bq_table(request, cohorts):
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
 
-        order_by = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
-        # field_list = json.loads(request.GET.get('columns',
-        #    '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]'))
-        # TODO: Allow users to specify the columns
-        field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
+        order_by = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
+                    "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
+        field_list = json.loads(request.GET.get(
+            'columns',
+           '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", ' +
+            '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]'
+        ))
 
         # We can only ORDER BY columns which we've actually requested
         order_by = list(set.intersection(set(order_by),set(field_list)))
 
         all_results = {}
         export_jobs = {}
+
+        table_schema = {'fields': [x for x in FILE_LIST_EXPORT_SCHEMA['fields'] if x['name'] in field_list]} \
+            if len(field_list) < len(FILE_LIST_EXPORT_SCHEMA['fields']) else None
 
         for cohort in cohorts:
             desc = None
@@ -505,7 +510,8 @@ def create_manifest_bq_table(request, cohorts):
             export_jobs[cohort.id]['bqs'] = BigQueryExportFileList(**{
                 'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
                 'dataset_id': settings.BIGQUERY_USER_MANIFEST_DATASET,
-                'table_id': table_name
+                'table_id': table_name,
+                'schema': table_schema
             })
             export_jobs[cohort.id]['job_id'] = export_jobs[cohort.id]['bqs'].export_file_list_query_to_bq(
                 query['sql_string'], query['params'],
@@ -589,9 +595,10 @@ def create_file_manifest(request, cohort):
     field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
                   "crdc_study_uuid", "crdc_series_uuid"]
 
-    # Fields we're actually returning in the CSV (the rest are for constructing the GCS path)
-    if request.GET.get('columns'):
+    # Fields we're actually returning in the file (the rest are for constructing the GCS path)
+    if request.GET.get('columns', None):
         selected_columns = json.loads(request.GET.get('columns'))
+        print(request.GET.get('columns', None))
 
     if request.GET.get('header_fields'):
         selected_header_fields = json.loads(request.GET.get('header_fields'))
