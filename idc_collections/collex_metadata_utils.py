@@ -205,6 +205,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             context['collection_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips(collex_attr_id)
 
         collectionSet = Collection.objects.select_related('program').filter(active=True, collection_type=Collection.ORIGINAL_COLLEX)
+        collection_info = {a: a.access for a in collectionSet}
         collectionsIdList = collectionSet.values_list('collection_id',flat=True)
 
         versions = versions or DataVersion.objects.filter(active=True)
@@ -374,8 +375,12 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                         if set == 'origin_set':
                             collex = _attr_by_source[set][source]['attributes']['collection_id']
                             if collex['vals']:
-                                context['collections'] = {a['value']: {'count': a['count'], 'access':collectionSet.get(collection_id=a['value']).access} for a in collex['vals'] if
-                                                          a['value'] in collectionsIdList}
+                                context['collections'] = {
+                                    a['value']: {
+                                        'count': a['count'],
+                                        'access': collection_info[a['value']]
+                                    } for a in collex['vals'] if a['value'] in collectionsIdList
+                                }
                             else:
                                 context['collections'] = {a: 0 for a in collectionsIdList}
                             context['collections']['All'] = source_metadata['total']
