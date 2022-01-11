@@ -405,7 +405,6 @@ def get_project_deleters(gcp_id, user_email, st_logger, log_name):
             # IF USER IS REGISTERED
             if member['registered_user']:
                 user = User.objects.get(email=email)
-                nih_user = None
                 # FIND NIH_USER FOR USER
                 # Since we are not checking "linked" state, we may have more than one:
                 nih_users = NIH_User.objects.filter(user_id=user.id)
