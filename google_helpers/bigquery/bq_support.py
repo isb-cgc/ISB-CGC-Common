@@ -779,19 +779,17 @@ class BigQuerySupport(BigQueryABC):
                             continue
                     btw_counter = 1
                     query_params = []
-                    first_btw=True
+                    btw_filter_strings = []
                     for btws in values:
-                        if not first_btw:
-                            filter_string += " OR "
                         param_name_1 = '{}_btw_{}'.format(param_name, btw_counter)
                         btw_counter += 1
                         param_name_2 = '{}_btw_{}'.format(param_name, btw_counter)
                         btw_counter += 1
-                        filter_string += "({}{} BETWEEN @{} AND @{})".format(
+                        btw_filter_strings.append("({}{} BETWEEN @{} AND @{})".format(
                             '' if not field_prefix else field_prefix, attr_name,
                             param_name_1,
                             param_name_2
-                        )
+                        ))
                         # query_param becomes our template for each pair
                         query_param_1 = copy.deepcopy(query_param)
                         query_param_2 = copy.deepcopy(query_param)
@@ -800,9 +798,8 @@ class BigQuerySupport(BigQueryABC):
                         query_param_2['name'] = param_name_2
                         query_param_2['parameterValue']['value'] = btws[1]
                         query_params.extend([query_param_1, query_param_2,])
-                        if first_btw:
-                            first_btw = False
 
+                    filter_string += " OR ".join(btw_filter_strings)
                     query_param = query_params
                 else:
                     # Simple array param
