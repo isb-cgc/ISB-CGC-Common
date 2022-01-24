@@ -763,7 +763,8 @@ class BigQuerySupport(BigQueryABC):
                 # Occasionally attributes may come in without the appropriate _e?btwe? suffix; we account for that here
                 # by checking for the proper attr_name in the optional continuous_numerics list
                 elif is_btw or attr_name in continuous_numerics:
-                    # Check for a single array of two and if we find it, convert it to an array containing a 2-member array
+                    # Check for a single array of two and if we find it, convert it to an array containing
+                    # a 2-member array
                     if len(values) == 2 and type(values[0]) is not list:
                         values = [values]
                     else:
@@ -778,16 +779,17 @@ class BigQuerySupport(BigQueryABC):
                             continue
                     btw_counter = 1
                     query_params = []
+                    btw_filter_strings = []
                     for btws in values:
-                        param_name_1 = '{}_btw_{}'.format(param_name,btw_counter)
-                        btw_counter+=1
-                        param_name_2 = '{}_btw_{}'.format(param_name,btw_counter)
+                        param_name_1 = '{}_btw_{}'.format(param_name, btw_counter)
                         btw_counter += 1
-                        filter_string += "{}{} BETWEEN @{} AND @{}".format(
+                        param_name_2 = '{}_btw_{}'.format(param_name, btw_counter)
+                        btw_counter += 1
+                        btw_filter_strings.append("({}{} BETWEEN @{} AND @{})".format(
                             '' if not field_prefix else field_prefix, attr_name,
                             param_name_1,
                             param_name_2
-                        )
+                        ))
                         # query_param becomes our template for each pair
                         query_param_1 = copy.deepcopy(query_param)
                         query_param_2 = copy.deepcopy(query_param)
@@ -795,8 +797,9 @@ class BigQuerySupport(BigQueryABC):
                         query_param_1['parameterValue']['value'] = btws[0]
                         query_param_2['name'] = param_name_2
                         query_param_2['parameterValue']['value'] = btws[1]
-                        query_params.extend([query_param_1, query_param_2,] )
+                        query_params.extend([query_param_1, query_param_2,])
 
+                    filter_string += " OR ".join(btw_filter_strings)
                     query_param = query_params
                 else:
                     # Simple array param
