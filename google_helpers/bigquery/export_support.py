@@ -259,6 +259,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     )
                 msg += "was unsuccessful, reason: {}".format(job_is_done['status']['errors'][0]['message'])
                 logger.error("[ERROR] {}".format(msg))
+                logger.error(job_is_done['configuration']['query'])
             elif not to_temp:
                 # Check the table
                 export_table = self.bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
