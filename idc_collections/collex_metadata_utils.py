@@ -1015,13 +1015,14 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 # filters: dict filter set
 # fields: list of columns to return, string format only
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
+# static_fields: Dict of field names and values for a fixed column
 # returns: 
 #   no_submit is False: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
 #   no_submit is True: { 'sql_string': <BigQuery API v2 compatible SQL Standard SQL parameterized query>,
 #     'params': <BigQuery API v2 compatible parameter set> }
 def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, 
                     offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False,
-                    search_child_records_by=None):
+                    search_child_records_by=None, static_fields=None):
 
     if not data_version and not sources_and_attrs:
         data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
@@ -1268,6 +1269,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                 INTERSECT DISTINCT
             """.join(intersect_statements)
 
+        if static_fields:
+            fields.extend(['"{}" AS {}'.format(static_fields[x],x) for x in static_fields])
         for_union.append(query_base.format(
             field_clause= ",".join(fields),
             table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),

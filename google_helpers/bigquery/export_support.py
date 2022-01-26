@@ -64,6 +64,9 @@ FILE_LIST_EXPORT_SCHEMA = {
         }, {
             'name': 'gcs_url',
             'type': 'STRING'
+        }, {
+            'name': 'idc_version',
+            'type': 'STRING'
         }
     ]
 }
@@ -307,7 +310,6 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     ),
                     'jobId': job_id
                 }
-
         else:
             logger.warning("[WARNING] Export is taking a long time to run, informing user.")
             result = {
