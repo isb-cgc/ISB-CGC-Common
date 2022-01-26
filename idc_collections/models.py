@@ -271,6 +271,7 @@ class Collection(models.Model):
     tcia_collection_id = models.CharField(max_length=255, null=True, blank=False)
     nbia_collection_id = models.CharField(max_length=255, null=True, blank=False)
     collection_id = models.CharField(max_length=255, null=True, blank=False)
+    collection_uuid = models.CharField(max_length=255, null=True, blank=False)
     description = models.TextField(null=True, blank=False)
     date_updated = models.DateField(null=True, blank=False)
     status = models.CharField(max_length=40, null=True, blank=False)

@@ -468,10 +468,11 @@ def create_manifest_bq_table(request, cohorts):
         all_results = {}
         export_jobs = {}
 
-        table_schema = {'fields': [x for x in FILE_LIST_EXPORT_SCHEMA['fields'] if x['name'] in field_list]} \
+        table_schema = {'fields': [x for x in FILE_LIST_EXPORT_SCHEMA['fields'] if x['name'] in field_list or x['name'] == 'idc_version']} \
             if len(field_list) < len(FILE_LIST_EXPORT_SCHEMA['fields']) else None
 
         for cohort in cohorts:
+            cohort_version = "; ".join([str(x) for x in cohort.get_idc_data_version()])
             desc = None
             headers = []
             if request.GET.get('header_fields'):
@@ -479,7 +480,7 @@ def create_manifest_bq_table(request, cohorts):
                 'cohort_name' in selected_header_fields and headers.append("Manifest for cohort '{}' ID#{}".format(cohort.name, cohort.id))
                 'user_email' in selected_header_fields and headers.append("User: {}".format(request.user.email))
                 'cohort_filters' in selected_header_fields and headers.append("Filters: {}".format(cohort.get_filter_display_string()))
-            headers.append("IDC Data Version(s): {}".format("; ".join([str(x) for x in cohort.get_idc_data_version()])))
+            headers.append("IDC Data Version(s): {}".format(cohort_version))
             desc = "\n".join(headers)
 
             base_filters = cohort.get_filters_as_dict_simple()[0]
@@ -502,10 +503,11 @@ def create_manifest_bq_table(request, cohorts):
                                               settings.BIGQUERY_USER_MANIFEST_DATASET,
                                               table_name)
             }
+            static_fields = { 'idc_version': cohort_version }
             query = get_bq_metadata(
                 base_filters, field_list, cohort.get_data_versions(),
                 order_by=order_by, no_submit=True,
-                search_child_records_by=True
+                search_child_records_by=True, static_fields=static_fields
             )
             export_jobs[cohort.id]['bqs'] = BigQueryExportFileList(**{
                 'project_id': settings.BIGQUERY_USER_DATA_PROJECT_ID,
