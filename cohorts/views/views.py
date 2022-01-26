@@ -73,6 +73,17 @@ BMI_MAPPING = {
     'obese': 30
 }
 
+STATIC_EXPORT_FIELDS = [ "idc_version" ]
+
+
+def build_static_map(cohort_obj):
+    static_map = {}
+    for x in STATIC_EXPORT_FIELDS:
+        if x == 'idc_version':
+            static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version()])
+    return static_map
+
+
 debug = settings.DEBUG # RO global for this file
 
 BLACKLIST_RE = settings.BLACKLIST_RE
@@ -459,7 +470,7 @@ def create_manifest_bq_table(request, cohorts):
         field_list = json.loads(request.GET.get(
             'columns',
            '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", ' +
-            '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]'
+            '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url", "idc_version"]'
         ))
 
         # We can only ORDER BY columns which we've actually requested
@@ -467,11 +478,13 @@ def create_manifest_bq_table(request, cohorts):
 
         all_results = {}
         export_jobs = {}
+        static_fields = None
 
-        table_schema = {'fields': [x for x in FILE_LIST_EXPORT_SCHEMA['fields'] if x['name'] in field_list or x['name'] == 'idc_version']} \
+        table_schema = {'fields': [x for x in FILE_LIST_EXPORT_SCHEMA['fields'] if x['name'] in field_list]} \
             if len(field_list) < len(FILE_LIST_EXPORT_SCHEMA['fields']) else None
 
         for cohort in cohorts:
+            static_map = build_static_map(cohort)
             cohort_version = "; ".join([str(x) for x in cohort.get_idc_data_version()])
             desc = None
             headers = []
@@ -503,7 +516,12 @@ def create_manifest_bq_table(request, cohorts):
                                               settings.BIGQUERY_USER_MANIFEST_DATASET,
                                               table_name)
             }
-            static_fields = { 'idc_version': cohort_version }
+            for x in STATIC_EXPORT_FIELDS:
+                if x in field_list:
+                    static_fields = static_fields or {}
+                    static_fields[x] = static_map[x]
+                    field_list.remove(x)
+
             query = get_bq_metadata(
                 base_filters, field_list, cohort.get_data_versions(),
                 order_by=order_by, no_submit=True,

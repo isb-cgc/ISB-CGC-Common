@@ -1269,7 +1269,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                 INTERSECT DISTINCT
             """.join(intersect_statements)
 
-        fields.extend(['"{}" AS {}'.format(static_fields[x],x) for x in static_fields])
+        if static_fields:
+            fields.extend(['"{}" AS {}'.format(static_fields[x],x) for x in static_fields])
         for_union.append(query_base.format(
             field_clause= ",".join(fields),
             table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),
