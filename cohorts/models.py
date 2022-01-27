@@ -182,12 +182,15 @@ class Cohort(models.Model):
             attribute__id__in=Attribute.objects.filter(id__in=self.get_attr_list())
         ).to_dict()
 
+        ranged_numerics = Attribute.get_ranged_attrs()
+
         for fg in filter_groups:
             filters = fg.filter_set.all().get_filter_set_array()
             group_filters = {x['display_name']: [attr_dvals.get(x['id'],{}).get(y,y) for y in x['values']] for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
-                group_filters, join_with_space=True, field_prefix=prefix, encapsulated=False
+                group_filters, join_with_space=True, field_prefix=prefix, encapsulated=False,
+                continuous_numerics=ranged_numerics
             ))
 
         return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")
@@ -205,10 +208,12 @@ class Cohort(models.Model):
 
         group_filter_dict = self.get_filters_as_dict()
 
+        ranged_numerics = Attribute.get_ranged_attrs()
+
         for group in group_filter_dict:
             group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
-                group_filters, field_prefix=prefix
+                group_filters, field_prefix=prefix, continuous_numerics=ranged_numerics
             ))
 
         return " AND ".join(filter_sets)
