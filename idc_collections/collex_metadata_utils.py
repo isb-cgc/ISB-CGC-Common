@@ -197,7 +197,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     attr_by_source = {}
     attr_sets = {}
     context = {}
-    facet_aggregates = ["StudyInstanceUID","case_barcode","sample_barcode"]
+    facet_aggregates = ["StudyInstanceUID", "case_barcode", "sample_barcode"]
     collex_attr_id = Attribute.objects.get(name='collection_id').id
 
     try:
@@ -1362,7 +1362,6 @@ def _get_bq_range_case_clause(attr, table, alias, count_on, include_nulls=True):
     return case_clause
 
 
-
 def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0,
                     order_by=None, order_asc=True, search_child_records_by=None):
 
@@ -1625,6 +1624,6 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
 
-    settings.DEBUG and logger.debug("[STATUS] get_bq_metadata: {}".format(full_query_str))
+    settings.DEBUG and logger.debug("[STATUS] get_bq_string: {}".format(full_query_str))
 
     return full_query_str

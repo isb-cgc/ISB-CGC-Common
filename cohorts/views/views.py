@@ -239,7 +239,8 @@ def cohort_detail(request, cohort_id):
 
         template_values = build_explorer_context(
             is_dicofdic, source, cohort_versions, initial_filters, fields, order_docs, counts_only, with_related,
-            with_derived, collapse_on, False)
+            with_derived, collapse_on, False
+        )
 
         file_parts_count = math.ceil(cohort.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
 
@@ -253,7 +254,8 @@ def cohort_detail(request, cohort_id):
             'cohort_id': cohort_id,
             'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
             'file_parts_count': file_parts_count,
-            'display_file_parts_count': min(file_parts_count, 10)
+            'display_file_parts_count': min(file_parts_count, 10),
+            'bq_string': get_cohort_bq_string(cohort)
         })
 
         template = 'cohorts/cohort_details.html'
@@ -768,6 +770,29 @@ def download_cohort_manifest(request, cohort_id=0):
     return redirect('cohort_list')
 
 
+def get_cohort_bq_string(cohort):
+    field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID"]
+
+    base_filters = cohort.get_filters_as_dict_simple()[0]
+    if 'bmi' in base_filters:
+        vals = base_filters['bmi']
+        del base_filters['bmi']
+        for val in vals:
+            if val not in ('None','obese'):
+                if 'bmi_btw' not in base_filters:
+                    base_filters['bmi_btw'] = []
+                base_filters['bmi_btw'].append(BMI_MAPPING[val])
+            elif val == 'obese':
+                base_filters['bmi_gt'] = BMI_MAPPING[val]
+            else:
+                base_filters['bmi'] = 'None'
+
+    return get_bq_string(
+        base_filters, field_list, cohort.get_data_versions(),
+        order_by=field_list, search_child_records_by=True
+    )
+
+
 @login_required
 def get_query_string(request, cohort_id=0):
     response = {
@@ -788,26 +813,7 @@ def get_query_string(request, cohort_id=0):
                 'message': "You do not have permission to view that cohort's string."
             })
 
-        field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID"]
-
-        base_filters = cohort.get_filters_as_dict_simple()[0]
-        if 'bmi' in base_filters:
-            vals = base_filters['bmi']
-            del base_filters['bmi']
-            for val in vals:
-                if val not in ('None','obese'):
-                    if 'bmi_btw' not in base_filters:
-                        base_filters['bmi_btw'] = []
-                    base_filters['bmi_btw'].append(BMI_MAPPING[val])
-                elif val == 'obese':
-                    base_filters['bmi_gt'] = BMI_MAPPING[val]
-                else:
-                    base_filters['bmi'] = 'None'
-
-        query = get_bq_string(
-            base_filters, field_list, cohort.get_data_versions(),
-            order_by=field_list, search_child_records_by=True
-        )
+        query = get_cohort_bq_string(cohort)
 
         response['data'] = {'query_string': query, 'cohort': cohort.id}
         response['msg'] = "Cohort Query string enclosed."
