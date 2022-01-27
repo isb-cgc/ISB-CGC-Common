@@ -856,7 +856,8 @@ class BigQuerySupport(BigQueryABC):
     #
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_where_clause(filters, join_with_space=False, comb_with='AND', field_prefix=None, type_schema=None, encapsulated=True):
+    def build_bq_where_clause(filters, join_with_space=False, comb_with='AND', field_prefix=None,
+                              type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True):
         join_str = ","
         if join_with_space:
             join_str = ", "
@@ -869,6 +870,7 @@ class BigQuerySupport(BigQueryABC):
         filter_set = []
         mutation_filters = {}
         other_filters = {}
+        continuous_numerics = continuous_numerics or []
 
         # Split mutation filters into their own set, because of repeat use of the same attrs
         for attr in filters:
@@ -888,7 +890,7 @@ class BigQuerySupport(BigQueryABC):
             filter_string = '{}Hugo_Symbol = {} AND '.format('' if not field_prefix else field_prefix, gene)
 
             if filter_type == 'category' and values[0].lower() == 'any':
-                filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix,)
+                filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix)
             else:
                 if filter_type == 'category':
                     values = MOLECULAR_CATEGORIES[values[0]]['attrs']
@@ -904,16 +906,28 @@ class BigQuerySupport(BigQueryABC):
 
         # Standard query filters
         for attr, values in list(other_filters.items()):
+            is_btw = re.search('_e?btwe?', attr.lower()) is not None
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+
+            # We require our attributes to be value lists
             if type(values) is not list:
                 values = [values]
-
-            parameter_type = None
-            if type_schema and attr in type_schema and type_schema[attr]:
-                parameter_type = ('NUMERIC' if type_schema[attr] == 'INTEGER' else 'STRING')
+            # However, *only* ranged numerics can be a list of lists; all others must be a single list
             else:
+                if type(values[0]) is list and not is_btw and attr not in continuous_numerics:
+                    values = [y for x in values for y in x]
+
+            if (type_schema and type_schema.get(attr, None)):
+                parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
+            elif FIXED_TYPES.get(attr, None):
+                parameter_type = FIXED_TYPES.get(attr)
+            else:
+                # If the values are arrays we assume the first value in the first array is indicative of all
+                # other values (since we don't support multi-typed fields)
+                type_check = values[0] if type(values[0]) is not list else values[0][0]
                 parameter_type = (
                     'STRING' if (
-                        type(values[0]) is not int and re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0])
+                            type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
                     ) else 'NUMERIC'
                 )
 
@@ -926,14 +940,15 @@ class BigQuerySupport(BigQueryABC):
             if len(values) > 0:
                 if len(filter_string):
                     filter_string += " OR "
-                if len(values) == 1:
+                if len(values) == 1 and not is_btw:
                     # Scalar param
                     if parameter_type == 'STRING':
-                        if '%' in values[0]:
-                            filter_string += "LOWER({}{}) LIKE LOWER('{}')".format('' if not field_prefix else field_prefix, attr, values[0])
+                        if '%' in values[0] or case_insens:
+                            filter_string += "LOWER({}{}) LIKE LOWER('{}')".format(
+                                '' if not field_prefix else field_prefix, attr, values[0])
                         else:
-                            filter_string += "{}{} = '{}'".format('' if not field_prefix else field_prefix, attr,
-                                                                 values[0])
+                            filter_string += "{}{} = '{}'".format(
+                                '' if not field_prefix else field_prefix, attr, values[0])
                     elif parameter_type == 'NUMERIC':
                         if attr.endswith('_gt') or attr.endswith('_gte'):
                             filter_string += "{}{} >{} {}".format(
@@ -952,14 +967,35 @@ class BigQuerySupport(BigQueryABC):
                                 '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
                                 values[0]
                             )
-                elif len(values) == 2 and attr.endswith('_btw'):
-                    filter_string += "{}{} BETWEEN {} AND {}".format(
-                        '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                        values[0],
-                        values[1]
-                    )
+                # Occasionally attributes may come in without the appropriate _e?btwe? suffix; we account for that here
+                # by checking for the proper attr_name in the optional continuous_numerics list
+                elif is_btw or attr_name in continuous_numerics:
+                    # Check for a single array of two and if we find it, convert it to an array containing
+                    # a 2-member array
+                    if len(values) == 2 and type(values[0]) is not list:
+                        values = [values]
+                    else:
+                        # confirm an array of arrays all contain paired values
+                        all_pairs = True
+                        for x in values:
+                            if len(x) != 2:
+                                all_pairs = False
+                        if not all_pairs:
+                            logger.error("[ERROR] While parsing attribute {}, calculated to be a numeric range filter, found an unparseable value:")
+                            logger.error("[ERROR] {}".format(values))
+                            continue
+                    btw_filter_strings = []
+                    for btws in values:
+                        btw_filter_strings.append("{}{} BETWEEN {} AND {}".format(
+                            '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                            btws[0],
+                            btws[1]
+                        ))
+                    filter_string += " OR ".join(btw_filter_strings)
                 else:
-                    val_list = join_str.join(["'{}'".format(x) for x in values]) if parameter_type == "STRING" else join_str.join(values)
+                    val_list = join_str.join(
+                        ["'{}'".format(x) for x in values]
+                    ) if parameter_type == "STRING" else join_str.join(values)
                     filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr, val_list)
 
             filter_set.append('{}{}{}'.format("(" if encapsulated else "", filter_string, ")" if encapsulated else ""))

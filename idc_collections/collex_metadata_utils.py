@@ -197,7 +197,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     attr_by_source = {}
     attr_sets = {}
     context = {}
-    facet_aggregates = ["StudyInstanceUID","case_barcode","sample_barcode"]
+    facet_aggregates = ["StudyInstanceUID", "case_barcode", "sample_barcode"]
     collex_attr_id = Attribute.objects.get(name='collection_id').id
 
     try:
@@ -1362,15 +1362,13 @@ def _get_bq_range_case_clause(attr, table, alias, count_on, include_nulls=True):
     return case_clause
 
 
-# Fetch the related metadata from BigQuery
-# filters: dict filter set
-# fields: list of columns to return, string format only
-# data_versions: QuerySet<DataVersion> of the data versions(s) to search
-# returns: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
 def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_by=None, limit=0, offset=0,
                     order_by=None, order_asc=True, search_child_records_by=None):
+
     if not data_version and not sources_and_attrs:
-        data_version = DataVersion.objects.selected_related('datasettype').filter(active=True)
+        data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
+
+    ranged_numerics = Attribute.get_ranged_attrs()
 
     if not group_by:
         group_by = fields
@@ -1382,19 +1380,48 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
 
     filter_attr_by_bq = {}
     field_attr_by_bq = {}
+    child_record_search_field = ""
 
     query_base = """
         SELECT {field_clause}
         FROM {table_clause} 
         {join_clause}
         {where_clause}
+        {intersect_clause}
         {group_clause}
         {order_clause}
         {limit_clause}
         {offset_clause}
     """
 
-    join_type=""
+    if search_child_records_by:
+        query_base = """
+            SELECT {field_clause}
+            FROM {table_clause} 
+            {join_clause}
+            WHERE {search_by} IN (
+                SELECT {search_by}
+                FROM {table_clause} 
+                {join_clause}
+                {where_clause}
+                {intersect_clause}
+                GROUP BY {search_by}    
+            )
+            {group_clause}
+            {order_clause}
+            {limit_clause}
+            {offset_clause}
+        """
+
+    intersect_base = """
+        SELECT {search_by}
+        FROM {table_clause} 
+        {join_clause}
+        {where_clause}
+        GROUP BY {search_by}  
+    """
+
+    join_type = ""
 
     join_clause_base = """
         {join_type}JOIN `{filter_table}` {filter_alias}
@@ -1402,15 +1429,15 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     """
 
     image_tables = {}
-
+    filter_clauses = {}
+    field_clauses = {}
 
     if len(data_version.filter(active=False)) <= 0:
         sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
     else:
         sources = data_version.get_data_sources(current=True, source_type=DataSource.BIGQUERY).filter().distinct()
-    # sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
-    attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
+    attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
@@ -1424,22 +1451,29 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
             if attr_set['sources'][source]['data_type'] == DataSetType.IMAGE_DATA:
                 image_tables[source] = 1
 
+    # If search_child_records_by isn't None--meaning we want all members of a study or series
+    # rather than just the instances--our query is a set of intersections to ensure we find the right
+    # series or study
+    may_need_intersect = search_child_records_by and bool(len(filters.keys()) > 1)
+
     table_info = {
         x: {
             'name': y['sources'][x]['name'],
             'alias': y['sources'][x]['name'].split(".")[-1].lower().replace("-", "_"),
-            'id': y['sources'][x]['id']
+            'id': y['sources'][x]['id'],
+            'type': y['sources'][x]['data_type'],
+            'set': y['sources'][x]['set_type'],
+            'count_col': y['sources'][x]['count_col']
         } for y in [field_attr_by_bq, filter_attr_by_bq] for x in y['sources']
     }
 
-    filter_clauses = {}
-    field_clauses = {}
-
     for bqtable in field_attr_by_bq['sources']:
         field_clauses[bqtable] = ",".join(
-            ["{}.{}".format(table_info[bqtable]['alias'], x) for x in field_attr_by_bq['sources'][bqtable]['list']])
+            ["{}.{}".format(table_info[bqtable]['alias'], x) for x in field_attr_by_bq['sources'][bqtable]['list']]
+        )
 
     for_union = []
+    intersect_statements = []
 
     if order_by:
         new_order = []
@@ -1451,6 +1485,8 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                     break
         order_by = new_order
 
+    # Failures to find grouping tables typically means the wrong version is being polled for the data sources.
+    # Make sure the right version is being used!
     if group_by:
         new_groups = []
         for grouping in group_by:
@@ -1459,7 +1495,8 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                 source_set = list(sources_and_attrs['filters']['sources'].keys())
                 source_set.extend(list(sources_and_attrs['fields']['sources'].keys()))
                 group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(
-                    id__in=set(source_set)).distinct().first()
+                    id__in=set(source_set)
+                ).distinct().first()
             else:
                 for id, source in attr_data['sources'].items():
                     if grouping in source['list']:
@@ -1474,25 +1511,60 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
         tables_in_query = []
         joins = []
         query_filters = []
+        non_related_filters = {}
         fields = [field_clauses[image_table]] if image_table in field_clauses else []
+        if search_child_records_by:
+            child_record_search_fields = [y for x, y in field_attr_by_bq['sources'][image_table]['attr_objs'].get_attr_set_types().get_child_record_searches().items() if y is not None]
+            child_record_search_field = list(set(child_record_search_fields))[0]
         if image_table in filter_attr_by_bq['sources']:
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
+            non_related_filters = filter_set
             if len(filter_set):
-                filter_clauses[image_table] = BigQuerySupport.build_bq_where_clause(
-                        filter_set, field_prefix=table_info[image_table]['alias'], type_schema=TYPE_SCHEMA)
-                query_filters.append(filter_clauses[image_table])
+                if may_need_intersect and len(filter_set.keys()) > 1:
+                    for filter in filter_set:
+                        bq_filter = BigQuerySupport.build_bq_where_clause(
+                            {filter: filter_set[filter]}, field_prefix=table_info[image_table]['alias'],
+                            case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                        )
+                        intersect_statements.append(intersect_base.format(
+                            search_by=child_record_search_field,
+                            table_clause="`{}` {}".format(
+                                table_info[image_table]['name'], table_info[image_table]['alias']
+                            ),
+                            join_clause="",
+                            where_clause="WHERE {}".format(bq_filter)
+                        ))
+                else:
+                    filter_clauses[image_table] = BigQuerySupport.build_bq_where_clause(
+                        filter_set, field_prefix=table_info[image_table]['alias'],
+                        case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                    )
+                # If we weren't running on intersected sets, append them here as simple filters
+                if filter_clauses.get(image_table, None):
+                    query_filters.append(filter_clauses[image_table])
         tables_in_query.append(image_table)
         for filter_bqtable in filter_attr_by_bq['sources']:
             if filter_bqtable not in image_tables and filter_bqtable not in tables_in_query:
-                filter_set = {x: filters[x] for x in filters if
-                              x in filter_attr_by_bq['sources'][filter_bqtable]['list']}
+                filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][filter_bqtable]['list']}
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_where_clause(
-                        filter_set, field_prefix=table_info[filter_bqtable]['alias'], type_schema=TYPE_SCHEMA)
-                    source_join = DataSourceJoin.objects.get(
-                        from_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']],
-                        to_src__in=[table_info[filter_bqtable]['id'], table_info[image_table]['id']]
+                        filter_set, field_prefix=table_info[filter_bqtable]['alias'],
+                        case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
                     )
+
+                    source_join = DataSourceJoin.objects.get(
+                        from_src__in=[table_info[filter_bqtable]['id'],table_info[image_table]['id']],
+                        to_src__in=[table_info[filter_bqtable]['id'],table_info[image_table]['id']]
+                    )
+
+                    join_type = ""
+                    if table_info[filter_bqtable]['set'] == DataSetType.RELATED_SET:
+                        join_type = "LEFT "
+                        filter_clauses[filter_bqtable] = "({} OR {}.{} IS NULL)".format(
+                            filter_clauses[filter_bqtable],
+                            table_info[filter_bqtable]['alias'],
+                            table_info[filter_bqtable]['count_col']
+                        )
 
                     joins.append(join_clause_base.format(
                         join_type=join_type,
@@ -1524,21 +1596,34 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                     filter_join_id=source_join.get_col(table_info[field_bqtable]['name'])
                 ))
 
+        intersect_clause = ""
+        if len(intersect_statements):
+            intersect_clause = """
+                INTERSECT DISTINCT
+            """.join(intersect_statements)
+
         for_union.append(query_base.format(
-            field_clause=",".join(fields),
+            field_clause= ",".join(fields),
             table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),
             join_clause=""" """.join(joins),
-            where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters)) if len(query_filters) else ""),
-            order_clause="{}".format("ORDER BY {}".format(
-                ", ".join(["{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by])) if order_by and len(
-                order_by) else ""),
+            where_clause="{}".format("WHERE {}".format(" AND ".join(query_filters) if len(query_filters) else "") if len(filters) else ""),
+            intersect_clause="{}".format("" if not len(intersect_statements) else "{}{}".format(
+                " AND " if len(non_related_filters) and len(query_filters) else "", "{} IN ({})".format(
+                    child_record_search_field, intersect_clause
+                ))),
+            order_clause="{}".format("ORDER BY {}".format(", ".join([
+                "{} {}".format(x, "ASC" if order_asc else "DESC") for x in order_by
+            ])) if order_by and len(order_by) else ""),
             group_clause="{}".format("GROUP BY {}".format(", ".join(group_by)) if group_by and len(group_by) else ""),
             limit_clause="{}".format("LIMIT {}".format(str(limit)) if limit > 0 else ""),
-            offset_clause="{}".format("OFFSET {}".format(str(offset)) if offset > 0 else "")
+            offset_clause="{}".format("OFFSET {}".format(str(offset)) if offset > 0 else ""),
+            search_by=child_record_search_field
         ))
 
     full_query_str = """
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
+
+    settings.DEBUG and logger.debug("[STATUS] get_bq_string: {}".format(full_query_str))
 
     return full_query_str
