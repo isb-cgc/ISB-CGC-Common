@@ -935,7 +935,7 @@ class BigQuerySupport(BigQueryABC):
 
             if 'None' in values:
                 values.remove('None')
-                filter_string = "{}{} IS NULL".format('' if not field_prefix else field_prefix, attr)
+                filter_string = "{}{} IS NULL".format('' if not field_prefix else field_prefix, attr_name)
 
             if len(values) > 0:
                 if len(filter_string):
@@ -945,26 +945,26 @@ class BigQuerySupport(BigQueryABC):
                     if parameter_type == 'STRING':
                         if '%' in values[0] or case_insens:
                             filter_string += "LOWER({}{}) LIKE LOWER('{}')".format(
-                                '' if not field_prefix else field_prefix, attr, values[0])
+                                '' if not field_prefix else field_prefix, attr_name, values[0])
                         else:
                             filter_string += "{}{} = '{}'".format(
-                                '' if not field_prefix else field_prefix, attr, values[0])
+                                '' if not field_prefix else field_prefix, attr_name, values[0])
                     elif parameter_type == 'NUMERIC':
                         if attr.endswith('_gt') or attr.endswith('_gte'):
                             filter_string += "{}{} >{} {}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '' if not field_prefix else field_prefix, attr_name,
                                 '=' if attr.endswith('_gte') else '',
                                 values[0]
                             )
                         elif attr.endswith('_lt') or attr.endswith('_lte'):
                             filter_string += "{}{} <{} {}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '' if not field_prefix else field_prefix, attr_name,
                                 '=' if attr.endswith('_lte') else '',
                                 values[0]
                             )
                         else:
                             filter_string += "{}{} = {}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '' if not field_prefix else field_prefix, attr_name,
                                 values[0]
                             )
                 # Occasionally attributes may come in without the appropriate _e?btwe? suffix; we account for that here
@@ -981,13 +981,13 @@ class BigQuerySupport(BigQueryABC):
                             if len(x) != 2:
                                 all_pairs = False
                         if not all_pairs:
-                            logger.error("[ERROR] While parsing attribute {}, calculated to be a numeric range filter, found an unparseable value:")
+                            logger.error("[ERROR] While parsing attribute {}, calculated to be a numeric range filter, found an unparseable value:".format(attr_name))
                             logger.error("[ERROR] {}".format(values))
                             continue
                     btw_filter_strings = []
                     for btws in values:
                         btw_filter_strings.append("{}{} BETWEEN {} AND {}".format(
-                            '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                            '' if not field_prefix else field_prefix, attr_name,
                             btws[0],
                             btws[1]
                         ))
@@ -996,7 +996,7 @@ class BigQuerySupport(BigQueryABC):
                     val_list = join_str.join(
                         ["'{}'".format(x) for x in values]
                     ) if parameter_type == "STRING" else join_str.join(values)
-                    filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr, val_list)
+                    filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr_name, val_list)
 
             filter_set.append('{}{}{}'.format("(" if encapsulated else "", filter_string, ")" if encapsulated else ""))
 
