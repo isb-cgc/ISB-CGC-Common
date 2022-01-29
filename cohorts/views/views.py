@@ -80,7 +80,10 @@ def build_static_map(cohort_obj):
     static_map = {}
     for x in STATIC_EXPORT_FIELDS:
         if x == 'idc_version':
-            static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version()])
+            # Verbose style
+            # static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version()])
+            # Numeric style
+            static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version().values_list("version_number",flat=True)])
     return static_map
 
 
@@ -771,7 +774,7 @@ def download_cohort_manifest(request, cohort_id=0):
 
 
 def get_cohort_bq_string(cohort):
-    field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID"]
+    field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"]
 
     base_filters = cohort.get_filters_as_dict_simple()[0]
     if 'bmi' in base_filters:
