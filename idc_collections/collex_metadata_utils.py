@@ -1378,8 +1378,6 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
         group_by.extend(fields)
         group_by = set(group_by)
 
-    filter_attr_by_bq = {}
-    field_attr_by_bq = {}
     child_record_search_field = ""
 
     query_base = """
