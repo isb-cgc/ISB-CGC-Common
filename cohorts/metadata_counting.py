@@ -387,7 +387,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
                 facets[set] = {}
                 if filtered_facets is not None:
                     filtered_facets[set] = {}
-                for source_result in set_result.items():
+                for source, source_result in set_result.items():
                     for facet_type, these_facets in facet_types.items():
                         if facet_type in source_result:
                             for attr, vals in source_result[facet_type].items():
