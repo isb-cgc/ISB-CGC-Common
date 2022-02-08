@@ -189,7 +189,6 @@ def program_share(request, program_id=0):
         emails = re.split('\s*,\s*', request.POST['share_users'].strip())
         users_not_found = []
         users = []
-        req_user = None
 
         try:
             req_user = User.objects.get(id=request.user.id)

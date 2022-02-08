@@ -464,8 +464,6 @@ def verify_sa(request, user_id):
 
 @login_required
 def register_sa(request, user_id):
-    st_logger = StackDriverLogger.build_from_django_settings()
-
     try:
         # This is a Service Account dataset adjustment or an initial load of the service account registration page
         if request.GET.get('sa_name') or request.GET.get('gcp_id'):
