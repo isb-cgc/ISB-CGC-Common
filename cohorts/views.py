@@ -1892,7 +1892,6 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
         user = request.user
 
         if public_program:
-            logger.debug("Entering public program block of the filter panel builder")
             # Public Program
             filters = None
 
@@ -1972,7 +1971,6 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                 template_values['cohort'] = Cohort.objects.get(id=cohort_id)
 
         else:
-            logger.warning("[WARNING] Saw user data panel load!")
             # Requesting User Data filter panel
             template = 'cohorts/user-data.html'
 
