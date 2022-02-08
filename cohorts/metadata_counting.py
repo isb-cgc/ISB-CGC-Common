@@ -365,7 +365,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
 
 # Tally counts for metadata filters of public programs
-def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, build='HG19', comb_mut_filters='OR'):
+def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None,comb_mut_filters='OR'):
 
     try:
         logger.info("[STATUS] Entering count_public_metadata")
@@ -605,8 +605,6 @@ def validate_and_count_barcodes(barcodes, user_id):
 
             program_query = validation_query.format(tmp_validation_table, program_tables.samples_table, program_tables.samples_table)
             cursor.execute(program_query, (program,))
-
-            row_eval = []
 
             for row in cursor.fetchall():
                 if row[3]:
