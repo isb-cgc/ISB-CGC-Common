@@ -2003,6 +2003,8 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
         template_values['all_nodes'] = all_nodes
         template_values['all_programs'] = all_programs
 
+        logger.debug(template_values)
+
     except Exception as e:
         logger.error("[ERROR] While building the filter panel:")
         logger.exception(e)
