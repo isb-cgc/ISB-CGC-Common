@@ -2051,68 +2051,68 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # If destination is BQ
         table = None
 
-        if export_dest == 'table':
-            dataset = request.POST.get('project-dataset', '').split(":")[1]
-            proj_id = request.POST.get('project-dataset', '').split(":")[0]
+        # if export_dest == 'table':
+        #     dataset = request.POST.get('project-dataset', '').split(":")[1]
+        #     proj_id = request.POST.get('project-dataset', '').split(":")[0]
+        #
+        #     if not len(dataset):
+        #         messages.error(request, "You must provide a Google Cloud Platform dataset to which your data can be exported.")
+        #         return redirect(redirect_url)
+        #
+        #     gcp = None
+        #     if not len(proj_id):
+        #         messages.error(request, "You must provide a Google Cloud Project to which your data can be exported.")
+        #         return redirect(redirect_url)
+        #     else:
+        #         try:
+        #             gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
+        #         except ObjectDoesNotExist as e:
+        #             messages.error(request,"A Google Cloud Project with that ID could not be located. Please be sure "
+        #                 + "to register your project first.")
+        #             return redirect(redirect_url)
+        #
+        #     bq_proj_id = gcp.project_id
+        #
+        #     if request.POST.get('table-type', '') == 'new':
+        #         table = request.POST.get('new-table-name', None)
+        #         if table:
+        #             # Check the user-provided table name against the whitelist for Google BQ table names
+        #             # truncate at max length regardless of what we received
+        #             table = request.POST.get('new-table-name', '')[0:1024]
+        #             tbl_whitelist = re.compile(r'([^A-Za-z0-9_])',re.UNICODE)
+        #             match = tbl_whitelist.search(str(table))
+        #             if match:
+        #                 messages.error(request,"There are invalid characters in your table name; only numbers, "
+        #                    + "letters, and underscores are permitted.")
+        #                 return redirect(redirect_url)
+        #         else:
+        #             table = request.POST.get('table-name', None)
+        #
+        # elif export_dest == 'gcs':
+        #     bq_proj_id = settings.GCLOUD_PROJECT_ID
+        #     file_name = request.POST.get('file-name', None)
+        #     if file_name:
+        #         file_name = request.POST.get('file-name', '')[0:1024]
+        #         file_whitelist = re.compile(r'([^A-Za-z0-9_\-\./])', re.UNICODE)
+        #         match = file_whitelist.search(str(file_name))
+        #         if match:
+        #             messages.error(request, "There are invalid characters in your file name; only numbers, letters, "
+        #                 + " periods (.), slashes, dashes, and underscores are permitted.")
+        #             return redirect(redirect_url)
 
-            if not len(dataset):
-                messages.error(request, "You must provide a Google Cloud Platform dataset to which your data can be exported.")
-                return redirect(redirect_url)
-
-            gcp = None
-            if not len(proj_id):
-                messages.error(request, "You must provide a Google Cloud Project to which your data can be exported.")
-                return redirect(redirect_url)
-            else:
-                try:
-                    gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
-                except ObjectDoesNotExist as e:
-                    messages.error(request,"A Google Cloud Project with that ID could not be located. Please be sure "
-                        + "to register your project first.")
-                    return redirect(redirect_url)
-
-            bq_proj_id = gcp.project_id
-
-            if request.POST.get('table-type', '') == 'new':
-                table = request.POST.get('new-table-name', None)
-                if table:
-                    # Check the user-provided table name against the whitelist for Google BQ table names
-                    # truncate at max length regardless of what we received
-                    table = request.POST.get('new-table-name', '')[0:1024]
-                    tbl_whitelist = re.compile(r'([^A-Za-z0-9_])',re.UNICODE)
-                    match = tbl_whitelist.search(str(table))
-                    if match:
-                        messages.error(request,"There are invalid characters in your table name; only numbers, "
-                           + "letters, and underscores are permitted.")
-                        return redirect(redirect_url)
-                else:
-                    table = request.POST.get('table-name', None)
-
-        elif export_dest == 'gcs':
-            bq_proj_id = settings.GCLOUD_PROJECT_ID
-            file_name = request.POST.get('file-name', None)
-            if file_name:
-                file_name = request.POST.get('file-name', '')[0:1024]
-                file_whitelist = re.compile(r'([^A-Za-z0-9_\-\./])', re.UNICODE)
-                match = file_whitelist.search(str(file_name))
-                if match:
-                    messages.error(request, "There are invalid characters in your file name; only numbers, letters, "
-                        + " periods (.), slashes, dashes, and underscores are permitted.")
-                    return redirect(redirect_url)
-
-        if not table:
-            table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
-            cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
-            table = "{}{}_{}_{}".format(
-                table_str_start,
-                cohort_id_str,
-                re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
-                datetime.datetime.now().strftime("%Y%m%d_%H%M")
-            )
-
-        if not file_name:
-            file_name = table
-        file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
+        # if not table:
+        #     table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
+        #     cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
+        #     table = "{}{}_{}_{}".format(
+        #         table_str_start,
+        #         cohort_id_str,
+        #         re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
+        #         datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        #     )
+        #
+        # if not file_name:
+        #     file_name = table
+        # file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
 
         build = escape(request.POST.get('build', 'HG19')).lower()
 
@@ -2126,16 +2126,16 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             case_barcode = inc_filters.get('case_barcode')
             inc_filters['case_barcode'] = ["%{}%".format(case_barcode),]
 
-        if cohort_id:
-            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-        else:
-            # for general file list without cohort, "program name can be passed in
-            if inc_filters.get('program_name'):
-                program_name_list = inc_filters.get('program_name')
-                cohort_programs = Program.objects.filter(name__in=program_name_list)
-                del inc_filters['program_name']
-            else:
-                cohort_programs = Program.objects.all()
+        # if cohort_id:
+        #     cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+        # else:
+        #     # for general file list without cohort, "program name can be passed in
+        #     if inc_filters.get('program_name'):
+        #         program_name_list = inc_filters.get('program_name')
+        #         cohort_programs = Program.objects.filter(name__in=program_name_list)
+        #         del inc_filters['program_name']
+        #     else:
+        #         cohort_programs = Program.objects.all()
 
         filter_params = None
         if len(inc_filters):
@@ -2190,43 +2190,23 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                      ORDER BY md.sample_barcode
                 """
 
-            for program in cohort_programs:
-                try:
-                    program_bq_tables = Public_Data_Tables.objects.get(program=program,build=build.upper())
-                except ObjectDoesNotExist:
-                    # No table for this combination of program and build--skip
-                    logger.info("[STATUS] No BQ table found for {}, build {}--skipping.".format(program.name, build))
-                    continue
-                except MultipleObjectsReturned:
-                    logger.info("[STATUS] Multiple BQ tables found for {}, build {}--using the first one!".format(program.name, build))
-                    program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper()).first()
+            cohort_id_str = cohort_id if cohort_id else 0
+            query_string = query_string_base.format(
+                metadata_table=settings.BQ_FILE_MANIFEST_TABLE_ID[build.upper()],
+                deployment_project=settings.BIGQUERY_PROJECT_ID,
+                deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
+                deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
+                filter_conditions=filter_conditions,
+                cohort_id=cohort_id_str,
+                date_added=date_added,
+                build=build,
+                tz=settings.TIME_ZONE
+            )
 
-                metadata_table = "{}.{}.{}".format(
-                    settings.BIGQUERY_DATA_PROJECT_ID, program_bq_tables.bq_dataset,
-                    program_bq_tables.data_table.lower(),
-                )
 
-                cohort_id_str = cohort_id if cohort_id else 0
-                union_queries.append(
-                    query_string_base.format(
-                        metadata_table=metadata_table,
-                        deployment_project=settings.BIGQUERY_PROJECT_ID,
-                        deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
-                        deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
-                        filter_conditions=filter_conditions,
-                        cohort_id=cohort_id_str,
-                        date_added=date_added,
-                        build=build,
-                        tz=settings.TIME_ZONE
-                    )
-                )
-
-            if len(union_queries) > 1:
-                query_string = ") UNION ALL (".join(union_queries)
-                query_string = '(' + query_string + ')'
-            else:
-                query_string = union_queries[0]
             query_string = '#standardSQL\n'+query_string
+            print(query_string)
+
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
@@ -2241,45 +2221,68 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # Exporting Cohort Records
         elif export_type == 'cohort':
             query_string_base = """
-                SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
+                SELECT DISTINCT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
-                {biospec_clause}
-                JOIN `{metadata_project}.{metadata_dataset}.{clin_table}` clin
+                JOIN `{program_bioclin_table}` clin
                 ON clin.case_barcode = cs.case_barcode
                 WHERE cs.cohort_id = {cohort_id} {filter_conditions}
             """
+            # query_string_base = """
+            #     SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
+            #       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
+            #     FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
+            #     {biospec_clause}
+            #     JOIN `{metadata_project}.{metadata_dataset}.{clin_table}` clin
+            #     ON clin.case_barcode = cs.case_barcode
+            #     WHERE cs.cohort_id = {cohort_id} {filter_conditions}
+            # """
+            #
+            # biospec_clause_base = """
+            #     JOIN `{metadata_project}.{metadata_dataset}.{biospec_table}` bios
+            #     ON bios.sample_barcode = cs.sample_barcode
+            # """
 
-            biospec_clause_base = """
-                JOIN `{metadata_project}.{metadata_dataset}.{biospec_table}` bios
-                ON bios.sample_barcode = cs.sample_barcode
-            """
+            if cohort_id:
+                cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+            else:
+                # for general file list without cohort, "program name can be passed in
+                if inc_filters.get('program_name'):
+                    program_name_list = inc_filters.get('program_name')
+                    cohort_programs = Program.objects.filter(name__in=program_name_list)
+                    del inc_filters['program_name']
+                else:
+                    # cohort_programs = Program.objects.all()
+                    cohort_programs = Program.objects.filter(active=True, is_public=True)
 
             for program in cohort_programs:
+                print(program.name)
 
-                program_bq_tables = Public_Metadata_Tables.objects.filter(program=program)[0]
 
-                biospec_clause = ""
-                if program_bq_tables.biospec_bq_table:
-                    biospec_clause = biospec_clause_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
-                        metadata_dataset=program_bq_tables.bq_dataset,
-                        biospec_table=program_bq_tables.biospec_bq_table
-                    )
+                # program_bq_tables = Public_Metadata_Tables.objects.filter(program=program)[0]
+
+                # biospec_clause = ""
+                # if program_bq_tables.biospec_bq_table:
+                #     biospec_clause = biospec_clause_base.format(
+                #         metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
+                #         metadata_dataset=program_bq_tables.bq_dataset,
+                #         biospec_table=program_bq_tables.biospec_bq_table
+                #     )
 
                 union_queries.append(
                     query_string_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
-                        metadata_dataset=program_bq_tables.bq_dataset,
-                        clin_table=program_bq_tables.clin_bq_table,
+                        program_bioclin_table=settings.BQ_PROG_BIOCLIN_TABLE_ID[program.name],
+                        # metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
+                        # metadata_dataset=program_bq_tables.bq_dataset,
+                        # clin_table=program_bq_tables.clin_bq_table,
                         deployment_project=settings.BIGQUERY_PROJECT_ID,
                         deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
                         date_added=date_added,
-                        tz=settings.TIME_ZONE,
-                        biospec_clause=biospec_clause
+                        tz=settings.TIME_ZONE
+                        # biospec_clause=biospec_clause
                     )
                 )
 
@@ -2289,6 +2292,8 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             else:
                 query_string = union_queries[0]
             query_string = '#standardSQL\n' + query_string
+
+            print(query_string)
 
             # Export the data
             if export_dest == 'table':
