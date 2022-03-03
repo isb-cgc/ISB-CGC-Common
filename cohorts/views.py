@@ -2124,17 +2124,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             case_barcode = inc_filters.get('case_barcode')
             inc_filters['case_barcode'] = ["%{}%".format(case_barcode),]
 
-        # if cohort_id:
-        #     cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-        # else:
-        #     # for general file list without cohort, "program name can be passed in
-        #     if inc_filters.get('program_name'):
-        #         program_name_list = inc_filters.get('program_name')
-        #         cohort_programs = Program.objects.filter(name__in=program_name_list)
-        #         del inc_filters['program_name']
-        #     else:
-        #         cohort_programs = Program.objects.all()
-
         filter_params = None
         if len(inc_filters):
             filter_and_params = BigQuerySupport.build_bq_filter_and_params(inc_filters, field_prefix='md.' if export_type == 'file_manifest' else None)
@@ -2201,9 +2190,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 tz=settings.TIME_ZONE
             )
 
-
             query_string = '#standardSQL\n'+query_string
-
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
@@ -2259,8 +2246,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             else:
                 query_string = union_queries[0]
             query_string = '#standardSQL\n' + query_string
-
-            print(query_string)
 
             # Export the data
             if export_dest == 'table':
