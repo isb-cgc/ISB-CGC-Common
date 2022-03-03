@@ -2049,68 +2049,68 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # If destination is BQ
         table = None
 
-        # if export_dest == 'table':
-        #     dataset = request.POST.get('project-dataset', '').split(":")[1]
-        #     proj_id = request.POST.get('project-dataset', '').split(":")[0]
-        #
-        #     if not len(dataset):
-        #         messages.error(request, "You must provide a Google Cloud Platform dataset to which your data can be exported.")
-        #         return redirect(redirect_url)
-        #
-        #     gcp = None
-        #     if not len(proj_id):
-        #         messages.error(request, "You must provide a Google Cloud Project to which your data can be exported.")
-        #         return redirect(redirect_url)
-        #     else:
-        #         try:
-        #             gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
-        #         except ObjectDoesNotExist as e:
-        #             messages.error(request,"A Google Cloud Project with that ID could not be located. Please be sure "
-        #                 + "to register your project first.")
-        #             return redirect(redirect_url)
-        #
-        #     bq_proj_id = gcp.project_id
-        #
-        #     if request.POST.get('table-type', '') == 'new':
-        #         table = request.POST.get('new-table-name', None)
-        #         if table:
-        #             # Check the user-provided table name against the whitelist for Google BQ table names
-        #             # truncate at max length regardless of what we received
-        #             table = request.POST.get('new-table-name', '')[0:1024]
-        #             tbl_whitelist = re.compile(r'([^A-Za-z0-9_])',re.UNICODE)
-        #             match = tbl_whitelist.search(str(table))
-        #             if match:
-        #                 messages.error(request,"There are invalid characters in your table name; only numbers, "
-        #                    + "letters, and underscores are permitted.")
-        #                 return redirect(redirect_url)
-        #         else:
-        #             table = request.POST.get('table-name', None)
-        #
-        # elif export_dest == 'gcs':
-        #     bq_proj_id = settings.GCLOUD_PROJECT_ID
-        #     file_name = request.POST.get('file-name', None)
-        #     if file_name:
-        #         file_name = request.POST.get('file-name', '')[0:1024]
-        #         file_whitelist = re.compile(r'([^A-Za-z0-9_\-\./])', re.UNICODE)
-        #         match = file_whitelist.search(str(file_name))
-        #         if match:
-        #             messages.error(request, "There are invalid characters in your file name; only numbers, letters, "
-        #                 + " periods (.), slashes, dashes, and underscores are permitted.")
-        #             return redirect(redirect_url)
+        if export_dest == 'table':
+            dataset = request.POST.get('project-dataset', '').split(":")[1]
+            proj_id = request.POST.get('project-dataset', '').split(":")[0]
 
-        # if not table:
-        #     table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
-        #     cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
-        #     table = "{}{}_{}_{}".format(
-        #         table_str_start,
-        #         cohort_id_str,
-        #         re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
-        #         datetime.datetime.now().strftime("%Y%m%d_%H%M")
-        #     )
-        #
-        # if not file_name:
-        #     file_name = table
-        # file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
+            if not len(dataset):
+                messages.error(request, "You must provide a Google Cloud Platform dataset to which your data can be exported.")
+                return redirect(redirect_url)
+
+            gcp = None
+            if not len(proj_id):
+                messages.error(request, "You must provide a Google Cloud Project to which your data can be exported.")
+                return redirect(redirect_url)
+            else:
+                try:
+                    gcp = GoogleProject.objects.get(project_id=proj_id, active=1)
+                except ObjectDoesNotExist as e:
+                    messages.error(request,"A Google Cloud Project with that ID could not be located. Please be sure "
+                        + "to register your project first.")
+                    return redirect(redirect_url)
+
+            bq_proj_id = gcp.project_id
+
+            if request.POST.get('table-type', '') == 'new':
+                table = request.POST.get('new-table-name', None)
+                if table:
+                    # Check the user-provided table name against the whitelist for Google BQ table names
+                    # truncate at max length regardless of what we received
+                    table = request.POST.get('new-table-name', '')[0:1024]
+                    tbl_whitelist = re.compile(r'([^A-Za-z0-9_])',re.UNICODE)
+                    match = tbl_whitelist.search(str(table))
+                    if match:
+                        messages.error(request,"There are invalid characters in your table name; only numbers, "
+                           + "letters, and underscores are permitted.")
+                        return redirect(redirect_url)
+                else:
+                    table = request.POST.get('table-name', None)
+
+        elif export_dest == 'gcs':
+            bq_proj_id = settings.GCLOUD_PROJECT_ID
+            file_name = request.POST.get('file-name', None)
+            if file_name:
+                file_name = request.POST.get('file-name', '')[0:1024]
+                file_whitelist = re.compile(r'([^A-Za-z0-9_\-\./])', re.UNICODE)
+                match = file_whitelist.search(str(file_name))
+                if match:
+                    messages.error(request, "There are invalid characters in your file name; only numbers, letters, "
+                        + " periods (.), slashes, dashes, and underscores are permitted.")
+                    return redirect(redirect_url)
+
+        if not table:
+            table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
+            cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
+            table = "{}{}_{}_{}".format(
+                table_str_start,
+                cohort_id_str,
+                re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
+                datetime.datetime.now().strftime("%Y%m%d_%H%M")
+            )
+
+        if not file_name:
+            file_name = table
+        file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
 
         build = escape(request.POST.get('build', 'HG19')).lower()
 
@@ -2203,7 +2203,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
 
 
             query_string = '#standardSQL\n'+query_string
-            print(query_string)
 
 
             if export_dest == 'table':
@@ -2226,20 +2225,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 ON clin.case_barcode = cs.case_barcode
                 WHERE cs.cohort_id = {cohort_id} {filter_conditions}
             """
-            # query_string_base = """
-            #     SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
-            #       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
-            #     FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
-            #     {biospec_clause}
-            #     JOIN `{metadata_project}.{metadata_dataset}.{clin_table}` clin
-            #     ON clin.case_barcode = cs.case_barcode
-            #     WHERE cs.cohort_id = {cohort_id} {filter_conditions}
-            # """
-            #
-            # biospec_clause_base = """
-            #     JOIN `{metadata_project}.{metadata_dataset}.{biospec_table}` bios
-            #     ON bios.sample_barcode = cs.sample_barcode
-            # """
 
             if cohort_id:
                 cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
@@ -2254,25 +2239,10 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                     cohort_programs = Program.objects.filter(active=True, is_public=True)
 
             for program in cohort_programs:
-                print(program.name)
-
-
-                # program_bq_tables = Public_Metadata_Tables.objects.filter(program=program)[0]
-
-                # biospec_clause = ""
-                # if program_bq_tables.biospec_bq_table:
-                #     biospec_clause = biospec_clause_base.format(
-                #         metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
-                #         metadata_dataset=program_bq_tables.bq_dataset,
-                #         biospec_table=program_bq_tables.biospec_bq_table
-                #     )
 
                 union_queries.append(
                     query_string_base.format(
                         program_bioclin_table=settings.BQ_PROG_BIOCLIN_TABLE_ID[program.name],
-                        # metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
-                        # metadata_dataset=program_bq_tables.bq_dataset,
-                        # clin_table=program_bq_tables.clin_bq_table,
                         deployment_project=settings.BIGQUERY_PROJECT_ID,
                         deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
@@ -2280,7 +2250,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                         cohort_id=cohort_id,
                         date_added=date_added,
                         tz=settings.TIME_ZONE
-                        # biospec_clause=biospec_clause
                     )
                 )
 

@@ -226,17 +226,13 @@ class Cohort(models.Model):
             prog_filters = filters[prog]
             for filter in prog_filters:
                 for value in prog_filters[filter]['values']:
-                    filter_item = {
+                    current_filters[prog].append({
                         'name': str(filter),
                         'value': str(value),
                         'program': prog,
+                        'program_obj': prog_filters[filter]['program_obj'] if not unformatted else None,
                         'program_id': prog_filters[filter]['program_id']
-                    }
-                    if not unformatted:
-                        filter_item['program_obj'] = prog_filters[filter]['program_obj'],
-                    current_filters[prog].append(
-                        filter_item
-                    )
+                    })
 
             if not unformatted:
                 Cohort.format_filters_for_display(current_filters[prog])
