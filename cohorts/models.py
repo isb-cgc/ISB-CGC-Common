@@ -230,7 +230,7 @@ class Cohort(models.Model):
                         'name': str(filter),
                         'value': str(value),
                         'program': prog,
-                        'program_obj': prog_filters[filter]['program_obj'],
+                        'program_obj': prog_filters[filter]['program_obj'] if not unformatted else None,
                         'program_id': prog_filters[filter]['program_id']
                     })
 
