@@ -67,6 +67,9 @@ FILE_LIST_EXPORT_SCHEMA = {
         }, {
             'name': 'idc_version',
             'type': 'STRING'
+        }, {
+            'name': 'access',
+            'type': 'STRING'
         }
     ]
 }
