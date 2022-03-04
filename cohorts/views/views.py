@@ -472,8 +472,8 @@ def create_manifest_bq_table(request, cohorts):
                     "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
         field_list = json.loads(request.GET.get(
             'columns',
-           '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", ' +
-            '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url", "idc_version"]'
+            '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", ' +
+            '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "access", "gcs_url", "idc_version"]'
         ))
 
         # We can only ORDER BY columns which we've actually requested
