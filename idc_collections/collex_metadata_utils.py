@@ -411,6 +411,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         prog_attr_id = Attribute.objects.get(name='program_name').id
 
         programSet = {}
+        collexDisplayVals = Attribute_Display_Values.objects.select_related("attribute").filter(
+            attribute__id=collex_attr_id).to_dict()[collex_attr_id]
         for collection in collectionSet:
             name = collection.program.short_name if collection.program else collection.name
             if name not in programSet:
@@ -422,7 +424,10 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 }
             if collection.collection_id in context['collections']:
                 name = collection.program.short_name if collection.program else collection.name
-                programSet[name]['projects'][collection.collection_id] = {'val':context['collections'][collection.collection_id]['count'], 'display':collection.tcia_collection_id }
+                programSet[name]['projects'][collection.collection_id] = {
+                    'val': context['collections'][collection.collection_id]['count'],
+                    'display': collexDisplayVals[collection.collection_id]
+                }
                 if 'access' in context['collections'][collection.collection_id]:
                     programSet[name]['projects'][collection.collection_id]['access'] = context['collections'][collection.collection_id]['access']
                 programSet[name]['val'] += context['collections'][collection.collection_id]['count']
