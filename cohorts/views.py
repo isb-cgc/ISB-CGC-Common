@@ -2246,7 +2246,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             else:
                 query_string = union_queries[0]
             query_string = '#standardSQL\n' + query_string
-            print(query_string)
+            
             # Export the data
             if export_dest == 'table':
                 bcs = BigQueryExportCohort(bq_proj_id, dataset, table, user_project=True)
