@@ -230,7 +230,7 @@ class Cohort(models.Model):
                         'name': str(filter),
                         'value': str(value),
                         'program': prog,
-                        'program_obj': prog_filters[filter]['program_obj'],
+                        'program_obj': prog_filters[filter]['program_obj'] if not unformatted else None,
                         'program_id': prog_filters[filter]['program_id']
                     })
 
@@ -395,7 +395,7 @@ class Cohort(models.Model):
                     else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) \
                     + ']' \
                     + (")" if 'NOT:' in cohort_filter['name'] else '')
-            elif cohort_filter['name'] == 'data_type':
+            elif cohort_filter['name'] == 'data_type_availability':
                 cohort_filter['displ_name'] = 'Data Type'
                 cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
             else:
@@ -419,6 +419,8 @@ class Samples(models.Model):
     case_barcode = models.CharField(max_length=45, null=True, blank=False, default=None)
     project = models.ForeignKey(Project, null=True, blank=True, on_delete=models.CASCADE)
 
+    def __str__(self):
+        return "Project {} : Case {} : Sample {}".format(self.project,self.case_barcode,self.sample_barcode)
 
 class Source(models.Model):
     FILTERS = 'FILTERS'

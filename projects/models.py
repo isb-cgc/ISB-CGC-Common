@@ -52,26 +52,33 @@ class Program(models.Model):
 
         return last_view
 
-    def get_data_sources(self, data_type=None, source_type=None):
+    def get_data_sources(self, data_type=None, source_type=None, active=True):
+        q_objects = Q()
+        if active is not None:
+            q_objects &= Q(version__active=active)
         if data_type:
-            return self.datasource_set.select_related('version').filter(
-                version__in=self.dataversion_set.filter(active=True, data_type=data_type)
-            ) if not source_type else self.datasource_set.select_related('version').filter(
-                version__in=self.dataversion_set.filter(active=True, data_type=data_type)
-            ).filter(source_type=source_type)
-        return self.datasource_set.select_related('version') if not source_type else self.datasource_set.select_related('version').filter(source_type=source_type)
+            if type(data_type) is list:
+                q_objects &= Q(version__data_type__in=data_type)
+            else:
+                q_objects &= Q(version__data_type=data_type)
+        if source_type:
+            q_objects &= Q(source_type=source_type)
+
+        return self.datasource_set.prefetch_related('version').filter(q_objects)
 
     def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
         prog_attrs = {'attrs': {}, 'by_src': {}}
-        if data_type_list:
-            datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list[0])
-            for data_type in data_type_list[1:]:
-                datasources |= self.get_data_sources(source_type=source_type, data_type=data_type)
-        else:
-            datasources = self.get_data_sources(source_type=source_type)
+        datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list)
         attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
         for attr in attrs['attrs']:
-            prog_attrs['attrs'][attr.name] = {'name': attr.name, 'displ_name': attr.display_name, 'values': {}, 'type': attr.data_type, 'preformatted': bool(attr.preformatted_values)}
+            prog_attrs['attrs'][attr.name] = {
+                'id': attr.id,
+                'name': attr.name,
+                'displ_name': attr.display_name,
+                'values': {},
+                'type': attr.data_type,
+                'preformatted': bool(attr.preformatted_values)
+            }
 
         for src in attrs['sources']:
             prog_attrs['by_src'][src] = {
@@ -143,6 +150,7 @@ class DataVersion(models.Model):
     CLINICAL_DATA = 'C'
     BIOSPECIMEN_DATA = 'B'
     MUTATION_DATA = 'M'
+    PROTEIN_DATA = 'P'
     TYPE_AVAILABILITY_DATA = 'D'
     DATA_TYPES = (
         (FILE_DATA, 'File Data'),
@@ -150,20 +158,39 @@ class DataVersion(models.Model):
         (CLINICAL_DATA, 'Clinical Data'),
         (BIOSPECIMEN_DATA, 'Biospecimen Data'),
         (MUTATION_DATA, 'Mutation Data'),
+        (PROTEIN_DATA, 'Protein Data'),
         (TYPE_AVAILABILITY_DATA, 'File Data Availability')
     )
+    DATA_TYPE_DICT = {
+        FILE_DATA: 'File Data',
+        IMAGE_DATA: 'Image Data',
+        CLINICAL_DATA: 'Clinical Data',
+        BIOSPECIMEN_DATA: 'Biospecimen Data',
+        MUTATION_DATA: 'Mutation Data',
+        PROTEIN_DATA: 'Protein Data',
+        TYPE_AVAILABILITY_DATA: 'File Data Availability'
+    }
     SET_TYPES = {
         CLINICAL_DATA: 'case_data',
         BIOSPECIMEN_DATA: 'case_data',
         TYPE_AVAILABILITY_DATA: 'data_type_data',
-        MUTATION_DATA: 'molecular_data'
+        MUTATION_DATA: 'molecular_data',
+        PROTEIN_DATA: 'protein_data'
     }
     version = models.CharField(max_length=16, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
     name = models.CharField(max_length=128, null=False, blank=False)
     active = models.BooleanField(default=True)
+    build = models.CharField(max_length=16, null=True, blank=False)
     programs = models.ManyToManyField(Program)
 
+    def __str__(self):
+        return "{}: {} {} ({})".format(
+            self.name,
+            DataVersion.DATA_TYPE_DICT[self.data_type],
+            self.version,
+            "Active" if self.active else "Inactive"
+        )
 
 class DataSourceQuerySet(models.QuerySet):
     def to_dicts(self):
@@ -193,21 +220,24 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #  }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, all=False):
         attrs = { 'list': None, 'attrs': None, 'ids': None }
         if by_source:
             attrs['sources'] = {}
 
         for ds in self.select_related('version').all():
-            q_objects = Q(active=True)
-            if for_ui:
-                q_objects &= Q(default_ui_display=for_ui)
-            if named_set:
-                q_objects &= Q(name__in=named_set)
-            if for_faceting:
-                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
-                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
-                    ).values_list('attribute__id', flat=True)))
+            if all:
+                q_objects = Q()
+            else:
+                q_objects = Q(active=True)
+                if for_ui:
+                    q_objects &= Q(default_ui_display=for_ui)
+                if named_set:
+                    q_objects &= Q(name__in=named_set)
+                if for_faceting:
+                    q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
+                            attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                        ).values_list('attribute__id', flat=True)))
 
             attr_set = ds.attribute_set.filter(q_objects)
 
@@ -225,9 +255,9 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
                         attrs['ids'] | attr_set.values_list('id', flat=True))
 
-        attrs['list'] = attrs['list'].distinct()
-        attrs['attrs'] = attrs['attrs'].distinct()
-        attrs['ids'] = attrs['ids'].distinct()
+        attrs['list'] = attrs['list'].distinct() if attrs['list'] else None
+        attrs['attrs'] = attrs['attrs'].distinct() if attrs['attrs'] else None
+        attrs['ids'] = attrs['ids'].distinct() if attrs['ids'] else None
 
         return attrs
 
@@ -264,26 +294,31 @@ class DataSource(models.Model):
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     programs = models.ManyToManyField(Program)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="PatientID")
+    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     objects = DataSourceManager()
 
     def get_set_type(self):
         return DataVersion.SET_TYPES[self.version.data_type]
 
-    def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None):
-        q_objects = Q(active=True)
+    def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None, active=True, all=False):
+        if all:
+            attr_set = self.attribute_set.filter()
+        else:
+            q_objects = Q()
 
-        if for_ui:
-            q_objects &= Q(default_ui_display=True)
-        if named_set:
-            q_objects &= Q(name__in=named_set)
-        if for_faceting:
-            q_objects &= (Q(id__in=Attribute_Ranges.objects.filter(
-                attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC, active=True)
-            ).values_list('attribute', flat=True)) | Q(data_type=Attribute.CATEGORICAL))
+            if for_ui:
+                q_objects &= Q(default_ui_display=True)
+            if named_set:
+                q_objects &= Q(name__in=named_set)
+            if active is not None:
+                q_objects &= Q(active=active)
+            if for_faceting:
+                q_objects &= (Q(id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute', flat=True)) | Q(data_type=Attribute.CATEGORICAL))
 
-        attr_set = self.attribute_set.filter(q_objects)
+            attr_set = self.attribute_set.filter(q_objects)
 
         return attr_set
 
@@ -362,6 +397,87 @@ class DataNode(models.Model):
     def __str__(self):
         return "{} - {}".format(self.short_name, self.name)
 
+    @classmethod
+    def get_node_programs(cls, is_authenticated=False):
+        by_node_list = []
+        by_prog_list = []
+        by_prog_dict = {}
+        nodes = cls.objects.filter(active=True)
+
+        for node in nodes:
+            programs = nodes.filter(id=node.id).prefetch_related(
+                'data_sources', 'data_sources__programs', 'data_sources__version'
+             ).filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True,
+                      data_sources__version__data_type__in=[DataVersion.CLINICAL_DATA]).values(
+                'data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description'
+            ).distinct()
+
+            if len(programs):
+                program_list = []
+                for prog in programs:
+                    prog_id = prog["data_sources__programs__id"]
+                    prog_name = prog["data_sources__programs__name"]
+                    prog_desc = prog["data_sources__programs__description"]
+
+                    prog_item = {
+                        "id": prog_id,
+                        "name": prog_name,
+                        "description": prog_desc}
+
+                    if not by_prog_dict.get(prog_id):
+                        by_prog_dict[prog_id] = prog_item.copy()
+                        by_prog_dict[prog_id]["nodes"] = []
+
+                    by_prog_dict[prog_id]["nodes"].append({
+                        "id": node.id,
+                        "name": node.name,
+                        "description": node.description,
+                        "short_name": node.short_name
+                    })
+
+                    program_list.append(prog_item)
+
+                by_node_list.append({
+                    "id": node.id,
+                    "name": node.name,
+                    "description": node.description,
+                    "short_name": node.short_name,
+                    "programs": program_list
+                })
+
+        for prog_id, prog_info in by_prog_dict.items():
+            by_prog_list.append({
+                "id": prog_id,
+                "name": prog_info["name"],
+                "description": prog_info["description"],
+                "nodes": prog_info["nodes"]
+            })
+
+        if is_authenticated:
+            by_node_list.append({
+                "id": 0,
+                "name": "User",
+                "description": "User",
+                "short_name": "User",
+                "programs": [{
+                    "id": 0,
+                    "name": "User Data",
+                    "description": "User Data"
+                    }]
+            })
+            by_prog_list.append({
+                "id": 0,
+                "name": "User Data",
+                "description": "User Data",
+                "nodes": [{
+                    "id": 0,
+                    "name": "User Data",
+                    "description": "User Data",
+                    "short_name": "User"
+                    }]
+            })
+
+        return (by_node_list, by_prog_list)
 
 class Project(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -590,6 +706,8 @@ class AttributeQuerySet(models.QuerySet):
     def get_display_values(self):
         return Attribute_Display_Values.objects.select_related('attribute').filter(attribute__in=self.all())
 
+
+
 class AttributeManager(models.Manager):
     def get_queryset(self):
         return AttributeQuerySet(self.model, using=self._db)
@@ -640,11 +758,14 @@ class Attribute(models.Model):
 
         return result
 
-    def get_data_sources(self, source_type=None):
-        sources = self.data_sources.select_related('version').all().filter(version__active=True)
+    def get_data_sources(self, source_type=None, all=False):
+        q_obj = Q()
+        if not all:
+            q_obj &= Q(version__active=True)
         if source_type:
-            return sources.filter(source_type=source_type).values_list('name', flat=True)
-        return sources.values_list('name', flat=True)
+            q_obj &= Q(source_type=source_type)
+
+        return self.data_sources.prefetch_related('version').filter(q_obj).values_list('name', flat=True)
 
     def get_ranges(self):
         return self.attribute_ranges_set.all()
@@ -655,18 +776,23 @@ class Attribute(models.Model):
 
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
-    def to_dict(self):
+    def to_dict(self, index_by_id=True):
         dvals = {}
         for dv in self.all().select_related('attribute'):
-            if dv.attribute.id not in dvals:
-                dvals[dv.attribute.id] = {}
-            dvals[dv.attribute.id][dv.raw_value] = dv.display_value
+            attr_i = dv.attribute.name
+            if index_by_id:
+                attr_i = dv.attribute.id
+            if attr_i not in dvals:
+                dvals[attr_i] = {}
+            dvals[attr_i][dv.raw_value] = dv.display_value
 
         return dvals
+
 
 class Attribute_Display_ValuesManager(models.Manager):
     def get_queryset(self):
         return Attribute_Display_ValuesQuerySet(self.model, using=self._db)
+
 
 # Attributes with specific display value attributes can use this model to record them
 class Attribute_Display_Values(models.Model):
@@ -674,6 +800,7 @@ class Attribute_Display_Values(models.Model):
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     raw_value = models.CharField(max_length=256, null=False, blank=False)
     display_value = models.CharField(max_length=256, null=False, blank=False)
+    objects=Attribute_Display_ValuesManager()
 
     class Meta(object):
         unique_together = (("raw_value", "attribute"),)
