@@ -160,7 +160,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             solr_query['queries']['data_format'] = format_query['queries']['data_format']
 
         if do_filter_count:
-            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique)
+            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None)
+            # facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique)
 
         filter_counts = {}
 
@@ -180,10 +181,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 "counts_only": False,
                 "collapse_on": collapse
         }
-        if data_type == 'all' or data_type == 'camic' or data_type == 'pdf':
-            query_params.update({
-                "unique": 'file_name_key'
-            })
+        # if data_type == 'all' or data_type == 'camic' or data_type == 'pdf':
+        #     query_params.update({
+        #         "unique": 'file_name_key'
+        #     })
         file_query_result = query_solr_and_format_result(query_params)
 
         total_file_count = file_query_result.get('numFound', 0)
