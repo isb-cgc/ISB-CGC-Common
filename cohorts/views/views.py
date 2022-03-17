@@ -465,6 +465,7 @@ class Echo(object):
 @login_required
 def create_manifest_bq_table(request, cohorts):
     response = None
+    tables = None
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
 
@@ -599,6 +600,7 @@ def create_manifest_bq_table(request, cohorts):
                 'status': 200,
                 'message': msg
             })
+            tables = { x.id: all_results[x]['table_id'] for x in all_results }
     except Exception as e:
         logger.error("[ERROR] While exporting cohort to BQ:")
         logger.exception(e)
@@ -607,7 +609,7 @@ def create_manifest_bq_table(request, cohorts):
             'message': "There was an error exporting your cohort to BigQuery. Please contact the administrator."
         })
 
-    return response
+    return response, tables
 
 
 # Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
@@ -745,17 +747,23 @@ def download_cohort_manifest(request, cohort_id=0):
 
         try:
             cohorts = Cohort.objects.filter(id__in=cohort_ids)
+            tables = None
             for cohort in cohorts:
                 Cohort_Perms.objects.get(cohort=cohort, user=request.user)
 
             if req.get('manifest-type','file-manifest') == 'bq-manifest':
-                response = create_manifest_bq_table(request, cohorts)
+                response, tables = create_manifest_bq_table(request, cohorts)
             else:
                 response = create_file_manifest(request, cohorts.first())
 
             if not response:
                 raise Exception("Response from manifest creation was None!")
 
+            if req.get('manifest-type','file-manifest') == 'bq-manifest':
+                for cohort in cohorts:
+                    cohort.last_exported_date = datetime.now()
+                    cohort.last_exported_table = tables[cohort.id]
+                    cohort.save()
             return response
         except ObjectDoesNotExist:
             logger.error("[ERROR] User ID {} attempted to access one or more of these cohorts, " +
