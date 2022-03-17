@@ -2124,17 +2124,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             case_barcode = inc_filters.get('case_barcode')
             inc_filters['case_barcode'] = ["%{}%".format(case_barcode),]
 
-        if cohort_id:
-            cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
-        else:
-            # for general file list without cohort, "program name can be passed in
-            if inc_filters.get('program_name'):
-                program_name_list = inc_filters.get('program_name')
-                cohort_programs = Program.objects.filter(name__in=program_name_list)
-                del inc_filters['program_name']
-            else:
-                cohort_programs = Program.objects.all()
-
         filter_params = None
         if len(inc_filters):
             filter_and_params = BigQuerySupport.build_bq_filter_and_params(inc_filters, field_prefix='md.' if export_type == 'file_manifest' else None)
@@ -2188,42 +2177,19 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                      ORDER BY md.sample_barcode
                 """
 
-            for program in cohort_programs:
-                try:
-                    program_bq_tables = Public_Data_Tables.objects.get(program=program,build=build.upper())
-                except ObjectDoesNotExist:
-                    # No table for this combination of program and build--skip
-                    logger.info("[STATUS] No BQ table found for {}, build {}--skipping.".format(program.name, build))
-                    continue
-                except MultipleObjectsReturned:
-                    logger.info("[STATUS] Multiple BQ tables found for {}, build {}--using the first one!".format(program.name, build))
-                    program_bq_tables = Public_Data_Tables.objects.filter(program=program,build=build.upper()).first()
+            cohort_id_str = cohort_id if cohort_id else 0
+            query_string = query_string_base.format(
+                metadata_table=settings.BQ_FILE_MANIFEST_TABLE_ID[build.upper()],
+                deployment_project=settings.BIGQUERY_PROJECT_ID,
+                deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
+                deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
+                filter_conditions=filter_conditions,
+                cohort_id=cohort_id_str,
+                date_added=date_added,
+                build=build,
+                tz=settings.TIME_ZONE
+            )
 
-                metadata_table = "{}.{}.{}".format(
-                    settings.BIGQUERY_DATA_PROJECT_ID, program_bq_tables.bq_dataset,
-                    program_bq_tables.data_table.lower(),
-                )
-
-                cohort_id_str = cohort_id if cohort_id else 0
-                union_queries.append(
-                    query_string_base.format(
-                        metadata_table=metadata_table,
-                        deployment_project=settings.BIGQUERY_PROJECT_ID,
-                        deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
-                        deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
-                        filter_conditions=filter_conditions,
-                        cohort_id=cohort_id_str,
-                        date_added=date_added,
-                        build=build,
-                        tz=settings.TIME_ZONE
-                    )
-                )
-
-            if len(union_queries) > 1:
-                query_string = ") UNION ALL (".join(union_queries)
-                query_string = '(' + query_string + ')'
-            else:
-                query_string = union_queries[0]
             query_string = '#standardSQL\n'+query_string
 
             if export_dest == 'table':
@@ -2239,45 +2205,38 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # Exporting Cohort Records
         elif export_type == 'cohort':
             query_string_base = """
-                SELECT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
+                SELECT DISTINCT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
-                {biospec_clause}
-                JOIN `{metadata_project}.{metadata_dataset}.{clin_table}` clin
+                JOIN `{program_bioclin_table}` clin
                 ON clin.case_barcode = cs.case_barcode
                 WHERE cs.cohort_id = {cohort_id} {filter_conditions}
             """
 
-            biospec_clause_base = """
-                JOIN `{metadata_project}.{metadata_dataset}.{biospec_table}` bios
-                ON bios.sample_barcode = cs.sample_barcode
-            """
+            if cohort_id:
+                cohort_programs = Cohort.objects.get(id=cohort_id).get_programs()
+            else:
+                # for general file list without cohort, "program name can be passed in
+                if inc_filters.get('program_name'):
+                    program_name_list = inc_filters.get('program_name')
+                    cohort_programs = Program.objects.filter(name__in=program_name_list)
+                    del inc_filters['program_name']
+                else:
+                    # cohort_programs = Program.objects.all()
+                    cohort_programs = Program.objects.filter(active=True, is_public=True)
 
             for program in cohort_programs:
 
-                program_bq_tables = Public_Metadata_Tables.objects.filter(program=program)[0]
-
-                biospec_clause = ""
-                if program_bq_tables.biospec_bq_table:
-                    biospec_clause = biospec_clause_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
-                        metadata_dataset=program_bq_tables.bq_dataset,
-                        biospec_table=program_bq_tables.biospec_bq_table
-                    )
-
                 union_queries.append(
                     query_string_base.format(
-                        metadata_project=settings.BIGQUERY_DATA_PROJECT_ID,
-                        metadata_dataset=program_bq_tables.bq_dataset,
-                        clin_table=program_bq_tables.clin_bq_table,
+                        program_bioclin_table=settings.BQ_PROG_BIOCLIN_TABLE_ID[program.name],
                         deployment_project=settings.BIGQUERY_PROJECT_ID,
                         deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                         deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
                         filter_conditions=filter_conditions,
                         cohort_id=cohort_id,
                         date_added=date_added,
-                        tz=settings.TIME_ZONE,
-                        biospec_clause=biospec_clause
+                        tz=settings.TIME_ZONE
                     )
                 )
 
