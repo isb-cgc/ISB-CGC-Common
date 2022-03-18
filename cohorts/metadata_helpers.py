@@ -240,11 +240,13 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
     elif type == 'camic':
         metadata_data_attrs = ['data_type', 'disease_code', 'project_short_name',]
     else:
-        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform', 'disease_code']
-        if build.lower() == 'hg38':
-            metadata_data_attrs.append("node")
+        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'platform', 'disease_code']
         if add_program_name:
             metadata_data_attrs.append('program_name')
+        if type == 'all':
+            metadata_data_attrs.append("data_format")
+            if build.lower() == 'hg38':
+                metadata_data_attrs.append("node")
 
     try:
         if len(METADATA_DATA_ATTR[build]) != len(metadata_data_attrs):
