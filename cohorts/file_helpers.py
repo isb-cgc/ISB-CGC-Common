@@ -85,7 +85,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             if do_filter_count:
                 facet_attr = Attribute.objects.filter(name__in=["disease_code", "Modality", "BodyPartExamined"])
 
-            collapse = "StudyInstanceUID"
+            # collapse = "StudyInstanceUID"
             unique="StudyInstanceUID"
 
         else:
@@ -108,7 +108,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 fields.append("file_name")
 
             col_map.update({
-                'col-filename': 'file_name_key',
+                'col-filename': 'file_name' if build.lower() == 'hg38' else 'file_name_key',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
@@ -127,7 +127,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 elif data_type == 'camic':
                     facet_names.extend(['data_type'])
                 elif data_type == 'igv':
-                    facet_names.extend(['data_category', 'experimental_strategy', 'platform', 'data_type'])
+                    facet_names.extend(['experimental_strategy', 'platform'])
 
                 if data_type != 'camic' and not cohort_id:
                     facet_names.extend(['program_name'])
@@ -180,7 +180,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 "counts_only": False,
                 "collapse_on": collapse
         }
-        if data_type == 'all' or data_type == 'camic' or data_type == 'pdf':
+        if data_type == 'dicom':
+            query_params.update({
+                "unique": "StudyInstanceUID"
+            })
+        elif data_type == 'all' or data_type == 'camic' or data_type == 'pdf':
             query_params.update({
                 "unique": "file_name" if build.lower() == 'hg38' else 'file_name_key'
             })
