@@ -85,7 +85,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             if do_filter_count:
                 facet_attr = Attribute.objects.filter(name__in=["disease_code", "Modality", "BodyPartExamined"])
 
-            collapse = "StudyInstanceUID"
+            # collapse = "StudyInstanceUID"
             unique="StudyInstanceUID"
 
         else:
@@ -108,7 +108,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 fields.append("file_name")
 
             col_map.update({
-                'col-filename': 'file_name_key',
+                'col-filename': 'file_name' if build.lower() == 'hg38' else 'file_name_key',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
@@ -127,7 +127,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 elif data_type == 'camic':
                     facet_names.extend(['data_type'])
                 elif data_type == 'igv':
-                    facet_names.extend(['data_category', 'experimental_strategy', 'platform', 'data_type'])
+                    facet_names.extend(['experimental_strategy', 'platform'])
 
                 if data_type != 'camic' and not cohort_id:
                     facet_names.extend(['program_name'])
@@ -160,8 +160,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             solr_query['queries']['data_format'] = format_query['queries']['data_format']
 
         if do_filter_count:
-            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None)
-            # facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique)
+            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique)
 
         filter_counts = {}
 
@@ -181,10 +180,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 "counts_only": False,
                 "collapse_on": collapse
         }
-        # if data_type == 'all' or data_type == 'camic' or data_type == 'pdf':
-        #     query_params.update({
-        #         "unique": 'file_name_key'
-        #     })
+        if data_type == 'dicom':
+            query_params.update({
+                "unique": "StudyInstanceUID"
+            })
+        elif data_type == 'all' or data_type == 'camic' or data_type == 'pdf':
+            query_params.update({
+                "unique": "file_name" if build.lower() == 'hg38' else 'file_name_key'
+            })
         file_query_result = query_solr_and_format_result(query_params)
 
         total_file_count = file_query_result.get('numFound', 0)

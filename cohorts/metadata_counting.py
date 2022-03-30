@@ -263,14 +263,12 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 if with_counts and with_totals:
                     solr_facets = build_solr_facets(
                         facet_attrs['sources'][source.id]['attrs'],
-                        filter_tags=solr_query.get('filter_tags', None) if solr_query else None,
-                        # filter_tags=solr_query.get('filter_tags', None) if solr_query else None, unique='file_node_id',
+                        filter_tags=solr_query.get('filter_tags', None) if solr_query else None, unique='case_barcode',
                         total_facets=total_counts
                     )
                     if solr_query:
                         solr_facets_filtered = build_solr_facets(
-                            facet_attrs['sources'][source.id]['attrs'], total_facets=total_counts
-                            # facet_attrs['sources'][source.id]['attrs'], unique='case_barcode', total_facets=total_counts
+                            facet_attrs['sources'][source.id]['attrs'], unique='case_barcode', total_facets=total_counts
                         )
                 elif with_totals:
                     solr_facets = build_solr_facets({},None,total_facets=total_counts)
@@ -326,7 +324,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'collection': source.name,
                     'facets': solr_facets,
                     'fqs': query_set,
-                    # 'unique': source.shared_id_col,
+                    'unique': source.shared_id_col,
                     'fields': solr_fields,
                     'counts_only': False,
                     'limit': limit if with_records else 0
@@ -336,7 +334,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         'collection': source.name,
                         'facets': solr_facets_filtered,
                         'fqs': query_set,
-                        # 'unique': source.shared_id_col,
+                        'unique': source.shared_id_col,
                         'counts_only': False,
                         'limit': 0
                     })
