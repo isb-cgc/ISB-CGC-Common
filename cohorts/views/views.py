@@ -478,7 +478,7 @@ def create_manifest_bq_table(request, cohorts):
         ))
 
         # We can only ORDER BY columns which we've actually requested
-        order_by = list(set.intersection(set(order_by),set(field_list)))
+        order_by = list(set.intersection(set(order_by), set(field_list)))
 
         all_results = {}
         export_jobs = {}
@@ -600,7 +600,7 @@ def create_manifest_bq_table(request, cohorts):
                 'status': 200,
                 'message': msg
             })
-            tables = { x.id: all_results[x]['table_id'] for x in all_results }
+            tables = { x: all_results[x]['table_id'] for x in all_results }
     except Exception as e:
         logger.error("[ERROR] While exporting cohort to BQ:")
         logger.exception(e)
@@ -761,7 +761,7 @@ def download_cohort_manifest(request, cohort_id=0):
 
             if req.get('manifest-type','file-manifest') == 'bq-manifest':
                 for cohort in cohorts:
-                    cohort.last_exported_date = datetime.now()
+                    cohort.last_exported_date = datetime.datetime.utcnow()
                     cohort.last_exported_table = tables[cohort.id]
                     cohort.save()
             return response

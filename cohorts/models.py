@@ -20,8 +20,11 @@ from builtins import object
 import operator
 import string
 import sys
+import datetime
+import pytz
 import logging
 from django.db import models
+from django.conf import settings
 from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
@@ -113,14 +116,14 @@ class Cohort(models.Model):
         return "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
             settings.BIGQUERY_USER_DATA_PROJECT_ID,
             settings.BIGQUERY_USER_MANIFEST_DATASET,
-            self.last_exported_table
+            self.last_exported_table.split('.')[-1]
         )
 
     # Exported tables live for 7 days
     def get_export_is_valid(self):
         if not self.last_exported_date:
             return None
-        return self.last_exported_date+datetime.timedelta(days=settings.BIGQUERY_USER_MANIFEST_TIMEOUT) < datetime.now()
+        return (self.last_exported_date+datetime.timedelta(days=settings.BIGQUERY_USER_MANIFEST_TIMEOUT)) > datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
 
     # Returns the data versions identified in the filter groups for this cohort
     # Returns a DataVersion QuerySet
