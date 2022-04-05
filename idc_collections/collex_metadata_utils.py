@@ -1034,14 +1034,6 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     ranged_numerics = Attribute.get_ranged_attrs()
 
-    if not group_by:
-        group_by = fields
-    else:
-        if type(group_by) is not list:
-            group_by = [group_by]
-        group_by.extend(fields)
-        group_by = set(group_by)
-
     filter_attr_by_bq = {}
     field_attr_by_bq = {}
     child_record_search_field = ""
@@ -1103,6 +1095,17 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
+    # Drop any requested fields not found in these source attribute sets
+    fields = [x for x in fields if x in attr_data['list']]
+
+    if not group_by:
+        group_by = fields
+    else:
+        if type(group_by) is not list:
+            group_by = [group_by]
+        group_by.extend(fields)
+        group_by = set(group_by)
+
     if not sources_and_attrs:
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
         field_attr_by_bq = _build_attr_by_source(fields, data_version, DataSource.BIGQUERY, attr_data)
@@ -1151,7 +1154,9 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     break
         order_by = new_order
 
-    # Failures to find grouping tables typically means the wrong version is being polled for the data sources.
+    # Failures to find grouping tables typically mean:
+    # * the wrong version is being polled for the data sources
+    # * the attribute isn't found in any of these tables
     # Make sure the right version is being used!
     if group_by:
         new_groups = []
@@ -1168,8 +1173,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     if grouping in source['list']:
                         group_table = source['name']
                         break
-            new_groups.append("{}.{}".format(table_info[group_table]['alias'], grouping))
-
+            if not group_table:
+                logger.warning("[WARNING] Fields `{}` not found in any datasource! It will be dropped.".format(grouping))
+            else:
+                new_groups.append("{}.{}".format(table_info[group_table]['alias'], grouping))
         group_by = new_groups
 
     # We join image tables to corresponding ancillary tables, and union between image tables

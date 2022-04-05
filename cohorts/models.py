@@ -20,8 +20,11 @@ from builtins import object
 import operator
 import string
 import sys
+import datetime
+import pytz
 import logging
 from django.db import models
+from django.conf import settings
 from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
@@ -70,6 +73,8 @@ class Cohort(models.Model):
     active = models.BooleanField(default=True)
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
+    last_exported_table = models.CharField(max_length=255, null=True, blank=False)
+    last_exported_date = models.DateTimeField(null=True ,blank=False)
     case_count = models.IntegerField(blank=False, null=False, default=0)
     series_count = models.IntegerField(blank=False, null=False, default=0)
     study_count = models.IntegerField(blank=False, null=False, default=0)
@@ -103,6 +108,22 @@ class Cohort(models.Model):
     def is_public(self):
         idc_su = User.objects.get(username='idc', is_superuser=True)
         return (self.cohort_perms_set.get(perm=Cohort_Perms.OWNER).user_id == idc_su.id)
+
+    # Create a URI to access our most recent export to a table, if there's a valid date
+    def get_last_export_uri(self):
+        if not self.last_exported_date:
+            return None
+        return "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
+            settings.BIGQUERY_USER_DATA_PROJECT_ID,
+            settings.BIGQUERY_USER_MANIFEST_DATASET,
+            self.last_exported_table.split('.')[-1]
+        )
+
+    # Exported tables live for 7 days
+    def get_export_is_valid(self):
+        if not self.last_exported_date:
+            return None
+        return (self.last_exported_date+datetime.timedelta(days=settings.BIGQUERY_USER_MANIFEST_TIMEOUT)) > datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
 
     # Returns the data versions identified in the filter groups for this cohort
     # Returns a DataVersion QuerySet

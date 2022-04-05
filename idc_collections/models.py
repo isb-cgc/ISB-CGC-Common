@@ -393,7 +393,7 @@ class DataSourceQuerySet(models.QuerySet):
 
             if by_source:
                 attrs['sources'][ds.id] = {
-                    'list': attr_set.values_list('name', flat=True).distinct(),
+                    'list': list(set(attr_set.values_list('name', flat=True))),
                     'attrs': attr_set.distinct(),
                     'id': ds.id,
                     'name': ds.name,
