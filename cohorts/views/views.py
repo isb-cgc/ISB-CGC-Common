@@ -781,63 +781,74 @@ def download_cohort_manifest(request, cohort_id=0):
     return redirect('cohort_list')
 
 
-def get_cohort_bq_string(cohort):
-    field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"]
-
-    base_filters = cohort.get_filters_as_dict_simple()[0]
-    if 'bmi' in base_filters:
-        vals = base_filters['bmi']
-        del base_filters['bmi']
-        for val in vals:
-            if val not in ('None','obese'):
-                if 'bmi_btw' not in base_filters:
-                    base_filters['bmi_btw'] = []
-                base_filters['bmi_btw'].append(BMI_MAPPING[val])
-            elif val == 'obese':
-                base_filters['bmi_gt'] = BMI_MAPPING[val]
-            else:
-                base_filters['bmi'] = 'None'
-
-    return get_bq_string(
-        base_filters, field_list, cohort.get_data_versions(),
-        order_by=field_list, search_child_records_by=True
-    )
-
-
 @login_required
 def get_query_string(request, cohort_id=0):
     response = {
         'status': 200,
-        'message': ''
+        'msg': ''
     }
+    status = 200
+
     try:
-        if not cohort_id:
-            raise Exception("Cannot provide query string without a cohort ID!")
+        req = request.POST or request.GET
+        filters = json.loads(req.get('filters', None) or '{}')
+        print(filters)
+        print(type(filters))
+        version = req.get('version', None)
 
-        cohort = Cohort.objects.get(id=cohort_id, active=True)
-        cohort.perm = cohort.get_perm(request)
-        cohort.owner = cohort.get_owner()
+        if not cohort_id and not filters:
+            raise Exception("Cannot provide query string without a cohort ID or filters!"
+                            + "Please provide a valid cohort ID or filter set.")
 
-        if not cohort.perm:
-            return JsonResponse({
-                'status': 400,
-                'message': "You do not have permission to view that cohort's string."
-            })
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id, active=True)
+            cohort.perm = cohort.get_perm(request)
+            cohort.owner = cohort.get_owner()
 
-        query = get_cohort_bq_string(cohort)
+            if not cohort.perm:
+                messages.error(request, "You do not have permission to view that cohort's string.")
+                return JsonResponse({
+                    'status': 400,
+                    'message': "You do not have permission to view that cohort's string."
+                }, status=400)
 
-        response['data'] = {'query_string': query, 'cohort': cohort.id}
-        response['msg'] = "Cohort Query string enclosed."
+            filters = cohort.get_filters_as_dict_simple()[0]
+            version = cohort.get_data_versions()
+
+        field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID",
+                      "SeriesInstanceUID", "SOPInstanceUID"]
+
+        if 'bmi' in filters:
+            vals = filters['bmi']
+            del filters['bmi']
+            for val in vals:
+                if val not in ('None','obese'):
+                    if 'bmi_btw' not in filters:
+                        filters['bmi_btw'] = []
+                    filters['bmi_btw'].append(BMI_MAPPING[val])
+                elif val == 'obese':
+                    filters['bmi_gt'] = BMI_MAPPING[val]
+                else:
+                    filters['bmi'] = 'None'
+
+        query = get_bq_string(
+            filters, field_list, version, order_by=field_list, search_child_records_by=True
+        )
+
+        response['data'] = {'query_string': query, 'cohort': cohort_id}
+        response['msg'] = "{} BigQuery string enclosed.".format("Cohort" if cohort_id else "Filter")
 
     except Exception as e:
-        logger.error("[ERROR] While fetching cohort BQ string for {}:".format(cohort_id))
+        logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
         logger.exception(e)
+        messages.error(request, "There was an error obtaining this BQ string. Please contact the administrator.")
         response = {
             'status': 500,
-            'message': "There was an error obtaining your cohort's BQ string. Please contact the administrator."
+            'msg': "There was an error obtaining this BQ string. Please contact the administrator."
         }
+        status = 500
 
-    return JsonResponse(response)
+    return JsonResponse(response, status=status)
 
 
 @login_required
