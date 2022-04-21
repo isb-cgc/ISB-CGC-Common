@@ -170,9 +170,11 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
             displays.append(idcdv.get_display())
         return displays if not joined else delimiter.join(displays)
 
+
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
         return ImagingDataCommonsVersionQuerySet(self.model, using=self._db)
+
 
 class ImagingDataCommonsVersion(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -208,7 +210,7 @@ class DataVersionQuerySet(models.QuerySet):
         sources = None
         q_objs = Q()
         if aggregate_level:
-            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             q_objs &= Q(aggregate_level__in=aggregate_level)
         if source_type:
             q_objs &= Q(source_type=source_type)
@@ -671,9 +673,11 @@ class Attribute_Set_TypeQuerySet(models.QuerySet):
             attr_child_record_search[attr_set_type.attribute.name] = attr_set_type.child_record_search
         return attr_child_record_search
 
+
 class Attribute_Set_TypeMananger(models.Manager):
     def get_queryset(self):
         return Attribute_Set_TypeQuerySet(self.model, using=self._db)
+
 
 class Attribute_Set_Type(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -684,6 +688,7 @@ class Attribute_Set_Type(models.Model):
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)
+
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):

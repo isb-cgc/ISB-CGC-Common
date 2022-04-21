@@ -432,8 +432,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                     programSet[name]['projects'][collection.collection_id]['access'] = context['collections'][collection.collection_id]['access']
                 programSet[name]['val'] += context['collections'][collection.collection_id]['count']
 
-
-
         if with_related:
             context['tcga_collections'] = Program.objects.get(short_name="TCGA").collection_set.all()
 
@@ -1030,7 +1028,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     search_child_records_by=None, static_fields=None):
 
     if not data_version and not sources_and_attrs:
-        data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
+        data_version = DataVersion.objects.filter(active=True)
 
     ranged_numerics = Attribute.get_ranged_attrs()
 
@@ -1378,7 +1376,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                     order_by=None, order_asc=True, search_child_records_by=None):
 
     if not data_version and not sources_and_attrs:
-        data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
+        data_version = ImagingDataCommonsVersion.objects.filter(active=True)
 
     ranged_numerics = Attribute.get_ranged_attrs()
 
@@ -1450,6 +1448,8 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
+        print(type(filters))
+        print(filters)
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
         field_attr_by_bq = _build_attr_by_source(fields, data_version, DataSource.BIGQUERY, attr_data)
     else:

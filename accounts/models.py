@@ -30,15 +30,17 @@ logger = logging.getLogger('main_logger')
 def utc_now_plus_expiry():
     return datetime.now(timezone.utc)+timedelta(days=settings.ACCOUNTS_PASSWORD_EXPIRATION)
 
+
 def utc_now():
     return datetime.now(timezone.utc)
+
 
 class PasswordExpiration(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     expiration_date = models.DateTimeField(null=False, blank=False, default=utc_now_plus_expiry)
 
     def expired(self):
-        return self.expiration_date <= timezone.now()
+        return self.expiration_date <= utc_now()
 
 
 class PasswordHistory(models.Model):
