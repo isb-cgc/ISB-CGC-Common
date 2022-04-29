@@ -203,8 +203,13 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     try:
         if not is_json:
             context['collection_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips(collex_attr_id)
+            context['analysis_results_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips(
+                Attribute.objects.get(name='analysis_results_id').id
+            )
 
-        collectionSet = Collection.objects.select_related('program').filter(active=True, collection_type=Collection.ORIGINAL_COLLEX)
+        collectionSet = Collection.objects.select_related('program').filter(
+            active=True, collection_type=Collection.ORIGINAL_COLLEX
+        )
         collection_info = {a.collection_id: a.access for a in collectionSet}
         collectionsIdList = collectionSet.values_list('collection_id',flat=True)
 
@@ -697,7 +702,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'stats': solr_stats,
                 'totals': curTotals,
                 'sort': sort,
-            },raw_format=raw_format)
+            }, raw_format=raw_format)
 
             solr_count_filtered_result = None
             if solr_facets_filtered:
@@ -725,12 +730,14 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
             if raw_format:
                 results['facets'] = solr_result['facets']
             else:
-                results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                    'facets': solr_result.get('facets',None)}
+                results['facets']["{}:{}:{}".format(source.name, ";".join(
+                    source_versions[source.id].values_list("name", flat=True)
+                ), source.id)] = {'facets': solr_result.get('facets',None)}
 
             if solr_count_filtered_result:
-                results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                    'facets': solr_count_filtered_result['facets']}
+                results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(
+                    source_versions[source.id].values_list("name", flat=True)
+                ), source.id)] = {'facets': solr_count_filtered_result['facets']}
 
             totals_source = solr_count_filtered_result or solr_result
             if 'totals' in totals_source:

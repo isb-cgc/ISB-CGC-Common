@@ -282,6 +282,7 @@ class Collection(models.Model):
     image_types = models.CharField(max_length=255, null=True, blank=False)
     cancer_type = models.CharField(max_length=128, null=True, blank=False)
     doi = models.CharField(max_length=255, null=True, blank=False)
+    source_url = models.CharField(max_length=512, null=True, blank=False)
     supporting_data = models.CharField(max_length=255, null=True, blank=False)
     analysis_artifacts = models.CharField(max_length=255, null=True, blank=False)
     species = models.CharField(max_length=64, null=True, blank=False)
@@ -294,7 +295,7 @@ class Collection(models.Model):
     access = models.CharField(max_length=16, null=False, blank=False, default="Public")
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
-    # We make this many to many in case a collection is part of one program, thoug  h it may not be
+    # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
@@ -428,6 +429,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         return attrs
 
+
 class DataSourceManager(models.Manager):
     def get_queryset(self):
         return DataSourceQuerySet(self.model, using=self._db)
@@ -443,6 +445,7 @@ class DataSourceManager(models.Manager):
 
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
+
 
 class DataSource(models.Model):
     QUERY = 'query'
