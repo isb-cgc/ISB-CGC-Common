@@ -246,7 +246,7 @@ def cohort_detail(request, cohort_id):
         )
 
         file_parts_count = math.ceil(cohort.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
-        bq_string = get_query_string(request, cohort)
+        bq_string = get_query_string(request, cohort.id)
 
         template_values.update({
             'request': request,
