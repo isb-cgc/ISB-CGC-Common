@@ -246,6 +246,7 @@ def cohort_detail(request, cohort_id):
         )
 
         file_parts_count = math.ceil(cohort.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
+        bq_string = get_query_string(request, cohort)
 
         template_values.update({
             'request': request,
@@ -258,7 +259,7 @@ def cohort_detail(request, cohort_id):
             'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
             'file_parts_count': file_parts_count,
             'display_file_parts_count': min(file_parts_count, 10),
-            'bq_string': get_cohort_bq_string(cohort)
+            'bq_string': bq_string
         })
 
         template = 'cohorts/cohort_details.html'
