@@ -246,7 +246,7 @@ def cohort_detail(request, cohort_id):
         )
 
         file_parts_count = math.ceil(cohort.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
-        bq_string = get_query_string(request, cohort.id)
+        bq_string = get_query_string(request, cohort_id)
 
         template_values.update({
             'request': request,
@@ -625,7 +625,6 @@ def create_file_manifest(request, cohort):
     # Fields we're actually returning in the file (the rest are for constructing the GCS path)
     if request.GET.get('columns', None):
         selected_columns = json.loads(request.GET.get('columns'))
-        print(request.GET.get('columns', None))
 
     if request.GET.get('header_fields'):
         selected_header_fields = json.loads(request.GET.get('header_fields'))
@@ -783,7 +782,7 @@ def download_cohort_manifest(request, cohort_id=0):
 
 
 @login_required
-def get_query_string(request, cohort_id=0):
+def get_query_str_response(request, cohort_id=0):
     response = {
         'status': 200,
         'msg': ''
@@ -791,10 +790,29 @@ def get_query_string(request, cohort_id=0):
     status = 200
 
     try:
+        query = get_query_string(request, cohort_id)
+
+        response['data'] = {'query_string': query, 'cohort': cohort_id}
+        response['msg'] = "{} BigQuery string enclosed.".format("Cohort" if cohort_id else "Filter")
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
+        logger.exception(e)
+        messages.error(request, "There was an error obtaining this BQ string. Please contact the administrator.")
+        response = {
+            'status': 500,
+            'msg': "There was an error obtaining this BQ string. Please contact the administrator."
+        }
+        status = 500
+
+    return JsonResponse(response, status=status)
+
+
+@login_required
+def get_query_string(request, cohort_id=0):
+    try:
         req = request.POST or request.GET
         filters = json.loads(req.get('filters', None) or '{}')
-        print(filters)
-        print(type(filters))
         version = req.get('version', None)
 
         if not cohort_id and not filters:
@@ -836,20 +854,11 @@ def get_query_string(request, cohort_id=0):
             filters, field_list, version, order_by=field_list, search_child_records_by=True
         )
 
-        response['data'] = {'query_string': query, 'cohort': cohort_id}
-        response['msg'] = "{} BigQuery string enclosed.".format("Cohort" if cohort_id else "Filter")
-
     except Exception as e:
         logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
         logger.exception(e)
-        messages.error(request, "There was an error obtaining this BQ string. Please contact the administrator.")
-        response = {
-            'status': 500,
-            'msg': "There was an error obtaining this BQ string. Please contact the administrator."
-        }
-        status = 500
 
-    return JsonResponse(response, status=status)
+    return query
 
 
 @login_required
