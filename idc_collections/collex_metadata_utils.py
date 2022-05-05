@@ -203,8 +203,13 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     try:
         if not is_json:
             context['collection_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips(collex_attr_id)
+            context['analysis_results_tooltips'] = Attribute_Tooltips.objects.all().get_tooltips(
+                Attribute.objects.get(name='analysis_results_id').id
+            )
 
-        collectionSet = Collection.objects.select_related('program').filter(active=True, collection_type=Collection.ORIGINAL_COLLEX)
+        collectionSet = Collection.objects.select_related('program').filter(
+            active=True, collection_type=Collection.ORIGINAL_COLLEX
+        )
         collection_info = {a.collection_id: a.access for a in collectionSet}
         collectionsIdList = collectionSet.values_list('collection_id',flat=True)
 
@@ -432,8 +437,6 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                     programSet[name]['projects'][collection.collection_id]['access'] = context['collections'][collection.collection_id]['access']
                 programSet[name]['val'] += context['collections'][collection.collection_id]['count']
 
-
-
         if with_related:
             context['tcga_collections'] = Program.objects.get(short_name="TCGA").collection_set.all()
 
@@ -523,20 +526,6 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
             )
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
-        if not raw_format:
-            for counts in ['facets', 'filtered_facets']:
-                facet_set = results.get(counts, {})
-                for source in facet_set:
-                    facets = facet_set[source]['facets']
-                    if facets and 'BodyPartExamined' in facets:
-                        if 'Kidney' in facets['BodyPartExamined']:
-                            if 'KIDNEY' in facets['BodyPartExamined']:
-                                facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
-                            else:
-                                facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
-                            del facets['BodyPartExamined']['Kidney']
-                    if not facets:
-                        logger.debug("[STATUS] Facets not seen for {}".format(source))
 
         if not counts_only:
             if 'SeriesNumber' in fields:
@@ -713,7 +702,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 'stats': solr_stats,
                 'totals': curTotals,
                 'sort': sort,
-            },raw_format=raw_format)
+            }, raw_format=raw_format)
 
             solr_count_filtered_result = None
             if solr_facets_filtered:
@@ -741,12 +730,14 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
             if raw_format:
                 results['facets'] = solr_result['facets']
             else:
-                results['facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                    'facets': solr_result.get('facets',None)}
+                results['facets']["{}:{}:{}".format(source.name, ";".join(
+                    source_versions[source.id].values_list("name", flat=True)
+                ), source.id)] = {'facets': solr_result.get('facets',None)}
 
             if solr_count_filtered_result:
-                results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(source_versions[source.id].values_list("name",flat=True)), source.id)] = {
-                    'facets': solr_count_filtered_result['facets']}
+                results['filtered_facets']["{}:{}:{}".format(source.name, ";".join(
+                    source_versions[source.id].values_list("name", flat=True)
+                ), source.id)] = {'facets': solr_count_filtered_result['facets']}
 
             totals_source = solr_count_filtered_result or solr_result
             if 'totals' in totals_source:
@@ -1030,17 +1021,9 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     search_child_records_by=None, static_fields=None):
 
     if not data_version and not sources_and_attrs:
-        data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
+        data_version = DataVersion.objects.filter(active=True)
 
     ranged_numerics = Attribute.get_ranged_attrs()
-
-    if not group_by:
-        group_by = fields
-    else:
-        if type(group_by) is not list:
-            group_by = [group_by]
-        group_by.extend(fields)
-        group_by = set(group_by)
 
     filter_attr_by_bq = {}
     field_attr_by_bq = {}
@@ -1103,6 +1086,17 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
 
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
+    # Drop any requested fields not found in these source attribute sets
+    fields = [x for x in fields if x in attr_data['list']]
+
+    if not group_by:
+        group_by = fields
+    else:
+        if type(group_by) is not list:
+            group_by = [group_by]
+        group_by.extend(fields)
+        group_by = set(group_by)
+
     if not sources_and_attrs:
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
         field_attr_by_bq = _build_attr_by_source(fields, data_version, DataSource.BIGQUERY, attr_data)
@@ -1151,7 +1145,9 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     break
         order_by = new_order
 
-    # Failures to find grouping tables typically means the wrong version is being polled for the data sources.
+    # Failures to find grouping tables typically mean:
+    # * the wrong version is being polled for the data sources
+    # * the attribute isn't found in any of these tables
     # Make sure the right version is being used!
     if group_by:
         new_groups = []
@@ -1168,8 +1164,10 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
                     if grouping in source['list']:
                         group_table = source['name']
                         break
-            new_groups.append("{}.{}".format(table_info[group_table]['alias'], grouping))
-
+            if not group_table:
+                logger.warning("[WARNING] Fields `{}` not found in any datasource! It will be dropped.".format(grouping))
+            else:
+                new_groups.append("{}.{}".format(table_info[group_table]['alias'], grouping))
         group_by = new_groups
 
     # We join image tables to corresponding ancillary tables, and union between image tables
@@ -1371,7 +1369,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                     order_by=None, order_asc=True, search_child_records_by=None):
 
     if not data_version and not sources_and_attrs:
-        data_version = DataVersion.objects.select_related('datasettype').filter(active=True)
+        data_version = ImagingDataCommonsVersion.objects.filter(active=True)
 
     ranged_numerics = Attribute.get_ranged_attrs()
 
@@ -1443,6 +1441,8 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
+        print(type(filters))
+        print(filters)
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
         field_attr_by_bq = _build_attr_by_source(fields, data_version, DataSource.BIGQUERY, attr_data)
     else:
