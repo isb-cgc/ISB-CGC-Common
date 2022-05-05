@@ -170,9 +170,11 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
             displays.append(idcdv.get_display())
         return displays if not joined else delimiter.join(displays)
 
+
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
         return ImagingDataCommonsVersionQuerySet(self.model, using=self._db)
+
 
 class ImagingDataCommonsVersion(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -208,7 +210,7 @@ class DataVersionQuerySet(models.QuerySet):
         sources = None
         q_objs = Q()
         if aggregate_level:
-            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             q_objs &= Q(aggregate_level__in=aggregate_level)
         if source_type:
             q_objs &= Q(source_type=source_type)
@@ -280,6 +282,7 @@ class Collection(models.Model):
     image_types = models.CharField(max_length=255, null=True, blank=False)
     cancer_type = models.CharField(max_length=128, null=True, blank=False)
     doi = models.CharField(max_length=255, null=True, blank=False)
+    source_url = models.CharField(max_length=512, null=True, blank=False)
     supporting_data = models.CharField(max_length=255, null=True, blank=False)
     analysis_artifacts = models.CharField(max_length=255, null=True, blank=False)
     species = models.CharField(max_length=64, null=True, blank=False)
@@ -292,7 +295,7 @@ class Collection(models.Model):
     access = models.CharField(max_length=16, null=False, blank=False, default="Public")
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
-    # We make this many to many in case a collection is part of one program, thoug  h it may not be
+    # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
@@ -393,7 +396,7 @@ class DataSourceQuerySet(models.QuerySet):
 
             if by_source:
                 attrs['sources'][ds.id] = {
-                    'list': attr_set.values_list('name', flat=True).distinct(),
+                    'list': list(set(attr_set.values_list('name', flat=True))),
                     'attrs': attr_set.distinct(),
                     'id': ds.id,
                     'name': ds.name,
@@ -426,6 +429,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         return attrs
 
+
 class DataSourceManager(models.Manager):
     def get_queryset(self):
         return DataSourceQuerySet(self.model, using=self._db)
@@ -441,6 +445,7 @@ class DataSourceManager(models.Manager):
 
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
+
 
 class DataSource(models.Model):
     QUERY = 'query'
@@ -671,9 +676,11 @@ class Attribute_Set_TypeQuerySet(models.QuerySet):
             attr_child_record_search[attr_set_type.attribute.name] = attr_set_type.child_record_search
         return attr_child_record_search
 
+
 class Attribute_Set_TypeMananger(models.Manager):
     def get_queryset(self):
         return Attribute_Set_TypeQuerySet(self.model, using=self._db)
+
 
 class Attribute_Set_Type(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -684,6 +691,7 @@ class Attribute_Set_Type(models.Model):
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)
+
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):

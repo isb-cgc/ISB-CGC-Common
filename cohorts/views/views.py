@@ -246,6 +246,7 @@ def cohort_detail(request, cohort_id):
         )
 
         file_parts_count = math.ceil(cohort.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
+        bq_string = get_query_string(request, cohort_id)
 
         template_values.update({
             'request': request,
@@ -258,7 +259,7 @@ def cohort_detail(request, cohort_id):
             'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
             'file_parts_count': file_parts_count,
             'display_file_parts_count': min(file_parts_count, 10),
-            'bq_string': get_cohort_bq_string(cohort)
+            'bq_string': bq_string
         })
 
         template = 'cohorts/cohort_details.html'
@@ -465,6 +466,7 @@ class Echo(object):
 @login_required
 def create_manifest_bq_table(request, cohorts):
     response = None
+    tables = None
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
 
@@ -477,7 +479,7 @@ def create_manifest_bq_table(request, cohorts):
         ))
 
         # We can only ORDER BY columns which we've actually requested
-        order_by = list(set.intersection(set(order_by),set(field_list)))
+        order_by = list(set.intersection(set(order_by), set(field_list)))
 
         all_results = {}
         export_jobs = {}
@@ -599,6 +601,7 @@ def create_manifest_bq_table(request, cohorts):
                 'status': 200,
                 'message': msg
             })
+            tables = { x: all_results[x]['table_id'] for x in all_results }
     except Exception as e:
         logger.error("[ERROR] While exporting cohort to BQ:")
         logger.exception(e)
@@ -607,7 +610,7 @@ def create_manifest_bq_table(request, cohorts):
             'message': "There was an error exporting your cohort to BigQuery. Please contact the administrator."
         })
 
-    return response
+    return response, tables
 
 
 # Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
@@ -622,7 +625,6 @@ def create_file_manifest(request, cohort):
     # Fields we're actually returning in the file (the rest are for constructing the GCS path)
     if request.GET.get('columns', None):
         selected_columns = json.loads(request.GET.get('columns'))
-        print(request.GET.get('columns', None))
 
     if request.GET.get('header_fields'):
         selected_header_fields = json.loads(request.GET.get('header_fields'))
@@ -745,17 +747,23 @@ def download_cohort_manifest(request, cohort_id=0):
 
         try:
             cohorts = Cohort.objects.filter(id__in=cohort_ids)
+            tables = None
             for cohort in cohorts:
                 Cohort_Perms.objects.get(cohort=cohort, user=request.user)
 
             if req.get('manifest-type','file-manifest') == 'bq-manifest':
-                response = create_manifest_bq_table(request, cohorts)
+                response, tables = create_manifest_bq_table(request, cohorts)
             else:
                 response = create_file_manifest(request, cohorts.first())
 
             if not response:
                 raise Exception("Response from manifest creation was None!")
 
+            if req.get('manifest-type','file-manifest') == 'bq-manifest':
+                for cohort in cohorts:
+                    cohort.last_exported_date = datetime.datetime.utcnow()
+                    cohort.last_exported_table = tables[cohort.id]
+                    cohort.save()
             return response
         except ObjectDoesNotExist:
             logger.error("[ERROR] User ID {} attempted to access one or more of these cohorts, " +
@@ -773,63 +781,84 @@ def download_cohort_manifest(request, cohort_id=0):
     return redirect('cohort_list')
 
 
-def get_cohort_bq_string(cohort):
-    field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID"]
+@login_required
+def get_query_str_response(request, cohort_id=0):
+    response = {
+        'status': 200,
+        'msg': ''
+    }
+    status = 200
 
-    base_filters = cohort.get_filters_as_dict_simple()[0]
-    if 'bmi' in base_filters:
-        vals = base_filters['bmi']
-        del base_filters['bmi']
-        for val in vals:
-            if val not in ('None','obese'):
-                if 'bmi_btw' not in base_filters:
-                    base_filters['bmi_btw'] = []
-                base_filters['bmi_btw'].append(BMI_MAPPING[val])
-            elif val == 'obese':
-                base_filters['bmi_gt'] = BMI_MAPPING[val]
-            else:
-                base_filters['bmi'] = 'None'
+    try:
+        query = get_query_string(request, cohort_id)
 
-    return get_bq_string(
-        base_filters, field_list, cohort.get_data_versions(),
-        order_by=field_list, search_child_records_by=True
-    )
+        response['data'] = {'query_string': query, 'cohort': cohort_id}
+        response['msg'] = "{} BigQuery string enclosed.".format("Cohort" if cohort_id else "Filter")
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
+        logger.exception(e)
+        messages.error(request, "There was an error obtaining this BQ string. Please contact the administrator.")
+        response = {
+            'status': 500,
+            'msg': "There was an error obtaining this BQ string. Please contact the administrator."
+        }
+        status = 500
+
+    return JsonResponse(response, status=status)
 
 
 @login_required
 def get_query_string(request, cohort_id=0):
-    response = {
-        'status': 200,
-        'message': ''
-    }
     try:
-        if not cohort_id:
-            raise Exception("Cannot provide query string without a cohort ID!")
+        req = request.POST or request.GET
+        filters = json.loads(req.get('filters', None) or '{}')
+        version = req.get('version', None)
 
-        cohort = Cohort.objects.get(id=cohort_id, active=True)
-        cohort.perm = cohort.get_perm(request)
-        cohort.owner = cohort.get_owner()
+        if not cohort_id and not filters:
+            raise Exception("Cannot provide query string without a cohort ID or filters!"
+                            + "Please provide a valid cohort ID or filter set.")
 
-        if not cohort.perm:
-            return JsonResponse({
-                'status': 400,
-                'message': "You do not have permission to view that cohort's string."
-            })
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id, active=True)
+            cohort.perm = cohort.get_perm(request)
+            cohort.owner = cohort.get_owner()
 
-        query = get_cohort_bq_string(cohort)
+            if not cohort.perm:
+                messages.error(request, "You do not have permission to view that cohort's string.")
+                return JsonResponse({
+                    'status': 400,
+                    'message': "You do not have permission to view that cohort's string."
+                }, status=400)
 
-        response['data'] = {'query_string': query, 'cohort': cohort.id}
-        response['msg'] = "Cohort Query string enclosed."
+            filters = cohort.get_filters_as_dict_simple()[0]
+            version = cohort.get_data_versions()
+
+        field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID",
+                      "SeriesInstanceUID", "SOPInstanceUID"]
+
+        if 'bmi' in filters:
+            vals = filters['bmi']
+            del filters['bmi']
+            for val in vals:
+                if val not in ('None','obese'):
+                    if 'bmi_btw' not in filters:
+                        filters['bmi_btw'] = []
+                    filters['bmi_btw'].append(BMI_MAPPING[val])
+                elif val == 'obese':
+                    filters['bmi_gt'] = BMI_MAPPING[val]
+                else:
+                    filters['bmi'] = 'None'
+
+        query = get_bq_string(
+            filters, field_list, version, order_by=field_list, search_child_records_by=True
+        )
 
     except Exception as e:
-        logger.error("[ERROR] While fetching cohort BQ string for {}:".format(cohort_id))
+        logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
         logger.exception(e)
-        response = {
-            'status': 500,
-            'message': "There was an error obtaining your cohort's BQ string. Please contact the administrator."
-        }
 
-    return JsonResponse(response)
+    return query
 
 
 @login_required
