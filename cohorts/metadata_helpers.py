@@ -237,7 +237,7 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
         metadata_data_attrs = ['disease_code', 'Modality', 'BodyPartExamined']
     elif type == 'pdf':
         metadata_data_attrs = ['disease_code', 'project_short_name', ]
-    elif type == 'camic':
+    elif type == 'slim':
         metadata_data_attrs = ['data_type', 'disease_code', 'project_short_name',]
     else:
         metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform', 'disease_code']
