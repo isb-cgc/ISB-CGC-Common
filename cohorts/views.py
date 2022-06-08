@@ -1502,8 +1502,8 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
-                                            'img_thumbs_url': settings.IMG_THUMBS_URL,
                                             'dicom_viewer_url': settings.DICOM_VIEWER,
+                                            'slim_viewer_url': settings.SLIM_VIEWER,
                                             'has_user_data': has_user_data,
                                             'build': build,
                                             'programs_this_cohort': programs_this_cohort})
