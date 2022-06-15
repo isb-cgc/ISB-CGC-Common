@@ -30,7 +30,6 @@ from django.conf import settings
 from django.db import connection
 from django.urls import reverse
 from collections import OrderedDict
-from data_upload.models import UserUpload, UserUploadedFile
 from projects.models import User_Feature_Definitions, User_Feature_Counts, Program, Project, Project_BQ_Tables, Public_Metadata_Tables
 from sharing.service import create_share
 from accounts.models import GoogleProject, Bucket, BqDataset
