@@ -1441,8 +1441,6 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
-        print(type(filters))
-        print(filters)
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
         field_attr_by_bq = _build_attr_by_source(fields, data_version, DataSource.BIGQUERY, attr_data)
     else:
@@ -1626,7 +1624,5 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     full_query_str = """
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
-
-    settings.DEBUG and logger.debug("[STATUS] get_bq_string: {}".format(full_query_str))
 
     return full_query_str
