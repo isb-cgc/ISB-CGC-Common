@@ -414,7 +414,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     # Mutation filters, not currently applicable in IDC
     for attr, values in list(mutation_filters.items()):
         if type(values) is dict and 'values' in values:
-            comb_with = values['op']
+            comb_with = values['op'] or comb_with
             values = values['values']
 
         if type(values) is not list:
