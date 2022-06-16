@@ -363,11 +363,16 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
     return facets
 
+
 # Build a query string for Solr
 #
-# filters: simple filter dict of the form:
+# filters: filter dict of one of these forms:
 # {
 #    <attribute name>: [<value1>,[<value2>...]],
+# }
+#
+# {
+#    <attribute name>: {'values': [<value1>,[<value2>...]], 'op': [<OR>|<AND>]},
 # }
 #
 # comb_with: Simple toggle to determine filter combination behavior (Solr default is OR between values, AND between fields)
@@ -409,6 +414,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     # Mutation filters, not currently applicable in IDC
     for attr, values in list(mutation_filters.items()):
         if type(values) is dict and 'values' in values:
+            comb_with = values['op'] or comb_with
             values = values['values']
 
         if type(values) is not list:
@@ -464,6 +470,9 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
     # All other filters
     for attr, values in list(main_filters.items()):
+        if type(values) is dict and 'values' in values:
+            comb_with = values['op'] or comb_with
+            values = values['values']
         attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_e?btwe?',attr) else attr
         attr_rng = attr[attr.rfind('_')+1:] if re.search('_[gl]t[e]|_e?btwe?', attr) else ''
 
