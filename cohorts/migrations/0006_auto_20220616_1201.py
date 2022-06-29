@@ -13,6 +13,8 @@ class Migration(migrations.Migration):
         migrations.AlterField(
             model_name='filter',
             name='numeric_op',
-            field=models.CharField(choices=[('B', '_btw'), ('GE', '_gte'), ('LE', '_lte'), ('G', '_gt'), ('L', '_lt'), ('A', '_and'), ('O', '_or')], default='O', max_length=4),
+            field=models.CharField(choices=[
+                ('B', '_btw'), ('EB', '_ebtw'), ('BE', '_btwe'), ('EBE', '_ebtwe'), ('GE', '_gte'), ('LE', '_lte'), ('G', '_gt'), ('L', '_lt'), ('A', '_and'), ('O', '_or')
+            ], default='O', max_length=4),
         ),
     ]

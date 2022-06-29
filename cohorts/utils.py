@@ -171,11 +171,16 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND, data_version=version)
 
         filter_attr = Attribute.objects.filter(id__in=filters.keys())
+        cont_numeric_attr = filter_attr.filter(data_type=Attribute.CONTINUOUS_NUMERIC)
 
         filter_set = []
 
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
+            op = Filter.OR if attr not in cont_numeric_attr else Filter.BTW
+            if type(filter_values) is dict:
+                op = Filter.STR_TO_OP.get(filter_values['op'], op)
+                filter_values = filter_values['values']
             filter_value_full = "".join([str(x) for x in filter_values])
             delimiter = Filter.DEFAULT_VALUE_DELIMITER
             if Filter.DEFAULT_VALUE_DELIMITER in filter_value_full:
@@ -188,7 +193,8 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
                 resulting_cohort=cohort,
                 attribute=attr, value=delimiter.join([str(x) for x in filter_values]),
                 filter_group=grouping,
-                value_delimiter=delimiter
+                value_delimiter=delimiter,
+                operator=op
             ))
 
         Filter.objects.bulk_create(filter_set)

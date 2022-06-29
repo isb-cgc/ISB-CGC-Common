@@ -207,7 +207,7 @@ class Cohort(models.Model):
 
         for fg in filter_groups:
             filters = fg.filter_set.all().get_filter_set_array()
-            group_filters = {x['display_name']: [attr_dvals.get(x['id'],{}).get(y,y) for y in x['values']] for x in filters}
+            group_filters = {x['name']: [attr_dvals.get(x['id'], {}).get(y, y) for y in x['values']] for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
                 group_filters, join_with_space=True, field_prefix=prefix, encapsulated=False,
@@ -220,7 +220,7 @@ class Cohort(models.Model):
         return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'))
 
     def get_attr_list(self):
-        return self.filter_set.select_related('attribute').all().values_list('attribute__id',flat=True)
+        return self.filter_set.select_related('attribute').all().values_list('attribute__id', flat=True)
 
     # Produce a BigQuery filter WHERE clause for this cohort's filters that can be used in the BQ console
     def get_bq_filter_string(self, prefix=None):
@@ -331,7 +331,7 @@ class FilterQuerySet(models.QuerySet):
     def get_filter_set(self):
         filters = {}
         for fltr in self.select_related('attribute').all():
-            filter_name = ("{}{}".format(fltr.name.lower(), fltr.operator)) if fltr.operator not in Filter.NUMERIC_OPS else fltr.attribute.name
+            filter_name = fltr.get_attr_name()
             filters[filter_name] = fltr.value.split(fltr.value_delimiter)
         return filters
 
@@ -340,7 +340,7 @@ class FilterQuerySet(models.QuerySet):
         for fltr in self.select_related('attribute').all():
             filters.append({
                 'id': fltr.attribute.id,
-                'name': ("{}{}".format(fltr.name.lower(), fltr.operator)) if fltr.operator not in Filter.NUMERIC_OPS else fltr.attribute.name,
+                'name': fltr.get_attr_name(),
                 'display_name': fltr.attribute.display_name,
                 'values': fltr.value.split(fltr.value_delimiter)
             })
@@ -354,6 +354,9 @@ class FilterManager(models.Manager):
 
 class Filter(models.Model):
     BTW = 'B'
+    EBTW = 'EB'
+    BTWE = 'BE'
+    EBTWE = 'EBE'
     GTE = 'GE'
     LTE = 'LE'
     GT = 'G'
@@ -362,6 +365,9 @@ class Filter(models.Model):
     OR = 'O'
     OPS = (
         (BTW, '_btw'),
+        (EBTW, '_btwe'),
+        (BTWE, '_ebtw'),
+        (EBTWE, '_ebtwe'),
         (GTE, '_gte'),
         (LTE, '_lte'),
         (GT, '_gt'),
@@ -369,7 +375,31 @@ class Filter(models.Model):
         (AND, '_and'),
         (OR, '_or')
     )
-    NUMERIC_OPS = [BTW, GTE, LTE, GT, LT]
+    NUMERIC_OPS = [BTW, EBTW, BTWE, EBTWE, GTE, LTE, GT, LT]
+    STR_TO_OP = {
+        'BTW': BTW,
+        'EBTW': EBTW,
+        'BTWE': BTWE,
+        'EBTWE': EBTWE,
+        'OR': OR,
+        'AND': AND,
+        'LT': LT,
+        'GT': GT,
+        'LTE': LTE,
+        'GTE': GTE
+    }
+    OP_TO_SUFFIX = {
+        BTW: '_btw',
+        EBTW: '_ebtw',
+        BTWE: '_btwe',
+        EBTWE: '_ebtwe',
+        GTE: '_gte',
+        LTE: '_lte',
+        GT: '_gt',
+        LT: '_lt',
+        AND: '_and',
+        OR: '_or'
+    }
     DEFAULT_VALUE_DELIMITER = ','
     ALTERNATIVE_VALUE_DELIMITERS = [';', '|', '^']
     objects = FilterManager()
@@ -381,18 +411,16 @@ class Filter(models.Model):
     operator = models.CharField(max_length=4, null=False, blank=False, choices=OPS, default=OR)
     value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=DEFAULT_VALUE_DELIMITER)
 
-    def get_numeric_filter(self):
-        if self.operator in NUMERIC_OPS:
-            return "{}{}".format(self.attribute.name.lower(), self.operator)
-        return None
+    def get_attr_name(self):
+        return "{}{}".format(self.attribute.name, self.OP_TO_SUFFIX[self.operator] if self.operator in self.NUMERIC_OPS else "")
 
     def get_filter(self):
         return {
-            "()".format(self.attribute.name if self.operator not in NUMERIC_OPS else self.get_numeric_filter()): self.value.split(self.value_delimiter)
+            self.get_attr_name(): self.value.split(self.value_delimiter)
         }
 
     def __repr__(self):
-        return "{ %s }" % ("\"{}\": [{}]".format(self.attribute.name if self.operator not in NUMERIC_OPS else self.get_numeric_filter(), self.value))
+        return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
 
     def __str__(self):
         return self.__repr__()

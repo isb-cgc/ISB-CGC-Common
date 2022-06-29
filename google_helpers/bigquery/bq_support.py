@@ -857,7 +857,8 @@ class BigQuerySupport(BigQueryABC):
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
     def build_bq_where_clause(filters, join_with_space=False, comb_with='AND', field_prefix=None,
-                              type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True):
+                              type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True,
+                              value_op='OR'):
         join_str = ","
         if join_with_space:
             join_str = ", "
@@ -908,6 +909,9 @@ class BigQuerySupport(BigQueryABC):
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
             attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            if type(values) is dict and 'values' in values:
+                value_op = values['op'] or value_op
+                values = values['values']
 
             # We require our attributes to be value lists
             if type(values) is not list:
