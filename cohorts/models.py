@@ -401,7 +401,8 @@ class Filter(models.Model):
         OR: '_or'
     }
     DEFAULT_VALUE_DELIMITER = ','
-    ALTERNATIVE_VALUE_DELIMITERS = [';', '|', '^']
+    ALTERNATIVE_VALUE_DELIMITERS = [';', '|', '^', ':']
+    FAILOVER_DELIMITER = '$$%%'
     objects = FilterManager()
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
@@ -424,6 +425,25 @@ class Filter(models.Model):
 
     def __str__(self):
         return self.__repr__()
+
+    @classmethod
+    def get_delimiter(cls,values):
+        filter_value_full = "".join([str(x) for x in values])
+        delimiter = None
+        if cls.DEFAULT_VALUE_DELIMITER in filter_value_full:
+            for delim in cls.ALTERNATIVE_VALUE_DELIMITERS:
+                if delim not in filter_value_full:
+                    delimiter = delim
+                    break
+        else:
+            delimiter = cls.DEFAULT_VALUE_DELIMITER
+        if not delimiter:
+            logger.warn("[WARNING] No valid delimiter value available for this set of values: {}".format(
+                filter_value_full)
+            )
+            logger.warn("[WARNING] Failing over to complex delimiter '$$%%'.")
+            delimiter = cls.FAILOVER_DELIMITER
+        return delimiter
 
 
 class Cohort_Comments(models.Model):
