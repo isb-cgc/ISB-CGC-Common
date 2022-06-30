@@ -175,20 +175,19 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         filter_set = []
 
+        nested_attr = {}
+
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
             op = Filter.OR if attr not in cont_numeric_attr else Filter.BTW
             if type(filter_values) is dict:
                 op = Filter.STR_TO_OP.get(filter_values['op'], op)
                 filter_values = filter_values['values']
-            filter_value_full = "".join([str(x) for x in filter_values])
-            delimiter = Filter.DEFAULT_VALUE_DELIMITER
-            if Filter.DEFAULT_VALUE_DELIMITER in filter_value_full:
-                for delim in Filter.ALTERNATIVE_VALUE_DELIMITERS:
-                    if delim not in filter_value_full:
-                        delimiter = delim
-                        break
-
+            elif type(filter_values) is list and type(filter_values[0]) is dict:
+                # complex query eg. 'age_at_diagnosis = None OR 45-67'
+                nested_attr[attr] = filter_values
+                continue
+            delimiter = Filter.get_delimiter(filter_values)
             filter_set.append(Filter(
                 resulting_cohort=cohort,
                 attribute=attr, value=delimiter.join([str(x) for x in filter_values]),
@@ -198,6 +197,28 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
             ))
 
         Filter.objects.bulk_create(filter_set)
+
+        # Nested attribute filters are complex filters which typically attempt to subset a range of numeric
+        # partitions (eg. Null or 5-10 or > 28), so should be OR'd rather than AND'd.
+        # The expected format here is [{'op': <OPERATOR>, 'values': [1, 2, ...]}, {...}, ...]
+        # In the case of a single value string or categorical numeric (eg. Modality = 'CT') filter the operator value
+        # supplied can be None, since it will be ignored as unneeded.
+        for attr in nested_attr:
+            next_group = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.OR, data_version=version)
+            nested_set = []
+            nested_filters = nested_attr[attr]
+            for nested in nested_filters:
+                op = Filter.STR_TO_OP.get(nested['op'], Filter.OR if attr not in cont_numeric_attr else Filter.BTW)
+                filter_values = nested['values']
+                delimiter = Filter.get_delimiter(filter_values)
+                nested_set.append(Filter(
+                    resulting_cohort=cohort,
+                    attribute=attr, value=delimiter.join([str(x) for x in filter_values]),
+                    filter_group=next_group,
+                    value_delimiter=delimiter,
+                    operator=op
+                ))
+            Filter.objects.bulk_create(nested_set)
 
         # For backwards compatibility with v1 cohorts
         if not no_stats:
