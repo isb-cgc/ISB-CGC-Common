@@ -309,9 +309,13 @@ class Filter_Group(models.Model):
         (AND, 'And'),
         (OR, 'Or')
     )
+    OP_TO_STR = {
+        OR: 'OR',
+        AND: 'AND'
+    }
     id = models.AutoField(primary_key=True)
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
-    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
+    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=AND)
     data_version = models.ForeignKey(ImagingDataCommonsVersion, on_delete=models.CASCADE, null=True)
 
     def get_filter_set(self):
@@ -330,20 +334,17 @@ class Filter_Group(models.Model):
 class FilterQuerySet(models.QuerySet):
     def get_filter_set(self):
         filters = {}
-        for fltr in self.select_related('attribute').all():
-            filter_name = fltr.get_attr_name()
-            filters[filter_name] = fltr.value.split(fltr.value_delimiter)
+        for fltr in self.all():
+            filters.update(fltr.get_filter())
         return filters
 
     def get_filter_set_array(self):
         filters = []
         for fltr in self.select_related('attribute').all():
-            filters.append({
+            filters.append(fltr.get_filter_flat().update({
                 'id': fltr.attribute.id,
-                'name': fltr.get_attr_name(),
-                'display_name': fltr.attribute.display_name,
-                'values': fltr.value.split(fltr.value_delimiter)
-            })
+                'display_name': fltr.attribute.display_name
+            }))
         return filters
 
 
@@ -388,6 +389,18 @@ class Filter(models.Model):
         'LTE': LTE,
         'GTE': GTE
     }
+    OP_TO_STR = {
+        BTW: 'BTW',
+        EBTW: 'EBTW',
+        BTWE: 'BTWE',
+        EBTWE: 'EBTWE',
+        OR: 'OR',
+        AND: 'AND',
+        LT: 'LT',
+        GT: 'GT',
+        LTE: 'LTE',
+        GTE: 'GTE'
+    }
     OP_TO_SUFFIX = {
         BTW: '_btw',
         EBTW: '_ebtw',
@@ -415,12 +428,28 @@ class Filter(models.Model):
     def get_attr_name(self):
         return "{}{}".format(self.attribute.name, self.OP_TO_SUFFIX[self.operator] if self.operator in self.NUMERIC_OPS else "")
 
+    def get_operator(self):
+        return self.OP_TO_STR[self.operator]
+
     def get_filter(self):
+        if self.operator not in [self.OR, self.BTW]:
+            return {
+                self.get_attr_name(): { 'op': self.get_operator(), 'values': self.value.split(self.value_delimiter) }
+            }
         return {
             self.get_attr_name(): self.value.split(self.value_delimiter)
         }
 
+    def get_filter_flat(self):
+        return {
+            'name': self.get_attr_name(),
+            'op': self.get_operator(),
+            'values': self.value.split(self.value_delimiter)
+        }
+
     def __repr__(self):
+        if self.operator not in [self.OR, self.BTW]:
+            return "{ %s: {'op': %s, 'values': [%s] }" % self.get_attr_name(), self.get_operator(), self.value
         return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
 
     def __str__(self):
