@@ -290,7 +290,6 @@ def save_cohort(request):
             name = request.POST.get('name')
             desc = request.POST.get('desc', None)
             filters = json.loads(request.POST.get('selected-filters','{}'))
-            print(filters)
             cohort_id = request.POST.get('cohort_id', None)
             req_version = request.POST.get('version', None)
 
