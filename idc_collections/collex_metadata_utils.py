@@ -670,7 +670,9 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
             stop = time.time()
             logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
             if filters and attrs_for_faceting and filtered_needed:
-                solr_facets_filtered = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col})
+                solr_facets_filtered = fetch_solr_facets(
+                    {'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col}
+                )
                 solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
 
             if custom_facets is not None:
@@ -720,7 +722,9 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 },raw_format=raw_format)
 
             stop = time.time()
-            logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(source.name, str(stop-start)))
+            logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(
+                source.name, str(stop-start))
+            )
 
             if DataSetType.IMAGE_DATA in source_data_types[source.id] and 'numFound' in solr_result:
                 results['total'] = solr_result['numFound']
@@ -790,11 +794,10 @@ def get_metadata_bq(filters, fields, sources_and_attrs, counts_only, collapse_on
     return results
 
 
-###################
-# BigQuery Metods
-###################
+####################
+# BigQuery Methods
+####################
 #
-
 # Faceted counting for an arbitrary set of filters and facets.
 # filters and facets can be provided as lists of names (in which case _build_attr_by_source is used to convert them
 # into Attribute objects) or as part of the sources_and_attrs construct, which is a dictionary of objects with the same
@@ -956,7 +959,8 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
                 else:
                     sel_count_col = "{}.{} AS {}".format(table_info[facet_table]['alias'], facet, facet)
                 count_clause = count_clause_base.format(
-                    sel_count_col=sel_count_col, count_col="{}.{}".format(table_info[image_table]['alias'], table_info[image_table]['count_col'],))
+                    sel_count_col=sel_count_col, count_col="{}.{}".format(
+                        table_info[image_table]['alias'], table_info[image_table]['count_col'],))
                 count_query = query_base.format(
                     facet=facet,
                     table_clause="`{}` {}".format(table_info[image_table]['name'], table_info[image_table]['alias']),
@@ -1186,20 +1190,37 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
             if len(filter_set):
                 if may_need_intersect and len(filter_set.keys()) > 1:
                     for filter in filter_set:
-                        bq_filter = BigQuerySupport.build_bq_filter_and_params(
-                            {filter: filter_set[filter]}, param_suffix=str(param_sfx),
-                            field_prefix=table_info[image_table]['alias'],
-                            case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
-                        )
-                        intersect_statements.append(intersect_base.format(
-                            search_by=child_record_search_field,
-                            table_clause="`{}` {}".format(
-                                table_info[image_table]['name'], table_info[image_table]['alias']
-                            ),
-                            join_clause="",
-                            where_clause="WHERE {}".format(bq_filter['filter_string'])
-                        ))
-                        params.append(bq_filter['parameters'])
+                        if type(filter_set[filter]) is dict and filter_set[filter]['op'] == 'AND':
+                            for val in filter_set[filter]['values']:
+                                bq_filter = BigQuerySupport.build_bq_where_clause(
+                                    {filter: [val]}, field_prefix=table_info[image_table]['alias'],
+                                    case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                                )
+                                intersect_statements.append(intersect_base.format(
+                                    search_by=child_record_search_field,
+                                    table_clause="`{}` {}".format(
+                                        table_info[image_table]['name'], table_info[image_table]['alias']
+                                    ),
+                                    join_clause="",
+                                    where_clause="WHERE {}".format(bq_filter)
+                                ))
+                                param_sfx += 1
+                                params.append(bq_filter['parameters'])
+                        else:
+                            bq_filter = BigQuerySupport.build_bq_filter_and_params(
+                                {filter: filter_set[filter]}, param_suffix=str(param_sfx),
+                                field_prefix=table_info[image_table]['alias'],
+                                case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                            )
+                            intersect_statements.append(intersect_base.format(
+                                search_by=child_record_search_field,
+                                table_clause="`{}` {}".format(
+                                    table_info[image_table]['name'], table_info[image_table]['alias']
+                                ),
+                                join_clause="",
+                                where_clause="WHERE {}".format(bq_filter['filter_string'])
+                            ))
+                            params.append(bq_filter['parameters'])
                 else:
                     filter_clauses[image_table] = BigQuerySupport.build_bq_filter_and_params(
                         filter_set, param_suffix=str(param_sfx), field_prefix=table_info[image_table]['alias'],
@@ -1346,15 +1367,18 @@ def _get_bq_range_case_clause(attr, table, alias, count_on, include_nulls=True):
                         "WHEN {}.{} < {} THEN {}".format(alias, attr.name, str(upper), "'* TO {}'".format(str(upper))))
                 else:
                     ranges_case.append(
-                        "WHEN {}.{} BETWEEN {} AND {} THEN {}".format(alias, attr.name, str(lower),
-                                                                       str(upper), "'{} TO {}'".format(str(lower),str(upper))))
+                        "WHEN {}.{} BETWEEN {} AND {} THEN {}".format(
+                            alias, attr.name, str(lower), str(upper), "'{} TO {}'".format(str(lower),str(upper)))
+                    )
                 lower = upper
                 upper = lower + gap
 
             # If we stopped *at* the end, we need to add one last bucket.
             if attr_range.unbounded:
                 ranges_case.append(
-                    "WHEN {}.{} > {} THEN {}".format(alias, attr.name, str(attr_range.last), "'{} TO *'".format(str(attr_range.last))))
+                    "WHEN {}.{} > {} THEN {}".format(
+                        alias, attr.name, str(attr_range.last), "'{} TO *'".format(str(attr_range.last)))
+                )
 
     if include_nulls:
         ranges_case.append(
@@ -1441,8 +1465,6 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
 
     if not sources_and_attrs:
-        print(type(filters))
-        print(filters)
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
         field_attr_by_bq = _build_attr_by_source(fields, data_version, DataSource.BIGQUERY, attr_data)
     else:
@@ -1525,18 +1547,34 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
             if len(filter_set):
                 if may_need_intersect and len(filter_set.keys()) > 1:
                     for filter in filter_set:
-                        bq_filter = BigQuerySupport.build_bq_where_clause(
-                            {filter: filter_set[filter]}, field_prefix=table_info[image_table]['alias'],
-                            case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
-                        )
-                        intersect_statements.append(intersect_base.format(
-                            search_by=child_record_search_field,
-                            table_clause="`{}` {}".format(
-                                table_info[image_table]['name'], table_info[image_table]['alias']
-                            ),
-                            join_clause="",
-                            where_clause="WHERE {}".format(bq_filter)
-                        ))
+                        # AND'd filters need to be intersected as well
+                        if type(filter_set[filter]) is dict and filter_set[filter]['op'] == 'AND':
+                            for val in filter_set[filter]['values']:
+                                bq_filter = BigQuerySupport.build_bq_where_clause(
+                                    {filter: [val]}, field_prefix=table_info[image_table]['alias'],
+                                    case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                                )
+                                intersect_statements.append(intersect_base.format(
+                                    search_by=child_record_search_field,
+                                    table_clause="`{}` {}".format(
+                                        table_info[image_table]['name'], table_info[image_table]['alias']
+                                    ),
+                                    join_clause="",
+                                    where_clause="WHERE {}".format(bq_filter)
+                                ))
+                        else:
+                            bq_filter = BigQuerySupport.build_bq_where_clause(
+                                {filter: filter_set[filter]}, field_prefix=table_info[image_table]['alias'],
+                                case_insens=True, type_schema=TYPE_SCHEMA, continuous_numerics=ranged_numerics
+                            )
+                            intersect_statements.append(intersect_base.format(
+                                search_by=child_record_search_field,
+                                table_clause="`{}` {}".format(
+                                    table_info[image_table]['name'], table_info[image_table]['alias']
+                                ),
+                                join_clause="",
+                                where_clause="WHERE {}".format(bq_filter)
+                            ))
                 else:
                     filter_clauses[image_table] = BigQuerySupport.build_bq_where_clause(
                         filter_set, field_prefix=table_info[image_table]['alias'],
@@ -1626,7 +1664,5 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     full_query_str = """
             #standardSQL
     """ + """UNION DISTINCT""".join(for_union)
-
-    settings.DEBUG and logger.debug("[STATUS] get_bq_string: {}".format(full_query_str))
 
     return full_query_str

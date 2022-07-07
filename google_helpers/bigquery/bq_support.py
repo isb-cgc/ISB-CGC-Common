@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2022, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -311,7 +311,8 @@ class BigQuerySupport(BigQueryABC):
     # Runs a basic, optionally parameterized query
     # If self.project_id, self.dataset_id, and self.table_id are set they will be used as the destination table for
     # the query WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False, paginated=False, no_results=False):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY',
+                      cost_est=False, with_schema=False, paginated=False, no_results=False):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
         logger.debug("query_job: {}".format(query_job))
@@ -383,7 +384,6 @@ class BigQuerySupport(BigQueryABC):
 
         return job_is_done and job_is_done['status']['state'] == 'DONE'
 
-
     # TODO: shim until we have time to rework this into a single method
     # Fetch the results of a job based on the reference provided
     def fetch_job_result_page(self, job_ref, page_token=None, maxResults=settings.MAX_BQ_RECORD_RESULT):
@@ -403,7 +403,6 @@ class BigQuerySupport(BigQueryABC):
             'schema': schema,
             'totalFound': totalFound,
             'next_page': next_page}
-
 
     # TODO: shim until we have time to rework this into a single method
     # Fetch the results of a job based on the reference provided
@@ -857,7 +856,9 @@ class BigQuerySupport(BigQueryABC):
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
     def build_bq_where_clause(filters, join_with_space=False, comb_with='AND', field_prefix=None,
-                              type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True):
+                              type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True,
+                              value_op='OR'):
+        global_value_op = value_op
         join_str = ","
         if join_with_space:
             join_str = ", "
@@ -908,6 +909,12 @@ class BigQuerySupport(BigQueryABC):
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
             attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            value_op = global_value_op
+            encapsulate = encapsulated
+            if type(values) is dict and 'values' in values:
+                value_op = values.get('op', global_value_op)
+                values = values['values']
+                encapsulate = True if value_op == 'AND' else encapsulate
 
             # We require our attributes to be value lists
             if type(values) is not list:
@@ -927,7 +934,7 @@ class BigQuerySupport(BigQueryABC):
                 type_check = values[0] if type(values[0]) is not list else values[0][0]
                 parameter_type = (
                     'STRING' if (
-                            type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
+                        type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
                     ) else 'NUMERIC'
                 )
 
@@ -993,11 +1000,15 @@ class BigQuerySupport(BigQueryABC):
                         ))
                     filter_string += " OR ".join(btw_filter_strings)
                 else:
-                    val_list = join_str.join(
-                        ["'{}'".format(x) for x in values]
-                    ) if parameter_type == "STRING" else join_str.join(values)
-                    filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr_name, val_list)
+                    if value_op == 'AND':
+                        val_scalars = ["{}{} = {}".format(field_prefix or '', attr_name, "'{}'".format(x) if parameter_type == "STRING" else x) for x in values]
+                        filter_string += " {} ".format(value_op).join(val_scalars)
+                    else:
+                        val_list = join_str.join(
+                            ["'{}'".format(x) for x in values]
+                        ) if parameter_type == "STRING" else join_str.join(values)
+                        filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr_name, val_list)
 
-            filter_set.append('{}{}{}'.format("(" if encapsulated else "", filter_string, ")" if encapsulated else ""))
+            filter_set.append('{}{}{}'.format("(" if encapsulate else "", filter_string, ")" if encapsulate else ""))
 
         return " {} ".format(comb_with).join(filter_set)

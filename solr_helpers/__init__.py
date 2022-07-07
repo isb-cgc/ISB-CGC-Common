@@ -363,14 +363,21 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
     return facets
 
+
 # Build a query string for Solr
 #
-# filters: simple filter dict of the form:
+# filters: filter dict of one of these forms:
 # {
 #    <attribute name>: [<value1>,[<value2>...]],
 # }
 #
-# comb_with: Simple toggle to determine filter combination behavior (Solr default is OR between values, AND between fields)
+# {
+#    <attribute name>: {'values': [<value1>,[<value2>...]], 'op': [<OR>|<AND>]},
+# }
+#
+# value_op: Controls the operator used in filtering the values of a given field (OR | AND, default OR)
+#
+# comb_with: Controls the operator used in combining filters (OR | AND, default AND)
 #
 # with_tags_for_ex: Boolean toggle for the creation and tracking dict of filter exclusion tags to be used in faceting
 #
@@ -382,12 +389,11 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 # satisfy another criteria - eg., records from the same study may not all have the same fields pulled out, but you may
 # still want those records when filtering on this attribute.
 #
-def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_field=None,
-                     search_child_records_by=None):
+def build_solr_query(filters, comb_with='AND', with_tags_for_ex=False, subq_join_field=None,
+                     search_child_records_by=None, global_value_op='OR'):
 
     # subq_join not currently used in IDC
     ranged_attrs = Attribute.get_ranged_attrs()
-
     first = True
     full_query_str = ''
     query_set = None
@@ -409,6 +415,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
     # Mutation filters, not currently applicable in IDC
     for attr, values in list(mutation_filters.items()):
         if type(values) is dict and 'values' in values:
+            value_op = values['op'] or value_op
             values = values['values']
 
         if type(values) is not list:
@@ -422,7 +429,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             first = False
         else:
             if not with_tags_for_ex:
-                full_query_str += ' {} '.format(comb_with)
+                full_query_str += ' {} '.format(value_op)
 
         attr_name = 'Variant_Classification'
         gene_field = "Hugo_Symbol"
@@ -464,6 +471,10 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
 
     # All other filters
     for attr, values in list(main_filters.items()):
+        value_op = global_value_op
+        if type(values) is dict and 'values' in values:
+            value_op = values['op'] or global_value_op
+            values = values['values']
         attr_name = attr[:attr.rfind('_')] if re.search('_[gl]t[e]|_e?btwe?',attr) else attr
         attr_rng = attr[attr.rfind('_')+1:] if re.search('_[gl]t[e]|_e?btwe?', attr) else ''
 
@@ -479,13 +490,13 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 values = [values]
 
         # All individual (nonlist) values MUST be cast to string; numbers cannot be combined using join
-        values = [str(x) if not isinstance(x,list) else x for x in values]
+        values = [str(x).replace('"','\\"') if not isinstance(x,list) else x for x in values]
         # If it's first in the list, don't append an "and"
         if first:
             first = False
         else:
             if not with_tags_for_ex:
-                full_query_str += ' AND '
+                full_query_str += ' {} '.format(comb_with)
 
         # If it's looking for a single None value
         if len(values) == 1 and values[0] == 'None':
@@ -496,7 +507,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             if 'None' in values:
                 values.remove('None')
                 with_none = True
-            clause = " {} ".format(comb_with).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
+            clause = " {} ".format(value_op).join(["{}:{}".format(attr, BMI_MAPPING[x]) for x in values])
             query_str += (('-(-(%s) +(%s:{* TO *}))' % (clause, attr)) if with_none else "+({})".format(clause))
         elif attr_name in ranged_attrs or attr_name in date_attrs:
             bounds = ("[" if re.search('^ebtwe?',attr_rng) else "{{","]" if re.search('e?btwe$',attr_rng) else "}}",)
@@ -515,7 +526,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                 date_temp_first = "{}T:00:00:00Z"
                 date_temp_second = "{}T:11:59:99Z"
                 if len(values) >= 1 and type(values[0]) is list:
-                    clause = " {} ".format(comb_with).join(
+                    clause = " {} ".format(value_op).join(
                         [rngTemp.format(attr_name, date_temp_first.format(x[0]),date_temp_second.format(x[1])) for x in values])
                 else:
                     clause = rngTemp.format(
@@ -525,7 +536,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
                     )
             else:
                 if len(values) >= 1 and type(values[0]) is list:
-                    clause = " {} ".format(comb_with).join(
+                    clause = " {} ".format(value_op).join(
                         [rngTemp.format(attr_name, str(x[0]), str(x[1])) for x in values])
                 elif len(values) > 1 :
                     clause = rngTemp.format(attr_name, values[0], values[1])
@@ -535,11 +546,12 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, subq_join_
             query_str += (('(-(-(%s) +(%s:{* TO *})))' % (clause, attr_name)) if with_none else "(+({}))".format(clause))
 
         else:
+            vals = "\" {} \"".format(value_op).join(values)
             if 'None' in values:
                 values.remove('None')
-                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr_name,"\" \"".join(values), attr_name)
+                query_str += '(-(-(%s:("%s")) +(%s:{* TO *})))' % (attr_name,vals, attr_name)
             else:
-                query_str += '(+%s:("%s"))' % (attr_name, "\" \"".join(values))
+                query_str += '(+%s:("%s"))' % (attr_name, vals)
 
         query_set = query_set or {}
 
