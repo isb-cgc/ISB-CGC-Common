@@ -859,6 +859,7 @@ class BigQuerySupport(BigQueryABC):
     def build_bq_where_clause(filters, join_with_space=False, comb_with='AND', field_prefix=None,
                               type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True,
                               value_op='OR'):
+        global_value_op = value_op
         join_str = ","
         if join_with_space:
             join_str = ", "
@@ -909,9 +910,12 @@ class BigQuerySupport(BigQueryABC):
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
             attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            value_op = global_value_op
+            encapsulate = encapsulated
             if type(values) is dict and 'values' in values:
-                value_op = values['op'] or value_op
+                value_op = values.get('op', global_value_op)
                 values = values['values']
+                encapsulate = True if value_op == 'AND' else encapsulate
 
             # We require our attributes to be value lists
             if type(values) is not list:
@@ -997,11 +1001,15 @@ class BigQuerySupport(BigQueryABC):
                         ))
                     filter_string += " OR ".join(btw_filter_strings)
                 else:
-                    val_list = join_str.join(
-                        ["'{}'".format(x) for x in values]
-                    ) if parameter_type == "STRING" else join_str.join(values)
-                    filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr_name, val_list)
+                    if value_op == 'AND':
+                        val_scalars = ["{}{} = {}".format(field_prefix or '', attr_name, "'{}'".format(x) if parameter_type == "STRING" else x) for x in values]
+                        filter_string += " {} ".format(value_op).join(val_scalars)
+                    else:
+                        val_list = join_str.join(
+                            ["'{}'".format(x) for x in values]
+                        ) if parameter_type == "STRING" else join_str.join(values)
+                        filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr_name, val_list)
 
-            filter_set.append('{}{}{}'.format("(" if encapsulated else "", filter_string, ")" if encapsulated else ""))
+            filter_set.append('{}{}{}'.format("(" if encapsulate else "", filter_string, ")" if encapsulate else ""))
 
         return " {} ".format(comb_with).join(filter_set)
