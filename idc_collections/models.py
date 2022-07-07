@@ -44,6 +44,7 @@ class ProgramManager(models.Manager):
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
+
 class Program(models.Model):
     id = models.AutoField(primary_key=True)
     # Eg. TCGA
@@ -97,9 +98,11 @@ class DataSetTypeQuerySet(models.QuerySet):
                 sources = sources | dst.datasource_set.all()
         return sources
 
+
 class DataSetTypeManager(models.Manager):
     def get_queryset(self):
         return DataSetTypeQuerySet(self.model, using=self._db)
+
 
 class DataSetType(models.Model):
     IMAGE_DATA = 'I'
@@ -252,9 +255,11 @@ class CollectionQuerySet(models.QuerySet):
             tips[collex.collection_id] = collex.description
         return tips
 
+
 class CollectionManager(models.Manager):
     def get_queryset(self):
         return CollectionQuerySet(self.model, using=self._db)
+
 
 class Collection(models.Model):
     ANALYSIS_COLLEX = 'A'
@@ -513,6 +518,7 @@ class DataSource(models.Model):
     class Meta(object):
         unique_together = (("name", "source_type"),)
 
+
 class DataSourceJoin(models.Model):
     from_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="from_data_source")
     from_src_col = models.CharField(max_length=64, null=False, blank=False)
@@ -586,9 +592,11 @@ class AttributeQuerySet(models.QuerySet):
             facet_types[attr.id] = DataSource.QUERY if attr.data_type == Attribute.CONTINUOUS_NUMERIC and attr.id in attr_with_ranges else DataSource.TERMS
         return facet_types
 
+
 class AttributeManager(models.Manager):
     def get_queryset(self):
         return AttributeQuerySet(self.model, using=self._db)
+
 
 class Attribute(models.Model):
     CONTINUOUS_NUMERIC = 'N'
@@ -657,6 +665,7 @@ class Attribute(models.Model):
     def __str__(self):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
+
 
 # This model allows for breaking Attributes up beyond the strict DataSource->DataSetType heirarchy,
 # since an attribute might be found in a DataSource housing more than one set type.

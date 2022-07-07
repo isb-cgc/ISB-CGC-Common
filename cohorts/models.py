@@ -207,20 +207,20 @@ class Cohort(models.Model):
 
         for fg in filter_groups:
             filters = fg.filter_set.all().get_filter_set_array()
-            group_filters = {x['display_name']: [attr_dvals.get(x['id'],{}).get(y,y) for y in x['values']] for x in filters}
+            group_filters = {x['name']: {'values': [attr_dvals.get(x['id'], {}).get(y, y) for y in x['values']], 'op': x['op']} for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
                 group_filters, join_with_space=True, field_prefix=prefix, encapsulated=False,
                 continuous_numerics=ranged_numerics
             ))
 
-        return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")
+        return " AND ".join(filter_sets).replace("AnatomicRegionSequence", "AnatomicRegion")
 
     def get_attrs(self):
         return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'))
 
     def get_attr_list(self):
-        return self.filter_set.select_related('attribute').all().values_list('attribute__id',flat=True)
+        return self.filter_set.select_related('attribute').all().values_list('attribute__id', flat=True)
 
     # Produce a BigQuery filter WHERE clause for this cohort's filters that can be used in the BQ console
     def get_bq_filter_string(self, prefix=None):
@@ -232,7 +232,7 @@ class Cohort(models.Model):
         ranged_numerics = Attribute.get_ranged_attrs()
 
         for group in group_filter_dict:
-            group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
+            group_filters = {x['name']: { 'op': x['op'], 'values': [y for y in x['values']]} for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
                 group_filters, field_prefix=prefix, continuous_numerics=ranged_numerics
             ))
@@ -248,7 +248,7 @@ class Cohort(models.Model):
         group_filter_dict = self.get_filters_as_dict()
 
         for group in group_filter_dict:
-            group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
+            group_filters = {x['name']: { 'op': x['op'], 'values': [y for y in x['values']]} for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
                 group_filters, field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
                 type_schema=schema
@@ -309,9 +309,13 @@ class Filter_Group(models.Model):
         (AND, 'And'),
         (OR, 'Or')
     )
+    OP_TO_STR = {
+        OR: 'OR',
+        AND: 'AND'
+    }
     id = models.AutoField(primary_key=True)
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
-    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
+    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=AND)
     data_version = models.ForeignKey(ImagingDataCommonsVersion, on_delete=models.CASCADE, null=True)
 
     def get_filter_set(self):
@@ -330,20 +334,19 @@ class Filter_Group(models.Model):
 class FilterQuerySet(models.QuerySet):
     def get_filter_set(self):
         filters = {}
-        for fltr in self.select_related('attribute').all():
-            filter_name = ("{}{}".format(fltr.name.lower(),fltr.numeric_op)) if fltr.numeric_op else fltr.attribute.name
-            filters[filter_name] = fltr.value.split(fltr.value_delimiter)
+        for fltr in self.all():
+            filters.update(fltr.get_filter())
         return filters
 
     def get_filter_set_array(self):
         filters = []
         for fltr in self.select_related('attribute').all():
-            filters.append({
+            flat_dict = fltr.get_filter_flat()
+            flat_dict.update({
                 'id': fltr.attribute.id,
-                'name': ("{}{}".format(fltr.name.lower(),fltr.numeric_op)) if fltr.numeric_op else fltr.attribute.name,
-                'display_name': fltr.attribute.display_name,
-                'values': fltr.value.split(fltr.value_delimiter)
+                'display_name': fltr.attribute.display_name
             })
+            filters.append(flat_dict)
         return filters
 
 
@@ -354,43 +357,124 @@ class FilterManager(models.Manager):
 
 class Filter(models.Model):
     BTW = 'B'
+    EBTW = 'EB'
+    BTWE = 'BE'
+    EBTWE = 'EBE'
     GTE = 'GE'
     LTE = 'LE'
     GT = 'G'
     LT = 'L'
-    NUMERIC_OPS = (
+    AND = 'A'
+    OR = 'O'
+    OPS = (
         (BTW, '_btw'),
+        (EBTW, '_btwe'),
+        (BTWE, '_ebtw'),
+        (EBTWE, '_ebtwe'),
         (GTE, '_gte'),
         (LTE, '_lte'),
         (GT, '_gt'),
-        (LT, '_lt')
+        (LT, '_lt'),
+        (AND, '_and'),
+        (OR, '_or')
     )
+    NUMERIC_OPS = [BTW, EBTW, BTWE, EBTWE, GTE, LTE, GT, LT]
+    STR_TO_OP = {
+        'BTW': BTW,
+        'EBTW': EBTW,
+        'BTWE': BTWE,
+        'EBTWE': EBTWE,
+        'OR': OR,
+        'AND': AND,
+        'LT': LT,
+        'GT': GT,
+        'LTE': LTE,
+        'GTE': GTE
+    }
+    OP_TO_STR = {
+        BTW: 'BTW',
+        EBTW: 'EBTW',
+        BTWE: 'BTWE',
+        EBTWE: 'EBTWE',
+        OR: 'OR',
+        AND: 'AND',
+        LT: 'LT',
+        GT: 'GT',
+        LTE: 'LTE',
+        GTE: 'GTE'
+    }
+    OP_TO_SUFFIX = {
+        BTW: '_btw',
+        EBTW: '_ebtw',
+        BTWE: '_btwe',
+        EBTWE: '_ebtwe',
+        GTE: '_gte',
+        LTE: '_lte',
+        GT: '_gt',
+        LT: '_lt',
+        AND: '_and',
+        OR: '_or'
+    }
     DEFAULT_VALUE_DELIMITER = ','
-    ALTERNATIVE_VALUE_DELIMITERS = [';','|','^']
+    ALTERNATIVE_VALUE_DELIMITERS = [';', '|', '^', ':']
+    FAILOVER_DELIMITER = '$$%%'
     objects = FilterManager()
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
     value = models.TextField(null=False, blank=False)
     filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
-    numeric_op = models.CharField(max_length=4, null=True, blank=True, choices=NUMERIC_OPS)
+    operator = models.CharField(max_length=4, null=False, blank=False, choices=OPS, default=OR)
     value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=DEFAULT_VALUE_DELIMITER)
 
-    def get_numeric_filter(self):
-        if self.numeric_op:
-            return "{}{}".format(self.attribute.name.lower(),self.numeric_op)
-        return None
+    def get_attr_name(self):
+        return "{}{}".format(self.attribute.name, self.OP_TO_SUFFIX[self.operator] if self.operator in self.NUMERIC_OPS else "")
+
+    def get_operator(self):
+        return self.OP_TO_STR[self.operator]
 
     def get_filter(self):
+        if self.operator not in [self.OR, self.BTW]:
+            return {
+                self.get_attr_name(): { 'op': self.get_operator(), 'values': self.value.split(self.value_delimiter) }
+            }
         return {
-            "()".format(self.attribute.name if not self.numeric_op else self.get_numeric_filter()): self.value.split(self.value_delimiter)
+            self.get_attr_name(): self.value.split(self.value_delimiter)
+        }
+
+    def get_filter_flat(self):
+        return {
+            'name': self.get_attr_name(),
+            'op': self.get_operator(),
+            'values': self.value.split(self.value_delimiter)
         }
 
     def __repr__(self):
-        return "{ %s }" % ("\"{}\": [{}]".format(self.attribute.name if not self.numeric_op else self.get_numeric_filter(), self.value))
+        if self.operator not in [self.OR, self.BTW]:
+            return "{ %s: {'op': %s, 'values': %s }" % (self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
+        return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
 
     def __str__(self):
         return self.__repr__()
+
+    @classmethod
+    def get_delimiter(cls,values):
+        filter_value_full = "".join([str(x) for x in values])
+        delimiter = None
+        if cls.DEFAULT_VALUE_DELIMITER in filter_value_full:
+            for delim in cls.ALTERNATIVE_VALUE_DELIMITERS:
+                if delim not in filter_value_full:
+                    delimiter = delim
+                    break
+        else:
+            delimiter = cls.DEFAULT_VALUE_DELIMITER
+        if not delimiter:
+            logger.warn("[WARNING] No valid delimiter value available for this set of values: {}".format(
+                filter_value_full)
+            )
+            logger.warn("[WARNING] Failing over to complex delimiter '$$%%'.")
+            delimiter = cls.FAILOVER_DELIMITER
+        return delimiter
 
 
 class Cohort_Comments(models.Model):
