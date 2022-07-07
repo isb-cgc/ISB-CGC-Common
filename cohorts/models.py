@@ -207,14 +207,14 @@ class Cohort(models.Model):
 
         for fg in filter_groups:
             filters = fg.filter_set.all().get_filter_set_array()
-            group_filters = {x['name']: [attr_dvals.get(x['id'], {}).get(y, y) for y in x['values']] for x in filters}
+            group_filters = {x['name']: {'values': [attr_dvals.get(x['id'], {}).get(y, y) for y in x['values']], 'op': x['op']} for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
                 group_filters, join_with_space=True, field_prefix=prefix, encapsulated=False,
                 continuous_numerics=ranged_numerics
             ))
 
-        return " AND ".join(filter_sets).replace("AnatomicRegionSequence","AnatomicRegion")
+        return " AND ".join(filter_sets).replace("AnatomicRegionSequence", "AnatomicRegion")
 
     def get_attrs(self):
         return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'))
@@ -232,7 +232,7 @@ class Cohort(models.Model):
         ranged_numerics = Attribute.get_ranged_attrs()
 
         for group in group_filter_dict:
-            group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
+            group_filters = {x['name']: { 'op': x['op'], 'values': [y for y in x['values']]} for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
                 group_filters, field_prefix=prefix, continuous_numerics=ranged_numerics
             ))
@@ -248,7 +248,7 @@ class Cohort(models.Model):
         group_filter_dict = self.get_filters_as_dict()
 
         for group in group_filter_dict:
-            group_filters = {x['name']: [y for y in x['values']] for x in group['filters']}
+            group_filters = {x['name']: { 'op': x['op'], 'values': [y for y in x['values']]} for x in group['filters']}
             filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
                 group_filters, field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
                 type_schema=schema
@@ -309,9 +309,13 @@ class Filter_Group(models.Model):
         (AND, 'And'),
         (OR, 'Or')
     )
+    OP_TO_STR = {
+        OR: 'OR',
+        AND: 'AND'
+    }
     id = models.AutoField(primary_key=True)
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
-    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=OR)
+    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=AND)
     data_version = models.ForeignKey(ImagingDataCommonsVersion, on_delete=models.CASCADE, null=True)
 
     def get_filter_set(self):
@@ -330,20 +334,19 @@ class Filter_Group(models.Model):
 class FilterQuerySet(models.QuerySet):
     def get_filter_set(self):
         filters = {}
-        for fltr in self.select_related('attribute').all():
-            filter_name = fltr.get_attr_name()
-            filters[filter_name] = fltr.value.split(fltr.value_delimiter)
+        for fltr in self.all():
+            filters.update(fltr.get_filter())
         return filters
 
     def get_filter_set_array(self):
         filters = []
         for fltr in self.select_related('attribute').all():
-            filters.append({
+            flat_dict = fltr.get_filter_flat()
+            flat_dict.update({
                 'id': fltr.attribute.id,
-                'name': fltr.get_attr_name(),
-                'display_name': fltr.attribute.display_name,
-                'values': fltr.value.split(fltr.value_delimiter)
+                'display_name': fltr.attribute.display_name
             })
+            filters.append(flat_dict)
         return filters
 
 
@@ -388,6 +391,18 @@ class Filter(models.Model):
         'LTE': LTE,
         'GTE': GTE
     }
+    OP_TO_STR = {
+        BTW: 'BTW',
+        EBTW: 'EBTW',
+        BTWE: 'BTWE',
+        EBTWE: 'EBTWE',
+        OR: 'OR',
+        AND: 'AND',
+        LT: 'LT',
+        GT: 'GT',
+        LTE: 'LTE',
+        GTE: 'GTE'
+    }
     OP_TO_SUFFIX = {
         BTW: '_btw',
         EBTW: '_ebtw',
@@ -415,12 +430,28 @@ class Filter(models.Model):
     def get_attr_name(self):
         return "{}{}".format(self.attribute.name, self.OP_TO_SUFFIX[self.operator] if self.operator in self.NUMERIC_OPS else "")
 
+    def get_operator(self):
+        return self.OP_TO_STR[self.operator]
+
     def get_filter(self):
+        if self.operator not in [self.OR, self.BTW]:
+            return {
+                self.get_attr_name(): { 'op': self.get_operator(), 'values': self.value.split(self.value_delimiter) }
+            }
         return {
             self.get_attr_name(): self.value.split(self.value_delimiter)
         }
 
+    def get_filter_flat(self):
+        return {
+            'name': self.get_attr_name(),
+            'op': self.get_operator(),
+            'values': self.value.split(self.value_delimiter)
+        }
+
     def __repr__(self):
+        if self.operator not in [self.OR, self.BTW]:
+            return "{ %s: {'op': %s, 'values': %s }" % (self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
         return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
 
     def __str__(self):
