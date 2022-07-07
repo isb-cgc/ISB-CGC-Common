@@ -571,8 +571,6 @@ def build_solr_query(filters, comb_with='AND', with_tags_for_ex=False, subq_join
 
         query_set[attr_name] = query_str
 
-    print(query_set)
-
     return {
         'queries': query_set,
         'full_query_str': full_query_str,

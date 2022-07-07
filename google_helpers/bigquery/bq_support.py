@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2022, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -311,7 +311,8 @@ class BigQuerySupport(BigQueryABC):
     # Runs a basic, optionally parameterized query
     # If self.project_id, self.dataset_id, and self.table_id are set they will be used as the destination table for
     # the query WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False, paginated=False, no_results=False):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY',
+                      cost_est=False, with_schema=False, paginated=False, no_results=False):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
         logger.debug("query_job: {}".format(query_job))
@@ -383,7 +384,6 @@ class BigQuerySupport(BigQueryABC):
 
         return job_is_done and job_is_done['status']['state'] == 'DONE'
 
-
     # TODO: shim until we have time to rework this into a single method
     # Fetch the results of a job based on the reference provided
     def fetch_job_result_page(self, job_ref, page_token=None, maxResults=settings.MAX_BQ_RECORD_RESULT):
@@ -403,7 +403,6 @@ class BigQuerySupport(BigQueryABC):
             'schema': schema,
             'totalFound': totalFound,
             'next_page': next_page}
-
 
     # TODO: shim until we have time to rework this into a single method
     # Fetch the results of a job based on the reference provided
@@ -935,7 +934,7 @@ class BigQuerySupport(BigQueryABC):
                 type_check = values[0] if type(values[0]) is not list else values[0][0]
                 parameter_type = (
                     'STRING' if (
-                            type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
+                        type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
                     ) else 'NUMERIC'
                 )
 
