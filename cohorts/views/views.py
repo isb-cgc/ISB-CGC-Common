@@ -835,7 +835,7 @@ def get_query_string(request, cohort_id=0):
             version = cohort.get_data_versions()
 
         field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID",
-                      "SeriesInstanceUID", "SOPInstanceUID"]
+                      "SeriesInstanceUID", "SOPInstanceUID", "gcs_url"]
 
         if 'bmi' in filters:
             vals = filters['bmi']
