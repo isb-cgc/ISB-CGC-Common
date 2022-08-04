@@ -287,10 +287,7 @@ def gcp_detail(request, user_id, gcp_id):
     try:
         logger.info("[INFO] gcp_detail {}:".format(gcp_id))
         is_linked = have_linked_user(user_id)
-        context = {}
-        context['is_linked'] = is_linked
-        context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
-        context['sa_list'] = []
+        context = {'is_linked': is_linked, 'gcp': GoogleProject.objects.get(id=gcp_id, active=1), 'sa_list': []}
         # logger.info("[INFO] Listing SAs for GCP {}:".format(gcp_id))
         # if settings.SA_VIA_DCF:
         #     context['sa_list'] = []
