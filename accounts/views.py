@@ -98,18 +98,19 @@ def user_gcp_list(request, user_id):
                     'last_name': user.last_name
                 }
 
-                gcp_and_sa_tuples = []
+                # gcp_and_sa_tuples = []
                 is_linked = have_linked_user(user_id)
-                for gcp in gcp_list:
-                    if is_linked:
-                        sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
-                        if sa_err_msg is not None:
-                            template = '500.html'
-                            return render(request, template, context)
-                    else:
-                        sa_dicts = []
-                    gcp_and_sa_tuples.append((gcp, sa_dicts))
-                context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples, 'linked': is_linked}
+                # for gcp in gcp_list:
+                #     if is_linked:
+                #         sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                #         if sa_err_msg is not None:
+                #             template = '500.html'
+                #             return render(request, template, context)
+                #     else:
+                #         sa_dicts = []
+                #     gcp_and_sa_tuples.append((gcp, sa_dicts))
+                # context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples, 'linked': is_linked}
+                context = {'user': user, 'user_details': user_details, 'gcps': gcp_list, 'linked': is_linked}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
