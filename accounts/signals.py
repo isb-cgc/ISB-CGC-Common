@@ -35,7 +35,7 @@ def post_logout(sender, user, request, **kwargs):
         log_name = WEBAPP_LOGIN_LOG_NAME
         st_logger.write_text_log_entry(
             log_name,
-            "[WEBAPP LOGIN] User {} logged out of the web application at {}".format(user.email,
+            "[WEBAPP LOGOUT] User {} logged out of the web application at {}".format(user.email,
                                                                                    datetime.datetime.utcnow())
         )
     except Exception as e:
