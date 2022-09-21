@@ -1,8 +1,8 @@
-from django.contrib.auth.signals import user_logged_in
+from django.contrib.auth.signals import user_logged_in, user_logged_out
 from django.dispatch import receiver
 from google_helpers.stackdriver import StackDriverLogger
-from django.contrib.auth.models import User
 from django.conf import settings
+import logging
 
 debug = settings.DEBUG
 logger = logging.getLogger('main_logger')
@@ -16,7 +16,6 @@ def post_login(sender, user, request, **kwargs):
         # Write log entry
         st_logger = StackDriverLogger.build_from_django_settings()
         log_name = WEBAPP_LOGIN_LOG_NAME
-        user = User.objects.get(id=request.user.id)
         st_logger.write_text_log_entry(
             log_name,
             "[WEBAPP LOGIN] User {} logged in to the web application at {}".format(user.email,
@@ -32,7 +31,6 @@ def post_logout(sender, user, request, **kwargs):
         # Write log entry
         st_logger = StackDriverLogger.build_from_django_settings()
         log_name = WEBAPP_LOGIN_LOG_NAME
-        user = User.objects.get(id=request.user.id)
         st_logger.write_text_log_entry(
             log_name,
             "[WEBAPP LOGIN] User {} logged out of the web application at {}".format(user.email,

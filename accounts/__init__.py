@@ -1,1 +1,1 @@
-from signals import post_login, post_logout
+from .signals import post_login, post_logout
