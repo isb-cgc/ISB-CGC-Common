@@ -1,8 +1,10 @@
+import logging
+import datetime
 from django.contrib.auth.signals import user_logged_in, user_logged_out
 from django.dispatch import receiver
 from google_helpers.stackdriver import StackDriverLogger
 from django.conf import settings
-import logging
+
 
 debug = settings.DEBUG
 logger = logging.getLogger('main_logger')
