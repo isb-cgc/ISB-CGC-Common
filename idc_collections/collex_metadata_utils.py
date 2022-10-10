@@ -540,6 +540,7 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
 
     return results
 
+
 def get_table_data(filters,fields,table_type,sources = None, versions = None, custom_facets = None):
     source_type = sources.first().source_type if sources else DataSource.SOLR
     if not versions:
