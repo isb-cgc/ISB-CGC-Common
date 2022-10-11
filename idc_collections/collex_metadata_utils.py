@@ -209,7 +209,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
             )
 
         collectionSet = Collection.objects.select_related('program').filter(
-            active=True, collection_type=Collection.ORIGINAL_COLLEX
+            active=True, collection_type=Collection.ORIGINAL_COLLEX, access="Public"
         )
         collection_info = {a.collection_id: a.access for a in collectionSet}
         collectionsIdList = collectionSet.values_list('collection_id',flat=True)

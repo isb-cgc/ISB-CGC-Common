@@ -70,8 +70,8 @@ def collection_list(request):
 def collection_detail(request):
     template = 'collections/collection_detail.html'
 
-    active_collections = Collection.objects.filter(active=True)
-    inactive_collections = Collection.objects.filter(active=False)
+    active_collections = Collection.objects.filter(active=True, access="Public")
+    inactive_collections = Collection.objects.filter(active=False, access="Public")
 
     context = {
         'active_collex': active_collections

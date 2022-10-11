@@ -62,7 +62,7 @@ def collections_list_api(request):
 
     try:
 
-        collections = Collection.objects.filter(collection_type='O')
+        collections = Collection.objects.filter(collection_type='O', access="Public")
 
         for collection in collections:
             if collection.active:
@@ -107,9 +107,9 @@ def analysis_results_list_api(request):
 
     try:
         if data_version.version_number == '1.0':
-            collections = Collection.objects.filter(collection_type='A')[0:3]
+            collections = Collection.objects.filter(collection_type='A', access="Public")[0:3]
         else:
-            collections = Collection.objects.filter(collection_type='A')
+            collections = Collection.objects.filter(collection_type='A', access="Public")
 
         for collection in collections:
             data = {
