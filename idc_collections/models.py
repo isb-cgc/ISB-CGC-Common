@@ -162,7 +162,8 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
         if source_type:
             source_qs &= Q(source_type=source_type)
         if aggregate_level:
-            source_qs &= Q(aggregate_level=aggregate_level)
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            source_qs &= Q(aggregate_level__in=aggregate_level)
         return sources.distinct().filter(source_qs)
 
     # Return all display strings in this queryset, either as a list (joined=False) or as a string (joined=True)
@@ -546,7 +547,7 @@ class AttributeQuerySet(models.QuerySet):
         if source_type:
             q_objects &= Q(source_type=source_type)
         if aggregate_level:
-            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             q_objects &= Q(aggregate_level__in=aggregate_level)
 
         data_sources = None
@@ -554,7 +555,7 @@ class AttributeQuerySet(models.QuerySet):
         for attr in attrs:
             data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
 
-        return data_sources.distinct()
+        return data_sources.distinct() if data_sources else None
 
     def get_attr_cats(self):
         categories = {}
