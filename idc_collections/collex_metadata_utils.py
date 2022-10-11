@@ -1547,8 +1547,6 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
             child_record_search_field = list(set(child_record_search_fields))[0]
         if image_table in filter_attr_by_bq['sources']:
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
-            print(filter_set)
-            print(may_need_intersect)
             non_related_filters = filter_set
             if len(filter_set):
                 if may_need_intersect and len(filter_set.keys()) > 1:
@@ -1581,7 +1579,6 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                                 join_clause="",
                                 where_clause="WHERE {}".format(bq_filter)
                             ))
-                    print(intersect_statements)
                 else:
                     filter_clauses[image_table] = BigQuerySupport.build_bq_where_clause(
                         filter_set, field_prefix=table_info[image_table]['alias'],

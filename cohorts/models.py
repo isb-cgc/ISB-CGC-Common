@@ -450,6 +450,7 @@ class Filter(models.Model):
 
     def get_filter_flat(self):
         return {
+            'attr_name': self.attribute.name,
             'name': self.get_attr_name(),
             'op': self.get_operator(),
             'values': self.value.split(self.value_delimiter)

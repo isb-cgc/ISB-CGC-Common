@@ -141,6 +141,7 @@ def get_cohort_stats(request, cohort_id):
                     cohort_stats['inactive_attr'] = list(old_cohort.inactive_attrs().values_list('name', flat=True))
                 cohort_filters = {}
                 cohort_filters_list = old_cohort.get_filters_as_dict(active_only=update)[0]['filters']
+                cohort_attrs = old_cohort.get_attrs().values_list('name', flat=True)
                 if len(cohort_filters_list) <= 0:
                     # If all of the filters from the prior version were made inactive, there will be no
                     # filters for this cohort.
@@ -150,7 +151,7 @@ def get_cohort_stats(request, cohort_id):
                     cohort_filters[cohort['name']] = cohort['values']
                 # For now we always require at least one filter coming from the 'ImageData' table type,
                 # so it's safe to case the sources only on the filters for purposes of stat counting
-                sources = Attribute.objects.filter(name__in=list(cohort_filters.keys())).get_data_sources(
+                sources = Attribute.objects.filter(name__in=list(cohort_attrs)).get_data_sources(
                     ImagingDataCommonsVersion.objects.filter(active=True),
                     source_type=DataSource.SOLR,
                     active=True,
@@ -170,7 +171,7 @@ def get_cohort_stats(request, cohort_id):
         messages.error(request, 'The cohort you were looking for does not exist.')
         return redirect('cohort_list')
     except Exception as e:
-        logger.error("[ERROR] Exception while trying to view a cohort:")
+        logger.error("[ERROR] Exception while trying to get cohort stats for cohort {}:".format(cohort_id))
         logger.exception(e)
         messages.error(request, "There was an error while trying to load that cohort's stats.")
         return redirect('cohort_list')
