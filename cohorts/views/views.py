@@ -122,7 +122,13 @@ def get_cases_by_cohort(cohort_id):
 
 
 def get_cohort_stats(request, cohort_id):
-    cohort_stats = {}
+    status = 200
+    cohort_stats = {
+        'PatientID': 0,
+        'StudyInstanceUID': 0,
+        'SeriesInstanceUID': 0,
+        'filters_found': True
+    }
     try:
         req = request.GET if request.GET else request.POST
         update = bool(req.get('update', "False").lower() == "true")
@@ -131,8 +137,15 @@ def get_cohort_stats(request, cohort_id):
 
         if old_cohort.perm:
             if update:
+                if len(old_cohort.inactive_attrs()) > 0:
+                    cohort_stats['inactive_attr'] = list(old_cohort.inactive_attrs().values_list('name', flat=True))
                 cohort_filters = {}
-                cohort_filters_list = old_cohort.get_filters_as_dict()[0]['filters']
+                cohort_filters_list = old_cohort.get_filters_as_dict(active_only=update)[0]['filters']
+                if len(cohort_filters_list) <= 0:
+                    # If all of the filters from the prior version were made inactive, there will be no
+                    # filters for this cohort.
+                    cohort_stats['filters_found'] = False
+                    return JsonResponse(cohort_stats, status=status)
                 for cohort in cohort_filters_list:
                     cohort_filters[cohort['name']] = cohort['values']
                 # For now we always require at least one filter coming from the 'ImageData' table type,
@@ -143,14 +156,14 @@ def get_cohort_stats(request, cohort_id):
                     active=True,
                     aggregate_level=["case_barcode", "StudyInstanceUID", "sample_barcode"]
                 )
-                cohort_stats = _get_cohort_stats(
+                cohort_stats.update(_get_cohort_stats(
                     0,
                     cohort_filters,
                     sources
-                )
+                ))
             else:
-                cohort_stats = {'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count,
-                                'SeriesInstanceUID': old_cohort.series_count}
+                cohort_stats.update({'PatientID': old_cohort.case_count, 'StudyInstanceUID': old_cohort.study_count,
+                                'SeriesInstanceUID': old_cohort.series_count})
 
     except ObjectDoesNotExist as e:
         logger.exception(e)
@@ -161,9 +174,8 @@ def get_cohort_stats(request, cohort_id):
         logger.exception(e)
         messages.error(request, "There was an error while trying to load that cohort's stats.")
         return redirect('cohort_list')
-    cohort_stats.pop('collections',None)
 
-    return JsonResponse(cohort_stats)
+    return JsonResponse(cohort_stats, status=status)
 
 
 @login_required
@@ -182,6 +194,7 @@ def cohorts_list(request, is_public=False):
         file_parts_count = math.ceil(item.series_count / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
         item.file_parts_count = file_parts_count
         item.display_file_parts_count = min(file_parts_count, 10)
+        item.has_inactive_attr = bool(len(item.get_attrs().filter(active=False)) > 0)
 
     #     item.perm = item.get_perm(request).get_perm_display()
     #     item.owner = item.get_owner()

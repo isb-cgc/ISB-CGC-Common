@@ -140,7 +140,8 @@ def fetch_solr_stats(fetch_settings,cache_as=None):
 #         'data_type': <data type of the this source, per its version>
 #     }
 # }
-def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, attr_data=None, cache_as=None, active=None):
+def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, attr_data=None, cache_as=None,
+                          active=None, only_active_attr=False):
     
     if cache_as and cache_as in DATA_SOURCE_ATTR:
         attr_by_src = DATA_SOURCE_ATTR[cache_as] 
@@ -149,7 +150,7 @@ def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, 
     
         if not attr_data:
             sources = data_version.get_data_sources(source_type=source_type, active=active)
-            attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
+            attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False, active_only=only_active_attr)
             
         for attr in attrs:
             stripped_attr = attr if (not '_' in attr) else \
@@ -232,7 +233,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 id__in=versions.get_data_sources().filter(source_type=source).values_list("id", flat=True)
             ).distinct().first()
 
-        source_attrs = fetch_data_source_attr(sources, {'for_ui': True, 'with_set_map': True}, cache_as="ui_faceting_set_map")
+        source_attrs = fetch_data_source_attr(sources, {'for_ui': True, 'with_set_map': True, 'active_only': True}, cache_as="ui_faceting_set_map")
 
         source_data_types = fetch_data_source_types(sources)
 
@@ -625,12 +626,12 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
     attrs_for_faceting = None
     if not records_only and facets or facets is None:
         attrs_for_faceting = fetch_data_source_attr(
-            sources, {'for_ui': True, 'named_set': facets},
+            sources, {'for_ui': True, 'named_set': facets, 'active_only': True},
             cache_as="ui_facet_set" if not sources.contains_inactive_versions() and not facets else None
         )
 
     all_ui_attrs = fetch_data_source_attr(
-        sources, {'for_ui': True, 'for_faceting': False},
+        sources, {'for_ui': True, 'for_faceting': False, 'active_only': True},
         cache_as="all_ui_attr" if not sources.contains_inactive_versions() else None)
 
     source_data_types = fetch_data_source_types(sources)
@@ -1457,13 +1458,15 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
     image_tables = {}
     filter_clauses = {}
     field_clauses = {}
+    active_attr_only = True
 
     if len(data_version.filter(active=False)) <= 0:
         sources = data_version.get_data_sources(active=True, source_type=DataSource.BIGQUERY).filter().distinct()
     else:
         sources = data_version.get_data_sources(current=True, source_type=DataSource.BIGQUERY).filter().distinct()
+        active_attr_only = False
 
-    attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False)
+    attr_data = sources.get_source_attrs(with_set_map=False, for_faceting=False, active_only=active_attr_only)
 
     if not sources_and_attrs:
         filter_attr_by_bq = _build_attr_by_source(list(filters.keys()), data_version, DataSource.BIGQUERY, attr_data)
@@ -1544,6 +1547,8 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
             child_record_search_field = list(set(child_record_search_fields))[0]
         if image_table in filter_attr_by_bq['sources']:
             filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][image_table]['list']}
+            print(filter_set)
+            print(may_need_intersect)
             non_related_filters = filter_set
             if len(filter_set):
                 if may_need_intersect and len(filter_set.keys()) > 1:
@@ -1576,6 +1581,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
                                 join_clause="",
                                 where_clause="WHERE {}".format(bq_filter)
                             ))
+                    print(intersect_statements)
                 else:
                     filter_clauses[image_table] = BigQuerySupport.build_bq_where_clause(
                         filter_set, field_prefix=table_info[image_table]['alias'],
