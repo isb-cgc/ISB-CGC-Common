@@ -182,7 +182,7 @@ class Cohort(models.Model):
         return result
 
     # Returns a dict of the filters defining this cohort organized by filter group
-    def get_filters_as_dict(self):
+    def get_filters_as_dict(self, active_only=False):
         result = []
 
         filter_groups = self.filter_group_set.all()
@@ -191,7 +191,7 @@ class Cohort(models.Model):
             result.append({
                 'id': fg.id,
                 'data_version': fg.data_version.get_display(),
-                'filters': fg.filter_set.all().get_filter_set_array()
+                'filters': fg.filter_set.all().get_filter_set_array(active_only)
             })
         return result
 
@@ -221,6 +221,9 @@ class Cohort(models.Model):
 
     def get_attr_list(self):
         return self.filter_set.select_related('attribute').all().values_list('attribute__id', flat=True)
+
+    def inactive_attrs(self):
+        return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'), active=False)
 
     # Produce a BigQuery filter WHERE clause for this cohort's filters that can be used in the BQ console
     def get_bq_filter_string(self, prefix=None):
@@ -338,9 +341,12 @@ class FilterQuerySet(models.QuerySet):
             filters.update(fltr.get_filter())
         return filters
 
-    def get_filter_set_array(self):
+    def get_filter_set_array(self, active_only=False):
         filters = []
-        for fltr in self.select_related('attribute').all():
+        q_objs = Q()
+        if active_only:
+            q_objs = Q(attribute__active=True)
+        for fltr in self.select_related('attribute').filter(q_objs):
             flat_dict = fltr.get_filter_flat()
             flat_dict.update({
                 'id': fltr.attribute.id,
@@ -444,6 +450,7 @@ class Filter(models.Model):
 
     def get_filter_flat(self):
         return {
+            'attr_name': self.attribute.name,
             'name': self.get_attr_name(),
             'op': self.get_operator(),
             'values': self.value.split(self.value_delimiter)
