@@ -162,7 +162,8 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
         if source_type:
             source_qs &= Q(source_type=source_type)
         if aggregate_level:
-            source_qs &= Q(aggregate_level=aggregate_level)
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            source_qs &= Q(aggregate_level__in=aggregate_level)
         return sources.distinct().filter(source_qs)
 
     # Return all display strings in this queryset, either as a list (joined=False) or as a string (joined=True)
@@ -371,7 +372,7 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #   }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False, active_only=False):
         start = time.time()
         # Simple string list of attribute names (warning: will not properly resolve for collision)
         attrs = { 'list': None, 'ids': None }
@@ -385,16 +386,18 @@ class DataSourceQuerySet(models.QuerySet):
         attr_set_types = Attribute_Set_Type.objects.filter(datasettype=set_type).values_list('attribute',flat=True) if set_type else None
 
         for ds in sources:
-            q_objects = Q(active=True)
+            q_objects = Q()
             if for_ui:
                 q_objects &= Q(default_ui_display=for_ui)
             if named_set:
                 q_objects &= Q(name__in=named_set)
             if set_type:
                 q_objects &= Q(id__in=attr_set_types)
+            if active_only:
+                q_objects &= Q(active=True)
             if for_faceting:
                 q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
-                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
                     ).values_list('attribute__id', flat=True)))
 
             attr_set = ds.attribute_set.filter(q_objects)
@@ -544,7 +547,7 @@ class AttributeQuerySet(models.QuerySet):
         if source_type:
             q_objects &= Q(source_type=source_type)
         if aggregate_level:
-            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             q_objects &= Q(aggregate_level__in=aggregate_level)
 
         data_sources = None
@@ -552,7 +555,7 @@ class AttributeQuerySet(models.QuerySet):
         for attr in attrs:
             data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
 
-        return data_sources.distinct()
+        return data_sources.distinct() if data_sources else None
 
     def get_attr_cats(self):
         categories = {}
