@@ -139,14 +139,24 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
                 'sets': {},
                 'totals': {}
             }
-            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA, DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA])
+            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[
+                DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA,
+                DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA
+            ])
             list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.BIOSPECIMEN_DATA)
             if not len(list_versions):
+                # If there is no biospecimen version to pull a sample list from, use clinical
                 list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
             all_sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
             source = prog.get_data_sources(source_type=source_type).filter(version__in=list_versions).first()
-            # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
-            # filter one program as a time.
+            if not source:
+                # The Biospec source might only exist as a source_type other than what we'd like--in that case, fall
+                # back on Clinical
+                source = prog.get_data_sources(source_type=source_type).filter(
+                    version__in=prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
+                ).first()
+            # This code is structured to allow for a filterset of the type
+            # {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only filter one program as a time.
             prog_filters = filters
             prog_mut_filters = mutation_filters
             attrs = all_sources.get_source_attrs(for_faceting=False)
@@ -1411,7 +1421,9 @@ def filelist(request, cohort_id=None, panel_type=None):
 
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
-        return redirect('/user_landing')
+        if request.user.is_anonymous:
+            return redirect('dashboard')
+        return redirect('cohort_list')
 
     try:
         metadata_data_attr_builds = {
@@ -1672,7 +1684,7 @@ def streaming_csv_view(request, cohort_id=None):
         total_expected = int(request.GET.get('total', '0'))
 
         if total_expected == 0:
-            logger.warn("[ERROR] Didn't receive a total--using MAX_FILE_LIST_ENTRIES.")
+            logger.warn("[WARNING] Didn't receive a total--using MAX_FILE_LIST_ENTRIES {}.".format(MAX_FILE_LIST_ENTRIES))
             total_expected = MAX_FILE_LIST_ENTRIES
 
         limit = total_expected+10 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
@@ -1699,15 +1711,13 @@ def streaming_csv_view(request, cohort_id=None):
                 messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
             if cohort_id:
                 return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
-            else:
-                return redirect(reverse('user_landing'))
+            return redirect(reverse('dashboard'))
 
         if len(file_list) < total_expected:
             messages.error(request, 'Only %d files found out of %d expected!' % (len(file_list), total_expected))
             if cohort_id:
                 return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
-            else:
-                return redirect(reverse('user_landing'))
+            return redirect(reverse('dashboard'))
 
         if len(file_list) > 0:
             """A view that streams a large CSV file."""
