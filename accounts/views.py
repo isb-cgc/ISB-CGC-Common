@@ -55,6 +55,7 @@ SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
+
 @login_required
 def extended_logout_view(request):
     response = None
@@ -64,7 +65,7 @@ def extended_logout_view(request):
     except Exception as e:
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
+        messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     return response
@@ -72,9 +73,7 @@ def extended_logout_view(request):
 # GCP RELATED VIEWS
 
 
-'''
-Returns page that has user Google Cloud Projects
-'''
+# Returns page that has user Google Cloud Projects
 @login_required
 def user_gcp_list(request, user_id):
     context = {}
@@ -98,18 +97,19 @@ def user_gcp_list(request, user_id):
                     'last_name': user.last_name
                 }
 
-                gcp_and_sa_tuples = []
+                # gcp_and_sa_tuples = []
                 is_linked = have_linked_user(user_id)
-                for gcp in gcp_list:
-                    if is_linked:
-                        sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
-                        if sa_err_msg is not None:
-                            template = '500.html'
-                            return render(request, template, context)
-                    else:
-                        sa_dicts = []
-                    gcp_and_sa_tuples.append((gcp, sa_dicts))
-                context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples, 'linked': is_linked}
+                # for gcp in gcp_list:
+                #     if is_linked:
+                #         sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                #         if sa_err_msg is not None:
+                #             template = '500.html'
+                #             return render(request, template, context)
+                #     else:
+                #         sa_dicts = []
+                #     gcp_and_sa_tuples.append((gcp, sa_dicts))
+                # context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples, 'linked': is_linked}
+                context = {'user': user, 'user_details': user_details, 'gcps': gcp_list, 'linked': is_linked}
 
             except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
                 logger.error("[ERROR] While fetching user GCP list: ")
@@ -287,51 +287,49 @@ def gcp_detail(request, user_id, gcp_id):
     try:
         logger.info("[INFO] gcp_detail {}:".format(gcp_id))
         is_linked = have_linked_user(user_id)
-        context = {}
-        context['is_linked'] = is_linked
-        context['gcp'] = GoogleProject.objects.get(id=gcp_id, active=1)
-        logger.info("[INFO] Listing SAs for GCP {}:".format(gcp_id))
-        if settings.SA_VIA_DCF:
-            context['sa_list'] = []
-            if is_linked:
-                gcp_project_id = context['gcp'].project_id
-                sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_project_id)
-                if sa_messages:
-                    for message in sa_messages:
-                        logger.error("[ERROR] {}:".format(message))
-                        messages.error(request, message)
-                    return render(request, 'isb_cgc/gcp_detail.html', context)
-
-                for sa_dict in sa_info:
-                    _sa_dict_to_data(context['sa_list'], gcp_id, sa_dict)
-
-        else:
-            context['sa_list'] = []
-
-            active_sas = context['gcp'].active_service_accounts()
-            for service_account in active_sas:
-                logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
-                auth_datasets = service_account.get_auth_datasets()
-                sa_data = {}
-                context['sa_list'].append(sa_data)
-                sa_data['name'] = service_account.service_account
-                # for modal names:
-                sa_data['esc_name'] = service_account.service_account.replace('@', "-at-").replace('.', '-dot-')
-                sa_data['is_expired'] = service_account.is_expired()
-                sa_data['authorized_date'] = service_account.authorized_date
-                auth_names = []
-                auth_ids = []
-                sa_data['num_auth'] = len(auth_datasets)
-                logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
-                for auth_data in auth_datasets:
-                    auth_names.append(auth_data.name)
-                    auth_ids.append(str(auth_data.id))
-                sa_data['auth_dataset_names'] = ', '.join(auth_names)
-                sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
-
-            # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
-            # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
-            #
+        context = {'is_linked': is_linked, 'gcp': GoogleProject.objects.get(id=gcp_id, active=1), 'sa_list': []}
+        # logger.info("[INFO] Listing SAs for GCP {}:".format(gcp_id))
+        # if settings.SA_VIA_DCF:
+        #     context['sa_list'] = []
+        #     if is_linked:
+        #         gcp_project_id = context['gcp'].project_id
+        #         sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_project_id)
+        #         if sa_messages:
+        #             for message in sa_messages:
+        #                 logger.error("[ERROR] {}:".format(message))
+        #                 messages.error(request, message)
+        #             return render(request, 'isb_cgc/gcp_detail.html', context)
+        #
+        #         for sa_dict in sa_info:
+        #             _sa_dict_to_data(context['sa_list'], gcp_id, sa_dict)
+        #
+        # else:
+        #     context['sa_list'] = []
+        #
+        #     active_sas = context['gcp'].active_service_accounts()
+        #     for service_account in active_sas:
+        #         logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
+        #         auth_datasets = service_account.get_auth_datasets()
+        #         sa_data = {}
+        #         context['sa_list'].append(sa_data)
+        #         sa_data['name'] = service_account.service_account
+        #         # for modal names:
+        #         sa_data['esc_name'] = service_account.service_account.replace('@', "-at-").replace('.', '-dot-')
+        #         sa_data['is_expired'] = service_account.is_expired()
+        #         sa_data['authorized_date'] = service_account.authorized_date
+        #         auth_names = []
+        #         auth_ids = []
+        #         sa_data['num_auth'] = len(auth_datasets)
+        #         logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
+        #         for auth_data in auth_datasets:
+        #             auth_names.append(auth_data.name)
+        #             auth_ids.append(str(auth_data.id))
+        #         sa_data['auth_dataset_names'] = ', '.join(auth_names)
+        #         sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
+        #
+        #     # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
+        #     # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
+        #     #
 
 
         # we need:
