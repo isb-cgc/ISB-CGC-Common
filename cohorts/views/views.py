@@ -491,7 +491,7 @@ def create_manifest_bq_table(request, cohorts):
         field_list = json.loads(request.GET.get(
             'columns',
             '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", ' +
-            '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "access", "gcs_url", "idc_version"]'
+            '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url", "idc_version"]'
         ))
 
         # We can only ORDER BY columns which we've actually requested
@@ -636,12 +636,14 @@ def create_file_manifest(request, cohort):
 
     # Fields we need to fetch
     field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
-                  "crdc_study_uuid", "crdc_series_uuid"]
+                  "crdc_study_uuid", "crdc_series_uuid", "idc_version"]
+    static_fields = None
 
     # Fields we're actually returning in the file (the rest are for constructing the GCS path)
     if request.GET.get('columns', None):
         selected_columns = json.loads(request.GET.get('columns'))
 
+    selected_columns_sorted = sorted(selected_columns, key = lambda x: field_list.index(x))
     if request.GET.get('header_fields'):
         selected_header_fields = json.loads(request.GET.get('header_fields'))
 
@@ -652,6 +654,13 @@ def create_file_manifest(request, cohort):
         selected_file_part = json.loads(request.GET.get('file_part'))
         selected_file_part = min(selected_file_part, 9)
         offset = selected_file_part * MAX_FILE_LIST_ENTRIES
+
+    static_map = build_static_map(cohort)
+    for x in STATIC_EXPORT_FIELDS:
+        if x in field_list:
+            static_fields = static_fields or {}
+            static_fields[x] = static_map[x]
+            field_list.remove(x)
 
     items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
 
@@ -699,14 +708,14 @@ def create_file_manifest(request, cohort):
                 rows += (["IDC Data Version(s): {}".format("; ".join([str(x) for x in cohort.get_idc_data_version()]))],)
 
                 # Column headers
-                rows += (selected_columns,)
+                rows += (selected_columns_sorted,)
 
             for row in manifest:
                 if 'collection_id' in row:
                     row['collection_id'] = "; ".join(row['collection_id'])
                 if 'source_DOI' in row:
                     row['source_DOI'] = ", ".join(row['source_DOI'])
-                this_row = [(row[x] if x in row else "") for x in selected_columns]
+                this_row = [(row[x] if x in row else static_fields[x] if x in static_fields else "") for x in selected_columns_sorted]
                 rows += (this_row,)
             pseudo_buffer = Echo()
 
