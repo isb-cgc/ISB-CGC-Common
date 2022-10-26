@@ -44,6 +44,7 @@ class ProgramManager(models.Manager):
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
+
 class Program(models.Model):
     id = models.AutoField(primary_key=True)
     # Eg. TCGA
@@ -97,9 +98,11 @@ class DataSetTypeQuerySet(models.QuerySet):
                 sources = sources | dst.datasource_set.all()
         return sources
 
+
 class DataSetTypeManager(models.Manager):
     def get_queryset(self):
         return DataSetTypeQuerySet(self.model, using=self._db)
+
 
 class DataSetType(models.Model):
     IMAGE_DATA = 'I'
@@ -159,7 +162,8 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
         if source_type:
             source_qs &= Q(source_type=source_type)
         if aggregate_level:
-            source_qs &= Q(aggregate_level=aggregate_level)
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            source_qs &= Q(aggregate_level__in=aggregate_level)
         return sources.distinct().filter(source_qs)
 
     # Return all display strings in this queryset, either as a list (joined=False) or as a string (joined=True)
@@ -170,9 +174,11 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
             displays.append(idcdv.get_display())
         return displays if not joined else delimiter.join(displays)
 
+
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
         return ImagingDataCommonsVersionQuerySet(self.model, using=self._db)
+
 
 class ImagingDataCommonsVersion(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -208,7 +214,7 @@ class DataVersionQuerySet(models.QuerySet):
         sources = None
         q_objs = Q()
         if aggregate_level:
-            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             q_objs &= Q(aggregate_level__in=aggregate_level)
         if source_type:
             q_objs &= Q(source_type=source_type)
@@ -250,9 +256,11 @@ class CollectionQuerySet(models.QuerySet):
             tips[collex.collection_id] = collex.description
         return tips
 
+
 class CollectionManager(models.Manager):
     def get_queryset(self):
         return CollectionQuerySet(self.model, using=self._db)
+
 
 class Collection(models.Model):
     ANALYSIS_COLLEX = 'A'
@@ -271,6 +279,7 @@ class Collection(models.Model):
     tcia_collection_id = models.CharField(max_length=255, null=True, blank=False)
     nbia_collection_id = models.CharField(max_length=255, null=True, blank=False)
     collection_id = models.CharField(max_length=255, null=True, blank=False)
+    collection_uuid = models.CharField(max_length=255, null=True, blank=False)
     description = models.TextField(null=True, blank=False)
     date_updated = models.DateField(null=True, blank=False)
     status = models.CharField(max_length=40, null=True, blank=False)
@@ -279,6 +288,7 @@ class Collection(models.Model):
     image_types = models.CharField(max_length=255, null=True, blank=False)
     cancer_type = models.CharField(max_length=128, null=True, blank=False)
     doi = models.CharField(max_length=255, null=True, blank=False)
+    source_url = models.CharField(max_length=512, null=True, blank=False)
     supporting_data = models.CharField(max_length=255, null=True, blank=False)
     analysis_artifacts = models.CharField(max_length=255, null=True, blank=False)
     species = models.CharField(max_length=64, null=True, blank=False)
@@ -288,9 +298,10 @@ class Collection(models.Model):
     collection_type = models.CharField(max_length=1, blank=False, null=False, choices=COLLEX_TYPES, default=ORIGINAL_COLLEX)
     objects = CollectionManager()
     owner = models.ForeignKey(User, on_delete=models.CASCADE)
+    access = models.CharField(max_length=16, null=False, blank=False, default="Public")
     collections = models.CharField(max_length=255, null=True, blank=False)
     data_versions = models.ManyToManyField(DataVersion)
-    # We make this many to many in case a collection is part of one program, thoug  h it may not be
+    # We make this many to many in case a collection is part of one program, though it may not be
     program = models.ForeignKey(Program, on_delete=models.CASCADE, null=True)
 
     def get_programs(self):
@@ -361,7 +372,7 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #   }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False, active_only=False):
         start = time.time()
         # Simple string list of attribute names (warning: will not properly resolve for collision)
         attrs = { 'list': None, 'ids': None }
@@ -375,23 +386,25 @@ class DataSourceQuerySet(models.QuerySet):
         attr_set_types = Attribute_Set_Type.objects.filter(datasettype=set_type).values_list('attribute',flat=True) if set_type else None
 
         for ds in sources:
-            q_objects = Q(active=True)
+            q_objects = Q()
             if for_ui:
                 q_objects &= Q(default_ui_display=for_ui)
             if named_set:
                 q_objects &= Q(name__in=named_set)
             if set_type:
                 q_objects &= Q(id__in=attr_set_types)
+            if active_only:
+                q_objects &= Q(active=True)
             if for_faceting:
                 q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
-                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
+                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
                     ).values_list('attribute__id', flat=True)))
 
             attr_set = ds.attribute_set.filter(q_objects)
 
             if by_source:
                 attrs['sources'][ds.id] = {
-                    'list': attr_set.values_list('name', flat=True).distinct(),
+                    'list': list(set(attr_set.values_list('name', flat=True))),
                     'attrs': attr_set.distinct(),
                     'id': ds.id,
                     'name': ds.name,
@@ -424,6 +437,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         return attrs
 
+
 class DataSourceManager(models.Manager):
     def get_queryset(self):
         return DataSourceQuerySet(self.model, using=self._db)
@@ -439,6 +453,7 @@ class DataSourceManager(models.Manager):
 
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
+
 
 class DataSource(models.Model):
     QUERY = 'query'
@@ -506,6 +521,7 @@ class DataSource(models.Model):
     class Meta(object):
         unique_together = (("name", "source_type"),)
 
+
 class DataSourceJoin(models.Model):
     from_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="from_data_source")
     from_src_col = models.CharField(max_length=64, null=False, blank=False)
@@ -531,7 +547,7 @@ class AttributeQuerySet(models.QuerySet):
         if source_type:
             q_objects &= Q(source_type=source_type)
         if aggregate_level:
-            aggregate_level = aggregate_level if isinstance(aggregate_level,list) else [aggregate_level]
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             q_objects &= Q(aggregate_level__in=aggregate_level)
 
         data_sources = None
@@ -539,7 +555,7 @@ class AttributeQuerySet(models.QuerySet):
         for attr in attrs:
             data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
 
-        return data_sources.distinct()
+        return data_sources.distinct() if data_sources else None
 
     def get_attr_cats(self):
         categories = {}
@@ -579,9 +595,11 @@ class AttributeQuerySet(models.QuerySet):
             facet_types[attr.id] = DataSource.QUERY if attr.data_type == Attribute.CONTINUOUS_NUMERIC and attr.id in attr_with_ranges else DataSource.TERMS
         return facet_types
 
+
 class AttributeManager(models.Manager):
     def get_queryset(self):
         return AttributeQuerySet(self.model, using=self._db)
+
 
 class Attribute(models.Model):
     CONTINUOUS_NUMERIC = 'N'
@@ -651,6 +669,7 @@ class Attribute(models.Model):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
 
+
 # This model allows for breaking Attributes up beyond the strict DataSource->DataSetType heirarchy,
 # since an attribute might be found in a DataSource housing more than one set type.
 class Attribute_Set_TypeQuerySet(models.QuerySet):
@@ -669,9 +688,11 @@ class Attribute_Set_TypeQuerySet(models.QuerySet):
             attr_child_record_search[attr_set_type.attribute.name] = attr_set_type.child_record_search
         return attr_child_record_search
 
+
 class Attribute_Set_TypeMananger(models.Manager):
     def get_queryset(self):
         return Attribute_Set_TypeQuerySet(self.model, using=self._db)
+
 
 class Attribute_Set_Type(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
@@ -682,6 +703,7 @@ class Attribute_Set_Type(models.Model):
 
     class Meta(object):
         unique_together = (("datasettype", "attribute"),)
+
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
     def to_dict(self):

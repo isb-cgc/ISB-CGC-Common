@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2022, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -29,15 +29,16 @@ logger = logging.getLogger('main_logger')
 MAX_INSERT = settings.MAX_BQ_INSERT
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
 
-COHORT_DATASETS = {
-    'prod': 'cloud_deployment_cohorts',
-    'staging': 'cloud_deployment_cohorts',
-    'dev': 'dev_deployment_cohorts'
-}
 
-COHORT_TABLES = {
-    'prod': 'prod_cohorts',
-    'staging': 'staging_cohorts'
+# Some attribute types will fool the type checker due to their content; we hard code
+# these as STRING
+FIXED_TYPES = {
+    'SeriesInstanceUID': 'STRING',
+    'StudyInstanceUID': 'STRING',
+    'PatientID': 'STRING',
+    'Manufacturer': 'STRING',
+    'ManufacturerModelName': 'STRING',
+    'StudyDate': 'DATE'
 }
 
 MOLECULAR_CATEGORIES = {
@@ -197,14 +198,14 @@ class BigQuerySupport(BigQueryABC):
                 ))
 
     # Insert an table, optionally providing a list of cohort IDs to include in the description
-    def _insert_table(self, desc):
+    def _insert_table(self, desc, schema=None):
         tables = self.bq_service.tables()
 
         response = tables.insert(projectId=self.project_id, datasetId=self.dataset_id, body={
             'friendlyName': self.table_id,
             'description': desc,
             'kind': 'bigquery#table',
-            'schema': self.table_schema,
+            'schema': schema or self.table_schema,
             'tableReference': {
                 'datasetId': self.dataset_id,
                 'projectId': self.project_id,
@@ -214,14 +215,14 @@ class BigQuerySupport(BigQueryABC):
 
         return response
 
-    def _confirm_dataset_and_table(self, desc):
+    def _confirm_dataset_and_table(self, desc, schema=None):
         # Get the dataset (make if not exists)
         if not self._dataset_exists():
             self._insert_dataset()
 
         # Get the table (make if not exists)
         if not self._table_exists():
-            table_result = self._insert_table(desc)
+            table_result = self._insert_table(desc, schema)
             if 'tableReference' not in table_result:
                 return {
                     'tableErrors': "Unable to create table {} in project {} and dataset {} - please ".format(
@@ -310,7 +311,8 @@ class BigQuerySupport(BigQueryABC):
     # Runs a basic, optionally parameterized query
     # If self.project_id, self.dataset_id, and self.table_id are set they will be used as the destination table for
     # the query WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, with_schema=False, paginated=False, no_results=False):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY',
+                      cost_est=False, with_schema=False, paginated=False, no_results=False):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
         logger.debug("query_job: {}".format(query_job))
@@ -382,7 +384,6 @@ class BigQuerySupport(BigQueryABC):
 
         return job_is_done and job_is_done['status']['state'] == 'DONE'
 
-
     # TODO: shim until we have time to rework this into a single method
     # Fetch the results of a job based on the reference provided
     def fetch_job_result_page(self, job_ref, page_token=None, maxResults=settings.MAX_BQ_RECORD_RESULT):
@@ -402,7 +403,6 @@ class BigQuerySupport(BigQueryABC):
             'schema': schema,
             'totalFound': totalFound,
             'next_page': next_page}
-
 
     # TODO: shim until we have time to rework this into a single method
     # Fetch the results of a job based on the reference provided
@@ -714,8 +714,10 @@ class BigQuerySupport(BigQueryABC):
                     values = [y for x in values for y in x]
 
             parameter_type = None
-            if type_schema and type_schema.get(attr, None):
+            if (type_schema and type_schema.get(attr, None)):
                 parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
+            elif FIXED_TYPES.get(attr, None):
+                parameter_type = FIXED_TYPES.get(attr)
             else:
                 # If the values are arrays we assume the first value in the first array is indicative of all
                 # other values (since we don't support multi-typed fields)
@@ -760,7 +762,8 @@ class BigQuerySupport(BigQueryABC):
                 # Occasionally attributes may come in without the appropriate _e?btwe? suffix; we account for that here
                 # by checking for the proper attr_name in the optional continuous_numerics list
                 elif is_btw or attr_name in continuous_numerics:
-                    # Check for a single array of two and if we find it, convert it to an array containing a 2-member array
+                    # Check for a single array of two and if we find it, convert it to an array containing
+                    # a 2-member array
                     if len(values) == 2 and type(values[0]) is not list:
                         values = [values]
                     else:
@@ -775,16 +778,17 @@ class BigQuerySupport(BigQueryABC):
                             continue
                     btw_counter = 1
                     query_params = []
+                    btw_filter_strings = []
                     for btws in values:
-                        param_name_1 = '{}_btw_{}'.format(param_name,btw_counter)
-                        btw_counter+=1
-                        param_name_2 = '{}_btw_{}'.format(param_name,btw_counter)
+                        param_name_1 = '{}_btw_{}'.format(param_name, btw_counter)
                         btw_counter += 1
-                        filter_string += "{}{} BETWEEN @{} AND @{}".format(
+                        param_name_2 = '{}_btw_{}'.format(param_name, btw_counter)
+                        btw_counter += 1
+                        btw_filter_strings.append("({}{} BETWEEN @{} AND @{})".format(
                             '' if not field_prefix else field_prefix, attr_name,
                             param_name_1,
                             param_name_2
-                        )
+                        ))
                         # query_param becomes our template for each pair
                         query_param_1 = copy.deepcopy(query_param)
                         query_param_2 = copy.deepcopy(query_param)
@@ -792,8 +796,9 @@ class BigQuerySupport(BigQueryABC):
                         query_param_1['parameterValue']['value'] = btws[0]
                         query_param_2['name'] = param_name_2
                         query_param_2['parameterValue']['value'] = btws[1]
-                        query_params.extend([query_param_1, query_param_2,] )
+                        query_params.extend([query_param_1, query_param_2,])
 
+                    filter_string += " OR ".join(btw_filter_strings)
                     query_param = query_params
                 else:
                     # Simple array param
@@ -850,7 +855,13 @@ class BigQuerySupport(BigQueryABC):
     #
     # TODO: add support for DATETIME eg 6/10/2010
     @staticmethod
-    def build_bq_where_clause(filters, comb_with='AND', field_prefix=None, type_schema=None, encapsulated=True):
+    def build_bq_where_clause(filters, join_with_space=False, comb_with='AND', field_prefix=None,
+                              type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True,
+                              value_op='OR'):
+        global_value_op = value_op
+        join_str = ","
+        if join_with_space:
+            join_str = ", "
 
         if field_prefix and field_prefix[-1] != ".":
             field_prefix += "."
@@ -858,9 +869,9 @@ class BigQuerySupport(BigQueryABC):
             field_prefix = ""
 
         filter_set = []
-
         mutation_filters = {}
         other_filters = {}
+        continuous_numerics = continuous_numerics or []
 
         # Split mutation filters into their own set, because of repeat use of the same attrs
         for attr in filters:
@@ -880,14 +891,14 @@ class BigQuerySupport(BigQueryABC):
             filter_string = '{}Hugo_Symbol = {} AND '.format('' if not field_prefix else field_prefix, gene)
 
             if filter_type == 'category' and values[0].lower() == 'any':
-                filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix,)
+                filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix)
             else:
                 if filter_type == 'category':
                     values = MOLECULAR_CATEGORIES[values[0]]['attrs']
                 filter_string += '{}Variant_Classification {}IN ({})'.format(
                     '' if not field_prefix else field_prefix,
                     'NOT ' if invert else '',
-                    ",".join(["'{}'".format(x) for x in values])
+                    join_str.join(["'{}'".format(x) for x in values])
                 )
 
             filter_set.append('({})'.format(filter_string))
@@ -896,16 +907,34 @@ class BigQuerySupport(BigQueryABC):
 
         # Standard query filters
         for attr, values in list(other_filters.items()):
+            is_btw = re.search('_e?btwe?', attr.lower()) is not None
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            value_op = global_value_op
+            encapsulate = encapsulated
+            if type(values) is dict and 'values' in values:
+                value_op = values.get('op', global_value_op)
+                values = values['values']
+                encapsulate = True if value_op == 'AND' else encapsulate
+
+            # We require our attributes to be value lists
             if type(values) is not list:
                 values = [values]
-
-            parameter_type = None
-            if type_schema and attr in type_schema and type_schema[attr]:
-                parameter_type = ('NUMERIC' if type_schema[attr] == 'INTEGER' else 'STRING')
+            # However, *only* ranged numerics can be a list of lists; all others must be a single list
             else:
+                if type(values[0]) is list and not is_btw and attr not in continuous_numerics:
+                    values = [y for x in values for y in x]
+
+            if (type_schema and type_schema.get(attr, None)):
+                parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
+            elif FIXED_TYPES.get(attr, None):
+                parameter_type = FIXED_TYPES.get(attr)
+            else:
+                # If the values are arrays we assume the first value in the first array is indicative of all
+                # other values (since we don't support multi-typed fields)
+                type_check = values[0] if type(values[0]) is not list else values[0][0]
                 parameter_type = (
                     'STRING' if (
-                        type(values[0]) is not int and re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0])
+                        type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
                     ) else 'NUMERIC'
                 )
 
@@ -913,47 +942,73 @@ class BigQuerySupport(BigQueryABC):
 
             if 'None' in values:
                 values.remove('None')
-                filter_string = "{}{} IS NULL".format('' if not field_prefix else field_prefix, attr)
+                filter_string = "{}{} IS NULL".format('' if not field_prefix else field_prefix, attr_name)
 
             if len(values) > 0:
                 if len(filter_string):
                     filter_string += " OR "
-                if len(values) == 1:
+                if len(values) == 1 and not is_btw:
                     # Scalar param
                     if parameter_type == 'STRING':
-                        if '%' in values[0]:
-                            filter_string += "LOWER({}{}) LIKE LOWER('{}')".format('' if not field_prefix else field_prefix, attr, values[0])
+                        if '%' in values[0] or case_insens:
+                            filter_string += "LOWER({}{}) LIKE LOWER('{}')".format(
+                                '' if not field_prefix else field_prefix, attr_name, values[0])
                         else:
-                            filter_string += "{}{} = '{}'".format('' if not field_prefix else field_prefix, attr,
-                                                                 values[0])
+                            filter_string += "{}{} = '{}'".format(
+                                '' if not field_prefix else field_prefix, attr_name, values[0])
                     elif parameter_type == 'NUMERIC':
                         if attr.endswith('_gt') or attr.endswith('_gte'):
                             filter_string += "{}{} >{} {}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '' if not field_prefix else field_prefix, attr_name,
                                 '=' if attr.endswith('_gte') else '',
                                 values[0]
                             )
                         elif attr.endswith('_lt') or attr.endswith('_lte'):
                             filter_string += "{}{} <{} {}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '' if not field_prefix else field_prefix, attr_name,
                                 '=' if attr.endswith('_lte') else '',
                                 values[0]
                             )
                         else:
                             filter_string += "{}{} = {}".format(
-                                '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
+                                '' if not field_prefix else field_prefix, attr_name,
                                 values[0]
                             )
-                elif len(values) == 2 and attr.endswith('_btw'):
-                    filter_string += "{}{} BETWEEN {} AND {}".format(
-                        '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
-                        values[0],
-                        values[1]
-                    )
+                # Occasionally attributes may come in without the appropriate _e?btwe? suffix; we account for that here
+                # by checking for the proper attr_name in the optional continuous_numerics list
+                elif is_btw or attr_name in continuous_numerics:
+                    # Check for a single array of two and if we find it, convert it to an array containing
+                    # a 2-member array
+                    if len(values) == 2 and type(values[0]) is not list:
+                        values = [values]
+                    else:
+                        # confirm an array of arrays all contain paired values
+                        all_pairs = True
+                        for x in values:
+                            if len(x) != 2:
+                                all_pairs = False
+                        if not all_pairs:
+                            logger.error("[ERROR] While parsing attribute {}, calculated to be a numeric range filter, found an unparseable value:".format(attr_name))
+                            logger.error("[ERROR] {}".format(values))
+                            continue
+                    btw_filter_strings = []
+                    for btws in values:
+                        btw_filter_strings.append("{}{} BETWEEN {} AND {}".format(
+                            '' if not field_prefix else field_prefix, attr_name,
+                            btws[0],
+                            btws[1]
+                        ))
+                    filter_string += " OR ".join(btw_filter_strings)
                 else:
-                    val_list = ",".join(["'{}'".format(x) for x in values]) if parameter_type == "STRING" else ",".join(values)
-                    filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr, val_list)
+                    if value_op == 'AND':
+                        val_scalars = ["{}{} = {}".format(field_prefix or '', attr_name, "'{}'".format(x) if parameter_type == "STRING" else x) for x in values]
+                        filter_string += " {} ".format(value_op).join(val_scalars)
+                    else:
+                        val_list = join_str.join(
+                            ["'{}'".format(x) for x in values]
+                        ) if parameter_type == "STRING" else join_str.join(values)
+                        filter_string += "{}{} IN ({})".format('' if not field_prefix else field_prefix, attr_name, val_list)
 
-            filter_set.append('{}{}{}'.format("(" if encapsulated else "", filter_string, ")" if encapsulated else ""))
+            filter_set.append('{}{}{}'.format("(" if encapsulate else "", filter_string, ")" if encapsulate else ""))
 
         return " {} ".format(comb_with).join(filter_set)

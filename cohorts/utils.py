@@ -67,15 +67,20 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
                 source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID"
             ))
 
+        totals = ["PatientID", "StudyInstanceUID", "SeriesInstanceUID"]
         result = get_collex_metadata(filters, None, sources=sources, facets=["collection_id"], counts_only=True,
-                                     totals=["PatientID", "StudyInstanceUID", "SeriesInstanceUID"], filtered_needed=True)
+                                     totals=totals, filtered_needed=True)
 
-        for total in result['totals']:
-            stats[total] = result['totals'][total]
-
-        for src in result['filtered_facets']:
-            if src.split(':')[0] in list(sources.values_list('name',flat=True)):
-                stats['collections'] = [x for x, y in result['filtered_facets'][src]['facets']['collection_id'].items() if y > 0]
+        if result.get('total', 0):
+            for total in result['totals']:
+                stats[total] = result['totals'][total]
+            for src in result.get('filtered_facets',{}):
+                if src.split(':')[0] in list(sources.values_list('name', flat=True)):
+                    stats['collections'] = [x for x, y in result['filtered_facets'][src]['facets']['collection_id'].items() if y > 0]
+        else:
+            # Nothing was found--either due to an error, or because nothing matched our filters.
+            for total in totals:
+                stats[total] = 0
 
     except Exception as e:
         logger.error("[ERROR] While fetching cohort stats:")
@@ -171,27 +176,54 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND, data_version=version)
 
         filter_attr = Attribute.objects.filter(id__in=filters.keys())
+        cont_numeric_attr = filter_attr.filter(data_type=Attribute.CONTINUOUS_NUMERIC)
 
         filter_set = []
 
+        nested_attr = {}
+
         for attr in filter_attr:
             filter_values = filters[str(attr.id)]
-            filter_value_full = "".join([str(x) for x in filter_values])
-            delimiter = Filter.DEFAULT_VALUE_DELIMITER
-            if Filter.DEFAULT_VALUE_DELIMITER in filter_value_full:
-                for delim in Filter.ALTERNATIVE_VALUE_DELIMITERS:
-                    if delim not in filter_value_full:
-                        delimiter = delim
-                        break
-
+            op = Filter.OR if attr not in cont_numeric_attr else Filter.BTW
+            if type(filter_values) is dict:
+                op = Filter.STR_TO_OP.get(filter_values['op'], op)
+                filter_values = filter_values['values']
+            elif type(filter_values) is list and type(filter_values[0]) is dict:
+                # complex query eg. 'age_at_diagnosis = None OR 45-67'
+                nested_attr[attr] = filter_values
+                continue
+            delimiter = Filter.get_delimiter(filter_values)
             filter_set.append(Filter(
                 resulting_cohort=cohort,
                 attribute=attr, value=delimiter.join([str(x) for x in filter_values]),
                 filter_group=grouping,
-                value_delimiter=delimiter
+                value_delimiter=delimiter,
+                operator=op
             ))
 
         Filter.objects.bulk_create(filter_set)
+
+        # Nested attribute filters are complex filters which typically attempt to subset a range of numeric
+        # partitions (eg. Null or 5-10 or > 28), so should be OR'd rather than AND'd.
+        # The expected format here is [{'op': <OPERATOR>, 'values': [1, 2, ...]}, {...}, ...]
+        # In the case of a single value string or categorical numeric (eg. Modality = 'CT') filter the operator value
+        # supplied can be None, since it will be ignored as unneeded.
+        for attr in nested_attr:
+            next_group = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.OR, data_version=version)
+            nested_set = []
+            nested_filters = nested_attr[attr]
+            for nested in nested_filters:
+                op = Filter.STR_TO_OP.get(nested['op'], Filter.OR if attr not in cont_numeric_attr else Filter.BTW)
+                filter_values = nested['values']
+                delimiter = Filter.get_delimiter(filter_values)
+                nested_set.append(Filter(
+                    resulting_cohort=cohort,
+                    attribute=attr, value=delimiter.join([str(x) for x in filter_values]),
+                    filter_group=next_group,
+                    value_delimiter=delimiter,
+                    operator=op
+                ))
+            Filter.objects.bulk_create(nested_set)
 
         # For backwards compatibility with v1 cohorts
         if not no_stats:
@@ -228,11 +260,12 @@ def cohort_manifest(cohort, user, fields, limit, offset, level="SeriesInstanceUI
         filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
         search_by = {x: "StudyInstanceUID" for x in filters} if level == "SeriesInstanceUID" else None
 
-
         cohort_records = get_collex_metadata(
             filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
-            collapse_on='SeriesInstanceUID', records_only=True, sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc",
-        search_child_records_by=search_by)
+            collapse_on='SeriesInstanceUID', records_only=True,
+            sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc",
+            search_child_records_by=search_by
+        )
         
         return cohort_records
         
@@ -286,8 +319,6 @@ def get_uuids_bq(inc_filters=None, tables=None, comb_mut_filters='OR', case_inse
     try:
         if not inc_filters or not tables:
             raise Exception("Filters and tables not provided")
-
-
 
     except Exception as e:
         logger.error("[ERROR] While queueing up program case/sample list jobs: ")
