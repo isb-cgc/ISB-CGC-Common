@@ -813,11 +813,18 @@ def get_query_str_response(request, cohort_id=0):
     }
     status = 200
 
+    req = request.GET or request.POST
+
     try:
         query = get_query_string(request, cohort_id)
 
         response['data'] = {'query_string': query, 'cohort': cohort_id}
         response['msg'] = "{} BigQuery string enclosed.".format("Cohort" if cohort_id else "Filter")
+
+        if bool(req.get('update', "False").lower() == "true"):
+            stats = get_cohort_stats(request, cohort_id)
+            response['filters_found'] = stats['filters_found']
+            response['inactive_attr'] = stats['inactive_attr']
 
     except Exception as e:
         logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
