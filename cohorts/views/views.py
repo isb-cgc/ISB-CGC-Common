@@ -830,6 +830,7 @@ def get_query_str_response(request, cohort_id=0):
             stats = get_cohort_stats(request, cohort_id, False)
             response['filters_found'] = stats.get('filters_found', None)
             response['inactive_attr'] = stats.get('inactive_attr', None)
+            response['PatientID'] = stats.get('PatientID', 0)
 
     except Exception as e:
         logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
