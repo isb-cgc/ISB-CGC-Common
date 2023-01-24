@@ -721,7 +721,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'fields': None,
                     'stats': solr_stats_filtered,
                     'totals': curTotals
-                },raw_format=raw_format)
+                }, raw_format=raw_format)
 
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(
