@@ -19,7 +19,7 @@ from builtins import object
 from django.db import models
 from django.conf import settings
 from django.contrib.auth.models import User
-from allauth.account.signals import password_changed,password_set,user_signed_up
+from allauth.account.signals import password_changed, password_set, user_signed_up, password_reset
 import logging
 from datetime import datetime, timezone, timedelta
 import pytz
@@ -76,4 +76,5 @@ user_signed_up.connect(add_password_history)
 user_signed_up.connect(set_password_expiration)
 password_changed.connect(add_password_history)
 password_changed.connect(set_password_expiration)
-
+password_reset.connect(add_password_history)
+password_reset.connect(set_password_expiration)
