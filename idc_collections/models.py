@@ -396,7 +396,7 @@ class DataSourceQuerySet(models.QuerySet):
             if active_only:
                 q_objects &= Q(active=True)
             if for_faceting:
-                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
+                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(id__in=Attribute_Ranges.objects.filter(
                         attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
                     ).values_list('attribute__id', flat=True)))
 
