@@ -121,7 +121,7 @@ def get_cases_by_cohort(cohort_id):
         logger.exception(e)
 
 
-def get_cohort_stats(request, cohort_id):
+def get_cohort_stats(request, cohort_id, as_json=True):
     status = 200
     cohort_stats = {
         'PatientID': 0,
@@ -146,6 +146,8 @@ def get_cohort_stats(request, cohort_id):
                     # If all of the filters from the prior version were made inactive, there will be no
                     # filters for this cohort.
                     cohort_stats['filters_found'] = False
+                    if not as_json:
+                        return cohort_stats
                     return JsonResponse(cohort_stats, status=status)
                 for cohort in cohort_filters_list:
                     cohort_filters[cohort['name']] = cohort['values']
@@ -175,6 +177,9 @@ def get_cohort_stats(request, cohort_id):
         logger.exception(e)
         messages.error(request, "There was an error while trying to load that cohort's stats.")
         return redirect('cohort_list')
+
+    if not as_json:
+        return cohort_stats
 
     return JsonResponse(cohort_stats, status=status)
 
@@ -813,11 +818,19 @@ def get_query_str_response(request, cohort_id=0):
     }
     status = 200
 
+    req = request.GET or request.POST
+
     try:
         query = get_query_string(request, cohort_id)
 
         response['data'] = {'query_string': query, 'cohort': cohort_id}
         response['msg'] = "{} BigQuery string enclosed.".format("Cohort" if cohort_id else "Filter")
+
+        if bool(req.get('update', "False").lower() == "true"):
+            stats = get_cohort_stats(request, cohort_id, False)
+            response['filters_found'] = stats.get('filters_found', None)
+            response['inactive_attr'] = stats.get('inactive_attr', None)
+            response['PatientID'] = stats.get('PatientID', 0)
 
     except Exception as e:
         logger.error("[ERROR] While fetching BQ string for {}:".format(cohort_id if cohort_id else filters))
