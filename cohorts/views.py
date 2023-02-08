@@ -1426,14 +1426,7 @@ def filelist(request, cohort_id=None, panel_type=None):
         return redirect('cohort_list')
 
     try:
-        metadata_data_attr_builds = {
-            'HG19': fetch_build_data_attr('HG19', panel_type, cohort_id is None),
-            'HG38': fetch_build_data_attr('HG38', panel_type, cohort_id is None)
-        }
-
-        build = request.GET.get('build', 'HG19')
-
-        metadata_data_attr = metadata_data_attr_builds[build]
+        metadata_data_attr = fetch_file_data_attr(panel_type, cohort_id is None)
 
         has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
@@ -1445,7 +1438,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             if request.GET.get('case_barcode', None):
                 inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, data_type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, access=has_access, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -1468,15 +1461,6 @@ def filelist(request, cohort_id=None, panel_type=None):
                         attr_val['count'] = 0
                     attr_values.append(attr_val)
                 metadata_data_attr[attr]['values'] = attr_values
-
-        for attr_build in metadata_data_attr_builds:
-            if attr_build != build:
-                for attr in metadata_data_attr_builds[attr_build]:
-                    for val in metadata_data_attr_builds[attr_build][attr]['values']:
-                        metadata_data_attr_builds[attr_build][attr]['values'][val]['count'] = 0
-                    metadata_data_attr_builds[attr_build][attr]['values'] = [metadata_data_attr_builds[attr_build][attr]['values'][x] for x in
-                                                                             metadata_data_attr_builds[attr_build][attr]['values']]
-            metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
 
         cohort = None
         has_user_data = False
@@ -1510,14 +1494,13 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
                                             'export_url': export_url,
-                                            'metadata_data_attr': metadata_data_attr_builds,
+                                            'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'dicom_viewer_url': settings.DICOM_VIEWER,
                                             'slim_viewer_url': settings.SLIM_VIEWER,
                                             'has_user_data': has_user_data,
-                                            'build': build,
                                             'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -1577,11 +1560,11 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_build_data_attr(build, panel_type, cohort_id is None)
+            metadata_data_attr = fetch_file_data_attr(panel_type, cohort_id is None)
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
