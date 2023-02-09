@@ -104,7 +104,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             fields.extend(["index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "experimental_strategy", "data_format",
                            "file_node_id", "case_node_id", "file_size",
-                           "program_name", "node", "file_name", "build"
+                           "program_name", "node", "file_name", "file_name_key", "build"
                            ])
             if data_type == 'slim':
                 fields.extend(["StudyInstanceUID", "SeriesInstanceUID", "slide_barcode"])
@@ -121,15 +121,12 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
 
             if do_filter_count:
-                facet_names = ['disease_code', 'project_short_name']
-                if data_type == 'all':
-                    facet_names.extend(['data_format', 'data_category', 'experimental_strategy', 'platform', 'data_type', 'node', 'build'])
-                elif data_type == 'slim':
-                    facet_names.extend(['data_type'])
-                elif data_type == 'igv':
-                    facet_names.extend(['experimental_strategy', 'platform', 'build'])
+                facet_names = [
+                    'disease_code', 'project_short_name', 'node', 'build', 'data_format', 'data_category',
+                    'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform'
+                ]
 
-                if data_type != 'slim' and not cohort_id:
+                if not cohort_id:
                     facet_names.extend(['program_name'])
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)

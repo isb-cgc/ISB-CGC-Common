@@ -228,20 +228,22 @@ def get_sql_connection():
 def fetch_file_data_attr(type=None, add_program_name=False):
 
     if type == 'dicom':
-        metadata_data_attrs = ['disease_code', 'Modality', 'BodyPartExamined']
+        metadata_data_attrs = ['Modality', 'BodyPartExamined']
     elif type == 'pdf':
-        metadata_data_attrs = ['disease_code', 'project_short_name', ]
+        metadata_data_attrs = ['project_short_name']
     elif type == 'slim':
-        metadata_data_attrs = ['data_type', 'disease_code', 'project_short_name',]
+        metadata_data_attrs = ['data_type', 'project_short_name']
     elif type == 'igv':
-        metadata_data_attrs = ['experimental_strategy', 'platform', 'disease_code', 'build']
+        metadata_data_attrs = ['experimental_strategy', 'platform']
         if add_program_name:
             metadata_data_attrs.append('program_name')
     else:
-        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform',
-                               'disease_code', 'node', 'build']
+        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform']
         if add_program_name:
             metadata_data_attrs.append('program_name')
+
+    if type != 'dicom':
+        metadata_data_attrs.extend(['disease_code', 'node', 'build'])
 
     try:
         if not len(METADATA_DATA_ATTR):
