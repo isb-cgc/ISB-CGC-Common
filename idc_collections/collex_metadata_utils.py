@@ -342,14 +342,16 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                                             sortDic = {'underweight': 0, 'normal weight': 1, 'overweight': 2, 'obese': 3,
                                                        'None': 4}
                                             _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: sortDic[x['value']])
-                                        elif _attr_by_source[set_name]['All']['attributes'][attr]['obj'].data_type=='N':
+                                        elif _attr_by_source[set_name]['All']['attributes'][attr]['obj'].data_type in [Attribute.CONTINUOUS_NUMERIC]:
                                             _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key= lambda x: sortNum(x['value']))
                                             if _attr_by_source[set_name]['All']['attributes'][attr]['vals'][0]['value']=='None':
                                                 litem=_attr_by_source[set_name]['All']['attributes'][attr]['vals'].pop(0)
                                                 _attr_by_source[set_name]['All']['attributes'][attr]['vals'].append(litem)
                                             pass
                                         else:
-                                            _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: x['value'])
+                                            # Because categorical numerics are a thing, always cast any compared values for sorting to string in case
+                                            # they're lurking
+                                            _attr_by_source[set_name]['All']['attributes'][attr]['vals'] = sorted(values, key=lambda x: str(x['value']))
 
         for which, _attr_by_source in {'filtered_attr_by_source': filtered_attr_by_source, 'attr_by_source': attr_by_source}.items():
             for set in _attr_by_source:
@@ -735,7 +737,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     'fields': None,
                     'stats': solr_stats_filtered,
                     'totals': curTotals
-                },raw_format=raw_format)
+                }, raw_format=raw_format)
 
             stop = time.time()
             logger.info("[BENCHMARKING] Total time to examine source {} and query: {}".format(
