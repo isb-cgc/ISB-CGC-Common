@@ -270,7 +270,6 @@ def fetch_file_data_attr(type=None, add_program_name=False):
                 values = query_solr_and_format_result(solr_query)
 
                 for attr in values['values']:
-                    print(attr)
                     if attr not in METADATA_DATA_ATTR:
                         METADATA_DATA_ATTR[attr] = {
                             'values': {},
@@ -304,7 +303,8 @@ def fetch_file_data_attr(type=None, add_program_name=False):
 
 def fetch_program_data_types(program, for_display=False):
     try:
-
+        cursor = None
+        db = None
         if not program:
             program = Program.objects.get(name="TCGA")
         else:

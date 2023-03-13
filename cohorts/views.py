@@ -1683,7 +1683,7 @@ def streaming_csv_view(request, cohort_id=None):
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
-        items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit, build=build)
+        items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit)
 
         if 'file_list' in items:
             file_list = items['file_list']
@@ -2131,6 +2131,11 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
 
         if export_type == 'file_manifest':
+            file_tables = DataSource.objects.select_related('version').filter(
+                version__active=1, source_type=DataSource.BIGQUERY, version__data_type=DataVersion.FILE_DATA
+            )
+
+            print("File tables seen: {}".format(file_tables))
             if cohort_id:
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
@@ -2171,19 +2176,25 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 """
 
             cohort_id_str = cohort_id if cohort_id else 0
-            query_string = query_string_base.format(
-                metadata_table=settings.BQ_FILE_MANIFEST_TABLE_ID[build.upper()],
-                deployment_project=settings.BIGQUERY_PROJECT_ID,
-                deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
-                deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
-                filter_conditions=filter_conditions,
-                cohort_id=cohort_id_str,
-                date_added=date_added,
-                build=build,
-                tz=settings.TIME_ZONE
-            )
+            for table in file_tables:
+                union_queries(query_string_base.format(
+                    metadata_table=table.name,
+                    deployment_project=settings.BIGQUERY_PROJECT_ID,
+                    deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
+                    deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
+                    filter_conditions=filter_conditions,
+                    cohort_id=cohort_id_str,
+                    date_added=date_added,
+                    build=build,
+                    tz=settings.TIME_ZONE
+                ))
 
-            query_string = '#standardSQL\n'+query_string
+            if len(union_queries) > 1:
+                query_string = ") UNION ALL (".join(union_queries)
+                query_string = '(' + query_string + ')'
+            else:
+                query_string = union_queries[0]
+            query_string = '#standardSQL\n' + query_string
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
@@ -2219,7 +2230,11 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                     cohort_programs = Program.objects.filter(active=True, is_public=True)
 
             for program in cohort_programs:
-
+                bioclin_tables = DataSource.objects.filter(
+                    version__active=1, source_type=DataSource.BIGQUERY,
+                    version__data_type=DataVersion.BIOSPECIMEN_DATA, programs__id=program.id
+                )
+                print(bioclin_tables)
                 union_queries.append(
                     query_string_base.format(
                         program_bioclin_table=settings.BQ_PROG_BIOCLIN_TABLE_ID[program.name],
