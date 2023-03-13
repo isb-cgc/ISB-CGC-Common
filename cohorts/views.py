@@ -1426,7 +1426,7 @@ def filelist(request, cohort_id=None, panel_type=None):
         return redirect('cohort_list')
 
     try:
-        metadata_data_attr = fetch_file_data_attr(panel_type, cohort_id is None)
+        metadata_data_attr = fetch_file_data_attr(panel_type)
 
         has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
@@ -1560,18 +1560,22 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, access=has_access,
+                              data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_file_data_attr(panel_type, cohort_id is None)
+            metadata_data_attr = fetch_file_data_attr(panel_type)
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            # TODO: This needs to be adjusted to not assume values coming out of the attribute fetcher are all that's valid.
+                            # TODO: This needs to be adjusted to not assume values coming out of the
+                            #  attribute fetcher are all that's valid.
                             if attr != 'program_name':
-                                metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
+                                metadata_data_attr.get(attr, {}).get('values', {}).get(
+                                    val, {}
+                                )['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
                             else:
                                 if val in progs:
                                     vals = metadata_data_attr.get(attr, {}).get('values', {})
@@ -1601,8 +1605,12 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         logger.exception(e)
         status=500
         if cohort_id:
-            result={'redirect': reverse('cohort_details', args=[cohort_id]),
-                    'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+            result = {
+                'redirect': reverse(
+                    'cohort_details', args=[cohort_id]
+                ),
+                'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."
+            }
         else:
             result = {'redirect': reverse('landing_page', args=[]),
                     'message': "Encountered an error while trying to fetch filelist--please contact the administrator."}

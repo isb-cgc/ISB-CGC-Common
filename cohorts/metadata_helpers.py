@@ -225,7 +225,7 @@ def get_sql_connection():
         if db and db.open: db.close()
 
 
-def fetch_file_data_attr(type=None, add_program_name=False):
+def fetch_file_data_attr(type=None):
 
     if type == 'dicom':
         metadata_data_attrs = ['Modality', 'BodyPartExamined']
@@ -235,13 +235,10 @@ def fetch_file_data_attr(type=None, add_program_name=False):
         metadata_data_attrs = ['data_type', 'project_short_name']
     elif type == 'igv':
         metadata_data_attrs = ['experimental_strategy', 'platform']
-        if add_program_name:
-            metadata_data_attrs.append('program_name')
     else:
         metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform']
-        if add_program_name:
-            metadata_data_attrs.append('program_name')
 
+    metadata_data_attrs.extend(['program_name'])
     if type != 'dicom':
         metadata_data_attrs.extend(['disease_code', 'node', 'build'])
 
