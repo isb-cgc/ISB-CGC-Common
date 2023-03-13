@@ -94,7 +94,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR,
                                                                                version__active=True,
                                                                                version__data_type=DataVersion.FILE_DATA)
-
             if data_type == 'igv':
                 fields.extend(["sample_barcode"])
                 col_map.update({
@@ -123,11 +122,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             if do_filter_count:
                 facet_names = [
                     'disease_code', 'project_short_name', 'node', 'build', 'data_format', 'data_category',
-                    'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform'
+                    'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform', 'program_name'
                 ]
-
-                if not cohort_id:
-                    facet_names.extend(['program_name'])
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
