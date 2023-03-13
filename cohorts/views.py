@@ -1426,14 +1426,7 @@ def filelist(request, cohort_id=None, panel_type=None):
         return redirect('cohort_list')
 
     try:
-        metadata_data_attr_builds = {
-            'HG19': fetch_build_data_attr('HG19', panel_type, cohort_id is None),
-            'HG38': fetch_build_data_attr('HG38', panel_type, cohort_id is None)
-        }
-
-        build = request.GET.get('build', 'HG19')
-
-        metadata_data_attr = metadata_data_attr_builds[build]
+        metadata_data_attr = fetch_file_data_attr(panel_type)
 
         has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
@@ -1445,7 +1438,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             if request.GET.get('case_barcode', None):
                 inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, data_type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, access=has_access, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -1468,15 +1461,6 @@ def filelist(request, cohort_id=None, panel_type=None):
                         attr_val['count'] = 0
                     attr_values.append(attr_val)
                 metadata_data_attr[attr]['values'] = attr_values
-
-        for attr_build in metadata_data_attr_builds:
-            if attr_build != build:
-                for attr in metadata_data_attr_builds[attr_build]:
-                    for val in metadata_data_attr_builds[attr_build][attr]['values']:
-                        metadata_data_attr_builds[attr_build][attr]['values'][val]['count'] = 0
-                    metadata_data_attr_builds[attr_build][attr]['values'] = [metadata_data_attr_builds[attr_build][attr]['values'][x] for x in
-                                                                             metadata_data_attr_builds[attr_build][attr]['values']]
-            metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
 
         cohort = None
         has_user_data = False
@@ -1510,14 +1494,13 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
                                             'export_url': export_url,
-                                            'metadata_data_attr': metadata_data_attr_builds,
+                                            'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'dicom_viewer_url': settings.DICOM_VIEWER,
                                             'slim_viewer_url': settings.SLIM_VIEWER,
                                             'has_user_data': has_user_data,
-                                            'build': build,
                                             'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -1577,18 +1560,22 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, access=has_access,
+                              data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_build_data_attr(build, panel_type, cohort_id is None)
+            metadata_data_attr = fetch_file_data_attr(panel_type)
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            # TODO: This needs to be adjusted to not assume values coming out of the attribute fetcher are all that's valid.
+                            # TODO: This needs to be adjusted to not assume values coming out of the
+                            #  attribute fetcher are all that's valid.
                             if attr != 'program_name':
-                                metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
+                                metadata_data_attr.get(attr, {}).get('values', {}).get(
+                                    val, {}
+                                )['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
                             else:
                                 if val in progs:
                                     vals = metadata_data_attr.get(attr, {}).get('values', {})
@@ -1618,8 +1605,12 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         logger.exception(e)
         status=500
         if cohort_id:
-            result={'redirect': reverse('cohort_details', args=[cohort_id]),
-                    'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+            result = {
+                'redirect': reverse(
+                    'cohort_details', args=[cohort_id]
+                ),
+                'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."
+            }
         else:
             result = {'redirect': reverse('landing_page', args=[]),
                     'message': "Encountered an error while trying to fetch filelist--please contact the administrator."}
@@ -1700,7 +1691,7 @@ def streaming_csv_view(request, cohort_id=None):
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
-        items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit, build=build)
+        items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit)
 
         if 'file_list' in items:
             file_list = items['file_list']
@@ -2148,6 +2139,11 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
 
         if export_type == 'file_manifest':
+            file_tables = DataSource.objects.select_related('version').filter(
+                version__active=1, source_type=DataSource.BIGQUERY, version__data_type=DataVersion.FILE_DATA
+            )
+
+            print("File tables seen: {}".format(file_tables))
             if cohort_id:
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
@@ -2188,19 +2184,25 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 """
 
             cohort_id_str = cohort_id if cohort_id else 0
-            query_string = query_string_base.format(
-                metadata_table=settings.BQ_FILE_MANIFEST_TABLE_ID[build.upper()],
-                deployment_project=settings.BIGQUERY_PROJECT_ID,
-                deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
-                deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
-                filter_conditions=filter_conditions,
-                cohort_id=cohort_id_str,
-                date_added=date_added,
-                build=build,
-                tz=settings.TIME_ZONE
-            )
+            for table in file_tables:
+                union_queries(query_string_base.format(
+                    metadata_table=table.name,
+                    deployment_project=settings.BIGQUERY_PROJECT_ID,
+                    deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
+                    deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
+                    filter_conditions=filter_conditions,
+                    cohort_id=cohort_id_str,
+                    date_added=date_added,
+                    build=build,
+                    tz=settings.TIME_ZONE
+                ))
 
-            query_string = '#standardSQL\n'+query_string
+            if len(union_queries) > 1:
+                query_string = ") UNION ALL (".join(union_queries)
+                query_string = '(' + query_string + ')'
+            else:
+                query_string = union_queries[0]
+            query_string = '#standardSQL\n' + query_string
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
@@ -2236,7 +2238,11 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                     cohort_programs = Program.objects.filter(active=True, is_public=True)
 
             for program in cohort_programs:
-
+                bioclin_tables = DataSource.objects.filter(
+                    version__active=1, source_type=DataSource.BIGQUERY,
+                    version__data_type=DataVersion.BIOSPECIMEN_DATA, programs__id=program.id
+                )
+                print(bioclin_tables)
                 union_queries.append(
                     query_string_base.format(
                         program_bioclin_table=settings.BQ_PROG_BIOCLIN_TABLE_ID[program.name],

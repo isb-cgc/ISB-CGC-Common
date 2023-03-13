@@ -34,7 +34,7 @@ FILTER_DATA_FORMAT = {
 
 
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
-                 sort_order=0, build='HG19', access=None, data_type=None, do_filter_count=True):
+                 sort_order=0, access=None, data_type=None, do_filter_count=True):
 
     if not user:
         raise Exception("A user must be supplied to view a cohort's files.")
@@ -70,11 +70,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
         if data_type in ('igv', 'slim', 'pdf'):
             format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]}
-            if data_type == 'slim':
-                build = 'HG38'
 
         if data_type == 'dicom':
-            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True)
+            file_collection = DataSource.objects.select_related('version').get(
+                source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True
+            )
 
             fields.extend(["file_path", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality"])
 
@@ -93,27 +93,23 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         else:
             file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR,
                                                                                version__active=True,
-                                                                               version__data_type=DataVersion.FILE_DATA,
-                                                                               name__contains=build.lower())
+                                                                               version__data_type=DataVersion.FILE_DATA)
             if data_type == 'igv':
                 fields.extend(["sample_barcode"])
                 col_map.update({
                     'col-sbarcode': 'sample_barcode'
                 })
 
-            fields.extend(["file_name_key", "index_file_name_key", "access", "acl", "platform",
+            fields.extend(["index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "experimental_strategy", "data_format",
-                           "file_node_id", "file_gdc_id", "case_gdc_id", "case_node_id", "file_size",
-                           "program_name", "node"
+                           "file_node_id", "case_node_id", "file_size",
+                           "program_name", "node", "file_name", "file_name_key", "build"
                            ])
             if data_type == 'slim':
                 fields.extend(["StudyInstanceUID", "SeriesInstanceUID", "slide_barcode"])
 
-            if build.lower() == 'hg38':
-                fields.append("file_name")
-
             col_map.update({
-                'col-filename': 'file_name' if build.lower() == 'hg38' else 'file_name_key',
+                'col-filename': 'file_name',
                 'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
@@ -124,22 +120,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
 
             if do_filter_count:
-                facet_names = ['disease_code', 'project_short_name']
-                if data_type == 'all':
-                    facet_names.extend(['data_format', 'data_category', 'experimental_strategy', 'platform', 'data_type'])
-                    if build.lower() == 'hg38':
-                        facet_names.append('node')
-                elif data_type == 'slim':
-                    facet_names.extend(['data_type'])
-                elif data_type == 'igv':
-                    facet_names.extend(['experimental_strategy', 'platform'])
-
-                if data_type != 'slim' and not cohort_id:
-                    facet_names.extend(['program_name'])
+                facet_names = [
+                    'disease_code', 'project_short_name', 'node', 'build', 'data_format', 'data_category',
+                    'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform', 'program_name'
+                ]
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
-            unique = "file_name" if build.lower() == 'hg38' else 'file_name_key'
+            unique = "file_name"
 
         if 'case_barcode' in inc_filters:
             inc_filters['case_barcode'] = ["*{}*".format(x) for x in inc_filters['case_barcode']]
@@ -191,7 +179,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
         elif data_type == 'all' or data_type == 'slim' or data_type == 'pdf':
             query_params.update({
-                "unique": "file_name" if build.lower() == 'hg38' else 'file_name_key'
+                "unique": "file_name"
             })
         file_query_result = query_solr_and_format_result(query_params)
 
@@ -222,7 +210,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'sample': entry.get('sample_barcode', 'N/A'),
                         'case': entry.get('case_barcode', 'N/A'),
                         'disease_code': entry.get('disease_code', 'N/A'),
-                        'build': build.lower(),
+                        'build': entry.get('build', 'N/A'),
                         'study_uid': entry.get('StudyInstanceUID', 'N/A'),
                         'series_uid': entry.get('SeriesInstanceUID', 'N/A'),
                         'slide_barcode': entry.get('slide_barcode', 'N/A'),
@@ -253,7 +241,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             'total_file_count': total_file_count,
             'page': page,
             'file_list': file_list,
-            'build': build,
             'metadata_data_counts': filter_counts
         }
 
