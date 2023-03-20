@@ -337,9 +337,11 @@ def get_cases_by_cohort(cohort_id):
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
+
 
 @login_required
 def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=False):
@@ -591,6 +593,7 @@ def cohort_detail(request, cohort_id):
 
     return render(request, template, template_values)
 
+
 '''
 Saves a cohort, adds the new cohort to an existing worksheet, then redirected back to the worksheet display
 '''
@@ -599,9 +602,7 @@ def save_cohort_for_existing_workbook(request):
     return save_cohort(request=request, workbook_id=request.POST.get('workbook_id'), worksheet_id=request.POST.get("worksheet_id"))
 
 
-'''
-Saves a cohort, adds the new cohort to a new worksheet, then redirected back to the worksheet display
-'''
+# Saves a cohort, adds the new cohort to a new worksheet, then redirected back to the worksheet display
 @login_required
 def save_cohort_for_new_workbook(request):
     return save_cohort(request=request, workbook_id=None, worksheet_id=None, create_workbook=True)
@@ -1551,8 +1552,6 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
             sort_order = int(request.GET.get('sort_order'))
             params['sort_order'] = sort_order
 
-        build = request.GET.get('build','HG19')
-
         has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
@@ -1682,11 +1681,6 @@ def streaming_csv_view(request, cohort_id=None):
 
         file_list = None
 
-        build = escape(request.GET.get('build', 'HG19'))
-
-        if not re.compile(r'[Hh][Gg](19|38)').search(build):
-            raise Exception("Invalid build supplied")
-
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
@@ -1715,8 +1709,8 @@ def streaming_csv_view(request, cohort_id=None):
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
-            cohort_string = "Cohort '{}', ".format(cohort.name) if cohort else ""
-            rows = (["File listing for {}Build {}".format(cohort_string, build)],)
+            cohort_string = " for Cohort '{}', ".format(cohort.name) if cohort else ""
+            rows = (["File listing{}".format(cohort_string,)],)
             rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
                       "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
@@ -1729,7 +1723,7 @@ def streaming_csv_view(request, cohort_id=None):
                                              content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
             cohort_string = 'cohort_{}_'.format(str(cohort_id)) if cohort_id else ''
-            filename = 'file_list_{}build_{}_{}.csv'.format(cohort_string, build, timestamp)
+            filename = 'file_list_{}{}.csv'.format(cohort_string, timestamp)
             response['Content-Disposition'] = 'attachment; filename=' + filename
             response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
@@ -2113,11 +2107,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             file_name = table
         file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
 
-        build = escape(request.POST.get('build', 'HG19')).lower()
-
-        if export_type == 'file_manifest' and not re.compile(r'[Hh][Gg](19|38)').search(build):
-            raise Exception("Invalid build supplied")
-
         filter_conditions = ""
         union_queries = []
         inc_filters = json.loads(request.POST.get('filters', '{}'))
@@ -2149,7 +2138,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                       md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
-                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                      {cohort_id} as cohort_id, build, md.index_file_name_key as index_file_cloud_storage_location,
                       md.index_file_id as index_file_gdc_uuid,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                      FROM `{metadata_table}` md
@@ -2171,7 +2160,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
                       md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
-                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
+                      {cohort_id} as cohort_id, build, md.index_file_name_key as index_file_cloud_storage_location,
                       md.index_file_id as index_file_gdc_uuid,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                      FROM `{metadata_table}` md
@@ -2193,7 +2182,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                     filter_conditions=filter_conditions,
                     cohort_id=cohort_id_str,
                     date_added=date_added,
-                    build=build,
                     tz=settings.TIME_ZONE
                 ))
 
