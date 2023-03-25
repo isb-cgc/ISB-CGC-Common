@@ -2174,7 +2174,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
 
             cohort_id_str = cohort_id if cohort_id else 0
             for table in file_tables:
-                union_queries(query_string_base.format(
+                union_queries.append(query_string_base.format(
                     metadata_table=table.name,
                     deployment_project=settings.BIGQUERY_PROJECT_ID,
                     deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
@@ -2230,7 +2230,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                     version__active=1, source_type=DataSource.BIGQUERY,
                     version__data_type=DataVersion.BIOSPECIMEN_DATA, programs__id=program.id
                 )
-                print(bioclin_tables)
                 union_queries.append(
                     query_string_base.format(
                         program_bioclin_table=settings.BQ_PROG_BIOCLIN_TABLE_ID[program.name],
