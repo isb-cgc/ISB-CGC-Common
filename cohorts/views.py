@@ -2042,7 +2042,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         file_name = None
 
         # If destination is BQ
-        table = None
+        dest_table = None
 
         if export_dest == 'table':
             dataset = request.POST.get('project-dataset', '').split(":")[1]
@@ -2067,19 +2067,19 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             bq_proj_id = gcp.project_id
 
             if request.POST.get('table-type', '') == 'new':
-                table = request.POST.get('new-table-name', None)
-                if table:
+                dest_table = request.POST.get('new-table-name', None)
+                if dest_table:
                     # Check the user-provided table name against the whitelist for Google BQ table names
                     # truncate at max length regardless of what we received
-                    table = request.POST.get('new-table-name', '')[0:1024]
+                    dest_table = request.POST.get('new-table-name', '')[0:1024]
                     tbl_whitelist = re.compile(r'([^A-Za-z0-9_])',re.UNICODE)
-                    match = tbl_whitelist.search(str(table))
+                    match = tbl_whitelist.search(str(dest_table))
                     if match:
                         messages.error(request,"There are invalid characters in your table name; only numbers, "
                            + "letters, and underscores are permitted.")
                         return redirect(redirect_url)
                 else:
-                    table = request.POST.get('table-name', None)
+                    dest_table = request.POST.get('table-name', None)
 
         elif export_dest == 'gcs':
             bq_proj_id = settings.GCLOUD_PROJECT_ID
@@ -2093,10 +2093,10 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                         + " periods (.), slashes, dashes, and underscores are permitted.")
                     return redirect(redirect_url)
 
-        if not table:
+        if not dest_table:
             table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
             cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
-            table = "{}{}_{}_{}".format(
+            dest_table = "{}{}_{}_{}".format(
                 table_str_start,
                 cohort_id_str,
                 re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
@@ -2104,7 +2104,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             )
 
         if not file_name:
-            file_name = table
+            file_name = dest_table
         file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
 
         filter_conditions = ""
@@ -2173,9 +2173,9 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 """
 
             cohort_id_str = cohort_id if cohort_id else 0
-            for table in file_tables:
+            for tbl in file_tables:
                 union_queries.append(query_string_base.format(
-                    metadata_table=table.name,
+                    metadata_table=tbl.name,
                     deployment_project=settings.BIGQUERY_PROJECT_ID,
                     deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
                     deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
@@ -2194,7 +2194,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
-                bcs = BigQueryExportFileList(bq_proj_id, dataset, table, user_project=True)
+                bcs = BigQueryExportFileList(bq_proj_id, dataset, dest_table, user_project=True)
                 result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
@@ -2252,7 +2252,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
 
             # Export the data
             if export_dest == 'table':
-                bcs = BigQueryExportCohort(bq_proj_id, dataset, table, user_project=True)
+                bcs = BigQueryExportCohort(bq_proj_id, dataset, dest_table, user_project=True)
                 result = bcs.export_cohort_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
@@ -2281,13 +2281,13 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             if result['status'] == 'long_running':
                 result['message'] = "The export of {} to {} ".format(
                     msg_cohort_str,
-                    "table {}:{}.{}".format(bq_proj_id, dataset, table)
+                    "table {}:{}.{}".format(bq_proj_id, dataset, dest_table)
                     if export_dest == 'table' else "GCS file gs://{}/{}".format(gcs_bucket, file_name)
                 ) + "is underway; check your {} in 1-2 minutes for the results.".format("BQ dataset" if export_dest == 'table' else "GCS bucket")
             else:
                 result['message'] = "{} was successfully exported to {}.".format(
                     msg_cohort_str,
-                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, dest_table, result['message'])
                     if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
                         gcs_bucket, file_name, result['message']
                     )
