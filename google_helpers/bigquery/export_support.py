@@ -44,8 +44,7 @@ FILE_LIST_EXPORT_SCHEMA = {
             'mode': 'REQUIRED'
         }, {
             'name': 'sample_barcode',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
+            'type': 'STRING'
         }, {
             'name': 'project_short_name',
             'type': 'STRING',
@@ -59,10 +58,10 @@ FILE_LIST_EXPORT_SCHEMA = {
             'type': 'STRING',
             'mode': 'REQUIRED'
         }, {
-            'name': 'gdc_file_uuid',
+            'name': 'file_node_id',
             'type': 'STRING'
         }, {
-            'name': 'gdc_case_uuid',
+            'name': 'case_node_id',
             'type': 'STRING'
         }, {
             'name': 'platform',
@@ -86,7 +85,7 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'file_size_bytes',
             'type': 'INTEGER'
         }, {
-            'name': 'index_file_gdc_uuid',
+            'name': 'index_file_id',
             'type': 'STRING'
         }, {
             'name': 'index_file_cloud_storage_location',
@@ -107,8 +106,7 @@ COHORT_EXPORT_SCHEMA = {
             'mode': 'REQUIRED'
         }, {
             'name': 'sample_barcode',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
+            'type': 'STRING'
         }, {
             'name': 'project_short_name',
             'type': 'STRING',
