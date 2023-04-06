@@ -36,10 +36,10 @@ TEMP_PATH_SCHEMA = {
             'name': 'sample_barcode',
             'type': 'STRING'
         }, {
-            'name': 'gdc_case_uuid',
+            'name': 'case_node_id',
             'type': 'STRING'
         }, {
-            'name': 'gdc_sample_uuid',
+            'name': 'sample_node_id',
             'type': 'STRING'
         }, {
             'name': 'file_gcs_path',
@@ -60,8 +60,8 @@ class BigQueryGcsPathSupport(BigQuerySupport):
             'file_node_id': file_node_id,
             'case_barcode': case_barcode,
             'sample_barcode': sample_barcode,
-            'gdc_case_uuid': case_node_id,
-            'gdc_sample_uuid': sample_node_id,
+            'case_node_id': case_node_id,
+            'sample_node_id': sample_node_id,
             'file_gcs_path': gcs_path
         }
 
