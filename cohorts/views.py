@@ -2137,9 +2137,8 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
-                      {cohort_id} as cohort_id, build, md.index_file_name_key as index_file_cloud_storage_location,
-                      md.index_file_id as index_file_gdc_uuid,
+                      md.file_node_id, md.case_node_id, md.project_short_name, {cohort_id} as cohort_id, build, 
+                      md.index_file_name_key as index_file_cloud_storage_location, md.index_file_id, 
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                      FROM `{metadata_table}` md
                      JOIN (SELECT case_barcode, sample_barcode
@@ -2151,7 +2150,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                      WHERE TRUE {filter_conditions}
                      GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                       md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      file_node_id, case_node_id, md.project_short_name, cohort_id, build, date_added, 
                       md.index_file_name_key, md.index_file_id
                      ORDER BY md.sample_barcode
                 """
@@ -2159,15 +2158,15 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
+                      md.file_node_id, md.case_node_id, md.project_short_name,
                       {cohort_id} as cohort_id, build, md.index_file_name_key as index_file_cloud_storage_location,
-                      md.index_file_id as index_file_gdc_uuid,
+                      md.index_file_id,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                      FROM `{metadata_table}` md
                      WHERE TRUE {filter_conditions}
                      GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                       md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      file_node_id, case_node_id, md.project_short_name, cohort_id, build, date_added, 
                       md.index_file_name_key, md.index_file_id
                      ORDER BY md.sample_barcode
                 """
@@ -2205,7 +2204,8 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # Exporting Cohort Records
         elif export_type == 'cohort':
             query_string_base = """
-                SELECT DISTINCT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
+                SELECT DISTINCT cs.cohort_id, cs.case_barcode, cs.sample_barcode, 
+                clin.case_node_id, clin.project_short_name,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
                 JOIN `{program_bioclin_table}` clin

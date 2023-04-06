@@ -1712,7 +1712,7 @@ def get_paths_by_uuid(uuids):
     if results:
         for row in results:
             item = {
-                'gdc_file_uuid': row['f'][0]['v'],
+                'file_node_id': row['f'][0]['v'],
                 'gcs_path': row['f'][1]['v']
             }
             if row['f'][2]['v'] is not None and not row['f'][2]['v'] == '':
@@ -1720,6 +1720,6 @@ def get_paths_by_uuid(uuids):
             
             paths.append(item)
             
-    not_found = [x for x in uuids if x not in [x['gdc_file_uuid'] for x in paths]]
+    not_found = [x for x in uuids if x not in [x['file_node_id'] for x in paths]]
 
     return paths, not_found
