@@ -26,6 +26,7 @@ from builtins import object
 import collections
 import csv
 import json
+import os
 import traceback
 import re
 import datetime
@@ -638,10 +639,13 @@ def create_manifest_bq_table(request, cohorts):
 @login_required
 def create_file_manifest(request, cohort):
     manifest = None
+    S5CMD_BASE = "cp s3://{}/{}/ .{}"
+    file_type = request.GET.get('file_type', 'csv').lower()
 
     # Fields we need to fetch
     field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
                   "crdc_study_uuid", "crdc_series_uuid", "idc_version"]
+
     static_fields = None
 
     # Fields we're actually returning in the file (the rest are for constructing the GCS path)
@@ -649,6 +653,7 @@ def create_file_manifest(request, cohort):
         selected_columns = json.loads(request.GET.get('columns'))
 
     selected_columns_sorted = sorted(selected_columns, key = lambda x: field_list.index(x))
+
     if request.GET.get('header_fields'):
         selected_header_fields = json.loads(request.GET.get('header_fields'))
 
@@ -660,12 +665,15 @@ def create_file_manifest(request, cohort):
         selected_file_part = min(selected_file_part, 9)
         offset = selected_file_part * MAX_FILE_LIST_ENTRIES
 
-    static_map = build_static_map(cohort)
-    for x in STATIC_EXPORT_FIELDS:
-        if x in field_list:
-            static_fields = static_fields or {}
-            static_fields[x] = static_map[x]
-            field_list.remove(x)
+    if file_type == 's5cmd':
+        field_list = ['crdc_series_uuid']
+    else:
+        static_map = build_static_map(cohort)
+        for x in STATIC_EXPORT_FIELDS:
+            if x in field_list:
+                static_fields = static_fields or {}
+                static_fields[x] = static_map[x]
+                field_list.remove(x)
 
     items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
 
@@ -675,14 +683,14 @@ def create_file_manifest(request, cohort):
         if 'error' in items:
             messages.error(request, items['error']['message'])
         else:
-            messages.error(request,
-                           "There was an error while attempting to retrieve this file list - please contact the administrator.")
+            messages.error(
+                request,
+                "There was an error while attempting to retrieve this file list - please contact the administrator."
+            )
         return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
 
-    file_type = request.GET.get('file_type','csv').lower()
-
     if len(manifest) > 0:
-        if file_type in ['csv','tsv']:
+        if file_type in ['csv', 'tsv', 's5cmd']:
             # CSV and TSV export
             rows = ()
             if include_header:
@@ -716,20 +724,27 @@ def create_file_manifest(request, cohort):
                 rows += (selected_columns_sorted,)
 
             for row in manifest:
-                if 'collection_id' in row:
-                    row['collection_id'] = "; ".join(row['collection_id'])
-                if 'source_DOI' in row:
-                    row['source_DOI'] = ", ".join(row['source_DOI'])
-                this_row = [(row[x] if x in row else static_fields[x] if x in static_fields else "") for x in selected_columns_sorted]
+                if file_type == 's5cmd':
+                    this_row = S5CMD_BASE.format(settings.AWS_BUCKET, row['crdc_series_uuid'], os.linesep)
+                    content_type = "text/plain"
+                else:
+                    content_type = "text/csv"
+                    if 'collection_id' in row:
+                        row['collection_id'] = "; ".join(row['collection_id'])
+                    if 'source_DOI' in row:
+                        row['source_DOI'] = ", ".join(row['source_DOI'])
+                    this_row = [(row[x] if x in row else static_fields[x] if x in static_fields else "") for x in selected_columns_sorted]
                 rows += (this_row,)
-            pseudo_buffer = Echo()
 
-            if file_type == 'csv':
-                writer = csv.writer(pseudo_buffer)
-            elif file_type == 'tsv':
-                writer = csv.writer(pseudo_buffer, delimiter='\t')
-
-            response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type="text/csv")
+            if file_type == 's5cmd':
+                response = StreamingHttpResponse((row for row in rows), content_type=content_type)
+            else:
+                pseudo_buffer = Echo()
+                if file_type == 'csv':
+                    writer = csv.writer(pseudo_buffer)
+                elif file_type == 'tsv':
+                    writer = csv.writer(pseudo_buffer, delimiter='\t')
+                response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type=content_type)
 
         elif file_type == 'json':
             # JSON export
@@ -754,7 +769,7 @@ def create_file_manifest(request, cohort):
         if request.GET.get('file_name'):
             file_name = "{}{}.{}".format(request.GET.get('file_name'), file_part_str, file_type)
         else:
-            file_name = "manifest_cohort_{}_{}{}.{}".format(str(cohort_id), timestamp, file_part_str, file_type)
+            file_name = "manifest_cohort_{}_{}{}.{}".format(str(cohort.id), timestamp, file_part_str, file_type)
         response['Content-Disposition'] = 'attachment; filename=' + file_name
         response.set_cookie("downloadToken", request.GET.get('downloadToken'))
         
@@ -781,11 +796,10 @@ def download_cohort_manifest(request, cohort_id=0):
             for cohort in cohorts:
                 Cohort_Perms.objects.get(cohort=cohort, user=request.user)
 
-            if req.get('manifest-type','file-manifest') == 'bq-manifest':
+            if req.get('manifest-type', 'file-manifest') == 'bq-manifest':
                 response, tables = create_manifest_bq_table(request, cohorts)
             else:
                 response = create_file_manifest(request, cohorts.first())
-
             if not response:
                 raise Exception("Response from manifest creation was None!")
 
