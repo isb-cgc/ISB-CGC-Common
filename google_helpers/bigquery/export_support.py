@@ -65,6 +65,9 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'gcs_url',
             'type': 'STRING'
         }, {
+            'name': 'aws_url',
+            'type': 'STRING'
+        }, {
             'name': 'idc_version',
             'type': 'STRING'
         }, {
