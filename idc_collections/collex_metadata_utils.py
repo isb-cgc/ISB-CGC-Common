@@ -421,6 +421,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
         programSet = {}
         collexDisplayVals = Attribute_Display_Values.objects.select_related("attribute").filter(
             attribute__id=collex_attr_id).to_dict()[collex_attr_id]
+
         for collection in collectionSet:
             name = collection.program.short_name if collection.program else collection.name
             if name not in programSet:
