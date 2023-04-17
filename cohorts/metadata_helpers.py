@@ -146,8 +146,7 @@ METADATA_DATA_TYPES_DISPLAY = {}
 
 # The set of possible values for metadata_data values
 METADATA_DATA_ATTR = {
-    'HG19': {},
-    'HG38': {}
+
 }
 
 
@@ -226,38 +225,27 @@ def get_sql_connection():
         if db and db.open: db.close()
 
 
-def fetch_build_data_attr(build, type=None, add_program_name=False):
-    db = None
-    cursor = None
-
-    # Our methods and templates use HG and not hg casing; try to be consistent
-    build = build.upper()
+def fetch_file_data_attr(type=None):
 
     if type == 'dicom':
-        metadata_data_attrs = ['disease_code', 'Modality', 'BodyPartExamined']
+        metadata_data_attrs = ['Modality', 'BodyPartExamined']
     elif type == 'pdf':
-        metadata_data_attrs = ['disease_code', 'project_short_name', ]
+        metadata_data_attrs = ['project_short_name']
     elif type == 'slim':
-        metadata_data_attrs = ['data_type', 'disease_code', 'project_short_name',]
+        metadata_data_attrs = ['data_type', 'project_short_name']
     elif type == 'igv':
-        metadata_data_attrs = ['experimental_strategy', 'platform', 'disease_code']
-        if add_program_name:
-            metadata_data_attrs.append('program_name')
+        metadata_data_attrs = ['experimental_strategy', 'platform']
     else:
-        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform',
-                               'disease_code']
-        if add_program_name:
-            metadata_data_attrs.append('program_name')
-        if build.lower() == 'hg38':
-            metadata_data_attrs.append("node")
+        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform']
+
+    metadata_data_attrs.extend(['program_name'])
+    if type != 'dicom':
+        metadata_data_attrs.extend(['disease_code', 'node', 'build'])
 
     try:
-        if len(METADATA_DATA_ATTR[build]) != len(metadata_data_attrs):
-            METADATA_DATA_ATTR[build]={}
-        if not len(METADATA_DATA_ATTR[build]):
+        if not len(METADATA_DATA_ATTR):
             data_sources = DataSource.objects.prefetch_related('programs', 'version').filter(
                 programs__active=True, version__in=DataVersion.objects.filter(
-                    Q(build__isnull=True) | Q(build=build.lower()),
                     Q(active=True),
                     Q(data_type=(DataVersion.IMAGE_DATA if type == 'dicom' else DataVersion.FILE_DATA))
                 ),
@@ -279,46 +267,41 @@ def fetch_build_data_attr(build, type=None, add_program_name=False):
                 values = query_solr_and_format_result(solr_query)
 
                 for attr in values['values']:
-                    if attr not in METADATA_DATA_ATTR[build]:
-                        METADATA_DATA_ATTR[build][attr] = {
+                    if attr not in METADATA_DATA_ATTR:
+                        METADATA_DATA_ATTR[attr] = {
                             'values': {},
                             'name': attr,
                             'displ_name': source_attrs_data[attr]['display_name']
                         }
                     for val in values['values'][attr]:
-                        if val not in METADATA_DATA_ATTR[build][attr]['values']:
-                            METADATA_DATA_ATTR[build][attr]['values'][val] = {
+                        if val not in METADATA_DATA_ATTR[attr]['values']:
+                            METADATA_DATA_ATTR[attr]['values'][val] = {
                                 'displ_value': display_vals.get(attr,{}).get(val,None) or (format_for_display(str(val)) if not source_attrs_data[attr]['preformatted'] else str(val)),
                                 'value': re.sub(r"[^A-Za-z0-9_\-]", "", re.sub(r"\s+", "-", val)),
                                 'name': val
                             }
                             if attr in tooltips and val in tooltips[attr]:
-                                METADATA_DATA_ATTR[build][attr]['values'][val]['tooltip'] =  tooltips[attr][val]
+                                METADATA_DATA_ATTR[attr]['values'][val]['tooltip'] =  tooltips[attr][val]
 
-                    if 'None' not in METADATA_DATA_ATTR[build][attr]['values']:
-                        METADATA_DATA_ATTR[build][attr]['values']['None'] = {
+                    if 'None' not in METADATA_DATA_ATTR[attr]['values']:
+                        METADATA_DATA_ATTR[attr]['values']['None'] = {
                             'displ_value': 'None',
                             'value': 'None',
                             'name': 'None',
                             'tooltip': ''
                         }
 
-        return copy.deepcopy(METADATA_DATA_ATTR[build])
+        return copy.deepcopy(METADATA_DATA_ATTR)
 
     except Exception as e:
-        logger.error('[ERROR] Exception while trying to get metadata_data attributes for build #%s:' % str(build))
+        logger.error('[ERROR] Exception while trying to get file metadata attributes:')
         logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
 
 
 def fetch_program_data_types(program, for_display=False):
-    db = None
-    cursor = None
-
     try:
-
+        cursor = None
+        db = None
         if not program:
             program = Program.objects.get(name="TCGA")
         else:
@@ -598,14 +581,14 @@ def get_preformatted_values(program=None):
 
 
 # Confirm that a filter key is a valid column in the attribute and data type sets or a valid mutation filter
-def validate_filter_key(col, program, build='HG19'):
+def validate_filter_key(col, program):
     prog_attr = fetch_program_attr(program, return_copy=False)
 
     if not program in METADATA_DATA_TYPES:
         fetch_program_data_types(program)
 
-    if not build in METADATA_DATA_ATTR:
-        fetch_build_data_attr(build)
+    if not len(METADATA_DATA_ATTR):
+        fetch_file_data_attr()
 
     if 'MUT:' in col:
         return (':category' in col or ':specific' in col)
@@ -615,7 +598,7 @@ def validate_filter_key(col, program, build='HG19'):
 
     return col in prog_attr \
            or (col == 'data_type_availability' and METADATA_DATA_TYPES.get(program,None)) \
-           or col in METADATA_DATA_ATTR[build]
+           or col in METADATA_DATA_ATTR
 
 
 # Make standard adjustments to a string for display: replace _ with ' ', title case (except for 'to')
@@ -1209,6 +1192,7 @@ def get_sample_metadata(barcode):
 
     return result
 
+
 def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
 
     if program_id is None and cohort_id is None:
@@ -1728,7 +1712,7 @@ def get_paths_by_uuid(uuids):
     if results:
         for row in results:
             item = {
-                'gdc_file_uuid': row['f'][0]['v'],
+                'file_node_id': row['f'][0]['v'],
                 'gcs_path': row['f'][1]['v']
             }
             if row['f'][2]['v'] is not None and not row['f'][2]['v'] == '':
@@ -1736,6 +1720,6 @@ def get_paths_by_uuid(uuids):
             
             paths.append(item)
             
-    not_found = [x for x in uuids if x not in [x['gdc_file_uuid'] for x in paths]]
+    not_found = [x for x in uuids if x not in [x['file_node_id'] for x in paths]]
 
     return paths, not_found
