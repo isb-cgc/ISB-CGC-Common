@@ -74,11 +74,6 @@ BMI_MAPPING = {
     'obese': 30
 }
 
-STORAGE_LOC_SCHEME = {
-    'aws': 's3',
-    'gcs': 'gs'
-}
-
 STATIC_EXPORT_FIELDS = [ "idc_version" ]
 
 
@@ -645,10 +640,8 @@ def create_manifest_bq_table(request, cohorts):
 def create_file_manifest(request, cohort):
 
     manifest = None
-    S5CMD_BASE = "cp {}://{}/{}/ .{}"
-    loc = request.GET.get('loc_type', 'aws')
-    loc_scheme = STORAGE_LOC_SCHEME[loc]
-    storage_bucket = '%s_bucket' % loc
+    S5CMD_BASE = "cp s3://{}/{}/ .{}"
+    storage_bucket = '%s_bucket' % request.GET.get('loc_type', 'aws')
     file_type = request.GET.get('file_type', 'csv').lower()
 
     # Fields we need to fetch
@@ -736,7 +729,7 @@ def create_file_manifest(request, cohort):
                 if file_type == 's5cmd':
                     this_row = ""
                     for bucket in row[storage_bucket]:
-                        this_row += S5CMD_BASE.format(loc_scheme, bucket, row['crdc_series_uuid'], os.linesep)
+                        this_row += S5CMD_BASE.format(bucket, row['crdc_series_uuid'], os.linesep)
                     content_type = "text/plain"
                 else:
                     content_type = "text/csv"
