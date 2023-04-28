@@ -641,7 +641,8 @@ def create_file_manifest(request, cohort):
 
     manifest = None
     S5CMD_BASE = "cp s3://{}/{}/ .{}"
-    storage_bucket = '%s_bucket' % request.GET.get('loc_type', 'aws')
+    loc = request.GET.get('loc_type', 'aws')
+    storage_bucket = '%s_bucket' % loc
     file_type = request.GET.get('file_type', 'csv').lower()
 
     # Fields we need to fetch
@@ -770,10 +771,11 @@ def create_file_manifest(request, cohort):
 
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
         file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
+        loc_type = ("_{}".format(loc)) if file_type == 's5cmd' else ""
         if request.GET.get('file_name'):
-            file_name = "{}{}.{}".format(request.GET.get('file_name'), file_part_str, file_type)
+            file_name = "{}{}{}.{}".format(request.GET.get('file_name'), file_part_str, loc_type, file_type)
         else:
-            file_name = "manifest_cohort_{}_{}{}.{}".format(str(cohort.id), timestamp, file_part_str, file_type)
+            file_name = "manifest_cohort_{}_{}{}{}.{}".format(str(cohort.id), timestamp, file_part_str, loc_type, file_type)
         response['Content-Disposition'] = 'attachment; filename=' + file_name
         response.set_cookie("downloadToken", request.GET.get('downloadToken'))
         
