@@ -771,7 +771,7 @@ def create_file_manifest(request, cohort):
 
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
         file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
-        loc_type = loc if file_type == 's5cmd' else ""
+        loc_type = ("_{}".format(loc)) if file_type == 's5cmd' else ""
         if request.GET.get('file_name'):
             file_name = "{}{}{}.{}".format(request.GET.get('file_name'), file_part_str, loc_type, file_type)
         else:
