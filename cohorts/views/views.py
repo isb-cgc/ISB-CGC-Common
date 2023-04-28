@@ -640,7 +640,7 @@ def create_manifest_bq_table(request, cohorts):
 def create_file_manifest(request, cohort):
 
     manifest = None
-    S5CMD_BASE = "cp s3://{}/{}/ .{}"
+    S5CMD_BASE = "cp s3://{}/{}/* .{}"
     loc = request.GET.get('loc_type', 'aws')
     storage_bucket = '%s_bucket' % loc
     file_type = request.GET.get('file_type', 'csv').lower()
@@ -656,14 +656,15 @@ def create_file_manifest(request, cohort):
         selected_columns = json.loads(request.GET.get('columns'))
 
     selected_columns_sorted = sorted(selected_columns, key = lambda x: field_list.index(x))
+    selected_file_part = 0
 
     if request.GET.get('header_fields'):
         selected_header_fields = json.loads(request.GET.get('header_fields'))
 
-    include_header = (request.GET.get('include_header','false').lower() == 'true')
+    include_header = (request.GET.get('include_header', 'false').lower() == 'true')
 
     offset = 0
-    if len(request.GET.get('file_part','0')) > 0:
+    if request.GET.get('file_part'):
         selected_file_part = json.loads(request.GET.get('file_part'))
         selected_file_part = min(selected_file_part, 9)
         offset = selected_file_part * MAX_FILE_LIST_ENTRIES
@@ -678,6 +679,14 @@ def create_file_manifest(request, cohort):
                 static_fields[x] = static_map[x]
                 field_list.remove(x)
 
+    timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+    file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
+    loc_type = ("_{}".format(loc)) if file_type == 's5cmd' else ""
+    if request.GET.get('file_name'):
+        file_name = "{}{}{}.{}".format(request.GET.get('file_name'), file_part_str, loc_type, file_type)
+    else:
+        file_name = "manifest_cohort_{}_{}{}{}.{}".format(str(cohort.id), timestamp, file_part_str, loc_type, file_type)
+
     items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
 
     if 'docs' in items:
@@ -690,41 +699,67 @@ def create_file_manifest(request, cohort):
                 request,
                 "There was an error while attempting to retrieve this file list - please contact the administrator."
             )
-        return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
+        return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort.id}))
 
     if len(manifest) > 0:
         if file_type in ['csv', 'tsv', 's5cmd']:
-            # CSV and TSV export
+            # CSV/TSV/s5cmd export
             rows = ()
+            if file_type == 's5cmd':
+                api_loc = "https://s3.amazonaws.com" if  loc == 'aws' else "https://storage.googleapis.com"
+                rows += (
+                    "# To download the files in this manifest, first install s5cmd (https://github.com/peak/s5cmd),{}".format(os.linesep),
+                    "# then run the following command:{}".format(os.linesep),
+                    "# s5cmd --no-sign-request --endpoint-url {} run {}{}".format(api_loc, file_name, os.linesep)
+                )
+
             if include_header:
+                cmt_delim = "# " if file_type == 's5cmd' else ""
+                linesep = os.linesep if file_type == 's5cmd' else ""
                 # File headers (first file part always have header)
-                if 'cohort_name' in selected_header_fields:
-                    rows += (["Manifest for cohort '{}'".format(cohort.name)],)
+                for header in selected_header_fields:
+                    if header == 'cohort_name':
+                        hdr = "{}Manifest for cohort '{}'{}".format(cmt_delim, cohort.name, linesep)
+                    elif header == 'user_email':
+                        hdr = "{}User: {}{}".format(cmt_delim, request.user.email, linesep)
+                    elif header == 'cohort_filters':
+                        hdr = "{}Filters: {}{}".format(cmt_delim, cohort.get_filter_display_string(), linesep)
+                    elif header == 'timestamp':
+                        hdr = "{}Date generated: {}{}".format(
+                            cmt_delim, datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'),
+                            linesep
+                        )
+                    elif header == 'total_records':
+                        hdr = "{}Total records found: {}{}".format(cmt_delim, str(items['total']), linesep)
 
-                if 'user_email' in selected_header_fields:
-                    rows += (["User: {}".format(request.user.email)],)
-
-                if 'cohort_filters' in selected_header_fields:
-                    rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
-
-                if 'timestamp' in selected_header_fields:
-                    rows += (["Date generated: {}".format(
-                        datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'))],)
-
-                if 'total_records' in selected_header_fields:
-                    rows += (["Total records found: {}".format(str(items['total']))],)
+                    if file_type != 's5cmd':
+                        hdr = [hdr]
+                    rows += (hdr,)
 
                 if items['total'] > MAX_FILE_LIST_ENTRIES:
-                    rows += (["NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(
-                        str(MAX_FILE_LIST_ENTRIES))
-                              + " Your cohort's total entries exceeded this number. This part of {} entries has been ".format(
-                        str(MAX_FILE_LIST_ENTRIES))
-                              + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID."],)
+                    hdr = "{}NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(
+                        cmt_delim, str(MAX_FILE_LIST_ENTRIES)
+                    ) + " Your cohort's total entries exceeded this number. This part of {} entries has been ".format(
+                        str(MAX_FILE_LIST_ENTRIES)
+                    ) + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID.{}".format(linesep)
 
-                rows += (["IDC Data Version(s): {}".format("; ".join([str(x) for x in cohort.get_idc_data_version()]))],)
+                    if file_type != 's5cmd':
+                        hdr = [hdr]
+                    rows += (hdr,)
+
+                hdr = "{}IDC Data Version(s): {}{}".format(
+                    cmt_delim,
+                    "; ".join([str(x) for x in cohort.get_idc_data_version()]),
+                    linesep
+                )
+
+                if file_type != 's5cmd':
+                    hdr = [hdr]
+                rows += (hdr,)
 
                 # Column headers
-                rows += (selected_columns_sorted,)
+                if file_type != 's5cmd':
+                    rows += (selected_columns_sorted,)
 
             for row in manifest:
                 if file_type == 's5cmd':
@@ -769,13 +804,6 @@ def create_file_manifest(request, cohort):
 
             response = HttpResponse(json_result, content_type="text/json")
 
-        timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-        file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
-        loc_type = ("_{}".format(loc)) if file_type == 's5cmd' else ""
-        if request.GET.get('file_name'):
-            file_name = "{}{}{}.{}".format(request.GET.get('file_name'), file_part_str, loc_type, file_type)
-        else:
-            file_name = "manifest_cohort_{}_{}{}{}.{}".format(str(cohort.id), timestamp, file_part_str, loc_type, file_type)
         response['Content-Disposition'] = 'attachment; filename=' + file_name
         response.set_cookie("downloadToken", request.GET.get('downloadToken'))
         
