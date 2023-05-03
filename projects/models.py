@@ -192,6 +192,7 @@ class DataVersion(models.Model):
             "Active" if self.active else "Inactive"
         )
 
+
 class DataSourceQuerySet(models.QuerySet):
     def to_dicts(self):
         return [{
@@ -261,6 +262,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         return attrs
 
+
 class DataSourceManager(models.Manager):
     def get_queryset(self):
         return DataSourceQuerySet(self.model, using=self._db)
@@ -276,6 +278,7 @@ class DataSourceManager(models.Manager):
 
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
+
 
 class DataSource(models.Model):
     QUERY = 'query'
@@ -478,6 +481,7 @@ class DataNode(models.Model):
             })
 
         return (by_node_list, by_prog_list)
+
 
 class Project(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
