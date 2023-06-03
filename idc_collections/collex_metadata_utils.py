@@ -490,7 +490,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_only=False, with_ancillary=True,
                         collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
                         facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None,
-                        search_child_records_by=None, filtered_needed=True, custom_facets=None, raw_format=False):
+                        search_child_records_by=None, filtered_needed=True, custom_facets=None, raw_format=False,
+                        default_facets=True):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -506,8 +507,10 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
             with_derived and data_types.extend(DataSetType.DERIVED_DATA)
             data_sets = DataSetType.objects.filter(data_type__in=data_types)
 
-            sources = data_sets.get_data_sources().filter(source_type=source_type, id__in=versions.get_data_sources().filter(
-                source_type=source_type).values_list("id", flat=True)).distinct()
+            sources = data_sets.get_data_sources().filter(
+                source_type=source_type, id__in=versions.get_data_sources().filter(
+                source_type=source_type).values_list("id", flat=True)
+            ).distinct()
 
         # Only active data is available in Solr, not archived
         if len(versions.filter(active=False)) and len(sources.filter(source_type=DataSource.SOLR)):
@@ -522,11 +525,11 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit, offset, search_child_records_by=search_child_records_by)
         elif source_type == DataSource.SOLR:
-
             results = get_metadata_solr(
                 filters, fields, sources, counts_only, collapse_on, record_limit, offset, facets, records_only, sort,
                 uniques, record_source, totals, search_child_records_by=search_child_records_by,
-                filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format
+                filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format,
+                default_facets=default_facets
             )
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
@@ -550,7 +553,11 @@ def get_table_data(filters,fields,table_type,sources = None, versions = None, cu
     if not versions:
         versions = ImagingDataCommonsVersion.objects.get(active=True).dataversion_set.all().distinct()
     if not sources:
-        sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True, source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID")
+        sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(
+            active=True,
+            source_type=DataSource.SOLR,
+            aggregate_level="StudyInstanceUID"
+        )
 
     custom_facets = None
     collapse_on = 'PatientID'
@@ -558,10 +565,19 @@ def get_table_data(filters,fields,table_type,sources = None, versions = None, cu
     offset = 0
     counts_only = True
 
-    custom_facets = {'uc': {'type': 'terms', 'field': 'PatientID', 'limit': -1, 'missing': True, 'facet': {'unique_count': 'unique(StudyInstanceUID)'}} }
+    custom_facets = {
+        'uc':
+            {
+                'type': 'terms',
+                'field': 'PatientID',
+                'limit': -1,
+                'missing': True,
+                'facet': {'unique_count': 'unique(StudyInstanceUID)'}
+             }
+    }
 
-
-    results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0,custom_facets=custom_facets,raw_format=False)
+    results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit,
+                                offset=0,custom_facets=custom_facets,raw_format=False)
 
     return results
 
@@ -613,10 +629,10 @@ def create_query_set(solr_query, sources, source, all_ui_attrs, image_source, Da
 
 
 # Use solr to fetch faceted counts and/or records
-def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, attr_facets=None,
                       records_only=False, sort=None, uniques=None, record_source=None, totals=None, cursor=None,
                       search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,
-                      raw_format=False):
+                      raw_format=False, default_facets=True):
 
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
@@ -627,10 +643,10 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
     source_versions = sources.get_source_versions()
 
     attrs_for_faceting = None
-    if not records_only and facets or facets is None:
+    if not records_only and (default_facets or attr_facets):
         attrs_for_faceting = fetch_data_source_attr(
-            sources, {'for_ui': True, 'named_set': facets, 'active_only': True},
-            cache_as="ui_facet_set" if not sources.contains_inactive_versions() and not facets else None
+            sources, {'for_ui': True, 'named_set': attr_facets, 'active_only': True},
+            cache_as="ui_facet_set" if not sources.contains_inactive_versions() and not attr_facets else None
         )
 
     all_ui_attrs = fetch_data_source_attr(
@@ -657,34 +673,35 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         solr_facets = None
         solr_facets_filtered = None
         solr_stats = None
-        if not records_only and attrs_for_faceting:
-            if not filters:
-                solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
-                                                'filter_tags': None, 'unique': source.count_col},
-                                                'facet_main_{}'.format(source.id))
-                solr_stats = fetch_solr_stats({'filter_tags': None,
-                                               'attrs': attrs_for_faceting['sources'][source.id]['attrs']},
-                                               'stats_main_{}'.format(source.id))
-            else:
-                solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
-                                                 'filter_tags': solr_query['filter_tags'] if solr_query else None,
-                                                 'unique': source.count_col})
-                solr_stats = fetch_solr_stats({'filter_tags': solr_query['filter_tags'] if solr_query else None,
-                                               'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
+        if not records_only:
+            if attrs_for_faceting:
+                if not filters:
+                    solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
+                                                    'filter_tags': None, 'unique': source.count_col},
+                                                    'facet_main_{}'.format(source.id))
+                    solr_stats = fetch_solr_stats({'filter_tags': None,
+                                                   'attrs': attrs_for_faceting['sources'][source.id]['attrs']},
+                                                   'stats_main_{}'.format(source.id))
+                else:
+                    solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
+                                                     'filter_tags': solr_query['filter_tags'] if solr_query else None,
+                                                     'unique': source.count_col})
+                    solr_stats = fetch_solr_stats({'filter_tags': solr_query['filter_tags'] if solr_query else None,
+                                                   'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
 
-            stop = time.time()
-            logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
-            if filters and attrs_for_faceting and filtered_needed:
-                solr_facets_filtered = fetch_solr_facets(
-                    {'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col}
-                )
-                solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
+                stop = time.time()
+                logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
+                if filters and attrs_for_faceting and filtered_needed:
+                    solr_facets_filtered = fetch_solr_facets(
+                        {'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col}
+                    )
+                    solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
 
             if custom_facets is not None:
                 if solr_facets is None:
                     solr_facets = {}
                 solr_facets.update(custom_facets)
-                solr_facets = custom_facets
+#                solr_facets = custom_facets <-- This looks like a bug???
                 if filtered_needed:
                     if solr_facets_filtered is None:
                         solr_facets_filtered = {}
@@ -731,10 +748,13 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 source.name, str(stop-start))
             )
 
-            if DataSetType.IMAGE_DATA in source_data_types[source.id] and 'numFound' in solr_result:
-                results['total'] = solr_result['numFound']
-                if 'uniques' in solr_result:
-                    results['uniques'] = solr_result['uniques']
+            if DataSetType.IMAGE_DATA in source_data_types[source.id]:
+                if 'numFound' in solr_result:
+                    results['total'] = solr_result['numFound']
+                    if 'uniques' in solr_result:
+                        results['uniques'] = solr_result['uniques']
+                if 'total_instance_size' in solr_result:
+                    results['total_instance_size'] = solr_result['total_instance_size']
 
             if raw_format:
                 results['facets'] = solr_result['facets']

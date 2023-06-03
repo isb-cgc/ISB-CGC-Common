@@ -88,6 +88,17 @@ def build_static_map(cohort_obj):
     return static_map
 
 
+def convert_disk_size(size):
+    size_val = ['', 'K','M','G','T','P']
+    init_size = size
+    val_count = 0
+    while init_size > 1024:
+        val_count += 1
+        init_size = init_size/1024
+
+    init_size = round(init_size,2)
+    return "{} {}B".format(init_size,size_val[val_count])
+
 debug = settings.DEBUG # RO global for this file
 
 BLACKLIST_RE = settings.BLACKLIST_RE
@@ -636,7 +647,6 @@ def create_manifest_bq_table(request, cohorts):
 
 
 # Creates a file manifest of the supplied Cohort object and returns a StreamingFileResponse
-@login_required
 def create_file_manifest(request, cohort):
 
     manifest = None
@@ -687,7 +697,7 @@ def create_file_manifest(request, cohort):
     else:
         file_name = "manifest_cohort_{}_{}{}{}.{}".format(str(cohort.id), timestamp, file_part_str, loc_type, file_type)
 
-    items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset)
+    items = cohort_manifest(cohort, request.user, field_list, MAX_FILE_LIST_ENTRIES, offset, with_size=True)
 
     if 'docs' in items:
         manifest = items['docs']
@@ -718,6 +728,7 @@ def create_file_manifest(request, cohort):
                 linesep = os.linesep if file_type == 's5cmd' else ""
                 # File headers (first file part always have header)
                 for header in selected_header_fields:
+                    hdr = ""
                     if header == 'cohort_name':
                         hdr = "{}Manifest for cohort '{}'{}".format(cmt_delim, cohort.name, linesep)
                     elif header == 'user_email':
@@ -752,6 +763,13 @@ def create_file_manifest(request, cohort):
                     "; ".join([str(x) for x in cohort.get_idc_data_version()]),
                     linesep
                 )
+
+                if file_type != 's5cmd':
+                    hdr = [hdr]
+                rows += (hdr,)
+
+                instance_size = convert_disk_size(items['total_instance_size'])
+                hdr = "{}Total manifest size on disk: {}{}".format(cmt_delim, instance_size, linesep)
 
                 if file_type != 's5cmd':
                     hdr = [hdr]
