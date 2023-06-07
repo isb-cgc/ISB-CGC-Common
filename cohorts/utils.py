@@ -33,7 +33,7 @@ from .models import Cohort, Cohort_Perms, Filter, Filter_Group
 from idc_collections.models import Program, Attribute, ImagingDataCommonsVersion, DataSourceJoin
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
-from idc_collections.collex_metadata_utils import get_collex_metadata
+from idc_collections.collex_metadata_utils import get_collex_metadata, filter_manifest
 from idc_collections.models import DataSetType,DataSource
 
 logger = logging.getLogger('main_logger')
@@ -254,44 +254,6 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         cohort_info['message'] = "Failed to save cohort!"
     
     return cohort_info
-
-
-def filter_manifest(filters, sources, versions, fields, limit, offset, level="SeriesInstanceUID", with_size=False):
-    try:
-        custom_facets = None
-        search_by = {x: "StudyInstanceUID" for x in filters} if level == "SeriesInstanceUID" else None
-
-        if with_size:
-            # build facet for instance_size aggregation
-            custom_facets = {
-                'instance_size': 'sum(instance_size)'
-            }
-
-        records = get_collex_metadata(
-            filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
-            collapse_on='SeriesInstanceUID', records_only=bool(custom_facets is None),
-            sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc", filtered_needed=False,
-            search_child_records_by=search_by, custom_facets=custom_facets, default_facets=False
-        )
-
-        return records
-
-    except Exception as e:
-        logger.exception(e)
-
-
-def cohort_manifest(cohort, user, fields, limit, offset, level="SeriesInstanceUID", with_size=False):
-    try:
-        sources = cohort.get_data_sources(aggregate_level=level)
-        versions = cohort.get_data_versions()
-        group_filters = cohort.get_filters_as_dict()
-
-        filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
-
-        return filter_manifest(filters, sources, versions, fields, limit, offset, level, with_size)
-        
-    except Exception as e:
-        logger.exception(e)
 
 
 # Get the various UUIDs for a given cohort
