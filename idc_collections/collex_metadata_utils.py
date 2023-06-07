@@ -16,8 +16,10 @@
 
 import logging
 import time
+import datetime
 import copy
 import re
+import os
 from time import sleep
 from idc_collections.models import Collection, Attribute_Tooltips, DataSource, Attribute, \
     Attribute_Display_Values, Program, DataVersion, DataSourceJoin, DataSetType, Attribute_Set_Type, \
@@ -29,6 +31,10 @@ from google_helpers.bigquery.export_support import BigQueryExportFileList
 import hashlib
 from django.conf import settings
 import math
+
+from django.contrib import messages
+from django.http import StreamingHttpResponse
+
 BQ_ATTEMPT_MAX = 10
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 
@@ -70,6 +76,31 @@ TYPE_SCHEMA = {
     'StudyInstanceUID': 'STRING',
     'SOPClassUID': 'STRING'
 }
+
+STATIC_EXPORT_FIELDS = [ "idc_version" ]
+
+
+def convert_disk_size(size):
+    size_val = ['', 'K','M','G','T','P']
+    init_size = size
+    val_count = 0
+    while init_size > 1024:
+        val_count += 1
+        init_size = init_size/1024
+
+    init_size = round(init_size,2)
+    return "{} {}B".format(init_size,size_val[val_count])
+
+
+def build_static_map(cohort_obj):
+    static_map = {}
+    for x in STATIC_EXPORT_FIELDS:
+        if x == 'idc_version':
+            # Verbose style
+            # static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version()])
+            # Numeric style
+            static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version().values_list("version_number",flat=True)])
+    return static_map
 
 
 def fetch_data_source_attr(sources, fetch_settings, cache_as=None):
@@ -475,6 +506,237 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
     return None
 
 
+def filter_manifest(filters, sources, versions, fields, limit, offset, level="SeriesInstanceUID", with_size=False):
+    try:
+        custom_facets = None
+        search_by = {x: "StudyInstanceUID" for x in filters} if level == "SeriesInstanceUID" else None
+
+        if with_size:
+            # build facet for instance_size aggregation
+            custom_facets = {
+                'instance_size': 'sum(instance_size)'
+            }
+
+        records = get_collex_metadata(
+            filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
+            collapse_on=level, records_only=bool(custom_facets is None),
+            sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc", filtered_needed=False,
+            search_child_records_by=search_by, custom_facets=custom_facets, default_facets=False
+        )
+
+        return records
+
+    except Exception as e:
+        logger.exception(e)
+
+
+# Creates a file manifest of the supplied Cohort object or filters and returns a StreamingFileResponse
+def create_file_manifest(request, cohort=None):
+    req = request.GET or request.POST
+    manifest = None
+    S5CMD_BASE = "cp s3://{}/{}/* .{}"
+    loc = req.get('loc_type', 'aws')
+    storage_bucket = '%s_bucket' % loc
+    file_type = req.get('file_type', 'csv').lower()
+
+    # Fields we need to fetch
+    field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
+                  "crdc_study_uuid", "crdc_series_uuid", "idc_version"]
+
+    static_fields = None
+
+    # Fields we're actually returning in the file (the rest are for constructing the GCS path)
+    if req.get('columns', None):
+        selected_columns = json.loads(req.get('columns'))
+
+    selected_columns_sorted = sorted(selected_columns, key=lambda x: field_list.index(x))
+    selected_file_part = 0
+
+    if req.get('header_fields'):
+        selected_header_fields = json.loads(req.get('header_fields'))
+
+    include_header = (req.get('include_header', 'false').lower() == 'true')
+
+    offset = 0
+    if req.get('file_part'):
+        selected_file_part = json.loads(request.GET.get('file_part'))
+        selected_file_part = min(selected_file_part, 9)
+        offset = selected_file_part * MAX_FILE_LIST_ENTRIES
+
+    if file_type == 's5cmd':
+        field_list = ['crdc_series_uuid', storage_bucket]
+    else:
+        static_map = build_static_map(cohort)
+        for x in STATIC_EXPORT_FIELDS:
+            if x in field_list:
+                static_fields = static_fields or {}
+                static_fields[x] = static_map[x]
+                field_list.remove(x)
+
+    timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+    file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
+    loc_type = ("_{}".format(loc)) if file_type == 's5cmd' else ""
+    if request.GET.get('file_name'):
+        file_name = "{}{}{}.{}".format(request.GET.get('file_name'), file_part_str, loc_type, file_type)
+    else:
+        file_name = "manifest_{}{}{}.{}".format("cohort_{}_".format(str(cohort.id)) if cohort else "", timestamp, file_part_str, loc_type, file_type)
+
+    if cohort:
+        sources = cohort.get_data_sources(aggregate_level="SeriesInstanceUID")
+        versions = cohort.get_data_versions()
+        group_filters = cohort.get_filters_as_dict()
+        filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
+    else:
+        filters = json.loads(req.get('filters', '{}'))
+        if not (len(filters)):
+            raise Exception("No filters supplied for file manifest!")
+
+        versions = json.loads(req.get('versions', '[]'))
+
+        data_types = [DataSetType.IMAGE_DATA, DataSetType.ANCILLARY_DATA, DataSetType.DERIVED_DATA]
+        source_type = req.get('data_source_type', DataSource.SOLR)
+        versions = versions or DataVersion.objects.filter(active=True)
+
+        data_sets = DataSetType.objects.filter(data_type__in=data_types)
+        sources = data_sets.get_data_sources().filter(
+            source_type=source_type,
+            aggregate_level__in=["SeriesInstanceUID"],
+            id__in=versions.get_data_sources().filter(source_type=source_type).values_list("id", flat=True)
+        ).distinct()
+
+    items = filter_manifest(filters, sources, versions, field_list, MAX_FILE_LIST_ENTRIES, offset, with_size=True)
+
+    if 'docs' in items:
+        manifest = items['docs']
+    else:
+        if 'error' in items:
+            messages.error(request, items['error']['message'])
+        else:
+            messages.error(
+                request,
+                "There was an error while attempting to retrieve this file list - please contact the administrator."
+            )
+        return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort.id}))
+
+    if len(manifest) > 0:
+        if file_type in ['csv', 'tsv', 's5cmd']:
+            # CSV/TSV/s5cmd export
+            rows = ()
+            if file_type == 's5cmd':
+                api_loc = "https://s3.amazonaws.com" if loc == 'aws' else "https://storage.googleapis.com"
+                rows += (
+                    "# To download the files in this manifest, first install s5cmd (https://github.com/peak/s5cmd),{}".format(
+                        os.linesep),
+                    "# then run the following command:{}".format(os.linesep),
+                    "# s5cmd --no-sign-request --endpoint-url {} run {}{}".format(api_loc, file_name, os.linesep)
+                )
+
+            if include_header:
+                cmt_delim = "# " if file_type == 's5cmd' else ""
+                linesep = os.linesep if file_type == 's5cmd' else ""
+                # File headers (first file part always have header)
+                for header in selected_header_fields:
+                    hdr = ""
+                    if header == 'cohort_name':
+                        hdr = "{}Manifest for cohort '{}'{}".format(cmt_delim, cohort.name, linesep)
+                    elif header == 'user_email':
+                        hdr = "{}User: {}{}".format(cmt_delim, request.user.email, linesep)
+                    elif header == 'cohort_filters':
+                        hdr = "{}Filters: {}{}".format(cmt_delim, cohort.get_filter_display_string(), linesep)
+                    elif header == 'timestamp':
+                        hdr = "{}Date generated: {}{}".format(
+                            cmt_delim, datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'),
+                            linesep
+                        )
+                    elif header == 'total_records':
+                        hdr = "{}Total records found: {}{}".format(cmt_delim, str(items['total']), linesep)
+
+                    if file_type != 's5cmd':
+                        hdr = [hdr]
+                    rows += (hdr,)
+
+                if items['total'] > MAX_FILE_LIST_ENTRIES:
+                    hdr = "{}NOTE: Due to the limits of our system, we can only return {} manifest entries.".format(
+                        cmt_delim, str(MAX_FILE_LIST_ENTRIES)
+                    ) + " Your cohort's total entries exceeded this number. This part of {} entries has been ".format(
+                        str(MAX_FILE_LIST_ENTRIES)
+                    ) + " downloaded, sorted by PatientID, StudyID, SeriesID, and SOPInstanceUID.{}".format(linesep)
+
+                    if file_type != 's5cmd':
+                        hdr = [hdr]
+                    rows += (hdr,)
+
+                hdr = "{}IDC Data Version(s): {}{}".format(
+                    cmt_delim,
+                    "; ".join([str(x) for x in cohort.get_idc_data_version()]),
+                    linesep
+                )
+
+                if file_type != 's5cmd':
+                    hdr = [hdr]
+                rows += (hdr,)
+
+                instance_size = convert_disk_size(items['total_instance_size'])
+                hdr = "{}Total manifest size on disk: {}{}".format(cmt_delim, instance_size, linesep)
+
+                if file_type != 's5cmd':
+                    hdr = [hdr]
+                rows += (hdr,)
+
+                # Column headers
+                if file_type != 's5cmd':
+                    rows += (selected_columns_sorted,)
+
+            for row in manifest:
+                if file_type == 's5cmd':
+                    this_row = ""
+                    for bucket in row[storage_bucket]:
+                        this_row += S5CMD_BASE.format(bucket, row['crdc_series_uuid'], os.linesep)
+                    content_type = "text/plain"
+                else:
+                    content_type = "text/csv"
+                    if 'collection_id' in row:
+                        row['collection_id'] = "; ".join(row['collection_id'])
+                    if 'source_DOI' in row:
+                        row['source_DOI'] = ", ".join(row['source_DOI'])
+                    this_row = [(row[x] if x in row else static_fields[x] if x in static_fields else "") for x in
+                                selected_columns_sorted]
+                rows += (this_row,)
+
+            if file_type == 's5cmd':
+                response = StreamingHttpResponse((row for row in rows), content_type=content_type)
+            else:
+                pseudo_buffer = Echo()
+                if file_type == 'csv':
+                    writer = csv.writer(pseudo_buffer)
+                elif file_type == 'tsv':
+                    writer = csv.writer(pseudo_buffer, delimiter='\t')
+                response = StreamingHttpResponse((writer.writerow(row) for row in rows), content_type=content_type)
+
+        elif file_type == 'json':
+            # JSON export
+            json_result = ""
+
+            for row in manifest:
+                if 'collection_id' in row:
+                    row['collection_id'] = "; ".join(row['collection_id'])
+                if 'source_DOI' in row:
+                    row['source_DOI'] = ", ".join(row['source_DOI'])
+                this_row = {}
+                for key in selected_columns:
+                    this_row[key] = row[key] if key in row else ""
+
+                json_row = json.dumps(this_row) + "\n"
+                json_result += json_row
+
+            response = HttpResponse(json_result, content_type="text/json")
+
+        response['Content-Disposition'] = 'attachment; filename=' + file_name
+        response.set_cookie("downloadToken", request.GET.get('downloadToken'))
+
+        return response
+
+
 # Based on the provided settings, fetch faceted counts and/or records from the desired data source type
 #
 # filters: dict, {<attribute name>: [<val1>, ...]}
@@ -490,7 +752,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
 def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_only=False, with_ancillary=True,
                         collapse_on='PatientID', order_docs=None, sources=None, versions=None, with_derived=True,
                         facets=None, records_only=False, sort=None, uniques=None, record_source=None, totals=None,
-                        search_child_records_by=None, filtered_needed=True, custom_facets=None, raw_format=False):
+                        search_child_records_by=None, filtered_needed=True, custom_facets=None, raw_format=False,
+                        default_facets=True):
 
     try:
         source_type = sources.first().source_type if sources else DataSource.SOLR
@@ -506,8 +769,10 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
             with_derived and data_types.extend(DataSetType.DERIVED_DATA)
             data_sets = DataSetType.objects.filter(data_type__in=data_types)
 
-            sources = data_sets.get_data_sources().filter(source_type=source_type, id__in=versions.get_data_sources().filter(
-                source_type=source_type).values_list("id", flat=True)).distinct()
+            sources = data_sets.get_data_sources().filter(
+                source_type=source_type, id__in=versions.get_data_sources().filter(
+                source_type=source_type).values_list("id", flat=True)
+            ).distinct()
 
         # Only active data is available in Solr, not archived
         if len(versions.filter(active=False)) and len(sources.filter(source_type=DataSource.SOLR)):
@@ -522,11 +787,11 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
                 'fields': sources.get_source_attrs(for_faceting=False, named_set=fields, with_set_map=False)
             }, counts_only, collapse_on, record_limit, offset, search_child_records_by=search_child_records_by)
         elif source_type == DataSource.SOLR:
-
             results = get_metadata_solr(
                 filters, fields, sources, counts_only, collapse_on, record_limit, offset, facets, records_only, sort,
                 uniques, record_source, totals, search_child_records_by=search_child_records_by,
-                filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format
+                filtered_needed=filtered_needed, custom_facets=custom_facets, raw_format=raw_format,
+                default_facets=default_facets
             )
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
@@ -550,7 +815,11 @@ def get_table_data(filters,fields,table_type,sources = None, versions = None, cu
     if not versions:
         versions = ImagingDataCommonsVersion.objects.get(active=True).dataversion_set.all().distinct()
     if not sources:
-        sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True, source_type=DataSource.SOLR, aggregate_level="StudyInstanceUID")
+        sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(
+            active=True,
+            source_type=DataSource.SOLR,
+            aggregate_level="StudyInstanceUID"
+        )
 
     custom_facets = None
     collapse_on = 'PatientID'
@@ -558,10 +827,19 @@ def get_table_data(filters,fields,table_type,sources = None, versions = None, cu
     offset = 0
     counts_only = True
 
-    custom_facets = {'uc': {'type': 'terms', 'field': 'PatientID', 'limit': -1, 'missing': True, 'facet': {'unique_count': 'unique(StudyInstanceUID)'}} }
+    custom_facets = {
+        'uc':
+            {
+                'type': 'terms',
+                'field': 'PatientID',
+                'limit': -1,
+                'missing': True,
+                'facet': {'unique_count': 'unique(StudyInstanceUID)'}
+             }
+    }
 
-
-    results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0,custom_facets=custom_facets,raw_format=False)
+    results = get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit,
+                                offset=0,custom_facets=custom_facets,raw_format=False)
 
     return results
 
@@ -613,10 +891,10 @@ def create_query_set(solr_query, sources, source, all_ui_attrs, image_source, Da
 
 
 # Use solr to fetch faceted counts and/or records
-def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, facets=None,
+def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record_limit, offset=0, attr_facets=None,
                       records_only=False, sort=None, uniques=None, record_source=None, totals=None, cursor=None,
                       search_child_records_by=None, filtered_needed=True, custom_facets=None, sort_field=None,
-                      raw_format=False):
+                      raw_format=False, default_facets=True):
 
     filters = filters or {}
     results = {'docs': None, 'facets': {}}
@@ -627,10 +905,10 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
     source_versions = sources.get_source_versions()
 
     attrs_for_faceting = None
-    if not records_only and facets or facets is None:
+    if not records_only and (default_facets or attr_facets):
         attrs_for_faceting = fetch_data_source_attr(
-            sources, {'for_ui': True, 'named_set': facets, 'active_only': True},
-            cache_as="ui_facet_set" if not sources.contains_inactive_versions() and not facets else None
+            sources, {'for_ui': True, 'named_set': attr_facets, 'active_only': True},
+            cache_as="ui_facet_set" if not sources.contains_inactive_versions() and not attr_facets else None
         )
 
     all_ui_attrs = fetch_data_source_attr(
@@ -657,34 +935,35 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         solr_facets = None
         solr_facets_filtered = None
         solr_stats = None
-        if not records_only and attrs_for_faceting:
-            if not filters:
-                solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
-                                                'filter_tags': None, 'unique': source.count_col},
-                                                'facet_main_{}'.format(source.id))
-                solr_stats = fetch_solr_stats({'filter_tags': None,
-                                               'attrs': attrs_for_faceting['sources'][source.id]['attrs']},
-                                               'stats_main_{}'.format(source.id))
-            else:
-                solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
-                                                 'filter_tags': solr_query['filter_tags'] if solr_query else None,
-                                                 'unique': source.count_col})
-                solr_stats = fetch_solr_stats({'filter_tags': solr_query['filter_tags'] if solr_query else None,
-                                               'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
+        if not records_only:
+            if attrs_for_faceting:
+                if not filters:
+                    solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
+                                                    'filter_tags': None, 'unique': source.count_col},
+                                                    'facet_main_{}'.format(source.id))
+                    solr_stats = fetch_solr_stats({'filter_tags': None,
+                                                   'attrs': attrs_for_faceting['sources'][source.id]['attrs']},
+                                                   'stats_main_{}'.format(source.id))
+                else:
+                    solr_facets = fetch_solr_facets({'attrs': attrs_for_faceting['sources'][source.id]['attrs'],
+                                                     'filter_tags': solr_query['filter_tags'] if solr_query else None,
+                                                     'unique': source.count_col})
+                    solr_stats = fetch_solr_stats({'filter_tags': solr_query['filter_tags'] if solr_query else None,
+                                                   'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
 
-            stop = time.time()
-            logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
-            if filters and attrs_for_faceting and filtered_needed:
-                solr_facets_filtered = fetch_solr_facets(
-                    {'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col}
-                )
-                solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
+                stop = time.time()
+                logger.debug("[STATUS] Time to build Solr facets: {}s".format(stop-start))
+                if filters and attrs_for_faceting and filtered_needed:
+                    solr_facets_filtered = fetch_solr_facets(
+                        {'attrs': attrs_for_faceting['sources'][source.id]['attrs'], 'unique': source.count_col}
+                    )
+                    solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
 
             if custom_facets is not None:
                 if solr_facets is None:
                     solr_facets = {}
                 solr_facets.update(custom_facets)
-                solr_facets = custom_facets
+#                solr_facets = custom_facets <-- This looks like a bug???
                 if filtered_needed:
                     if solr_facets_filtered is None:
                         solr_facets_filtered = {}
@@ -731,10 +1010,13 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                 source.name, str(stop-start))
             )
 
-            if DataSetType.IMAGE_DATA in source_data_types[source.id] and 'numFound' in solr_result:
-                results['total'] = solr_result['numFound']
-                if 'uniques' in solr_result:
-                    results['uniques'] = solr_result['uniques']
+            if DataSetType.IMAGE_DATA in source_data_types[source.id]:
+                if 'numFound' in solr_result:
+                    results['total'] = solr_result['numFound']
+                    if 'uniques' in solr_result:
+                        results['uniques'] = solr_result['uniques']
+                if 'total_instance_size' in solr_result:
+                    results['total_instance_size'] = solr_result['total_instance_size']
 
             if raw_format:
                 results['facets'] = solr_result['facets']
