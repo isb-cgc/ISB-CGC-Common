@@ -661,9 +661,9 @@ def download_cohort_manifest(request, cohort_id=0):
             messages.error(request,"You don't have permission to view one or more of these cohorts.")
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the cohort manifest(s) for user {}:".format(str(request.user.email)))
+        logger.error("[ERROR] While creating the cohort manifest(s) for user {}:".format(str(request.user.email)))
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to download your cohort manifest(s)--please contact the administrator.")
+        messages.error(request,"There was an error while attempting to obtain your cohort manifest(s)--please contact the administrator.")
 
     if cohort_id:
         return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))
