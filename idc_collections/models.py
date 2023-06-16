@@ -387,7 +387,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         for ds in sources:
             q_objects = Q()
-            if for_ui:
+            if for_ui is not None:
                 q_objects &= Q(default_ui_display=for_ui)
             if named_set:
                 q_objects &= Q(name__in=named_set)

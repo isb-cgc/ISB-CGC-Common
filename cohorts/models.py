@@ -78,6 +78,7 @@ class Cohort(models.Model):
     case_count = models.IntegerField(blank=False, null=False, default=0)
     series_count = models.IntegerField(blank=False, null=False, default=0)
     study_count = models.IntegerField(blank=False, null=False, default=0)
+    total_disk_size = models.PositiveBigIntegerField(blank=False, null=False, default=0)
     collections = models.TextField(blank=False, null=False, default="")
 
     # Returns the names only of the collections found in this Cohort

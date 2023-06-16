@@ -33,7 +33,7 @@ from .models import Cohort, Cohort_Perms, Filter, Filter_Group
 from idc_collections.models import Program, Attribute, ImagingDataCommonsVersion, DataSourceJoin
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from google_helpers.bigquery.bq_support import BigQuerySupport
-from idc_collections.collex_metadata_utils import get_collex_metadata
+from idc_collections.collex_metadata_utils import get_collex_metadata, filter_manifest
 from idc_collections.models import DataSetType,DataSource
 
 logger = logging.getLogger('main_logger')
@@ -68,8 +68,11 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
             ))
 
         totals = ["PatientID", "StudyInstanceUID", "SeriesInstanceUID"]
+        custom_facets = {
+            'instance_size': 'sum(instance_size)'
+        }
         result = get_collex_metadata(filters, None, sources=sources, facets=["collection_id"], counts_only=True,
-                                     totals=totals, filtered_needed=True)
+                                     totals=totals, filtered_needed=True, custom_facets=custom_facets)
 
         if result.get('total', 0):
             for total in result['totals']:
@@ -77,6 +80,7 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
             for src in result.get('filtered_facets',{}):
                 if src.split(':')[0] in list(sources.values_list('name', flat=True)):
                     stats['collections'] = [x for x, y in result['filtered_facets'][src]['facets']['collection_id'].items() if y > 0]
+            stats['total_instance_size'] = result['total_instance_size']
         else:
             # Nothing was found--either due to an error, or because nothing matched our filters.
             for total in totals:
@@ -231,6 +235,7 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
             cohort.case_count = cohort_stats['PatientID']
             cohort.series_count = cohort_stats['SeriesInstanceUID']
             cohort.study_count = cohort_stats['StudyInstanceUID']
+            cohort.total_disk_size = cohort_stats['total_instance_size']
             cohort.collections = "; ".join(cohort_stats['collections'])
             cohort.save()
 
@@ -249,28 +254,6 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
         cohort_info['message'] = "Failed to save cohort!"
     
     return cohort_info
-
-
-def cohort_manifest(cohort, user, fields, limit, offset, level="SeriesInstanceUID"):
-    try:
-        sources = cohort.get_data_sources(aggregate_level=level)
-        versions = cohort.get_data_versions()
-        group_filters = cohort.get_filters_as_dict()
-
-        filters = {x['name']: x['values'] for x in group_filters[0]['filters']}
-        search_by = {x: "StudyInstanceUID" for x in filters} if level == "SeriesInstanceUID" else None
-
-        cohort_records = get_collex_metadata(
-            filters, fields, limit, offset, sources=sources, versions=versions, counts_only=False,
-            collapse_on='SeriesInstanceUID', records_only=True,
-            sort="PatientID asc, StudyInstanceUID asc, SeriesInstanceUID asc",
-            search_child_records_by=search_by
-        )
-        
-        return cohort_records
-        
-    except Exception as e:
-        logger.exception(e)
 
 
 # Get the various UUIDs for a given cohort
