@@ -57,11 +57,13 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                 if 'unique_count' in result['facets']:
                     formatted_query_result['totalNumFound'] = formatted_query_result['numFound']
                     formatted_query_result['numFound'] = result['facets']['unique_count']
+                if 'instance_size' in result['facets']:
+                    formatted_query_result['total_instance_size'] = result['facets']['instance_size']
                 if normalize_facets:
                     formatted_query_result['facets'] = {}
                     for facet in result['facets']:
                         check_facet = re.search('^(unique|total)_(.+)$',facet)
-                        if facet not in ['count', 'unique_count'] and not check_facet :
+                        if facet not in ['count', 'unique_count', 'instance_size'] and not check_facet :
                             facet_counts = result['facets'][facet]
                             if 'buckets' in facet_counts:
                                 # This is a term facet
@@ -84,7 +86,7 @@ def query_solr_and_format_result(query_settings, normalize_facets=True, normaliz
                             newFacet = check_facet.group(2)
                             which = "{}s".format(check_facet.group(1))
                             if which not in formatted_query_result:
-                                formatted_query_result[which] ={}
+                                formatted_query_result[which] = {}
                             formatted_query_result[which][newFacet] = result['facets'][facet]
                 else:
                     formatted_query_result['facets'] = result['facets']
