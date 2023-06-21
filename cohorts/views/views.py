@@ -60,7 +60,7 @@ from django.utils.html import escape
 from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, _get_cohort_stats
 from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion, Attribute
-from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata, get_bq_string, create_file_manifest
+from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata, get_bq_string, create_file_manifest, build_static_map, STATIC_EXPORT_FIELDS
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 COHORT_CREATION_LOG_NAME = settings.COHORT_CREATION_LOG_NAME
@@ -463,15 +463,6 @@ def cohort_uuids(request, cohort_id=0):
     return response
 
 
-class Echo(object):
-    """An object that implements just the write method of the file-like
-    interface.
-    """
-    def write(self, value):
-        """Write the value by returning it, instead of storing in a buffer."""
-        return value
-
-
 @login_required
 def create_manifest_bq_table(request, cohorts):
     response = None
@@ -661,9 +652,9 @@ def download_cohort_manifest(request, cohort_id=0):
             messages.error(request,"You don't have permission to view one or more of these cohorts.")
 
     except Exception as e:
-        logger.error("[ERROR] While downloading the cohort manifest(s) for user {}:".format(str(request.user.email)))
+        logger.error("[ERROR] While creating the cohort manifest(s) for user {}:".format(str(request.user.email)))
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to download your cohort manifest(s)--please contact the administrator.")
+        messages.error(request,"There was an error while attempting to obtain your cohort manifest(s)--please contact the administrator.")
 
     if cohort_id:
         return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort_id}))

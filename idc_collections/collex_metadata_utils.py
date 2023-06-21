@@ -18,6 +18,7 @@ import logging
 import time
 import datetime
 import copy
+import csv
 import re
 import os
 from time import sleep
@@ -94,12 +95,14 @@ def convert_disk_size(size):
 
 def build_static_map(cohort_obj):
     static_map = {}
+    IDC_version = cohort_obj.get_idc_data_version() if cohort_obj else ImagingDataCommonsVersion.objects.filter(active=True)
+
     for x in STATIC_EXPORT_FIELDS:
         if x == 'idc_version':
             # Verbose style
             # static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version()])
             # Numeric style
-            static_map[x] = "; ".join([str(x) for x in cohort_obj.get_idc_data_version().values_list("version_number",flat=True)])
+            static_map[x] = "; ".join([str(x) for x in IDC_version.values_list("version_number",flat=True)])
     return static_map
 
 
@@ -528,6 +531,15 @@ def filter_manifest(filters, sources, versions, fields, limit, offset, level="Se
 
     except Exception as e:
         logger.exception(e)
+
+
+class Echo(object):
+    """An object that implements just the write method of the file-like
+    interface.
+    """
+    def write(self, value):
+        """Write the value by returning it, instead of storing in a buffer."""
+        return value
 
 
 # Creates a file manifest of the supplied Cohort object or filters and returns a StreamingFileResponse
