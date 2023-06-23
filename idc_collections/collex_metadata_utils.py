@@ -551,7 +551,6 @@ def create_file_manifest(request, cohort=None):
     storage_bucket = '%s_bucket' % loc
     file_type = req.get('file_type', 'csv').lower()
     versions = None
-    idc_versions = None
 
     # Fields we need to fetch
     field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
@@ -609,7 +608,7 @@ def create_file_manifest(request, cohort=None):
 
         data_types = [DataSetType.IMAGE_DATA, DataSetType.ANCILLARY_DATA, DataSetType.DERIVED_DATA]
         source_type = req.get('data_source_type', DataSource.SOLR)
-        versions = versions or DataVersion.objects.filter(active=True)
+        versions = ImagingDataCommonsVersion.objects.filter(active=True) if not versions else ImagingDataCommonsVersion.objects.filter(name__in=versions)
 
         data_sets = DataSetType.objects.filter(data_type__in=data_types)
         sources = data_sets.get_data_sources().filter(
@@ -618,7 +617,6 @@ def create_file_manifest(request, cohort=None):
             id__in=versions.get_data_sources().filter(source_type=source_type).values_list("id", flat=True)
         ).distinct()
 
-    idc_versions = versions.get_active_idc_versions()
     items = filter_manifest(filters, sources, versions, field_list, MAX_FILE_LIST_ENTRIES, offset, with_size=True)
 
     if 'docs' in items:
@@ -685,7 +683,7 @@ def create_file_manifest(request, cohort=None):
 
                 hdr = "{}IDC Data Version(s): {}{}".format(
                     cmt_delim,
-                    "; ".join([str(x) for x in idc_versions]),
+                    "; ".join([str(x) for x in versions]),
                     linesep
                 )
 
