@@ -34,7 +34,7 @@ from django.conf import settings
 import math
 
 from django.contrib import messages
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, HttpResponse
 
 BQ_ATTEMPT_MAX = 10
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -550,6 +550,7 @@ def create_file_manifest(request, cohort=None):
     loc = req.get('loc_type', 'aws')
     storage_bucket = '%s_bucket' % loc
     file_type = req.get('file_type', 'csv').lower()
+    versions = None
 
     # Fields we need to fetch
     field_list = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
@@ -571,7 +572,7 @@ def create_file_manifest(request, cohort=None):
 
     offset = 0
     if req.get('file_part'):
-        selected_file_part = json.loads(request.GET.get('file_part'))
+        selected_file_part = json.loads(req.get('file_part'))
         selected_file_part = min(selected_file_part, 9)
         offset = selected_file_part * MAX_FILE_LIST_ENTRIES
 
@@ -586,10 +587,10 @@ def create_file_manifest(request, cohort=None):
                 field_list.remove(x)
 
     timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-    file_part_str = "_Part{}".format(selected_file_part + 1) if request.GET.get('file_part') else ""
+    file_part_str = "_Part{}".format(selected_file_part + 1) if req.get('file_part') else ""
     loc_type = ("_{}".format(loc)) if file_type == 's5cmd' else ""
-    if request.GET.get('file_name'):
-        file_name = "{}{}{}.{}".format(request.GET.get('file_name'), file_part_str, loc_type, file_type)
+    if req.get('file_name'):
+        file_name = "{}{}.{}".format(req.get('file_name'), file_part_str, file_type)
     else:
         file_name = "manifest_{}{}{}.{}".format("cohort_{}_".format(str(cohort.id)) if cohort else "", timestamp, file_part_str, loc_type, file_type)
 
@@ -607,7 +608,7 @@ def create_file_manifest(request, cohort=None):
 
         data_types = [DataSetType.IMAGE_DATA, DataSetType.ANCILLARY_DATA, DataSetType.DERIVED_DATA]
         source_type = req.get('data_source_type', DataSource.SOLR)
-        versions = versions or DataVersion.objects.filter(active=True)
+        versions = ImagingDataCommonsVersion.objects.filter(active=True) if not versions else ImagingDataCommonsVersion.objects.filter(version_number__in=versions)
 
         data_sets = DataSetType.objects.filter(data_type__in=data_types)
         sources = data_sets.get_data_sources().filter(
@@ -649,12 +650,14 @@ def create_file_manifest(request, cohort=None):
                 # File headers (first file part always have header)
                 for header in selected_header_fields:
                     hdr = ""
-                    if header == 'cohort_name':
+                    if cohort and header == 'cohort_name':
                         hdr = "{}Manifest for cohort '{}'{}".format(cmt_delim, cohort.name, linesep)
                     elif header == 'user_email':
                         hdr = "{}User: {}{}".format(cmt_delim, request.user.email, linesep)
                     elif header == 'cohort_filters':
-                        hdr = "{}Filters: {}{}".format(cmt_delim, cohort.get_filter_display_string(), linesep)
+                        filter_str = cohort.get_filter_display_string() if cohort else BigQuerySupport.build_bq_where_clause(filters)
+
+                        hdr = "{}Filters: {}{}".format(cmt_delim, filter_str, linesep)
                     elif header == 'timestamp':
                         hdr = "{}Date generated: {}{}".format(
                             cmt_delim, datetime.datetime.now(datetime.timezone.utc).strftime('%m/%d/%Y %H:%M %Z'),
@@ -680,7 +683,7 @@ def create_file_manifest(request, cohort=None):
 
                 hdr = "{}IDC Data Version(s): {}{}".format(
                     cmt_delim,
-                    "; ".join([str(x) for x in cohort.get_idc_data_version()]),
+                    "; ".join([str(x) for x in versions]),
                     linesep
                 )
 
@@ -744,7 +747,7 @@ def create_file_manifest(request, cohort=None):
             response = HttpResponse(json_result, content_type="text/json")
 
         response['Content-Disposition'] = 'attachment; filename=' + file_name
-        response.set_cookie("downloadToken", request.GET.get('downloadToken'))
+        response.set_cookie("downloadToken", req.get('downloadToken'))
 
         return response
 
