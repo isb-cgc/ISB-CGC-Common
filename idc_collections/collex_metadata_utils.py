@@ -34,7 +34,7 @@ from django.conf import settings
 import math
 
 from django.contrib import messages
-from django.http import StreamingHttpResponse
+from django.http import StreamingHttpResponse, HttpResponse
 
 BQ_ATTEMPT_MAX = 10
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -608,7 +608,7 @@ def create_file_manifest(request, cohort=None):
 
         data_types = [DataSetType.IMAGE_DATA, DataSetType.ANCILLARY_DATA, DataSetType.DERIVED_DATA]
         source_type = req.get('data_source_type', DataSource.SOLR)
-        versions = ImagingDataCommonsVersion.objects.filter(active=True) if not versions else ImagingDataCommonsVersion.objects.filter(name__in=versions)
+        versions = ImagingDataCommonsVersion.objects.filter(active=True) if not versions else ImagingDataCommonsVersion.objects.filter(version_number__in=versions)
 
         data_sets = DataSetType.objects.filter(data_type__in=data_types)
         sources = data_sets.get_data_sources().filter(
@@ -655,7 +655,7 @@ def create_file_manifest(request, cohort=None):
                     elif header == 'user_email':
                         hdr = "{}User: {}{}".format(cmt_delim, request.user.email, linesep)
                     elif header == 'cohort_filters':
-                        filter_str = cohort.get_filter_display_string() if cohort else build_bq_where_clause(filters)
+                        filter_str = cohort.get_filter_display_string() if cohort else BigQuerySupport.build_bq_where_clause(filters)
 
                         hdr = "{}Filters: {}{}".format(cmt_delim, filter_str, linesep)
                     elif header == 'timestamp':
