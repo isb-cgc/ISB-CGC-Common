@@ -34,7 +34,7 @@ from django.conf import settings
 import math
 
 from django.contrib import messages
-from django.http import StreamingHttpResponse, HttpResponse
+from django.http import StreamingHttpResponse, HttpResponse, JsonResponse
 
 BQ_ATTEMPT_MAX = 10
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -627,9 +627,12 @@ def create_file_manifest(request, cohort=None):
         else:
             messages.error(
                 request,
-                "There was an error while attempting to retrieve this file list - please contact the administrator."
+                "There was an error while attempting to export this manifest - please contact the administrator."
             )
-        return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort.id}))
+            if cohort:
+                return redirect(reverse('cohort_details', kwargs={'cohort_id': cohort.id}))
+            return JsonResponse({'msg': "There was an error while attempting to export this manifest - " +
+                                 "please contact the administrator."}, response=400)
 
     if len(manifest) > 0:
         if file_type in ['csv', 'tsv', 's5cmd']:
