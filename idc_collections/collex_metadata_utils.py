@@ -228,7 +228,7 @@ def sortNum(x):
 
 # Build data exploration context/response
 def build_explorer_context(is_dicofdic, source, versions, filters, fields, order_docs, counts_only, with_related,
-                           with_derived, collapse_on, is_json, uniques=None, totals=None):
+                           with_derived, collapse_on, is_json, uniques=None, totals=None, disk_size=False):
     attr_by_source = {}
     attr_sets = {}
     context = {}
@@ -293,12 +293,17 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                     attr_by_source[set_type]['attributes'].update(
                         {attr.name: {'source': source.id, 'obj': attr, 'vals': None, 'id': attr.id} for attr in attrs}
                     )
+        custom_facets = None
+        if disk_size:
+            custom_facets = {
+                'instance_size': 'sum(instance_size)'
+            }
 
         start = time.time()
         source_metadata = get_collex_metadata(
             filters, fields, record_limit=3000, offset=0, counts_only=counts_only, with_ancillary=with_related,
             collapse_on=collapse_on, order_docs=order_docs, sources=sources, versions=versions, uniques=uniques,
-            record_source=record_source, search_child_records_by=None, totals=totals
+            record_source=record_source, search_child_records_by=None, totals=totals, custom_facets=custom_facets
         )
         stop = time.time()
         logger.debug("[STATUS] Benchmarking: Time to collect metadata for source type {}: {}s".format(
@@ -498,6 +503,8 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 attr_by_source['uniques'] = source_metadata['uniques']
             if 'totals' in source_metadata:
                 attr_by_source['totals'] = source_metadata['totals']
+                if disk_size and 'total_instance_size' in source_metadata:
+                    attr_by_source['totals']['disk_size'] = convert_disk_size(source_metadata['total_instance_size'])
             return attr_by_source
 
         return context
