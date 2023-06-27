@@ -215,6 +215,7 @@ def cohorts_list(request, is_public=False):
                     'base_api_url': settings.BASE_API_URL,
                     'is_public': is_public,
                     'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
+                    'is_cohort': True,
                     'previously_selected_cohort_ids' : previously_selected_cohort_ids
                     }
                   )
