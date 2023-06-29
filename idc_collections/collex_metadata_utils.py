@@ -973,6 +973,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
         ) if filters else None
         solr_facets = None
         solr_facets_filtered = None
+        solr_stats_filtered = None
         solr_stats = None
         if not records_only:
             if attrs_for_faceting:
