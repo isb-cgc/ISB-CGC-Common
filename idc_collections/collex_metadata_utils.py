@@ -998,7 +998,8 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     )
                     solr_stats_filtered = fetch_solr_stats({'attrs': attrs_for_faceting['sources'][source.id]['attrs']})
 
-            if custom_facets is not None:
+            # For the moment custom facets are only valid on IMAGE_DATA set types
+            if custom_facets is not None and DataSetType.IMAGE_DATA in source_data_types[source.id]:
                 if solr_facets is None:
                     solr_facets = {}
                 solr_facets.update(custom_facets)
