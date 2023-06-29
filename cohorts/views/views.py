@@ -60,7 +60,8 @@ from django.utils.html import escape
 from cohorts.models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from cohorts.utils import _save_cohort, _delete_cohort, get_cohort_uuids, _get_cohort_stats
 from idc_collections.models import Program, Collection, DataSource, DataVersion, ImagingDataCommonsVersion, Attribute
-from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata, get_bq_string, create_file_manifest, build_static_map, STATIC_EXPORT_FIELDS
+from idc_collections.collex_metadata_utils import build_explorer_context, get_bq_metadata, get_bq_string, \
+    create_file_manifest, build_static_map, STATIC_EXPORT_FIELDS
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 COHORT_CREATION_LOG_NAME = settings.COHORT_CREATION_LOG_NAME
@@ -214,6 +215,7 @@ def cohorts_list(request, is_public=False):
                     'base_api_url': settings.BASE_API_URL,
                     'is_public': is_public,
                     'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
+                    'is_cohort': True,
                     'previously_selected_cohort_ids' : previously_selected_cohort_ids
                     }
                   )
@@ -467,12 +469,13 @@ def cohort_uuids(request, cohort_id=0):
 def create_manifest_bq_table(request, cohorts):
     response = None
     tables = None
+    req = request.GET or request.POST
     try:
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
 
         order_by = ["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID",
                     "SOPInstanceUID", "crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url"]
-        field_list = json.loads(request.GET.get(
+        field_list = json.loads(req.get(
             'columns',
             '["PatientID", "collection_id", "source_DOI", "StudyInstanceUID", "SeriesInstanceUID", "SOPInstanceUID", ' +
             '"crdc_study_uuid", "crdc_series_uuid", "crdc_instance_uuid", "gcs_url", "idc_version"]'
@@ -493,8 +496,8 @@ def create_manifest_bq_table(request, cohorts):
             cohort_version = "; ".join([str(x) for x in cohort.get_idc_data_version()])
             desc = None
             headers = []
-            if request.GET.get('header_fields'):
-                selected_header_fields = json.loads(request.GET.get('header_fields'))
+            if req.get('header_fields'):
+                selected_header_fields = json.loads(req.get('header_fields'))
                 'cohort_name' in selected_header_fields and headers.append("Manifest for cohort '{}' ID#{}".format(cohort.name, cohort.id))
                 'user_email' in selected_header_fields and headers.append("User: {}".format(request.user.email))
                 'cohort_filters' in selected_header_fields and headers.append("Filters: {}".format(cohort.get_filter_display_string()))
@@ -617,7 +620,7 @@ def create_manifest_bq_table(request, cohorts):
 def download_cohort_manifest(request, cohort_id=0):
     try:
         cohort_ids = []
-        req = request.GET if request.GET else request.POST
+        req = request.GET or request.POST
         if cohort_id:
             cohort_ids = [cohort_id]
         else:

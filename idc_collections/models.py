@@ -174,6 +174,19 @@ class ImagingDataCommonsVersionQuerySet(models.QuerySet):
             displays.append(idcdv.get_display())
         return displays if not joined else delimiter.join(displays)
 
+    # Return all the DataVersions which have this ImagingDataCommonsVersion
+    def get_data_versions(self, active=None, current=None):
+        idcdvs = self.all()
+        version_qs = Q()
+        versions = None
+        for idcdv in idcdvs:
+            if active is not None:
+                version_qs &= Q(active=active)
+            if current is not None:
+                version_qs &= Q(current=current)
+            versions = idcdv.dataversion_set.filter(version_qs).distinct()
+        return versions
+
 
 class ImagingDataCommonsVersionManager(models.Manager):
     def get_queryset(self):
@@ -226,6 +239,17 @@ class DataVersionQuerySet(models.QuerySet):
                 sources = sources | dv.datasource_set.filter(q_objs)
         return sources
 
+    def get_active_idc_versions(self):
+        idc_versions = None
+        dvs = self.all()
+        for dv in dvs:
+            if not idc_versions:
+                idc_versions = dv.idc_versions.filter(active=True)
+            else:
+                idc_versions = idc_versions | dv.idc_versions.filter(active=True)
+
+        return idc_versions
+
 
 class DataVersionManager(models.Manager):
     def get_queryset(self):
@@ -243,6 +267,9 @@ class DataVersion(models.Model):
 
     def get_active_version(self):
         return DataVersion.objects.get(active=True, name=name).version
+
+    def get_active_idc_version(self):
+        return self.idc_versions.filter(active=True)
 
     def __str__(self):
         return "{} ({}) ({})".format(self.name, self.version, self.idc_versions.filter(active=True))
