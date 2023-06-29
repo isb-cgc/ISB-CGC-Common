@@ -202,7 +202,7 @@ def attributes_list_api(request):
                     attributes_info.append(attribute_info_copy)
         data_source = {
             "data_source": source.name,
-            'attributes': attributes_info
+            'filters': attributes_info
         }
         response["data_sources"].append(data_source)
 

@@ -170,7 +170,8 @@ def _cohort_preview_query_api(request, data, info):
     # Always preview query against the active version
     data_version = ImagingDataCommonsVersion.objects.filter(active=True)
     # data_version = get_idc_data_version_query_set(data['cohort_def']['filterSet']['idc_data_version'])
-    info = get_query_query(request, filters, data['queryFields']['fields'], data_version, info)
+    # info = get_query_query(request, filters, data['queryFields']['fields'], data_version, info)
+    info = get_query_query(request, filters, data['fields'], data_version, info)
 
     info['cohort_def']["filterSet"] = {}
     info['cohort_def']["filterSet"]["filters"] = copy.deepcopy(data['cohort_def']['filters'])
@@ -245,6 +246,10 @@ def get_manifest_query(request, filters, data_version, manifest_info):
         select.append('crdc_series_uuid')
     if request.GET['crdc_instance_uuid'] in [True, 'True']:
         select.append('crdc_instance_uuid')
+    if request.GET['gcs_bucket'] in [True, 'True']:
+        select.append('gcs_bucket')
+    if request.GET['aws_bucket'] in [True, 'True']:
+        select.append('aws_bucket')
     if request.GET['gcs_url'] in [True, 'True']:
         select.append('gcs_url')
     if request.GET['aws_url'] in [True, 'True']:
