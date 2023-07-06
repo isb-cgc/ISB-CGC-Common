@@ -1005,7 +1005,7 @@ def get_metadata_solr(filters, fields, sources, counts_only, collapse_on, record
                     solr_facets = {}
                 solr_facets.update(custom_facets)
 #                solr_facets = custom_facets <-- This looks like a bug???
-                if filtered_needed:
+                if filtered_needed and filters:
                     if solr_facets_filtered is None:
                         solr_facets_filtered = {}
                     solr_facets_filtered.update(custom_facets)
