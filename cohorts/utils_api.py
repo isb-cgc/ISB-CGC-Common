@@ -170,7 +170,8 @@ def _cohort_preview_query_api(request, data, info):
     # Always preview query against the active version
     data_version = ImagingDataCommonsVersion.objects.filter(active=True)
     # data_version = get_idc_data_version_query_set(data['cohort_def']['filterSet']['idc_data_version'])
-    info = get_query_query(request, filters, data['queryFields']['fields'], data_version, info)
+    # info = get_query_query(request, filters, data['queryFields']['fields'], data_version, info)
+    info = get_query_query(request, filters, data['fields'], data_version, info)
 
     info['cohort_def']["filterSet"] = {}
     info['cohort_def']["filterSet"]["filters"] = copy.deepcopy(data['cohort_def']['filters'])
@@ -227,9 +228,9 @@ def get_cohort_query(request, filters, data_version, cohort_info):
 def get_manifest_query(request, filters, data_version, manifest_info):
 
     select = []
-    if request.GET['Collection_ID'] in [True, 'True']:
+    if request.GET['collection_id'] in [True, 'True']:
         select.append('collection_id')
-    if request.GET['Patient_ID'] in [True, 'True']:
+    if request.GET['PatientID'] in [True, 'True']:
         select.append('PatientID')
     if request.GET['StudyInstanceUID'] in [True, 'True']:
         select.append('StudyInstanceUID')
@@ -237,23 +238,22 @@ def get_manifest_query(request, filters, data_version, manifest_info):
         select.append('SeriesInstanceUID')
     if request.GET['SOPInstanceUID'] in [True, 'True']:
         select.append('SOPInstanceUID')
-    if request.GET['Source_DOI'] in [True, 'True']:
+    if request.GET['source_DOI'] in [True, 'True']:
         select.append('source_DOI')
-    if request.GET['CRDC_Study_GUID'] in [True, 'True']:
+    if request.GET['crdc_study_uuid'] in [True, 'True']:
         select.append('crdc_study_uuid')
-    if request.GET['CRDC_Series_GUID'] in [True, 'True']:
+    if request.GET['crdc_series_uuid'] in [True, 'True']:
         select.append('crdc_series_uuid')
-    if request.GET['CRDC_Instance_GUID'] in [True, 'True']:
+    if request.GET['crdc_instance_uuid'] in [True, 'True']:
         select.append('crdc_instance_uuid')
-    if request.GET['GCS_URL'] in [True, 'True']:
+    if request.GET['gcs_bucket'] in [True, 'True']:
+        select.append('gcs_bucket')
+    if request.GET['aws_bucket'] in [True, 'True']:
+        select.append('aws_bucket')
+    if request.GET['gcs_url'] in [True, 'True']:
         select.append('gcs_url')
-
-    # Get the SQL
-    if request.GET['sql'] in [True, 'True']:
-        manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
-            order_by=select[-1:])
-    else:
-        manifest_info['cohort']['sql'] = ""
+    if request.GET['aws_url'] in [True, 'True']:
+        select.append('aws_url')
 
     # Perform the query but don't return the results, just the job reference
     results = get_bq_metadata(
@@ -268,9 +268,43 @@ def get_manifest_query(request, filters, data_version, manifest_info):
         }
         return manifest_info
 
+    # Get the SQL
+    if request.GET['sql'] in [True, 'True']:
+        manifest_info['cohort']['sql'] = parameterize_sql_string(results, manifest_info)
+        # manifest_info['cohort']['sql'] = get_bq_string(filters=filters, fields=select, data_version=data_version,
+        #                                                order_by=select[-1:])
+    else:
+        manifest_info['cohort']['sql'] = ""
+
     manifest_info['query'] = results
 
     return manifest_info
+
+# Replace variables in SQL string with values
+def parameterize_sql_string(results, manifest_info):
+    sql_string = results['sql_string']
+    for params in results['params']:
+        for param in params:
+            name = param['name']
+            if param['parameterType']['type'] == 'ARRAY':
+                param_values = []
+                arrayType = param['parameterType']['arrayType']['type']
+                for arrayValue in param['parameterValue']['arrayValues']:
+                    if arrayType == 'STRING':
+                        param_values.append(f"\'{arrayValue['value']}\'")
+                    else:
+                        param_values.append(str(arrayValue['value']))
+                param_value = f"[{','.join(param_values)}]"
+            else:
+                arrayType = param['parameterType']['type']
+                if arrayType == 'STRING':
+                    param_value = f"\'{param['parameterValue']['value']}\'"
+                else:
+                    param_value = str(param['parameterValue']['value'])
+                # param_value = param['parameterValue']['value']
+            sql_string = sql_string.replace(f'@{name}', param_value)
+    return sql_string
+
 
 def get_query_query(request, filters, fields, data_version, info):
 
