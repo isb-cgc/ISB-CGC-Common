@@ -14,29 +14,45 @@
 # limitations under the License.
 #
 from __future__ import absolute_import
-from .metadata_helpers import fetch_metadata_value_set, fetch_program_data_types, MOLECULAR_DISPLAY_STRINGS
 
 from builtins import str
 from builtins import object
 import operator
 import string
 import sys
+import datetime
+import pytz
 import logging
-import time
 from django.db import models
+from django.conf import settings
 from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from projects.models import Project, Program, User_Feature_Definitions
+from projects.models import Collection, Attribute, User_Feature_Definitions, DataVersion, DataSource, ImagingDataCommonsVersion, Attribute_Display_Values
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
+from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 
 
+class CohortQuerySet(models.QuerySet):
+    def to_dicts(self):
+        return [{
+            "id": cohort.id,
+            "name": cohort.name,
+            "description": cohort.description,
+            "file_count": 0,
+            "hashes": []
+        } for cohort in self.all()]
+
+
 class CohortManager(models.Manager):
+    def get_queryset(self):
+        return CohortQuerySet(self.model, using=self._db)
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -49,78 +65,36 @@ class CohortManager(models.Manager):
         # Use operator's or_ to string together all of your Q objects.
         return qs.filter(reduce(operator.and_, [reduce(operator.or_, q_objects), Q(active=True)]))
 
-    def get_all_tcga_cohort(self):
-        isb_user = User.objects.get(is_staff=True, is_superuser=True, is_active=True)
-        all_isb_cohort_ids = Cohort_Perms.objects.filter(user=isb_user, perm=Cohort_Perms.OWNER).values_list('cohort_id', flat=True)
-        return Cohort.objects.filter(name='All TCGA Data', id__in=all_isb_cohort_ids)[0]
-
 
 class Cohort(models.Model):
     id = models.AutoField(primary_key=True)
-    name = models.TextField(null=True)
+    name = models.CharField(max_length=255, null=False, blank=True)
+    description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now=True)
     objects = CohortManager()
     shared = models.ManyToManyField(Shared_Resource)
+    last_exported_table = models.CharField(max_length=255, null=True, blank=False)
+    last_exported_date = models.DateTimeField(null=True ,blank=False)
+    case_count = models.IntegerField(blank=False, null=False, default=0)
+    series_count = models.IntegerField(blank=False, null=False, default=0)
+    study_count = models.IntegerField(blank=False, null=False, default=0)
+    total_disk_size = models.PositiveBigIntegerField(blank=False, null=False, default=0)
+    collections = models.TextField(blank=False, null=False, default="")
 
-    def sample_size(self):
-        return self.samples_set.all().count()
-
-    def get_cohort_cases(self):
-        start = time.time()
-        samples = self.samples_set.all()
-        cases = samples.values('case_barcode').distinct().values_list('case_barcode', flat=True)
-        stop = time.time()
-        logger.info("[STATUS] Time to get case list: {}s".format(str(stop-start)))
-        return list(cases)
-
-    def get_cohort_samples(self):
-        samples = self.samples_set.all().values('sample_barcode').distinct().values_list('sample_barcode', flat=True)
-        return list(samples)
-
-    def case_size(self):
-        return self.samples_set.values('case_barcode').aggregate(Count('case_barcode',distinct=True))['case_barcode__count']
-
-    def get_programs(self, is_public=None):
-        programs = self.samples_set.select_related('project__program', 'owner').values_list('project__program__id', flat=True).distinct()
-        q_obj = Q(active=True,id__in=list(programs))
-        if is_public is not None:
-            q_obj &= Q(is_public=is_public)
-        return Program.objects.filter(q_obj).distinct()
-
-    def get_program_names(self):
-        programs = self.samples_set.select_related('project__program').values_list('project__program__id', flat=True).distinct()
-        names = Program.objects.filter(active=True, id__in=programs).distinct().values_list('name',flat=True)
+    # Returns the names only of the collections found in this Cohort
+    # Return value is an array of strings
+    def get_collection_names(self):
+        collex = self.get_collections()
+        names = collex.distinct().values_list('name', flat=True)
         return [str(x) for x in names]
 
+    # Determines if the Cohort has only user-owned collections
     def only_user_data(self):
-        return not Program.objects.filter(id__in=self.get_programs(), is_public=True).exists()
+        return bool(Collection.objects.filter(id__in=self.get_collections(), is_public=True).count() <= 0)
 
-    def has_user_data(self):
-        return Program.objects.filter(id__in=self.get_programs(), is_public=False).exists()
-
-    '''
-    Sets the last viewed time for a cohort
-    '''
-    def mark_viewed (self, request, user=None):
-        if user is None:
-            user = request.user
-
-        last_view = self.cohort_last_view_set.filter(user=user)
-        if last_view is None or last_view.count() == 0:
-            last_view = self.cohort_last_view_set.create(user=user)
-        else:
-            last_view = last_view[0]
-
-        last_view.save(False, True)
-
-        return last_view
-
-    '''
-    Returns the highest level of permission the user has.
-    '''
+    # Returns the highest level of permission the user has.
     def get_perm(self, request):
-        perm = self.cohort_perms_set.select_related('user').filter(user__id=request.user.id).order_by('perm')
+        perm = self.cohort_perms_set.filter(user_id=request.user.id).order_by('perm')
 
         if perm.count() > 0:
             return perm[0]
@@ -128,309 +102,189 @@ class Cohort(models.Model):
             return None
 
     def get_owner(self):
-        return self.cohort_perms_set.select_related('user').filter(perm=Cohort_Perms.OWNER)[0].user
+        return self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user
 
+    # If a Cohort is owned by the IDC Superuser, it's considered public; this checks for the owner and returns a bool
+    # based on that determination
     def is_public(self):
-        isbuser = User.objects.get(is_staff=True, is_superuser=True, is_active=True)
-        return (self.cohort_perms_set.select_related('user').filter(perm=Cohort_Perms.OWNER)[0].user.id == isbuser.id)
+        idc_su = User.objects.get(username='idc', is_superuser=True)
+        return (self.cohort_perms_set.get(perm=Cohort_Perms.OWNER).user_id == idc_su.id)
 
+    # Create a URI to access our most recent export to a table, if there's a valid date
+    def get_last_export_uri(self):
+        if not self.last_exported_date:
+            return None
+        return "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
+            settings.BIGQUERY_USER_DATA_PROJECT_ID,
+            settings.BIGQUERY_USER_MANIFEST_DATASET,
+            self.last_exported_table.split('.')[-1]
+        )
 
-    '''
-    Returns a list of filters used on this cohort and all of its parents that were created using a filters.
+    # Exported tables live for 7 days
+    def get_export_is_valid(self):
+        if not self.last_exported_date:
+            return None
+        return (self.last_exported_date+datetime.timedelta(days=settings.BIGQUERY_USER_MANIFEST_TIMEOUT)) > datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
 
-    Filters are only returned if each of the parents were created using 1+ filters.
-    If a cohort is created using some other method, the chain is broken.
-    '''
-    def get_filters(self):
-        filter_list = []
-        cohort = self
-        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
-        while cohort:
-            filter_list.extend(Filters.objects.filter(resulting_cohort=cohort))
-            sources = Source.objects.filter(cohort=cohort)
-            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
-                cohort = sources[0].parent
-            else:
-                cohort = None
+    # Returns the data versions identified in the filter groups for this cohort
+    # Returns a DataVersion QuerySet
+    def get_data_versions(self, active=None):
+        data_versions = ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True)) \
+            if active is None else ImagingDataCommonsVersion.objects.filter(active=active, id__in=self.filter_group_set.all().values_list('data_version',flat=True))
 
-        return filter_list
+        return data_versions.distinct()
 
-    '''
-    Returns a list of filters used on this cohort and all of its parents that were created using a filters, as a JSON-
-    compatible object
+    def get_idc_data_version(self):
+        return ImagingDataCommonsVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True))
 
-    Filters are only returned if each of the parents were created using 1+ filters.
-    If a cohort is created using some other method, the chain is broken.
-    '''
-    def get_filters(self):
-        filter_list = []
-        dict_filters = {}
-        cohort = self
-        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
-        while cohort:
-            filter_list.extend(Filters.objects.filter(resulting_cohort=cohort))
-            sources = Source.objects.filter(cohort=cohort)
-            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
-                cohort = sources[0].parent
-            else:
-                cohort = None
+    def only_active_versions(self):
+        return bool(len(self.get_data_versions(active=False)) <= 0)
 
-        for filter in filter_list:
-            if filter.program.name not in dict_filters:
-                dict_filters[filter.program.name] = {}
-            prog_filters = dict_filters[filter.program.name]
-            if filter.name not in prog_filters:
-                prog_filters[filter.name] = []
-            values = prog_filters[filter.name]
-            if filter.value not in values:
-                values.append(filter.value)
+    # Returns the list of data sources used by this cohort, as a function of the filters which define it
+    def get_data_sources(self, source_type=DataSource.SOLR, active=None, current=True, aggregate_level=None):
 
-        return dict_filters
+        # A cohort might be from an inactive data version, in which case, active isn't a valid request,
+        # and we ignore it.
+        cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
+        attributes = Attribute.objects.filter(id__in=cohort_filters.values_list('attribute', flat=True))
 
-    '''
-    Returns the current filters which are active (i.e. strips anything which is mututally exclusive)
-    '''
-    def get_current_filters(self, unformatted=False):
-        filters = {}
-        cohort = self
-        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
-        while cohort:
-            for filter in Filters.objects.select_related('program').filter(resulting_cohort=cohort):
-                prog_name = filter.program.name
-                if prog_name not in filters:
-                    filters[prog_name] = {}
-                prog_filters = filters[prog_name]
-                if filter.name not in prog_filters:
-                    prog_filters[filter.name] = {
-                        'id': cohort.id,
-                        'program_id': filter.program.id,
-                        'values': []
+        data_versions = self.get_data_versions()
+
+        sources = attributes.get_data_sources(data_versions, source_type, active, current, aggregate_level)
+
+        return sources
+
+    # Returns the set of filters defining this cohort as a dict organized by data source
+    def get_filters_by_data_source(self, source_type=None):
+
+        cohort_filters = Filter.objects.select_related('attribute').filter(resulting_cohort=self)
+        result = self.get_data_sources(source_type)
+
+        for source in DataSource.SOURCE_TYPES:
+            if not source_type or source_type == source[0]:
+                for data_source in result[source[0]]:
+                    source_attrs = result[source[0]][data_source].attribute_set.filter(id__in=attributes)
+                    result[source[0]][data_source] = {
+                        'source': result[source[0]][data_source],
+                        'filters': cohort_filters.filter(attribute__id__in=source_attrs)
                     }
-                    if not unformatted:
-                        prog_filters[filter.name]['program_obj'] = filter.program
-                prog_filter = prog_filters[filter.name]
-                if prog_filter['id'] == cohort.id:
-                    prog_filter['values'].append(filter.value)
 
+        return result
 
-            sources = Source.objects.filter(cohort=cohort)
-            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
-                cohort = sources[0].parent
-            else:
-                cohort = None
+    # Returns a dict of the filters defining this cohort organized by filter group
+    def get_filters_as_dict_simple(self):
+        result = []
 
-        current_filters = {}
+        filter_groups = self.filter_group_set.all()
 
-        for prog in filters:
-            current_filters[prog] = []
-            prog_filters = filters[prog]
-            for filter in prog_filters:
-                for value in prog_filters[filter]['values']:
-                    current_filters[prog].append({
-                        'name': str(filter),
-                        'value': str(value),
-                        'program': prog,
-                        'program_obj': prog_filters[filter]['program_obj'] if not unformatted else None,
-                        'program_id': prog_filters[filter]['program_id']
-                    })
+        for fg in filter_groups:
+            filter_group = fg.filter_set.all().get_filter_set()
+            result.append(filter_group)
+        return result
 
-            if not unformatted:
-                Cohort.format_filters_for_display(current_filters[prog])
+    # Returns a dict of the filters defining this cohort organized by filter group
+    def get_filters_as_dict(self, active_only=False):
+        result = []
 
-        return current_filters
+        filter_groups = self.filter_group_set.all()
 
-
-    '''
-    Returns the first (i.e. 'creation') set of filters applied to this cohort
-
-    Filters are only returned if each of the parents in the chain were created using 1+ filters.
-    If a cohort is created using some other method, the chain is broken.
-    '''
-    def get_creation_filters(self):
-        filter_list = []
-        cohort = self
-        # Iterate through all parents if they were are all created through filters (should be a single chain with no branches)
-        while cohort:
-            sources = Source.objects.select_related('parent').filter(cohort=cohort)
-            if sources and sources.count() == 1 and sources[0].type == Source.FILTERS:
-                cohort = sources[0].parent
-            else:
-                filter_list = Filters.objects.select_related('program').filter(resulting_cohort=cohort)
-                cohort = None
-
-        filters = {}
-
-        for filter in filter_list:
-            if filter.program.name not in filters:
-                filters[filter.program.name] = []
-
-            filters[filter.program.name].append({
-                'name': str(filter.name),
-                'value': str(filter.value),
-                'program': filter.program.name,
-                'program_obj': filter.program,
-                'program_id': filter.program.id
+        for fg in filter_groups:
+            result.append({
+                'id': fg.id,
+                'data_version': fg.data_version.get_display(),
+                'filters': fg.filter_set.all().get_filter_set_array(active_only)
             })
-            
-        for prog in filters:
-            Cohort.format_filters_for_display(filters[prog])
+        return result
 
-        return filters
+    def get_filter_display_string(self, prefix=None):
+        filter_groups = self.filter_group_set.all()
+        filter_sets = []
 
-    '''
-    Creates a historical list of the filters applied to produce this cohort
-    '''
-    def get_filter_history(self):
-        filter_history = None
+        attr_dvals = Attribute_Display_Values.objects.select_related('attribute').filter(
+            attribute__id__in=Attribute.objects.filter(id__in=self.get_attr_list())
+        ).to_dict()
 
-        sources = Source.objects.filter(cohort=self)
+        ranged_numerics = Attribute.get_ranged_attrs()
 
-        keep_traversing = True
+        for fg in filter_groups:
+            filters = fg.filter_set.all().get_filter_set_array()
+            group_filters = {x['name']: {'values': [attr_dvals.get(x['id'], {}).get(y, y) for y in x['values']], 'op': x['op']} for x in filters}
 
-        while sources and keep_traversing:
-            # single parent
-            if sources.count() == 1:
-                source = sources[0]
-                if source.type == Source.FILTERS:
-                    if filter_history is None:
-                        filter_history = {}
-                    source_filters = Filters.objects.select_related('program').filter(resulting_cohort=source.cohort)
-                    filters = []
-                    for source_filter in source_filters:
-                        filters.append({
-                            'name': source_filter.name,
-                            'value': source_filter.value,
-                            'program': source_filter.program.name,
-                            'program_id': source_filter.program.id,
-                            'program_obj': source_filter.program,
-                        })
-                    filter_history[source.cohort.id] = filters
-            else:
-                keep_traversing = False
+            filter_sets.append(BigQuerySupport.build_bq_where_clause(
+                group_filters, join_with_space=True, field_prefix=prefix, encapsulated=False,
+                continuous_numerics=ranged_numerics
+            ))
 
-            sources = Source.objects.filter(cohort=source.parent)
+        return " AND ".join(filter_sets).replace("AnatomicRegionSequence", "AnatomicRegion")
 
-        return filter_history
+    def get_attrs(self):
+        return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'))
 
-    '''
-    Returns a list of notes from its parents.
-    Will only continue up the chain if there is only one parent and it was created by applying filters.
+    def get_attr_list(self):
+        return self.filter_set.select_related('attribute').all().values_list('attribute__id', flat=True)
 
-    '''
-    def get_revision_history(self):
-        revision_list = []
-        sources = Source.objects.select_related('parent', 'cohort').filter(cohort=self)
-        source_filters = None
+    def inactive_attrs(self):
+        return Attribute.objects.filter(pk__in=self.filter_set.select_related('attribute').all().values_list('attribute'), active=False)
 
-        while sources:
-            # single parent
-            if sources.count() == 1:
-                source = sources[0]
-                if source.type == Source.FILTERS:
-                    if source_filters is None:
-                        source_filters = self.get_filter_history()
-                    Cohort.format_filters_for_display(source_filters[source.cohort.id])
-                    prog_filters = {}
-                    for cohort_filter in source_filters[source.cohort.id]:
-                        if cohort_filter['program'] not in prog_filters:
-                            prog_filters[cohort_filter['program']] = []
-                        prog_filters[cohort_filter['program']].append(cohort_filter)
-                    revision_list.append({'type': 'filter', 'vals': prog_filters})
-                elif source.type == Source.CLONE:
-                    revision_list.append('Cloned from %s.' % escape(source.parent.name))
-                elif source.type == Source.PLOT_SEL:
-                    revision_list.append('Selected from plot of %s.' % escape(source.parent.name))
-                sources = Source.objects.filter(cohort=source.parent)
+    # Produce a BigQuery filter WHERE clause for this cohort's filters that can be used in the BQ console
+    def get_bq_filter_string(self, prefix=None):
 
-            # multiple parents
-            if sources.count() > 1:
-                if sources[0].type == Source.SET_OPS:
-                    revision_list.append(escape(sources[0].notes))
-                if sources[0].type == Source.PLOT_SEL:
-                    ret_str = 'Selected from plot of '
-                    first = True
-                    for source in sources:
-                        if first:
-                            ret_str += escape(source.parent.name)
-                            first = False
-                        else:
-                            ret_str += ', ' + escape(source.parent.name)
-                    revision_list.append(ret_str)
-                # TODO: Actually traverse the tree, but this will require a most sophisticated way of displaying
-                # Currently only getting parents history, and not grandparents history.
-                sources = []
-        if len(revision_list) == 0:
-            revision_list = ['There is no revision history.']
+        filter_sets = []
 
-        return revision_list
-    
-    @classmethod
-    def format_filters_for_display(cls, filters):
-        prog_vals = {}
-        prog_dts = {}
-        prog_values = None
-        prog_data_types = None
+        group_filter_dict = self.get_filters_as_dict()
 
-        for cohort_filter in filters:
-            prog = cohort_filter['program_obj']
-            prog_id = cohort_filter['program_id']
-            is_private = bool(not prog.is_public)
+        ranged_numerics = Attribute.get_ranged_attrs()
 
-            if not is_private:
-                if prog_id not in prog_vals:
-                    prog_vals[prog_id] = fetch_metadata_value_set(prog)
-                if prog_id not in prog_dts:
-                    prog_dts[prog_id] = fetch_program_data_types(prog, True)
+        for group in group_filter_dict:
+            group_filters = {x['name']: { 'op': x['op'], 'values': [y for y in x['values']]} for x in group['filters']}
+            filter_sets.append(BigQuerySupport.build_bq_where_clause(
+                group_filters, field_prefix=prefix, continuous_numerics=ranged_numerics
+            ))
 
-                prog_values = prog_vals[prog_id]
-                prog_data_types = prog_dts[prog_id]
+        return " AND ".join(filter_sets)
 
-            if 'MUT:' in cohort_filter['name']:
-                cohort_filter['displ_name'] = ("NOT(" if 'NOT:' in cohort_filter['name'] else '') \
-                      + cohort_filter['name'].split(':')[2].upper() \
-                      + ' [' + cohort_filter['name'].split(':')[1].upper() + ',' \
-                      + string.capwords(cohort_filter['name'].split(':')[-1])
-                cohort_filter['displ_val'] = (
-                    MOLECULAR_DISPLAY_STRINGS['values'][cohort_filter['value']] if cohort_filter['name'].split(':')[-1] != 'category'
-                    else MOLECULAR_DISPLAY_STRINGS['categories'][cohort_filter['value']]) \
-                    + ']' \
-                    + (")" if 'NOT:' in cohort_filter['name'] else '')
-            elif cohort_filter['name'] == 'data_type_availability':
-                cohort_filter['displ_name'] = 'Data Type'
-                cohort_filter['displ_val'] = prog_data_types[cohort_filter['value']]
-            else:
-                if not prog_values or cohort_filter['name'] not in prog_values:
-                    cohort_filter['displ_name'] = cohort_filter['name']
-                    cohort_filter['displ_val'] = cohort_filter['value']
-                else:
-                    cohort_filter['displ_name'] = prog_values[cohort_filter['name']]['displ_name']
-                    if cohort_filter['value'] in prog_values[cohort_filter['name']]['values']:
-                        cohort_filter['displ_val'] = prog_values[cohort_filter['name']]['values'][cohort_filter['value']]['displ_value']
-                    else:
-                        cohort_filter['displ_val'] = cohort_filter['value']
+    # Produce a BigQuery filter clause and parameters; this is for *programmatic* use of BQ, NOT copy-paste into
+    # the console
+    def get_filters_for_bq(self, prefix=None, suffix=None, counts=False, schema=None):
 
-    class Meta(object):
-        verbose_name_plural = "Saved Cohorts"
+        filter_sets = []
+
+        group_filter_dict = self.get_filters_as_dict()
+
+        for group in group_filter_dict:
+            group_filters = {x['name']: { 'op': x['op'], 'values': [y for y in x['values']]} for x in group['filters']}
+            filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
+                group_filters, field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
+                type_schema=schema
+             ))
+
+        return filter_sets
+
+    # Returns the set of filters used to create this cohort as a JSON-compatible dict, for use in UI display
+    def get_filters_for_ui(self, with_display_vals=False):
+        cohort_filters = self.get_filters_as_dict()
+
+        if with_display_vals:
+            attribute_display_vals = {}
+            for fg in cohort_filters:
+                for filter in fg['filters']:
+                    attr = Attribute.objects.get(filter['id'])
+                    if attr.id not in attribute_display_vals:
+                        attribute_display_vals[attr.id] = attr.get_display_values()
+                    values = filter['values']
+                    filter['values'] = []
+                    for val in values:
+                        filter['values'].append({'value': val, 'display_val': attribute_display_vals[attr.id][val]})
+
+        return cohort_filters
 
 
-class Samples(models.Model):
-    cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
-    sample_barcode = models.CharField(max_length=45, null=False, db_index=True)
-    case_barcode = models.CharField(max_length=45, null=True, blank=False, default=None)
-    project = models.ForeignKey(Project, null=True, blank=True, on_delete=models.CASCADE)
-
-    def __str__(self):
-        return "Project {} : Case {} : Sample {}".format(self.project,self.case_barcode,self.sample_barcode)
-
+# A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning or set operations
 class Source(models.Model):
-    FILTERS = 'FILTERS'
     SET_OPS = 'SET_OPS'
-    PLOT_SEL = 'PLOT_SEL'
     CLONE = 'CLONE'
     SOURCE_TYPES = (
-        (FILTERS, 'Filters'),
         (SET_OPS, 'Set Operations'),
-        (PLOT_SEL, 'Plot Selections'),
         (CLONE, 'Clone')
     )
 
@@ -439,6 +293,7 @@ class Source(models.Model):
     type = models.CharField(max_length=10, choices=SOURCE_TYPES)
     notes = models.CharField(max_length=1024, blank=True)
 
+
 class Cohort_Perms(models.Model):
     READER = 'READER'
     OWNER = 'OWNER'
@@ -446,25 +301,192 @@ class Cohort_Perms(models.Model):
         (READER, 'Reader'),
         (OWNER, 'Owner')
     )
-
     cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     user = models.ForeignKey(User, null=False, blank=True, on_delete=models.CASCADE)
     perm = models.CharField(max_length=10, choices=PERMISSIONS, default=READER)
 
-class Filters(models.Model):
-    resulting_cohort = models.ForeignKey(Cohort, null=True, blank=True, on_delete=models.CASCADE)
-    name = models.CharField(max_length=256, null=False)
-    value = models.CharField(max_length=512, null=False)
-    program = models.ForeignKey(Program, null=True, blank=True, on_delete=models.CASCADE)
+
+class Filter_Group(models.Model):
+    AND = 'A'
+    OR = 'O'
+    OPS = (
+        (AND, 'And'),
+        (OR, 'Or')
+    )
+    OP_TO_STR = {
+        OR: 'OR',
+        AND: 'AND'
+    }
+    id = models.AutoField(primary_key=True)
+    resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
+    operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=AND)
+    data_version = models.ForeignKey(ImagingDataCommonsVersion, on_delete=models.CASCADE, null=True)
+
+    def get_filter_set(self):
+        return self.filter_set.all().get_filter_set()
+
+    @classmethod
+    def get_op(cls, op_string):
+        if op_string.lower() == 'and':
+            return Filter_Group.AND
+        elif op_string.lower() == 'or':
+            return Filter_Group.OR
+        else:
+            return None
+
+
+class FilterQuerySet(models.QuerySet):
+    def get_filter_set(self):
+        filters = {}
+        for fltr in self.all():
+            filters.update(fltr.get_filter())
+        return filters
+
+    def get_filter_set_array(self, active_only=False):
+        filters = []
+        q_objs = Q()
+        if active_only:
+            q_objs = Q(attribute__active=True)
+        for fltr in self.select_related('attribute').filter(q_objs):
+            flat_dict = fltr.get_filter_flat()
+            flat_dict.update({
+                'id': fltr.attribute.id,
+                'display_name': fltr.attribute.display_name
+            })
+            filters.append(flat_dict)
+        return filters
+
+
+class FilterManager(models.Manager):
+    def get_queryset(self):
+        return FilterQuerySet(self.model, using=self._db)
+
+
+class Filter(models.Model):
+    BTW = 'B'
+    EBTW = 'EB'
+    BTWE = 'BE'
+    EBTWE = 'EBE'
+    GTE = 'GE'
+    LTE = 'LE'
+    GT = 'G'
+    LT = 'L'
+    AND = 'A'
+    OR = 'O'
+    OPS = (
+        (BTW, '_btw'),
+        (EBTW, '_btwe'),
+        (BTWE, '_ebtw'),
+        (EBTWE, '_ebtwe'),
+        (GTE, '_gte'),
+        (LTE, '_lte'),
+        (GT, '_gt'),
+        (LT, '_lt'),
+        (AND, '_and'),
+        (OR, '_or')
+    )
+    NUMERIC_OPS = [BTW, EBTW, BTWE, EBTWE, GTE, LTE, GT, LT]
+    STR_TO_OP = {
+        'BTW': BTW,
+        'EBTW': EBTW,
+        'BTWE': BTWE,
+        'EBTWE': EBTWE,
+        'OR': OR,
+        'AND': AND,
+        'LT': LT,
+        'GT': GT,
+        'LTE': LTE,
+        'GTE': GTE
+    }
+    OP_TO_STR = {
+        BTW: 'BTW',
+        EBTW: 'EBTW',
+        BTWE: 'BTWE',
+        EBTWE: 'EBTWE',
+        OR: 'OR',
+        AND: 'AND',
+        LT: 'LT',
+        GT: 'GT',
+        LTE: 'LTE',
+        GTE: 'GTE'
+    }
+    OP_TO_SUFFIX = {
+        BTW: '_btw',
+        EBTW: '_ebtw',
+        BTWE: '_btwe',
+        EBTWE: '_ebtwe',
+        GTE: '_gte',
+        LTE: '_lte',
+        GT: '_gt',
+        LT: '_lt',
+        AND: '_and',
+        OR: '_or'
+    }
+    DEFAULT_VALUE_DELIMITER = ','
+    ALTERNATIVE_VALUE_DELIMITERS = [';', '|', '^', ':']
+    FAILOVER_DELIMITER = '$$%%'
+    objects = FilterManager()
+    resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    value = models.TextField(null=False, blank=False)
+    filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     feature_def = models.ForeignKey(User_Feature_Definitions, null=True, blank=True, on_delete=models.CASCADE)
+    operator = models.CharField(max_length=4, null=False, blank=False, choices=OPS, default=OR)
+    value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=DEFAULT_VALUE_DELIMITER)
+
+    def get_attr_name(self):
+        return "{}{}".format(self.attribute.name, self.OP_TO_SUFFIX[self.operator] if self.operator in self.NUMERIC_OPS else "")
+
+    def get_operator(self):
+        return self.OP_TO_STR[self.operator]
+
+    def get_filter(self):
+        if self.operator not in [self.OR, self.BTW]:
+            return {
+                self.get_attr_name(): { 'op': self.get_operator(), 'values': self.value.split(self.value_delimiter) }
+            }
+        return {
+            self.get_attr_name(): self.value.split(self.value_delimiter)
+        }
+
+    def get_filter_flat(self):
+        return {
+            'attr_name': self.attribute.name,
+            'name': self.get_attr_name(),
+            'op': self.get_operator(),
+            'values': self.value.split(self.value_delimiter)
+        }
+
+    def __repr__(self):
+        if self.operator not in [self.OR, self.BTW]:
+            return "{ %s: {'op': %s, 'values': %s }" % (self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
+        return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
+
+    def __str__(self):
+        return self.__repr__()
+
+    @classmethod
+    def get_delimiter(cls,values):
+        filter_value_full = "".join([str(x) for x in values])
+        delimiter = None
+        if cls.DEFAULT_VALUE_DELIMITER in filter_value_full:
+            for delim in cls.ALTERNATIVE_VALUE_DELIMITERS:
+                if delim not in filter_value_full:
+                    delimiter = delim
+                    break
+        else:
+            delimiter = cls.DEFAULT_VALUE_DELIMITER
+        if not delimiter:
+            logger.warn("[WARNING] No valid delimiter value available for this set of values: {}".format(
+                filter_value_full)
+            )
+            logger.warn("[WARNING] Failing over to complex delimiter '$$%%'.")
+            delimiter = cls.FAILOVER_DELIMITER
+        return delimiter
+
 
 class Cohort_Comments(models.Model):
     cohort = models.ForeignKey(Cohort, blank=False, related_name='cohort_comment', on_delete=models.CASCADE)
     user = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
     date_created = models.DateTimeField(auto_now_add=True)
     content = models.CharField(max_length=1024, null=False)
-
-class Cohort_Last_View(models.Model):
-    cohort = models.ForeignKey(Cohort, blank=False, on_delete=models.CASCADE)
-    user = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
-    last_view = models.DateTimeField(auto_now=True)
