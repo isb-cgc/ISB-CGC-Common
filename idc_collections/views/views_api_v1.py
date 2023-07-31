@@ -20,7 +20,7 @@ from idc_collections.models import Program, Collection, DataSetType, ImagingData
 from django.views.decorators.http import require_http_methods
 from cohorts.decorators import api_auth
 
-from cohorts.utils_api import get_idc_data_version
+from cohorts.utils_api_v1 import get_idc_data_version
 
 from solr_helpers import *
 
@@ -202,7 +202,7 @@ def attributes_list_api(request):
                     attributes_info.append(attribute_info_copy)
         data_source = {
             "data_source": source.name,
-            'filters': attributes_info
+            'attributes': attributes_info
         }
         response["data_sources"].append(data_source)
 
