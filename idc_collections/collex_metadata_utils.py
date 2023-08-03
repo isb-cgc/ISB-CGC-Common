@@ -566,14 +566,12 @@ def create_file_manifest(request, cohort=None):
     static_fields = None
 
     # Fields we're actually returning in the file (the rest are for constructing the GCS path)
-    if req.get('columns', None):
-        selected_columns = json.loads(req.get('columns'))
+    selected_columns = json.loads(req.get('columns', '[]'))
 
     selected_columns_sorted = sorted(selected_columns, key=lambda x: field_list.index(x))
     selected_file_part = 0
 
-    if req.get('header_fields'):
-        selected_header_fields = json.loads(req.get('header_fields'))
+    selected_header_fields = json.loads(req.get('header_fields', '[]'))
 
     include_header = (req.get('include_header', 'false').lower() == 'true')
 
