@@ -33,7 +33,7 @@ from ..decorators import api_auth
 
 from idc_collections.models import Attribute
 from cohorts.models import Cohort, Cohort_Perms
-from cohorts.utils_api import get_filterSet_api, get_idc_data_version, \
+from cohorts.utils_api_v1 import get_filterSet_api, get_idc_data_version, \
     _cohort_manifest_api, _cohort_preview_manifest_api, \
     _cohort_preview_query_api, _cohort_query_api
 from ..views.views import _save_cohort,_delete_cohort
@@ -58,35 +58,27 @@ def save_cohort_api(request):
     print(request.GET.get('email', ''))
     try:
         body = json.loads(request.body.decode('utf-8'))
-        # user = User.objects.get(email=request.GET.get('email', ''))
-        user = User.objects.get(email=body['email'])
+        user = User.objects.get(email=request.GET.get('email', ''))
         data = body["request_data"]
-        cohort_name = data['name']
+        name = data['name']
         description = data['description']
         filters = data['filters']
         # Create a cohort only against the current version
         version = get_idc_data_version()
         # version = get_idc_data_version('1.0')
 
-        # We first need to convert the filters to a form accepted by _save_cohorts
-        filters_by_name = {}
-        for filter, value in filters.items():
-            if filter.endswith(('lt', 'lte', 'ebtw', 'ebtwe', 'btw', 'btwe', 'gte' 'gt')):
-                name = filter.rsplit('_', 1)[0]
-                op = filter.rsplit('_', 1)[-1]
-                filters_by_name[name] = dict(
-                    op= op,
-                    values = value
-                )
-            else:
-                filters_by_name[filter] = value
+        # filters = filterset['filters']
         filters_by_id = {}
-        for attr in Attribute.objects.filter(name__in=list(filters_by_name.keys())).values('id', 'name'):
-            filters_by_id[str(attr['id'])] = filters_by_name[attr['name']]
-        response = _save_cohort(user, filters=filters_by_id, name=cohort_name, desc=description, version=version,
+        for attr in Attribute.objects.filter(name__in=list(filters.keys())).values('id', 'name'):
+            filters_by_id[str(attr['id'])] = filters[attr['name']]
+        response = _save_cohort(user, filters=filters_by_id, name=name, desc=description, version=version,
                                 no_stats=True)
         cohort_id = response['cohort_id']
         idc_data_version = Cohort.objects.get(id=cohort_id).get_data_versions()[0].version_number
+        # if request.GET['return_filter'] == 'True':
+        #     response["filterSet"] =  get_filterSet_api(cohort)
+        # response["filterSet"] =  get_filterSet_api(cohort)
+
         response['filterSet'] = {'idc_data_version': idc_data_version, 'filters': response.pop('filters')}
 
     except Exception as e:
@@ -122,6 +114,7 @@ def cohort_manifest_api(request, cohort_id=0):
         # messages.error(request, 'Cohort requested does not exist.')
         # return redirect('/user_landing')
 
+    print(request.GET.get('email', ''))
     try:
         cohort = Cohort.objects.get(id=cohort_id)
     except ObjectDoesNotExist as e:
@@ -134,9 +127,7 @@ def cohort_manifest_api(request, cohort_id=0):
         return JsonResponse(manifest_info)
 
     try:
-        body = json.loads(request.body.decode('utf-8'))
-        # user = User.objects.get(email=request.GET.get('email', ''))
-        user = User.objects.get(email=body['email'])
+        user = User.objects.get(email=request.GET.get('email', ''))
         Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
     except Exception as e:
         logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted.".format(request.GET.get('email', ''), cohort_id))
@@ -211,6 +202,11 @@ def cohort_query_api(request, cohort_id=0):
         }
         return JsonResponse(manifest_info)
 
+    # if cohort_id == 0:
+    #     messages.error(request, 'Cohort requested does not exist.')
+    #     return redirect('/user_landing')
+
+    # print(request.GET.get('email', ''))
     try:
         cohort = Cohort.objects.get(id=cohort_id)
     except ObjectDoesNotExist as e:
@@ -223,8 +219,7 @@ def cohort_query_api(request, cohort_id=0):
         return JsonResponse(info)
 
     try:
-        body = json.loads(request.body.decode('utf-8'))
-        user = User.objects.get(email=body['email'])
+        user = User.objects.get(email=request.GET.get('email', ''))
         Cohort_Perms.objects.get(user=user, cohort=cohort, perm=Cohort_Perms.OWNER, cohort__active=True)
     except Exception as e:
         logger.error("[ERROR] {} isn't the owner of cohort ID {}, or the cohort has been deleted.".format(request.GET.get('email', ''), cohort_id))
@@ -297,8 +292,7 @@ def cohort_list_api(request):
     try:
         # response = cohorts_list(request)
 
-        body = json.loads(request.body.decode('utf-8'))
-        user = User.objects.get(email=body['email'])
+        user = User.objects.get(email=request.GET.get('email', ''))
         cohortList = []
 
         cohorts = [cohort for cohort in Cohort.objects.filter(active=True) if
@@ -345,8 +339,7 @@ def delete_cohort_api(request):
     cohort_info = []
     print(request.GET.get('email', ''))
     try:
-        body = json.loads(request.body.decode('utf-8'))
-        user = User.objects.get(email=body['email'])
+        user = User.objects.get(email=request.GET.get('email', ''))
 
         # cohort_ids = request.DELETE.getlist('id')
         body = json.loads(request.body.decode('utf-8'))
