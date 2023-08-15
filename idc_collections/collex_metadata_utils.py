@@ -660,7 +660,7 @@ def create_file_manifest(request, cohort=None):
                     hdr = ""
                     if cohort and header == 'cohort_name':
                         hdr = "{}Manifest for cohort '{}'{}".format(cmt_delim, cohort.name, linesep)
-                    elif header == 'user_email':
+                    elif header == 'user_email' and request.user.is_authenticated:
                         hdr = "{}User: {}{}".format(cmt_delim, request.user.email, linesep)
                     elif header == 'cohort_filters':
                         filter_str = cohort.get_filter_display_string() if cohort else BigQuerySupport.build_bq_where_clause(filters)
