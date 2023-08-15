@@ -503,6 +503,9 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 attr_by_source['uniques'] = source_metadata['uniques']
             if 'totals' in source_metadata:
                 attr_by_source['totals'] = source_metadata['totals']
+                attr_by_source['totals']['file_parts_count'] = math.ceil(
+                    attr_by_source['totals']['SeriesInstanceUID'] / (MAX_FILE_LIST_ENTRIES if MAX_FILE_LIST_ENTRIES > 0 else 1))
+                attr_by_source['totals']['display_file_parts_count'] = min(attr_by_source['totals']['file_parts_count'], 10)
                 if disk_size and 'total_instance_size' in source_metadata:
                     attr_by_source['totals']['disk_size'] = convert_disk_size(source_metadata['total_instance_size'])
             return attr_by_source
@@ -664,7 +667,6 @@ def create_file_manifest(request, cohort=None):
                         hdr = "{}User: {}{}".format(cmt_delim, request.user.email, linesep)
                     elif header == 'cohort_filters':
                         filter_str = cohort.get_filter_display_string() if cohort else BigQuerySupport.build_bq_where_clause(filters)
-
                         hdr = "{}Filters: {}{}".format(cmt_delim, filter_str, linesep)
                     elif header == 'timestamp':
                         hdr = "{}Date generated: {}{}".format(
