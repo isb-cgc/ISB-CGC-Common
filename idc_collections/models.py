@@ -313,7 +313,7 @@ class Collection(models.Model):
     access = models.CharField(max_length=40, null=True, blank=False)
     subject_count = models.IntegerField(default=0, null=True, blank=False)
     image_types = models.CharField(max_length=255, null=True, blank=False)
-    cancer_type = models.CharField(max_length=128, null=True, blank=False)
+    cancer_type = models.CharField(max_length=512, null=True, blank=False)
     doi = models.CharField(max_length=255, null=True, blank=False)
     source_url = models.CharField(max_length=512, null=True, blank=False)
     supporting_data = models.CharField(max_length=255, null=True, blank=False)
