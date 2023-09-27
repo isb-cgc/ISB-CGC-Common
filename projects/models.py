@@ -4,13 +4,21 @@ import operator
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
-from data_upload.models import UserUpload
-from accounts.models import GoogleProject, Bucket, BqDataset
-from sharing.models import Shared_Resource
 from functools import reduce
+
+class ProgramQuerySet(models.QuerySet):
+    def get_projects(self):
+        return Project.objects.select_related('program').filter(program__in=self.all())
+
+
+    def get_data_sources(self):
+        return DataSource.objects.prefetch_related(Prefetch('programs', queryset=self.all())).distinct()
 
 
 class ProgramManager(models.Manager):
+    def get_queryset(self):
+        return ProgramQuerySet(self.model, using=self._db)
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -29,11 +37,8 @@ class Program(models.Model):
     name = models.CharField(max_length=255, null=True)
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now_add=True)
     objects = ProgramManager()
-    owner = models.ForeignKey(User, on_delete=models.CASCADE)
     is_public = models.BooleanField(default=False)
-    shared = models.ManyToManyField(Shared_Resource)
 
     def get_data_sources(self, data_type=None, source_type=None, active=True):
         q_objects = Q()
@@ -312,7 +317,6 @@ class DataSource(models.Model):
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     programs = models.ManyToManyField(Program)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
     objects = DataSourceManager()
 
@@ -496,7 +500,6 @@ class Project(models.Model):
     name = models.CharField(max_length=255) # Eg. Framingham Heart Study
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
-    owner = models.ForeignKey(User, on_delete=models.CASCADE)
     program = models.ForeignKey(Program, on_delete=models.CASCADE)
     is_public = models.BooleanField(default=False)
 

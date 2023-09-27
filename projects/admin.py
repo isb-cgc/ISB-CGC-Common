@@ -16,15 +16,15 @@
 
 from django.contrib import admin
 
-from projects.models import Project, Program, User_Data_Tables, Public_Data_Tables, Public_Annotation_Tables, Public_Metadata_Tables
+from projects.models import Project, Program, DataSource, DataVersion, Attribute, Attribute_Tooltips, \
+    Attribute_Display_Values, Attribute_Ranges, DataNode, DataSourceJoin
 
 
 class Program_Admin(admin.ModelAdmin):
     list_display = (
         'name',
         'active',
-        'last_date_saved',
-        'owner',
+        'description',
         'is_public'
     )
     exclude = ('shared',)
@@ -33,55 +33,101 @@ class Program_Admin(admin.ModelAdmin):
 class Project_Admin(admin.ModelAdmin):
     list_display = (
         'name',
+        'short_name',
         'active',
-        'last_date_saved',
-        'owner',
         'program',
-        'extends'
+        'description',
+        'is_public'
     )
 
 
-class UserDataTable_Admin(admin.ModelAdmin):
+class DataSource_Admin(admin.ModelAdmin):
     list_display = (
-        'project',
-        'google_project',
-        'google_bucket',
+        'name',
+        'version',
+        'source_type'
     )
 
-class PublicMetadataTable_Admin(admin.ModelAdmin):
+
+class DataSourceJoin_Admin(admin.ModelAdmin):
     list_display = (
-        'program',
-        'data_tables',
-        'annot_tables',
-        'biospec_table',
-        'clin_table',
-        'samples_table',
-        'attr_table',
-        'sample_data_availability_table',
-        'sample_data_type_availability_table'
+        'from_src_col',
+        'from_src',
+        'to_src_col',
+        'to_src'
     )
 
-class PublicAnnotationTable_Admin(admin.ModelAdmin):
+
+class DataNode_Admin(admin.ModelAdmin):
     list_display = (
-        'program',
-        'annot_table',
-        'annot2biospec_table',
-        'annot2clin_table',
-        'annot2sample_table'
+        'name',
+        'active',
+        'short_name',
+        'description'
     )
 
-class PublicDataTable_Admin(admin.ModelAdmin):
+
+class DataVersion_Admin(admin.ModelAdmin):
     list_display = (
-        'program',
-        'build',
-        'data_table',
-        'annot2data_table'
+        'name',
+        'active',
+        'version',
+        'data_type',
+        'build'
     )
 
+
+class Attribute_Admin(admin.ModelAdmin):
+    list_display = (
+        'name',
+        'display_name',
+        'description',
+        'data_type',
+        'active',
+        'is_cross_collex',
+        'preformatted_values',
+        'default_ui_display',
+        'units'
+    )
+
+
+class Attribute_Display_Values_Admin(admin.ModelAdmin):
+    list_display = (
+        'attribute',
+        'display_value',
+        'raw_value'
+    )
+
+
+class Attribute_Tooltips_Admin(admin.ModelAdmin):
+    list_display = (
+        'attribute',
+        'value',
+        'tooltip'
+    )
+
+
+class Attribute_Ranges_Admin(admin.ModelAdmin):
+    list_display = (
+        'type',
+        'attribute',
+        'include_lower',
+        'include_upper',
+        'unbounded',
+        'first',
+        'last',
+        'gap',
+        'unit',
+        'label'
+    )
 
 admin.site.register(Program, Program_Admin)
 admin.site.register(Project, Project_Admin)
-admin.site.register(User_Data_Tables, UserDataTable_Admin)
-admin.site.register(Public_Data_Tables, PublicDataTable_Admin)
-admin.site.register(Public_Metadata_Tables, PublicMetadataTable_Admin)
-admin.site.register(Public_Annotation_Tables, PublicAnnotationTable_Admin)
+admin.site.register(DataSource, DataSource_Admin)
+admin.site.register(DataSourceJoin, DataSourceJoin_Admin)
+admin.site.register(DataVersion, DataVersion_Admin)
+admin.site.register(Attribute, Attribute_Admin)
+admin.site.register(Attribute_Display_Values, Attribute_Display_Values_Admin)
+admin.site.register(Attribute_Ranges, Attribute_Ranges_Admin)
+admin.site.register(Attribute_Tooltips, Attribute_Tooltips_Admin)
+admin.site.register(DataNode, DataNode_Admin)
