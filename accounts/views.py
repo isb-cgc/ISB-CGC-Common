@@ -30,7 +30,6 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_protect
 from google_helpers.stackdriver import StackDriverLogger
 from google_helpers.bigquery.service import get_bigquery_service
-from google_helpers.resourcemanager_service import get_special_crm_resource
 from google_helpers.storage_service import get_storage_resource
 from google_helpers.bigquery.bq_support import BigQuerySupport
 from googleapiclient.errors import HttpError

@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2023, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ from time import sleep
 from uuid import uuid4
 import copy
 from django.conf import settings
-from google_helpers.bigquery.service import get_bigquery_service
 from google_helpers.bigquery.abstract import BigQueryABC
+from google.cloud import bigquery
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger('main_logger')
@@ -49,7 +49,7 @@ MOLECULAR_CATEGORIES = {
 
 class BigQuerySupport(BigQueryABC):
 
-    def __init__(self, project_id, dataset_id, table_id, executing_project=None, table_schema=None, user_project=False):
+    def __init__(self, project_id, dataset_id, table_id, executing_project=None, table_schema=None):
         # Project which will execute any jobs run by this class
         self.executing_project = executing_project or settings.BIGQUERY_PROJECT_ID
         # Destination project
@@ -58,7 +58,7 @@ class BigQuerySupport(BigQueryABC):
         self.dataset_id = dataset_id
         # Destination table
         self.table_id = table_id
-        self.bq_service = get_bigquery_service(user_project)
+        self.bq_client = bigquery.Client()
         self.table_schema = table_schema
 
     def _build_request_body_from_rows(self, rows):
@@ -74,7 +74,7 @@ class BigQuerySupport(BigQueryABC):
 
     def _streaming_insert(self, rows):
 
-        table_data = self.bq_service.tabledata()
+        table_data = self.bq_client.tabledata()
         index = 0
         next = 0
         response = None
@@ -101,7 +101,7 @@ class BigQuerySupport(BigQueryABC):
         bq_tables = []
 
         try:
-            datasets = self.bq_service.datasets().list(projectId=self.project_id).execute(num_retries=5)
+            datasets = self.bq_client.datasets().list(projectId=self.project_id).execute(num_retries=5)
         except HttpError as e:
             logger.warning("[WARNING] Unable to access BQ datasets and tables for GCP project {}!".format(self.project_id))
             logger.warning("[WARNING] The monitoring service account may have been removed, or the project may have been deleted. Skipping.")
@@ -109,7 +109,7 @@ class BigQuerySupport(BigQueryABC):
 
         if datasets and 'datasets' in datasets:
             for dataset in datasets['datasets']:
-                tables = self.bq_service.tables().list(projectId=self.project_id,
+                tables = self.bq_client.tables().list(projectId=self.project_id,
                                                        datasetId=dataset['datasetReference']['datasetId']).execute(
                     num_retries=5
                 )
@@ -125,7 +125,7 @@ class BigQuerySupport(BigQueryABC):
         
     # Check if the dataset referenced by dataset_id exists in the project referenced by project_id
     def _dataset_exists(self):
-        datasets = self.bq_service.datasets().list(projectId=self.project_id).execute(num_retries=5)
+        datasets = self.bq_client.datasets().list(projectId=self.project_id).execute(num_retries=5)
         dataset_found = False
 
         for dataset in datasets['datasets']:
@@ -144,7 +144,7 @@ class BigQuerySupport(BigQueryABC):
     # Note this only confirms that fields required by table_schema are found in the proposed table with the appropriate
     # type, and that no 'required' fields in the proposed table are absent from table_schema
     def _confirm_table_schema(self):
-        table = self.bq_service.tables().get(projectId=self.project_id, datasetId=self.dataset_id,
+        table = self.bq_client.tables().get(projectId=self.project_id, datasetId=self.dataset_id,
                                              tableId=self.table_id).execute(num_retries=5)
         table_fields = table['schema']['fields']
 
@@ -166,7 +166,7 @@ class BigQuerySupport(BigQueryABC):
     # Check if the table referenced by table_id exists in the dataset referenced by dataset_id and the
     # project referenced by project_id
     def _table_exists(self):
-        tables = self.bq_service.tables().list(projectId=self.project_id, datasetId=self.dataset_id).execute(
+        tables = self.bq_client.tables().list(projectId=self.project_id, datasetId=self.dataset_id).execute(
             num_retries=5
         )
         table_found = False
@@ -182,7 +182,7 @@ class BigQuerySupport(BigQueryABC):
     # project referenced by project_id
     def _delete_table(self):
         if self._table_exists():
-            table_delete = self.bq_service.tables().delete(
+            table_delete = self.bq_client.tables().delete(
                 projectId=self.project_id,
                 datasetId=self.dataset_id,
                 tableId=self.table_id
@@ -194,7 +194,7 @@ class BigQuerySupport(BigQueryABC):
 
     # Insert an table, optionally providing a list of cohort IDs to include in the description
     def _insert_table(self, desc):
-        tables = self.bq_service.tables()
+        tables = self.bq_client.tables()
 
         response = tables.insert(projectId=self.project_id, datasetId=self.dataset_id, body={
             'friendlyName': self.table_id,
@@ -273,7 +273,7 @@ class BigQuerySupport(BigQueryABC):
         if cost_est:
             job_desc['configuration']['dryRun'] = True
 
-        return self.bq_service.jobs().insert(
+        return self.bq_client.jobs().insert(
             projectId=self.executing_project,
             body=job_desc).execute(num_retries=5)
 
@@ -330,13 +330,13 @@ class BigQuerySupport(BigQueryABC):
             sleep(1)
             done = self.job_is_done(query_job)
 
-        return self.bq_service.jobs().get(
+        return self.bq_client.jobs().get(
             projectId=self.executing_project, jobId=query_job['jobReference']['jobId']
         ).execute(num_retries=5)
 
     # Check to see if query job is done
     def job_is_done(self, query_job):
-        job_is_done = self.bq_service.jobs().get(projectId=self.executing_project,
+        job_is_done = self.bq_client.jobs().get(projectId=self.executing_project,
                                                  jobId=query_job['jobReference']['jobId']).execute(num_retries=5)
 
         return job_is_done and job_is_done['status']['state'] == 'DONE'
@@ -348,7 +348,7 @@ class BigQuerySupport(BigQueryABC):
         page_token = None
 
         while True:
-            page = self.bq_service.jobs().getQueryResults(
+            page = self.bq_client.jobs().getQueryResults(
                 pageToken=page_token,
                 **job_ref).execute(num_retries=2)
 
@@ -365,7 +365,7 @@ class BigQuerySupport(BigQueryABC):
         return result
 
     def fetch_job_resource(self, job_ref):
-        return self.bq_service.jobs().get(**job_ref).execute(num_retries=5)
+        return self.bq_client.jobs().get(**job_ref).execute(num_retries=5)
 
     # Add rows to the table specified by project.dataset.table
     # Note that this is a class method therefor the rows must be supplied formatted ready
@@ -429,21 +429,21 @@ class BigQuerySupport(BigQueryABC):
     @classmethod
     def get_table_fields(cls, projectId, datasetId, tableId):
         bqs = cls(None, None, None)
-        table = bqs.bq_service.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
+        table = bqs.bq_client.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
 
         return [x['name'] for x in table['schema']['fields']]
 
     @classmethod
     def get_table_schema(cls, projectId, datasetId, tableId):
         bqs = cls(None, None, None)
-        table = bqs.bq_service.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
+        table = bqs.bq_client.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
 
         return [{'name': x['name'], 'type': x['type']} for x in table['schema']['fields']]
 
     @classmethod
     def get_result_schema(cls, job_ref):
         bqs = cls(None, None, None)
-        results = bqs.bq_service.jobs().getQueryResults(**job_ref).execute(num_retries=5)
+        results = bqs.bq_client.jobs().getQueryResults(**job_ref).execute(num_retries=5)
 
         return results['schema']
     

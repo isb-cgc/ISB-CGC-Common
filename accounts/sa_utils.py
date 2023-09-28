@@ -33,8 +33,6 @@ from .service_obj import ServiceAccountBlacklist, GoogleOrgWhitelist, ManagedSer
 from .models import *
 from django.conf import settings
 
-from google_helpers.resourcemanager_service import get_special_crm_resource
-
 from .dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf, extend_sa_at_dcf, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
                         GoogleLinkState, get_auth_elapsed_time, unregister_sa, \

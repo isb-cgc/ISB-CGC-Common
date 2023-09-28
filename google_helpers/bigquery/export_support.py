@@ -21,8 +21,7 @@ import datetime
 from time import sleep
 from django.conf import settings
 from uuid import uuid4
-from google_helpers.bigquery.service import get_bigquery_service
-from google_helpers.storage_service import get_storage_resource
+from google.cloud import bigquery
 from google_helpers.bigquery.abstract import BigQueryExportABC
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
@@ -125,8 +124,8 @@ COHORT_EXPORT_SCHEMA = {
 
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema, user_project=False):
-        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema, user_project=user_project)
+    def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema):
+        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema)
         self.bucket_path = bucket_path
         self.file_name = file_name
 
@@ -142,8 +141,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         }
 
     def _streaming_insert(self, rows):
-        bigquery_service = get_bigquery_service(True)
-        table_data = bigquery_service.tabledata()
+        bq_client = bigquery.Client()
+        table_data = bq_client.tabledata()
 
         index = 0
         next = 0
@@ -169,7 +168,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
     def _table_to_gcs(self, file_format, dataset_and_table, export_type, table_job_id=None):
 
-        bq_service = get_bigquery_service(True)
+        bq_client = bigquery.Client()
 
         result = {
             'status': None,
@@ -179,12 +178,12 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         # presence of a table_job_id means the export query was still running when this
         # method was called; give it another round of checks
         if table_job_id:
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=table_job_id).execute()
+            job_is_done = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=table_job_id).execute()
             retries = 0
             while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
                 retries += 1
                 sleep(1)
-                job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=table_job_id).execute()
+                job_is_done = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=table_job_id).execute()
 
             if job_is_done and not job_is_done['status']['state'] == 'DONE':
                 logger.debug(str(job_is_done))
@@ -220,11 +219,11 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
             }
         }
 
-        export_job = bq_service.jobs().insert(
+        export_job = bq_client.jobs().insert(
             projectId=settings.BIGQUERY_PROJECT_ID,
             body=export_config).execute(num_retries=5)
 
-        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
+        job_is_done = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
                                             jobId=job_id).execute()
 
         retries = 0
@@ -232,7 +231,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
+            job_is_done = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
 
         logger.debug("[STATUS] extraction job_is_done: {}".format(str(job_is_done)))
 
@@ -250,7 +249,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 if not exported_file:
                     msg = "Export file {}/{} not found".format(self.bucket_path, self.file_name)
                     logger.error("[ERROR] ".format({msg}))
-                    export_result = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
+                    export_result = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
                     if 'errors' in export_result:
                         logger.error('[ERROR] Errors seen: {}'.format(export_result['errors'][0]['message']))
                     result['status'] = 'error'
@@ -282,7 +281,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         return result
 
     def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False):
-        bq_service = get_bigquery_service(True)
+        bq_client = bigquery.Client()
         job_id = str(uuid4())
 
         query_data = {
@@ -309,18 +308,18 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         if parameters:
             query_data['configuration']['query']['queryParameters'] = parameters
 
-        query_job = bq_service.jobs().insert(
+        query_job = bq_client.jobs().insert(
             projectId=settings.BIGQUERY_PROJECT_ID,
             body=query_data).execute(num_retries=5)
 
-        job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
+        job_is_done = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
 
         retries = 0
 
         while (job_is_done and not job_is_done['status']['state'] == 'DONE') and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            job_is_done = bq_service.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
+            job_is_done = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID,
                               jobId=job_id).execute()
 
         result = {
@@ -347,11 +346,11 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 logger.error("[ERROR] {}".format(msg))
             elif not to_temp:
                 # Check the table
-                export_table = bq_service.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
+                export_table = bq_client.tables().get(projectId=self.project_id,datasetId=self.dataset_id,tableId=self.table_id).execute()
                 if not export_table:
                     msg = "Export table {}:{}.{} not found".format(self.project_id,self.dataset_id,self.table_id)
                     logger.error("[ERROR] ".format({msg}))
-                    bq_result = bq_service.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_ID,
+                    bq_result = bq_client.jobs().getQueryResults(projectId=settings.BIGQUERY_PROJECT_ID,
                                   jobId=job_id).execute()
                     if 'errors' in bq_result:
                         logger.error('[ERROR] Errors seen: {}'.format(bq_result['errors'][0]['message']))
@@ -431,8 +430,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
 class BigQueryExportFileList(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None, user_project=False):
-        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA, user_project)
+    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None):
+        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA)
 
     def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -501,9 +500,9 @@ class BigQueryExportFileList(BigQueryExport):
 
 class BigQueryExportCohort(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None, user_project=False):
+    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None):
         self._uuids = uuids
-        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA, user_project)
+        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA)
 
     def _build_row(self, sample):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
