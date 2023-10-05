@@ -26,7 +26,7 @@ from google_helpers.bigquery.bq_support import BigQuerySupport
 
 
 logger = logging.getLogger('main_logger')
-BLACKLIST_RE = settings.BLACKLIST_RE
+DENYLIST_RE = settings.DENYLIST_RE
 
 # Get the current if none specified
 def get_idc_data_version(version_number=None):

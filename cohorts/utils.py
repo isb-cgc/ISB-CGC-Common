@@ -37,7 +37,7 @@ from idc_collections.collex_metadata_utils import get_collex_metadata, filter_ma
 from idc_collections.models import DataSetType,DataSource
 
 logger = logging.getLogger('main_logger')
-BLACKLIST_RE = settings.BLACKLIST_RE
+DENYLIST_RE = settings.DENYLIST_RE
 
 
 def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
@@ -141,13 +141,13 @@ def _save_cohort(user, filters=None, name=None, cohort_id=None, version=None, de
 
         cohort_details = {}
         if name or desc:
-            blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
-            check = {'name': {'val': name, 'match': blacklist.search(str(name))},
-                     'description': {'val': desc, 'match': blacklist.search(str(desc))}}
+            denylist = re.compile(DENYLIST_RE, re.UNICODE)
+            check = {'name': {'val': name, 'match': denylist.search(str(name))},
+                     'description': {'val': desc, 'match': denylist.search(str(desc))}}
             if len([check[x]['match'] for x in check if check[x]['match'] is not None]):
                 mal = " and ".join([x for x in check if check[x]['match'] is not None])
                 s = "" if len([check[x]['match'] for x in check if check[x]['match'] is not None]) > 1 else "s"
-                vals = ", ".join([y for x in check if check[x]['match'] is not None for y in blacklist.findall(str(check[x]['val']))])
+                vals = ", ".join([y for x in check if check[x]['match'] is not None for y in denylist.findall(str(check[x]['val']))])
                 logger.error('[ERROR] While saving a cohort, saw a malformed {}: characters: {}'.format(mal,s,vals))
                 return {'message': "Your cohort's {} contain{} invalid characters; please choose another name.".format(mal,s)}
             else:
