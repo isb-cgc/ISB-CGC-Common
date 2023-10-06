@@ -511,13 +511,16 @@ class BigQuerySupport(BigQueryABC):
                 values = [values]
 
             parameter_type = None
-            if type_schema and attr in type_schema and type_schema[attr]:
-                parameter_type = ('INT64' if type_schema[attr] == 'INTEGER' else 'STRING')
+            if type_schema and type_schema.get(attr, None):
+                parameter_type = ('NUMERIC' if type_schema[attr] != 'STRING' else 'STRING')
             else:
+                # If the values are arrays we assume the first value in the first array is indicative of all
+                # other values (since we don't support multi-typed fields)
+                type_check = values[0] if type(values[0]) is not list else values[0][0]
                 parameter_type = (
                     'STRING' if (
-                        type(values[0]) is not int and re.compile(r'[^0-9\.,]', re.UNICODE).search(values[0])
-                    ) else 'INT64'
+                        type(type_check) not in [int,float,complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(type_check)
+                    ) else 'NUMERIC'
                 )
 
             filter_string = ''
