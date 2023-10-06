@@ -392,10 +392,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         if not is_temp:
             check_dataset_table = self._confirm_dataset_and_table(desc)
             write_disp = 'WRITE_EMPTY'
-
-            if 'tableErrors' in check_dataset_table:
+            status = check_dataset_table.get('status',None)
+            if status == 'ERROR':
                 return check_dataset_table
-            elif 'status' in check_dataset_table and check_dataset_table['status'] == 'TABLE_EXISTS':
+            elif status == 'TABLE_EXISTS':
                 write_disp = 'WRITE_APPEND'
         else:
             write_disp = 'WRITE_EMPTY'
@@ -407,7 +407,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         logger.info("[STATUS] Initiating BQ export of {} rows".format(str(len(rows))))
         check_dataset_table = self._confirm_dataset_and_table(desc)
 
-        if 'tableErrors' in check_dataset_table:
+        if check_dataset_table.get('status', None) == 'ERROR':
             return check_dataset_table
 
         return self._streaming_insert(rows)

@@ -23,6 +23,10 @@ import copy
 from django.conf import settings
 from google_helpers.bigquery.abstract import BigQueryABC
 from google.cloud import bigquery
+from google.cloud.bigquery.table import Table
+from google.cloud.bigquery.schema import SchemaField
+from google.cloud.bigquery import ArrayQueryParameter, ScalarQueryParameter, StructQueryParameter
+from google.cloud.bigquery import QueryJob, QueryJobConfig
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger('main_logger')
@@ -60,6 +64,9 @@ class BigQuerySupport(BigQueryABC):
         self.table_id = table_id
         self.bq_client = bigquery.Client()
         self.table_schema = table_schema
+
+    def _full_table_id(self):
+        return "{}.{}.{}".format(project=self.project_id, dataset=self.dataset_id, table=self.table_id)
 
     def _build_request_body_from_rows(self, rows):
         insertable_rows = []
@@ -101,35 +108,32 @@ class BigQuerySupport(BigQueryABC):
         bq_tables = []
 
         try:
-            datasets = self.bq_client.datasets().list(projectId=self.project_id).execute(num_retries=5)
+            datasets = self.bq_client.list_datasets(project=self.project_id)
         except HttpError as e:
             logger.warning("[WARNING] Unable to access BQ datasets and tables for GCP project {}!".format(self.project_id))
             logger.warning("[WARNING] The monitoring service account may have been removed, or the project may have been deleted. Skipping.")
             datasets = None
 
-        if datasets and 'datasets' in datasets:
-            for dataset in datasets['datasets']:
-                tables = self.bq_client.tables().list(projectId=self.project_id,
-                                                       datasetId=dataset['datasetReference']['datasetId']).execute(
-                    num_retries=5
-                )
-                if 'tables' not in tables:
-                    bq_tables.append({'dataset': dataset['datasetReference']['datasetId'],
+        if datasets:
+            for dataset in datasets:
+                tables = self.bq_client.list_tables(dataset=dataset.dataset_id)
+                if not tables:
+                    bq_tables.append({'dataset': dataset.dataset_id,
                                       'table_id': None})
                 else:
-                    for table in tables['tables']:
-                        bq_tables.append({'dataset': dataset['datasetReference']['datasetId'],
-                                          'table_id': table['tableReference']['tableId']})
+                    for table in tables:
+                        bq_tables.append({'dataset': dataset.dataset_id,
+                                          'table_id': table.table_id})
 
         return bq_tables
         
     # Check if the dataset referenced by dataset_id exists in the project referenced by project_id
     def _dataset_exists(self):
-        datasets = self.bq_client.datasets().list(projectId=self.project_id).execute(num_retries=5)
+        datasets = self.bq_client.list_datasets(project=self.project_id)
         dataset_found = False
 
-        for dataset in datasets['datasets']:
-            if self.dataset_id == dataset['datasetReference']['datasetId']:
+        for dataset in datasets:
+            if self.dataset_id == dataset.dataset_id:
                 return True
 
         return dataset_found
@@ -144,11 +148,9 @@ class BigQuerySupport(BigQueryABC):
     # Note this only confirms that fields required by table_schema are found in the proposed table with the appropriate
     # type, and that no 'required' fields in the proposed table are absent from table_schema
     def _confirm_table_schema(self):
-        table = self.bq_client.tables().get(projectId=self.project_id, datasetId=self.dataset_id,
-                                             tableId=self.table_id).execute(num_retries=5)
-        table_fields = table['schema']['fields']
+        table = self.bq_client.get_table(self._full_table_id())
 
-        proposed_schema = {x['name']: x['type'] for x in table_fields}
+        proposed_schema = {x.name: x.field_type for x in table.schema}
         expected_schema = {x['name']: x['type'] for x in self.table_schema['fields']}
 
         # Check for expected fields
@@ -157,8 +159,8 @@ class BigQuerySupport(BigQueryABC):
                 return False
 
         # Check for unexpected, required fields
-        for field in table_fields:
-            if 'mode' in field and field['mode'] == 'REQUIRED' and field['name'] not in expected_schema:
+        for field in table.schema:
+            if field['mode'] == 'REQUIRED' and field.name not in expected_schema:
                 return False
 
         return True
@@ -166,49 +168,41 @@ class BigQuerySupport(BigQueryABC):
     # Check if the table referenced by table_id exists in the dataset referenced by dataset_id and the
     # project referenced by project_id
     def _table_exists(self):
-        tables = self.bq_client.tables().list(projectId=self.project_id, datasetId=self.dataset_id).execute(
-            num_retries=5
-        )
         table_found = False
 
-        if 'tables' in tables:
-            for table in tables['tables']:
-                if self.table_id == table['tableReference']['tableId']:
-                    return True
+        try:
+            table = self.bq_client.get_table(self._full_table_id())
+            table_found = True if table else False
+
+        except Exception as e:
+            logger.warn("Table {} was not found.".format(self._full_table_id()))
 
         return table_found
 
     # Delete a table referenced by table_id in the dataset referenced by dataset_id and the
     # project referenced by project_id
     def _delete_table(self):
-        if self._table_exists():
-            table_delete = self.bq_client.tables().delete(
-                projectId=self.project_id,
-                datasetId=self.dataset_id,
-                tableId=self.table_id
-            ).execute(num_retries=5)
-            if 'errors' in table_delete:
-                logger.error("[ERROR] Couldn't delete table {}:{}.{}".format(
-                    self.project_id, self.dataset_id, self.table_id
-                ))
+        try:
+            if self._table_exists():
+                table_delete = self.bq_client.delete_table(self._full_table_id())
+        except Exception as e:
+            logger.error("[ERROR] Couldn't delete table {}".format(self._full_table_id()))
+            logger.exception(e)
+
+        return
 
     # Insert an table, optionally providing a list of cohort IDs to include in the description
     def _insert_table(self, desc):
-        tables = self.bq_client.tables()
+        table = None
+        try:
+            table = self.bq_client.create_table(Table(
+                self._full_table_id(), self.table_schema, description=desc
+            ))
+        except Exception as e:
+            logger.error("[ERROR] Couldn't create table {}".format(self._full_table_id()))
+            logger.exception(e)
 
-        response = tables.insert(projectId=self.project_id, datasetId=self.dataset_id, body={
-            'friendlyName': self.table_id,
-            'description': desc,
-            'kind': 'bigquery#table',
-            'schema': self.table_schema,
-            'tableReference': {
-                'datasetId': self.dataset_id,
-                'projectId': self.project_id,
-                'tableId': self.table_id
-            }
-        }).execute(num_retries=5)
-
-        return response
+        return table
 
     def _confirm_dataset_and_table(self, desc):
         # Get the dataset (make if not exists)
@@ -218,18 +212,18 @@ class BigQuerySupport(BigQueryABC):
         # Get the table (make if not exists)
         if not self._table_exists():
             table_result = self._insert_table(desc)
-            if 'tableReference' not in table_result:
+            if not table_result:
                 return {
-                    'tableErrors': "Unable to create table {} in project {} and dataset {} - please ".format(
-                        self.table_id, self.project_id, self.dataset_id
-                    ) + "double-check your project's permissions for the ISB-CGC service account."
+                    'status': 'ERROR',
+                    'message': "Unable to create table {}".format(self._full_table_id())
                 }
             return {
                 'status': 'TABLE_MADE'
             }
         elif not self._confirm_table_schema():
             return {
-                'tableErrors': "The table schema of {} does not match the required schema for cohort export.".format(
+                'status': 'ERROR',
+                'message': "The table schema of {} does not match the required schema for cohort export.".format(
                     self.table_id
                 ) + "Please make a new table, or adjust this table's schema."
             }
@@ -239,43 +233,23 @@ class BigQuerySupport(BigQueryABC):
             }
 
     # Build and insert a BQ job
-    def insert_bq_query_job(self, query,parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
+    def insert_bq_query_job(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
 
-        # Make yourself a job ID
-        job_id = str(uuid4())
-
-        # Build your job description
-        job_desc = {
-            'jobReference': {
-                'projectId': self.executing_project,  # This is the project which will *execute* the query
-                'jobId': job_id
-            },
-            'configuration': {
-                'query': {
-                    'query': query,
-                    'priority': 'INTERACTIVE'
-                }
-            }
-        }
+        # Build Query Job Config
+        job_config = QueryJobConfig(allow_large_results=True, use_query_cache=False, priority='INTERACTIVE')
 
         if parameters:
-            job_desc['configuration']['query']['queryParameters'] = parameters
-            job_desc['configuration']['query']['useLegacySql'] = False
+            job_config.query_parameters = parameters
+            job_config.use_legacy_sql = False
 
         if self.project_id and self.dataset_id and self.table_id:
-            job_desc['configuration']['query']['destinationTable'] = {
-                'projectId': self.project_id,
-                'datasetId': self.dataset_id,
-                'tableId': self.table_id
-            }
-            job_desc['configuration']['query']['writeDisposition'] = write_disposition
+            job_config.destiation = self._full_table_id()
+            job_config.write_disposition = write_disposition
 
         if cost_est:
-            job_desc['configuration']['dryRun'] = True
+            job_config.dry_run = True
 
-        return self.bq_client.jobs().insert(
-            projectId=self.executing_project,
-            body=job_desc).execute(num_retries=5)
+        return self.bq_client.query(query, job_config=job_config)
 
     # Runs a basic, optionally parameterized query
     # If self.project_id, self.dataset_id, and self.table_id are set they
@@ -285,25 +259,25 @@ class BigQuerySupport(BigQueryABC):
 
         query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
 
-        job_id = query_job['jobReference']['jobId']
+        job_id = query_job.job_id
 
         query_results = None
 
         # Cost Estimates don't actually run as fully-fledged jobs, and won't be inserted as such,
         # so we just get back the estimate immediately
         if cost_est:
-            if query_job['status']['state'] == 'DONE':
+            if query_job.done():
                 return {
                     'total_bytes_billed': query_job['statistics']['query']['totalBytesBilled'],
                     'total_bytes_processed': query_job['statistics']['query']['totalBytesProcessed']
                 }
 
-        job_is_done = self.await_job_is_done(query_job)
+        job_is_done_ = self.await_job_is_done(query_job)
 
         # Parse the final disposition
-        if job_is_done and job_is_done['status']['state'] == 'DONE':
-            if 'status' in job_is_done and 'errors' in job_is_done['status']:
-                logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done['status']['errors'])))
+        if job_is_done_ and job_is_done_['status']['state'] == 'DONE':
+            if 'status' in job_is_done_ and 'errors' in job_is_done_['status']:
+                logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_['status']['errors'])))
                 logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
@@ -314,36 +288,26 @@ class BigQuerySupport(BigQueryABC):
                          "if you check job ID {} manually you can wait for it to finish.".format(job_id))
             logger.error("[ERROR] Timed out query: {}".format(query))
 
-        if 'statistics' in job_is_done and 'query' in job_is_done['statistics'] and 'timeline' in \
-                job_is_done['statistics']['query']:
-            logger.debug("Elapsed: {}".format(str(job_is_done['statistics']['query']['timeline'][-1]['elapsedMs'])))
+        if 'statistics' in job_is_done_ and 'query' in job_is_done_['statistics'] and 'timeline' in \
+                job_is_done_['statistics']['query']:
+            logger.debug("Elapsed: {}".format(str(job_is_done_['statistics']['query']['timeline'][-1]['elapsedMs'])))
 
         return query_results
 
     # Check for a job's status for the maximum number of attempts, return the final resulting response
     def await_job_is_done(self, query_job):
-        done = self.job_is_done(query_job)
+        done = query_job.done()
         retries = 0
 
         while not done and retries < BQ_ATTEMPT_MAX:
             retries += 1
             sleep(1)
-            done = self.job_is_done(query_job)
+            done = query_job.done()
 
-        return self.bq_client.jobs().get(
-            projectId=self.executing_project, jobId=query_job['jobReference']['jobId']
-        ).execute(num_retries=5)
-
-    # Check to see if query job is done
-    def job_is_done(self, query_job):
-        job_is_done = self.bq_client.jobs().get(projectId=self.executing_project,
-                                                 jobId=query_job['jobReference']['jobId']).execute(num_retries=5)
-
-        return job_is_done and job_is_done['status']['state'] == 'DONE'
+        return query_job
 
     # Fetch the results of a job based on the reference provided
-    def fetch_job_results(self, job_ref):
-        logger.info(str(job_ref))
+    def fetch_job_results(self, query_job):
         result = []
         page_token = None
 
@@ -394,12 +358,6 @@ class BigQuerySupport(BigQueryABC):
         bqs = cls(None, None, None)
         return bqs.insert_bq_query_job(query, parameters)
 
-    # Check the status of a BQ job
-    @classmethod
-    def check_job_is_done(cls, query_job):
-        bqs = cls(None, None, None)
-        return bqs.job_is_done(query_job)
-
     # Do a 'dry run' query, which estimates the cost
     @classmethod
     def estimate_query_cost(cls, query, parameters=None):
@@ -408,9 +366,9 @@ class BigQuerySupport(BigQueryABC):
 
     # Given a job reference, fetch out the results
     @classmethod
-    def get_job_results(cls, job_reference):
+    def get_job_results(cls, query_job):
         bqs = cls(None, None, None)
-        return bqs.fetch_job_results(job_reference)
+        return bqs.fetch_job_results(query_job)
 
     # Given a job reference for a running job, await the completion,
     # then fetch and return the results
@@ -418,45 +376,38 @@ class BigQuerySupport(BigQueryABC):
     def wait_for_done_and_get_results(cls, query_job):
         bqs = cls(None, None, None)
         check_done = bqs.await_job_is_done(query_job)
-        return bqs.fetch_job_results(check_done['jobReference'])
+        return bqs.fetch_job_results(check_done)
 
-    # Given a BQ service and a job reference, fetch out the results
-    @classmethod
-    def get_job_resource(cls, job_id, project_id):
-        bqs = cls(None, None, None)
-        return bqs.fetch_job_resource({'jobId': job_id, 'projectId': project_id})
-    
     @classmethod
     def get_table_fields(cls, projectId, datasetId, tableId):
         bqs = cls(None, None, None)
-        table = bqs.bq_client.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
+        table = bqs.bq_client.get_table("{}.{}.{}".format(projectId, datasetId, tableId))
 
-        return [x['name'] for x in table['schema']['fields']]
+        return [x.name for x in table.schema]
 
     @classmethod
     def get_table_schema(cls, projectId, datasetId, tableId):
         bqs = cls(None, None, None)
-        table = bqs.bq_client.tables().get(projectId=projectId, datasetId=datasetId, tableId=tableId).execute(num_retries=5)
+        table = bqs.bq_client.get_table("{}.{}.{}".format(projectId, datasetId, tableId))
 
-        return [{'name': x['name'], 'type': x['type']} for x in table['schema']['fields']]
+        return [{'name': x.name, 'type': x.field_type} for x in table.schema]
 
     @classmethod
-    def get_result_schema(cls, job_ref):
+    def get_result_schema(cls, query_job):
         bqs = cls(None, None, None)
-        results = bqs.bq_client.jobs().getQueryResults(**job_ref).execute(num_retries=5)
+        results = bq_client.get_table(query_job.destination)
 
-        return results['schema']
+        return results.schema
     
     # Method for submitting a group of jobs and awaiting the results of the whole set
     @classmethod
     def insert_job_batch_and_get_results(cls, query_set):
-        logger.info(str(query_set))
         bqs = cls(None, None, None)
         submitted_job_set = {}
         for query in query_set:
             job_obj = bqs.insert_bq_query_job(query['query'],query['parameters'])
-            query['job_id'] = job_obj['jobReference']['jobId']
-            submitted_job_set[job_obj['jobReference']['jobId']] = job_obj
+            query['job_id'] = job_obj.job_id
+            submitted_job_set[job_obj.job_id] = job_obj
 
         not_done = True
         still_checking = True
@@ -465,7 +416,7 @@ class BigQuerySupport(BigQueryABC):
         while still_checking and not_done:
             not_done = False
             for job in submitted_job_set:
-                if not BigQuerySupport.check_job_is_done(submitted_job_set[job]):
+                if not submitted_job_set[job].done():
                     not_done = True
             if not_done:
                 sleep(1)
@@ -476,9 +427,9 @@ class BigQuerySupport(BigQueryABC):
             logger.warn("[WARNING] Not all of the queries completed!")
 
         for query in query_set:
-            if bqs.job_is_done(submitted_job_set[query['job_id']]):
-                query['bq_results'] = bqs.fetch_job_results(submitted_job_set[query['job_id']]['jobReference'])
-                query['result_schema'] = BigQuerySupport.get_result_schema(submitted_job_set[query['job_id']]['jobReference'])
+            if submitted_job_set[query['job_id']].done():
+                query['bq_results'] = bqs.fetch_job_results(submitted_job_set[query['job_id']])
+                query['result_schema'] = submitted_job_set[query['job_id']].schema
             else:
                 query['bq_results'] = None
                 query['result_schema'] = None
@@ -501,7 +452,8 @@ class BigQuerySupport(BigQueryABC):
     #
     # TODO: add support for DATES
     @staticmethod
-    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False, field_prefix=None, type_schema=None, case_insens=True):
+    def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False,
+                                   field_prefix=None, type_schema=None, case_insens=True):
         result = {
             'filter_string': '',
             'parameters': []
@@ -533,25 +485,9 @@ class BigQuerySupport(BigQueryABC):
             param_name = 'gene{}{}'.format(str(mut_filtr_count), '_{}'.format(param_suffix) if param_suffix else '')
             filter_string = '{}Hugo_Symbol = @{} AND '.format('' if not field_prefix else field_prefix, param_name)
 
-            gene_query_param = {
-                'name': param_name,
-                'parameterType': {
-                    'type': 'STRING'
-                },
-                'parameterValue': {
-                    'value': gene
-                }
-            }
+            gene_query_param = ScalarQueryParameter(param_name, 'STRING', gene)
 
-            var_query_param = {
-                'name': None,
-                'parameterType': {
-                    'type': None
-                },
-                'parameterValue': {
-
-                }
-            }
+            var_query_param = None
 
             if filter_type == 'category' and values[0].lower() == 'any':
                 filter_string += '{}Variant_Classification IS NOT NULL'.format('' if not field_prefix else field_prefix,)
@@ -561,10 +497,7 @@ class BigQuerySupport(BigQueryABC):
                     values = MOLECULAR_CATEGORIES[values[0]]['attrs']
                 var_param_name = "var_class{}{}".format(str(mut_filtr_count), '_{}'.format(param_suffix) if param_suffix else '')
                 filter_string += '{}Variant_Classification {}IN UNNEST(@{})'.format('' if not field_prefix else field_prefix, 'NOT ' if invert else '', var_param_name)
-                var_query_param['name'] = var_param_name
-                var_query_param['parameterType']['type'] = 'ARRAY'
-                var_query_param['parameterValue'] = {'arrayValues': [{'value': x} for x in values]}
-                var_query_param['parameterType']['arrayType'] = {'type': 'STRING'}
+                var_query_param = ArrayQueryParameter(var_param_name, 'STRING', [{'value': x} for x in values])
 
             filter_set.append('({})'.format(filter_string))
             result['parameters'].append(gene_query_param)
@@ -589,11 +522,9 @@ class BigQuerySupport(BigQueryABC):
 
             filter_string = ''
             param_name = attr + '{}'.format('_{}'.format(param_suffix) if param_suffix else '')
-            query_param = {
-                'name': param_name,
-                'parameterType': {'type': parameter_type},
-                'parameterValue': {}
-            }
+
+            query_param = ScalarQueryParameter(param_name, parameter_type)
+
             if 'None' in values:
                 values.remove('None')
                 filter_string = "{}{} IS NULL".format('' if not field_prefix else field_prefix, attr)
@@ -603,14 +534,14 @@ class BigQuerySupport(BigQueryABC):
                     filter_string += " OR "
                 if len(values) == 1:
                     # Scalar param
-                    query_param['parameterValue']['value'] = values[0]
-                    if query_param['parameterType']['type'] == 'STRING':
+                    query_param.value = values[0]
+                    if query_param.type == 'STRING':
                         if '%' in values[0] or case_insens:
                             filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
                         else:
                             filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
                                                                  param_name)
-                    elif query_param['parameterType']['type'] == 'INT64':
+                    elif query_param.type == 'INT64':
                         if attr.endswith('_gt') or attr.endswith('_gte'):
                             filter_string += "{}{} >{} @{}".format(
                                 '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
@@ -639,32 +570,19 @@ class BigQuerySupport(BigQueryABC):
                     query_param_1 = query_param
                     query_param_2 = copy.deepcopy(query_param)
                     query_param = [query_param_1, query_param_2, ]
-                    query_param_1['name'] = param_name_1
-                    query_param_1['parameterValue']['value'] = values[0]
-                    query_param_2['name'] = param_name_2
-                    query_param_2['parameterValue']['value'] = values[1]
+                    query_param_1.name = param_name_1
+                    query_param_1.value = values[0]
+                    query_param_2.name = param_name_2
+                    query_param_2.value = values[1]
 
                 else:
                     # Array param
-                    query_param['parameterType']['type'] = "ARRAY"
-                    query_param['parameterType']['arrayType'] = {
-                        'type': parameter_type
-                    }
-                    query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values]}
-
+                    query_param = ArrayQueryParameter(param_name, parameter_typem, [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values])
                     filter_string += "LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
                 filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
-                result['count_params'][param_name] = {
-                    'name': param_name+'_filtering',
-                    'parameterType': {
-                        'type': 'STRING'
-                    },
-                    'parameterValue': {
-                        'value': 'filtering'
-                    }
-                }
+                result['count_params'][param_name] = ScalarQueryParameter(param_name+'_filtering', 'STRING', 'filtering')
                 result['parameters'].append(result['count_params'][param_name])
 
             filter_set.append('({})'.format(filter_string))
