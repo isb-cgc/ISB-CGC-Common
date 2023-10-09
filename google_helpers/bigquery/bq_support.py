@@ -68,37 +68,22 @@ class BigQuerySupport(BigQueryABC):
     def _full_table_id(self):
         return "{}.{}.{}".format(project=self.project_id, dataset=self.dataset_id, table=self.table_id)
 
-    def _build_request_body_from_rows(self, rows):
-        insertable_rows = []
-        for row in rows:
-            insertable_rows.append({
-                'json': row
-            })
-
-        return {
-            "rows": insertable_rows
-        }
-
     def _streaming_insert(self, rows):
 
-        table_data = self.bq_client.tabledata()
         index = 0
         next = 0
         response = None
+        next_rows = None
 
         while next is not None and index < len(rows):
             next = MAX_INSERT+index
-            body = None
             if next > len(rows):
                 next = None
-                body = self._build_request_body_from_rows(rows[index:])
+                next_rows = copy.deepcopy(rows[index:])
             else:
-                body = self._build_request_body_from_rows(rows[index:next])
+                next_rows = copy.deepcopy(rows[index:next])
 
-            response = table_data.insertAll(projectId=self.project_id,
-                                            datasetId=self.dataset_id,
-                                            tableId=self.table_id,
-                                            body=body).execute(num_retries=5)
+            response = self.bq_client.insert_rows(self._full_table_id(), rows)
             index = next
 
         return response
@@ -268,29 +253,29 @@ class BigQuerySupport(BigQueryABC):
         if cost_est:
             if query_job.done():
                 return {
-                    'total_bytes_billed': query_job['statistics']['query']['totalBytesBilled'],
-                    'total_bytes_processed': query_job['statistics']['query']['totalBytesProcessed']
+                    'total_bytes_billed': query_job.total_bytes_billed,
+                    'total_bytes_processed': query_job.total_bytes_processed
                 }
 
         job_is_done_ = self.await_job_is_done(query_job)
 
         # Parse the final disposition
-        if job_is_done_ and job_is_done_['status']['state'] == 'DONE':
-            if 'status' in job_is_done_ and 'errors' in job_is_done_['status']:
-                logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_['status']['errors'])))
+        if job_is_done_.done():
+            if query_job.errors or query_job.error_result:
+                job_is_done_.error_result and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.error_result)))
+                job_is_done_.errors and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.errors)))
                 logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
-                query_results = self.fetch_job_results(query_job['jobReference'])
+                query_results = self.fetch_job_results(query_job)
                 logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
         else:
-            logger.error("[ERROR] Query took longer than the allowed time to execute--" +
-                         "if you check job ID {} manually you can wait for it to finish.".format(job_id))
+            logger.error("[ERROR] Query took longer than the allowed time to execute. " +
+                         "If you check job ID {} manually you can wait for it to finish.".format(job_id))
             logger.error("[ERROR] Timed out query: {}".format(query))
 
-        if 'statistics' in job_is_done_ and 'query' in job_is_done_['statistics'] and 'timeline' in \
-                job_is_done_['statistics']['query']:
-            logger.debug("Elapsed: {}".format(str(job_is_done_['statistics']['query']['timeline'][-1]['elapsedMs'])))
+        if job_is_done_.timeline and len(job_is_done_.timeline):
+            logger.debug("Elapsed: {}".format(str(job_is_done_.timeline[-1].elapsed_ms)))
 
         return query_results
 
@@ -307,24 +292,19 @@ class BigQuerySupport(BigQueryABC):
         return query_job
 
     # Fetch the results of a job based on the reference provided
-    def fetch_job_results(self, query_job):
+    # fetch_size: maximum number of rows to fetch per API call (overrides API default)
+    def fetch_job_results(self, query_job, fetch_size=None):
         result = []
         page_token = None
 
-        while True:
-            page = self.bq_client.jobs().getQueryResults(
-                pageToken=page_token,
-                **job_ref).execute(num_retries=2)
-
-            if int(page['totalRows']) == 0:
-                break
-
-            rows = page['rows']
-            result.extend(rows)
-
-            page_token = page.get('pageToken')
-            if not page_token:
-                break
+        not_done = True
+        next_page_token = None
+        while not_done:
+            row_iter = bq_client.list_rows(query_job.destination, max_results=fetch_size, page_token=next_page_token)
+            for x in row_iter:
+                result.extend(x)
+            next_page_token = row_iter.next_page_token
+            not_done = next_page_token is not None
 
         return result
 
@@ -397,7 +377,7 @@ class BigQuerySupport(BigQueryABC):
         bqs = cls(None, None, None)
         results = bq_client.get_table(query_job.destination)
 
-        return results.schema
+        return [{'name': x.name, 'type': x.field_type} for x in results.schema]
     
     # Method for submitting a group of jobs and awaiting the results of the whole set
     @classmethod

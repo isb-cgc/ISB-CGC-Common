@@ -129,42 +129,6 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         self.bucket_path = bucket_path
         self.file_name = file_name
 
-    def _build_request_body_from_rows(self, rows):
-        insertable_rows = []
-        for row in rows:
-            insertable_rows.append({
-                'json': row
-            })
-
-        return {
-            "rows": insertable_rows
-        }
-
-    def _streaming_insert(self, rows):
-        bq_client = bigquery.Client()
-        table_data = bq_client.tabledata()
-
-        index = 0
-        next = 0
-
-        logger.info("[STATUS] Beginning row stream...")
-        while index < len(rows) and next is not None:
-            next = MAX_INSERT+index
-            body = None
-            if next > len(rows):
-                next = None
-                body = self._build_request_body_from_rows(rows[index:])
-            else:
-                body = self._build_request_body_from_rows(rows[index:next])
-
-            response = table_data.insertAll(projectId=self.project_id,
-                                            datasetId=self.dataset_id,
-                                            tableId=self.table_id,
-                                            body=body).execute()
-            index = next
-        logger.info("[STATUS] ...done.")
-
-        return response
 
     def _table_to_gcs(self, file_format, dataset_and_table, export_type, table_job_id=None):
 

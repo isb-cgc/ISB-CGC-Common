@@ -963,18 +963,17 @@ def get_full_sample_metadata(barcodes):
             ), search_clause['parameters'])
 
             bq_results = BigQuerySupport.wait_for_done_and_get_results(sample_job)
-            result_schema = BigQuerySupport.get_result_schema(sample_job['jobReference'])
 
             skip = ['endpoint_type', 'metadata_clinical_id', 'metadata_biospecimen_id', 'sb', 'cb', 'case_barcode']
 
             for row in bq_results:
-                items[row['f'][0]['v']] = {
-                    'sample_barcode': row['f'][0]['v'],
-                    'case_barcode': row['f'][1]['v'],
+                items[row.get("sample_barcode", "N/A")] = {
+                    'sample_barcode': row.get("sample_barcode", "N/A"),
+                    'case_barcode': row.get("case_barcode", "N/A"),
                     'data_details': {
                         x.build: [] for x in program_data_tables
                     },
-                    'biospecimen_data': {result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip}
+                    'biospecimen_data': {key: val for key, val in row.items() if key not in skip}
                 }
 
             if len(list(items.keys())):
@@ -1009,20 +1008,18 @@ def get_full_sample_metadata(barcodes):
                     for row in bq_results:
                         # A result in the file tables which wasn't in the biospecimen table isn't unheard of
                         # (eg. pathology slides)
-                        if row['f'][0]['v'] not in items:
-                            items[row['f'][0]['v']] = {
-                                'sample_barcode': row['f'][0]['v'],
-                                'case_barcode': row['f'][1]['v'],
+                        if row.get("sample_barcode", "N/A") not in items:
+                            items[row.get("sample_barcode", "N/A")] = {
+                                'sample_barcode': row.get("sample_barcode", "N/A"),
+                                'case_barcode': row.get("case_barcode", "N/A"),
                                 'data_details': {
                                     x.build: [] for x in program_data_tables
                                 },
                             }
 
-                        items[row['f'][0]['v']]['data_details'][bq_result['build']].append({
-                            result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip
+                        items[row.get("sample_barcode", "N/A")]['data_details'][bq_result['build']].append({
+                            key: val for key, val in row.items() if key not in skip
                         })
-
-                # TODO: Once we have aliquots in the database again, add those here
 
                 result['samples'] = [item for item in list(items.values())]
                 result['total_found'] += len(result['samples'])
@@ -1080,18 +1077,17 @@ def get_full_case_metadata(barcodes):
                 bq_search['filter_string']), bq_search['parameters'])
 
             bq_results = BigQuerySupport.wait_for_done_and_get_results(case_job)
-            result_schema = BigQuerySupport.get_result_schema(case_job['jobReference'])
 
             skip = ['endpoint_type', 'metadata_clinical_id', 'metadata_biospecimen_id', 'cb', 'summary_file_count']
 
             for row in bq_results:
-                items[row['f'][0]['v']] = {
-                    'case_barcode': row['f'][0]['v'],
+                items[row.get("case_barcode", "N/A")] = {
+                    'case_barcode': row.get("case_barcode", "N/A"),
                     'samples': [],
                     'data_details': {
                         x.build: [] for x in program_data_tables
                     },
-                    'clinlical_data': {result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip}
+                    'clinlical_data': {key: val for key, val in row.items() if key not in skip}
                 }
 
             if len(list(items.keys())):
@@ -1134,14 +1130,12 @@ def get_full_case_metadata(barcodes):
                     bq_results = bq_result['bq_results']
                     if bq_result['query_type'] == 'samples':
                         for row in bq_results:
-                            items[row['f'][0]['v']]['samples'].append(row['f'][1]['v'])
+                            items[row.get("case_barcode","N/A")]['samples'].append(row.append("sample_barcode","N/A"))
                     else:
                         for row in bq_results:
-                            items[row['f'][0]['v']]['data_details'][bq_result['build']].append({
-                                result_schema['fields'][index]['name']: x['v'] for index, x in enumerate(row['f'], start=0) if result_schema['fields'][index]['name'] not in skip
+                            items[row.get("case_barcode","N/A")]['data_details'][bq_result['build']].append({
+                                key: val for key, val in row.items() if key not in skip
                             })
-
-                # TODO: Once we have aliquots in the database again, add those here
 
                 result['total_found'] += 1
                 result['cases'] = [item for item in list(items.values())]
@@ -1221,7 +1215,7 @@ def get_acls_by_uuid(uuids):
 
     results = BigQuerySupport.execute_query_and_fetch_results(query, where_clause['parameters'])
 
-    acls = [row['f'][0]['v'] for row in results]
+    acls = [row.get("acl") for row in results]
 
     return acls
 
@@ -1255,11 +1249,11 @@ def get_paths_by_uuid(uuids):
     if results:
         for row in results:
             item = {
-                'file_node_id': row['f'][0]['v'],
-                'gcs_path': row['f'][1]['v']
+                'file_node_id': row.get("file_node_id"),
+                'gcs_path': row.get("gcs_path")
             }
-            if row['f'][2]['v'] is not None and not row['f'][2]['v'] == '':
-                item['index_file_path'] = row['f'][2]['v']
+            if row.get("index_file_path", None) and len(row.get("index_file_path")) > 1:
+                item['index_file_path'] = row.get("index_file_path")
             
             paths.append(item)
             
