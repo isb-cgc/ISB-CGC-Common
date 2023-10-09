@@ -228,7 +228,7 @@ class BigQuerySupport(BigQueryABC):
             job_config.use_legacy_sql = False
 
         if self.project_id and self.dataset_id and self.table_id:
-            job_config.destiation = self._full_table_id()
+            job_config.destination = self._full_table_id()
             job_config.write_disposition = write_disposition
 
         if cost_est:
