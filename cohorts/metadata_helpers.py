@@ -809,59 +809,6 @@ def build_where_clause(filters, alt_key_map=False, program=None, for_files=False
 
 
 """
-BigQuery methods
-"""
-def submit_bigquery_job(bq_service, project_id, query_body, batch=False):
-
-    job_data = {
-        'jobReference': {
-            'projectId': project_id,
-            'jobId': str(uuid4())
-        },
-        'configuration': {
-            'query': {
-                'query': query_body,
-                'priority': 'BATCH' if batch else 'INTERACTIVE'
-            }
-        }
-    }
-
-    return bq_service.jobs().insert(
-        projectId=project_id,
-        body=job_data).execute(num_retries=5)
-
-
-def is_bigquery_job_finished(bq_service, project_id, job_id):
-
-    job = bq_service.jobs().get(projectId=project_id,
-                             jobId=job_id).execute()
-
-    return job['status']['state'] == 'DONE'
-
-
-def get_bq_job_results(bq_service, job_reference):
-
-    result = []
-    page_token = None
-
-    while True:
-        page = bq_service.jobs().getQueryResults(
-            pageToken=page_token,
-            **job_reference).execute(num_retries=2)
-
-        if int(page['totalRows']) == 0:
-            break
-
-        rows = page['rows']
-        result.extend(rows)
-
-        page_token = page.get('pageToken')
-        if not page_token:
-            break
-
-    return result
-
-"""
 Display Formatting Methods
 """
 def data_availability_sort(key, value, attr_details):

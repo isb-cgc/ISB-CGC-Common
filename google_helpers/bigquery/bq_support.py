@@ -308,9 +308,6 @@ class BigQuerySupport(BigQueryABC):
 
         return result
 
-    def fetch_job_resource(self, job_ref):
-        return self.bq_client.jobs().get(**job_ref).execute(num_retries=5)
-
     # Add rows to the table specified by project.dataset.table
     # Note that this is a class method therefor the rows must be supplied formatted ready
     # for insertion, build_row will not be called! (build_row is implemented in derived classes only)
@@ -373,9 +370,54 @@ class BigQuerySupport(BigQueryABC):
         return [{'name': x.name, 'type': x.field_type} for x in table.schema]
 
     @classmethod
+    def get_table_preview(cls, projectId, datasetId, tableId, max_rows=8):
+        bqs = cls(None, None, None)
+        dataset = bqs.bq_client.get_dataset("{}.{}".format(projectId, datasetId))
+        is_public = False
+        for access in dataset.access_entries:
+            print(access)
+            if access.role == "READER" and \
+                    ((access.entity_type == "specialGroup" and access.entity_id == "allAuthenticatedUsers") or \
+                        (access.entity_type == "iamMember" and access.entity_id == "allUsers")):
+                is_public = True
+                break
+        if is_public:
+            table = bqs.bq_client.get_table("{}.{}.{}".format(projectId, datasetId, tableId))
+            if table.table_type == 'VIEW' and table.view_query:
+                raw_rows = cls.execute_query_and_fetch_results("""
+                    {view_query}
+                    LIMIT {max}
+                """.format(view_query=table.get("view_query"),max=max_rows))
+
+            else:
+                raw_rows = bqs.bq_client.list_rows("{}.{}.{}".format(projectId, datasetId, tableId), max_results=max_rows)
+
+            if raw_rows.total_rows > 0:
+                result = {
+                    'rows': [{key: val for key, val in x.items() } for x in raw_rows],
+                    'status': 200
+                }
+            else:
+                result = {
+                    'message': 'No record has been found for table {proj_id}.{dataset_id}.{table_id}.'.format(
+                        proj_id=projectId,
+                        dataset_id=datasetId,
+                        table_id=tableId
+                    ),
+                    'status': 404
+                }
+        else:
+            result = {
+                'message': "Preview is not available for this table/view.",
+                'status': 401
+            }
+
+        return result
+
+    @classmethod
     def get_result_schema(cls, query_job):
         bqs = cls(None, None, None)
-        results = bq_client.get_table(query_job.destination)
+        results = bqs.bq_client.get_table(query_job.destination)
 
         return [{'name': x.name, 'type': x.field_type} for x in results.schema]
     

@@ -161,19 +161,19 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
         export_config = ExtractJobConfig(destination_format=file_format, compression="GZIP")
 
-        export_job = bq_client.extract_table(
+        extract_job = bq_client.extract_table(
             source="{}.{}.{}".format(self.project_id,dataset_and_table['dataset_id'],dataset_and_table['table_id']),
             destination_uris=['gs://{}/{}'.format(self.bucket_path, self.file_name)],job_config=export_config
         )
 
-        query_job = self.await_job_is_done(query_job)
+        extract_job = self.await_job_is_done(extract_job)
 
-        logger.debug("[STATUS] extraction job_is_done: {}".format(str(job_is_done)))
+        logger.debug("[STATUS] extraction job_is_done: {}".format(str(extract_job)))
 
-        if query_job.done():
-            if query_job.errors or query_job.error_result:
+        if extract_job.done():
+            if extract_job.errors or export_job.error_result:
                 msg = "Export of {} to GCS bucket {} was unsuccessful, reason: {}".format(
-                    export_type, self.bucket_path, str(job_is_done.errors))
+                    export_type, self.bucket_path, str(extract_job.errors or extract_job.error_result))
                 logger.error("[ERROR] {}".format(msg))
                 result['status'] = 'error'
                 result['message'] = "Unable to export {} to bucket {}--please contact the administrator.".format(
@@ -183,10 +183,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 exported_file = get_storage_resource(True).objects().get(bucket=self.bucket_path, object=self.file_name).execute()
                 if not exported_file:
                     msg = "Export file {}/{} not found".format(self.bucket_path, self.file_name)
-                    logger.error("[ERROR] ".format({msg}))
-                    export_result = bq_client.jobs().get(projectId=settings.BIGQUERY_PROJECT_ID, jobId=job_id).execute()
-                    if 'errors' in export_result:
-                        logger.error('[ERROR] Errors seen: {}'.format(export_result['errors'][0]['message']))
+                    logger.error("[ERROR] ".format(msg))
                     result['status'] = 'error'
                     result['message'] = "Unable to export {} to file {}/{}--please contact the administrator.".format(
                         export_type, self.bucket_path, self.file_name)
