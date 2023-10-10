@@ -71,7 +71,8 @@ def collections_list_api(request):
                     "collection_id": collection.collection_id,
                     "date_updated": collection.date_updated,
                     "description": collection.description,
-                    "doi": collection.doi,
+                    "source_doi": collection.doi,
+                    "source_url": collection.source_url,
                     "image_types": collection.image_types,
                     "location": collection.location,
                     "species": collection.species,
@@ -113,16 +114,20 @@ def analysis_results_list_api(request):
 
         for collection in collections:
             data = {
-                "active": collection.active,
+                # "active": collection.active,
+                "analysis_result_id": collection.collection_id,
                 "analysisArtifacts": collection.analysis_artifacts,
                 "cancer_type": collection.cancer_type,
                 "collections": collection.collections,
                 "date_updated": collection.date_updated,
-                "description": collection.name,
+                "description": collection.description,
                 "doi": collection.doi,
                 "location": collection.location,
-                "subject_count": collection.subject_count,
-                "idc_data_versions": ["1.0"] if data_version.version_number=='1.0' else ["1.0","2.0"]}
+                "subjects": collection.subject_count,
+                "title": collection.name,
+
+                # "idc_data_versions": ["1.0"] if data_version.version_number=='1.0' else ["1.0","2.0"]
+            }
             collections_info['analysisResults'].append(data)
 
 
@@ -144,46 +149,15 @@ def attributes_list_api(request):
 
     data_version = get_idc_data_version('')
 
-    try:
-        data_source_name = request.GET.get('data_source')
-        if data_source_name:
-            if data_source_name == "idc-dev.metadata.dicom_pivot_wave0":
-                raise ObjectDoesNotExist
-            if not DataSource.objects.filter(name=data_source_name):
-                raise ObjectDoesNotExist
-
-    except ObjectDoesNotExist:
-        return JsonResponse(
-            dict(
-                message="The  data source, {}, is not part of the specified version {}".format(
-                    data_source_name, data_version.version_number),
-                code=400
-            )
-        )
-
     response = {"idc_data_version": data_version.version_number,
                 "data_sources": []}
 
-    if data_version.active:
-        if data_source_name:
-            sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B') \
-                .filter(name=data_source_name).distinct()
-        else:
-            sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(
-                source_type='B').distinct()
-    else:
-        if data_source_name:
-            sources = data_version.dataversion_set.all().get_data_sources().filter(source_type='B') \
-                .filter(name=data_source_name).distinct()
-        else:
-            sources = data_version.dataversion_set.all().get_data_sources().\
-                exclude(name="idc-dev.metadata.dicom_pivot_wave0").filter(source_type='B').distinct()
-
-
+    sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(
+        source_type='B').distinct()
 
     for source in sources:
-        attributes = source.get_attr(for_faceting=False).filter(default_ui_display=True)
-
+        # attributes = source.get_attr(for_faceting=False).filter(default_ui_display=True)
+        attributes = sorted(source.get_attr(for_faceting=False).filter(default_ui_display=True), key=lambda d: d.name.lower())
         attributes_info = []
         for attribute in attributes:
             if 'clinical_' in attribute.name:
@@ -191,20 +165,50 @@ def attributes_list_api(request):
             attribute_info = {
                 "name": attribute.name,
                 "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
-                "active": attribute.active,
+                # "active": attribute.active,
                 "units": attribute.units,
             }
+            # if attribute_info['data_type'] in ['Categorical String', 'Categorical Integer']:
+            #     values = attribute.get_display_values()
+            #     attribute_info['accepted_values'] = values
+            # else:
+            #     attribute_info['accepted_values'] = []
+            #
             attributes_info.append(attribute_info)
             if attribute_info['data_type'] == 'Continuous Numeric':
                 for suffix in ['lt', 'lte', 'btw', 'ebtw', 'ebtwe', 'btwe', 'gte', 'gt']:
                     attribute_info_copy = dict(attribute_info)
                     attribute_info_copy['name'] = '{}_{}'.format(attribute.name, suffix)
+                    attribute_info_copy['categorical_values'] = []
                     attributes_info.append(attribute_info_copy)
         data_source = {
             "data_source": source.name,
             'filters': attributes_info
         }
         response["data_sources"].append(data_source)
+    return JsonResponse(response)
+
+
+@api_auth
+@require_http_methods(["GET"])
+def queryfields_list_api(request):
+    sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True,
+                                                                                  source_type=DataSource.BIGQUERY)
+    image_sources = sources.prefetch_related('data_sets').filter(data_sets__data_type=DataSetType.IMAGE_DATA)
+    image_source_attr = image_sources.get_source_attrs(for_faceting=False, active_only=True)
+    fields = image_source_attr['list']
+    fields.extend(
+            ["counts",
+            "sizes",
+            "PatientAge",
+            "PatientSex",
+            "PatientSize",
+            "PatientWeight"])
+
+    fields.sort(key=str.casefold)
+    response = {
+            "queryFields": fields
+        }
 
 
     return JsonResponse(response)
