@@ -42,7 +42,7 @@ BQ_ATTEMPT_MAX = 10
 
 debug = settings.DEBUG # RO global for this file
 
-BLACKLIST_RE = settings.BLACKLIST_RE
+DENYLIST_RE = settings.DENYLIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger('main_logger')

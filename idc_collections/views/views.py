@@ -44,7 +44,7 @@ import logging
 
 logger = logging.getLogger('main_logger')
 
-BLACKLIST_RE = settings.BLACKLIST_RE
+DENYLIST_RE = settings.DENYLIST_RE
 
 
 def collection_list(request):
