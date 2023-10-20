@@ -109,7 +109,7 @@ class Program(models.Model):
         return self.name
 
 
-# A data version represents a given release of data, eg. GDC Rel20 or TCIA 2019
+# A data version represents a given release of data, eg. GDC Rel20 or IDC v15
 class DataVersion(models.Model):
     FILE_DATA = 'F'
     IMAGE_DATA = 'I'
@@ -117,13 +117,15 @@ class DataVersion(models.Model):
     BIOSPECIMEN_DATA = 'B'
     MUTATION_DATA = 'M'
     PROTEIN_DATA = 'P'
+    FILE_TYPE_DATA = 'T'
     DATA_TYPES = (
         (FILE_DATA, 'File Data'),
         (IMAGE_DATA, 'Image Data'),
         (CLINICAL_DATA, 'Clinical Data'),
         (BIOSPECIMEN_DATA, 'Biospecimen Data'),
         (MUTATION_DATA, 'Mutation Data'),
-        (PROTEIN_DATA, 'Protein Data')
+        (PROTEIN_DATA, 'Protein Data'),
+        (FILE_TYPE_DATA, 'File Type Data')
     )
     DATA_TYPE_DICT = {
         FILE_DATA: 'File Data',
@@ -131,7 +133,8 @@ class DataVersion(models.Model):
         CLINICAL_DATA: 'Clinical Data',
         BIOSPECIMEN_DATA: 'Biospecimen Data',
         MUTATION_DATA: 'Mutation Data',
-        PROTEIN_DATA: 'Protein Data'
+        PROTEIN_DATA: 'Protein Data',
+        FILE_TYPE_DATA: 'File Type Data'
     }
     SET_TYPES = {
         CLINICAL_DATA: 'case_data',
@@ -139,7 +142,8 @@ class DataVersion(models.Model):
         IMAGE_DATA: 'image_data',
         FILE_DATA: 'file_data',
         MUTATION_DATA: 'molecular_data',
-        PROTEIN_DATA: 'protein_data'
+        PROTEIN_DATA: 'protein_data',
+        FILE_TYPE_DATA: 'file_data'
     }
     version = models.CharField(max_length=16, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
@@ -591,6 +595,7 @@ class Attribute(models.Model):
     preformatted_values = models.BooleanField(default=False)
     default_ui_display = models.BooleanField(default=True)
     data_sources = models.ManyToManyField(DataSource)
+    programs = models.ManyToManyField(Program)
     units = models.CharField(max_length=256, blank=True, null=True)
     objects = AttributeManager()
 
@@ -618,6 +623,9 @@ class Attribute(models.Model):
             q_obj &= Q(source_type=source_type)
 
         return self.data_sources.prefetch_related('version').filter(q_obj).values_list('name', flat=True)
+
+    def get_programs(self):
+        return self.programs.values_list('name', flat=True)
 
     def get_ranges(self):
         return self.attribute_ranges_set.all()

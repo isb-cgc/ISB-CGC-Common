@@ -59,8 +59,6 @@ from .utils import delete_cohort as utils_delete_cohort
 
 BQ_ATTEMPT_MAX = 10
 
-TCGA_PROJECT_SET = fetch_isbcgc_project_set()
-
 debug = settings.DEBUG # RO global for this file
 
 MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
@@ -69,8 +67,6 @@ BLACKLIST_RE = settings.BLACKLIST_RE
 BQ_SERVICE = None
 
 logger = logging.getLogger('main_logger')
-
-USER_DATA_ON = settings.USER_DATA_ON
 
 def convert(data):
     if isinstance(data, basestring):
@@ -81,200 +77,6 @@ def convert(data):
         return type(data)(list(map(convert, data)))
     else:
         return data
-
-def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR', versions=None, source_type=DataSource.SOLR):
-    if program_id is None and cohort_id is None:
-        # We must always have a program_id or a cohort_id - we cannot have neither, because then
-        # we have no way to know where to source our samples from
-        raise Exception("No Program or Cohort ID was provided when trying to obtain sample and case lists!")
-
-    if inc_filters and program_id is None:
-        # You cannot filter samples without specifying the program they apply to
-        raise Exception("Filters were supplied, but no program was indicated - you cannot filter samples without knowing the program!")
-
-    samples_and_cases = {'samples': [], 'cases': [], 'project_counts': {}}
-
-
-    comb_mut_filters = comb_mut_filters.upper()
-
-    mutation_filters = None
-    mutation_build = None
-    filters = {}
-
-    results = { 'programs': {} }
-
-    try:
-        start = time.time()
-
-        # Divide our filters into 'mutation' and 'non-mutation' sets
-        if inc_filters:
-            for key in inc_filters:
-                if 'data_type_availability' in key:
-                        filters[key] = inc_filters[key]
-                elif 'MUT:' in key:
-                    if not mutation_filters:
-                        mutation_filters = {}
-                    mutation_filters[key] = inc_filters[key]
-                    if not mutation_build:
-                        mutation_build = key.split(":")[1]
-                else:
-                    filters[key.split(':')[-1]] = inc_filters[key]
-
-        versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
-            active=True)
-
-        programs = Program.objects.filter(active=1,is_public=1,owner=User.objects.get(is_superuser=1,is_active=1,is_staff=1))
-
-        if program_id:
-            programs = programs.filter(id=program_id)
-
-        if cohort_id:
-            if not program_id:
-                programs = programs.filter(id__in=Cohort.objects.get(id=cohort_id).get_programs())
-
-        for prog in programs:
-            results['programs'][prog.id] = {
-                'sets': {},
-                'totals': {}
-            }
-            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[
-                DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA,
-                DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA
-            ])
-            list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.BIOSPECIMEN_DATA)
-            if not len(list_versions):
-                # If there is no biospecimen version to pull a sample list from, use clinical
-                list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
-            all_sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
-            source = prog.get_data_sources(source_type=source_type).filter(version__in=list_versions).first()
-            if not source:
-                # The Biospec source might only exist as a source_type other than what we'd like--in that case, fall
-                # back on Clinical
-                source = prog.get_data_sources(source_type=source_type).filter(
-                    version__in=prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
-                ).first()
-            # This code is structured to allow for a filterset of the type
-            # {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only filter one program as a time.
-            prog_filters = filters
-            prog_mut_filters = mutation_filters
-            attrs = all_sources.get_source_attrs(for_faceting=False)
-
-            solr_query = build_solr_query(prog_filters, with_tags_for_ex=False, subq_join_field=source.shared_id_col) if prog_filters else None
-            solr_mut_query = build_solr_query(
-                prog_mut_filters, with_tags_for_ex=False, subq_join_field=source.shared_id_col,
-                comb_with=comb_mut_filters
-            ) if prog_mut_filters else None
-            if solr_mut_query:
-                if comb_mut_filters == 'OR':
-                    if not solr_query:
-                        solr_query = {'queries': {}}
-                    solr_query['queries']['MUT:{}:Variant_Classification'.format(mutation_build)] = solr_mut_query[
-                        'full_query_str']
-                else:
-                    if solr_query:
-                        solr_query['queries'].update(solr_mut_query['queries'])
-                    else:
-                        solr_query = solr_mut_query
-            query_set = []
-
-            if solr_query:
-                for attr in solr_query['queries']:
-                    attr_name = 'Variant_Classification' if 'MUT:' in attr else re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
-                    # If an attribute is not in this program's attribute listing, then it's ignored
-                    if attr_name in attrs['list']:
-                        # If the attribute is from this source, just add the query
-                        mutation_filter_matches_source = (
-                                (source.version.data_type != DataVersion.MUTATION_DATA) or
-                                (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower()))
-                        )
-                        if attr_name in attrs['sources'][source.id]['list'] and mutation_filter_matches_source:
-                            query_set.append(solr_query['queries'][attr])
-                        # If it's in another source for this program, we need to join on that source
-                        else:
-                            for ds in all_sources:
-                                mutation_filter_matches_source = (
-                                    (ds.version.data_type != DataVersion.MUTATION_DATA) or (
-                                       attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), ds.name.lower())
-                                    )
-                                )
-                                if ds.id != source.id and attr_name in attrs['sources'][ds.id]['list'] and mutation_filter_matches_source:
-                                    query_set.append(("{!join %s}" % "from={} fromIndex={} to={}".format(
-                                        ds.shared_id_col, ds.name, source.shared_id_col
-                                    )) + solr_query['queries'][attr])
-                    else:
-                        logger.warning("[WARNING] Attribute {} not found in program {}".format(attr_name,prog.name))
-
-            if cohort_id:
-                source_name = source.name.lower()
-                if source_name.startswith('files'):
-                    cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
-                    query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
-                else:
-                    cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                    query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
-
-            samples_and_cases = query_solr_and_format_result({
-                'collection': source.name,
-                'fqs': query_set,
-                'limit': 100000,
-                'counts_only': False,
-                'fields': ['sample_barcode', 'case_barcode', 'project_short_name']
-            })
-
-        stop = time.time()
-
-        results['elapsed_time'] = "{}s".format(str(stop-start))
-
-    except Exception as e:
-        logger.error("[ERROR] While fetching case and sample list:")
-        logger.exception(e)
-
-    return samples_and_cases
-
-
-def get_sample_case_list(user, inc_filters=None, cohort_id=None, program_id=None, build='HG19', comb_mut_filters='OR'):
-    filters = {}
-    try:
-        if inc_filters is not None:
-            id_to_name = {str(y['id']): x for x,y in fetch_program_attr(program_id, return_copy=False).items()}
-            try:
-                for key in inc_filters:
-                    attr = id_to_name.get(str(key),key)
-                    if not validate_filter_key(attr, program_id):
-                        raise Exception('Invalid filter key received: ' + attr)
-                    this_filter = inc_filters[key]['values']
-                    if attr not in filters:
-                        filters[attr] = {'values': []}
-                    for value in this_filter:
-                        filters[attr]['values'].append(value)
-            except Exception as e:
-                logger.exception(e)
-                raise Exception('Filters must be a valid JSON formatted object of filter sets, with value lists keyed on filter names.')
-
-        samples_cases_projects = get_sample_case_list_solr(user, filters, cohort_id, program_id, comb_mut_filters)
-        public_projects = Project.get_public_projects(by_name=True)
-        items = []
-        for x in samples_cases_projects['docs']:
-            proj = x['project_short_name']
-            if type(x['project_short_name']) is list:
-                proj = proj[0]
-            if type(x['sample_barcode']) is not list:
-                x['sample_barcode'] = [x['sample_barcode']]
-            for sbc in x['sample_barcode']:
-                item = {'sample_barcode': sbc, 'case_barcode': x['case_barcode'], 'project_id': public_projects[proj]['id']}
-                items.append(item)
-
-        samples_and_cases = {
-            'items': items,
-            'cases': list(set([x['case_barcode'] for x in samples_cases_projects['docs']])),
-            'count': samples_cases_projects['numFound']
-        }
-
-        return samples_and_cases
-
-    except Exception as e:
-        logger.error("[ERROR] While getting the sample and case list:")
-        logger.exception(e)
 
 
 # Given a cohort ID, fetch out the unique set of case IDs associated with those samples
@@ -393,60 +195,6 @@ def cohorts_list(request, is_public=False):
                                                         'is_public': is_public,
                                                         'previously_selected_cohort_ids' : previously_selected_cohort_ids
                                                         })
-
-
-@login_required
-def validate_barcodes(request):
-    if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
-
-    try:
-        body_unicode = request.body
-        body = json.loads(body_unicode)
-        barcodes = body['barcodes']
-
-        status = 200
-
-        valid_entries = []
-        invalid_entries = []
-        entries_to_check = []
-        valid_counts = None
-        messages = None
-
-        for entry in barcodes:
-            entry_split = entry.split('{}')
-            barcode_entry = {'case_barcode': entry_split[0], 'sample_barcode': entry_split[1], 'program': entry_split[2]}
-            if (barcode_entry['sample_barcode'] == '' and barcode_entry['case_barcode'] == '') or barcode_entry['program'] == '':
-                # Case barcode is required - this entry isn't valid
-                invalid_entries.append(barcode_entry)
-            else:
-                entries_to_check.append(barcode_entry)
-
-        if len(entries_to_check):
-            result = validate_and_count_barcodes_solr(entries_to_check,request.user)
-            if len(result['valid_barcodes']):
-                valid_entries = result['valid_barcodes']
-                valid_counts = result['counts']
-
-            if len(result['invalid_barcodes']):
-                invalid_entries.extend(result['invalid_barcodes'])
-
-            if len(result['messages']):
-                messages = result['messages']
-
-        # If there were any valid entries, we can call it 200, otherwise we send back 404
-        status = 200 if len(valid_entries) else 404
-
-    except Exception as e:
-        logger.error("[ERROR] While validating barcodes: ")
-        logger.exception(e)
-        status=500
-
-    return JsonResponse({
-        'valid_entries': valid_entries,
-        'invalid_entries': invalid_entries,
-        'counts': valid_counts,
-        'messages': messages
-    }, status=status)
 
 
 def new_cohort(request):

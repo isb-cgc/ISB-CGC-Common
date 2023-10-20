@@ -28,14 +28,11 @@ from metadata_utils import *
 from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Display_Values
 from cohorts.models import Cohort
 from django.contrib.auth.models import User
-from google_helpers.bigquery.service import authorize_credentials_with_Google
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from solr_helpers import build_solr_facets, build_solr_query
 
 BQ_ATTEMPT_MAX = 10
-
-TCGA_PROJECT_SET = fetch_isbcgc_project_set()
 
 debug = settings.DEBUG # RO global for this file
 
@@ -45,10 +42,6 @@ BQ_SERVICE = None
 
 logger = logging.getLogger('main_logger')
 
-USER_DATA_ON = settings.USER_DATA_ON
-BIG_QUERY_API_URL = settings.BASE_API_URL + '/_ah/api/bq_api/v1'
-COHORT_API = settings.BASE_API_URL + '/_ah/api/cohort_api/v1'
-METADATA_API = settings.BASE_API_URL + '/_ah/api/meta_api/'
 
 '''------------------------------------- Begin metadata counting methods -------------------------------------'''
 def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_id=None, versions=None,

@@ -383,43 +383,6 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
         logger.exception(e)
 
 
-# Generate the ISB_CGC_PROJECTS['list'] value set based on the get_isbcgc_project_set sproc
-def fetch_isbcgc_project_set():
-
-    db = None
-    cursor = None
-
-    try:
-        db = get_sql_connection()
-
-        if not ISB_CGC_PROJECTS['list'] or len(ISB_CGC_PROJECTS['list']) <= 0:
-            cursor = db.cursor()
-            cursor.execute("""
-                SELECT COUNT(SPECIFIC_NAME) 
-                FROM INFORMATION_SCHEMA.ROUTINES 
-                WHERE SPECIFIC_NAME = 'get_isbcgc_project_set'
-                    AND ROUTINE_SCHEMA = %s
-                ;""", (settings.DATABASES['default']['NAME'],))
-            # Only try to fetch the project set if the sproc exists
-            if cursor.fetchall()[0][0] > 0:
-                cursor.execute("CALL get_isbcgc_project_set();")
-                ISB_CGC_PROJECTS['list'] = []
-                for row in cursor.fetchall():
-                    ISB_CGC_PROJECTS['list'].append(row[0])
-            else:
-                # Otherwise just warn
-                logger.warning("[WARNING] Stored procedure get_isbcgc_project_set was not found!")
-
-        return copy.deepcopy(ISB_CGC_PROJECTS['list'])
-
-    except Exception as e:
-        logger.error('[ERROR] Exception when fetching the isb-cgc study set:')
-        logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-
 # Fetch a list of all public programs, represented as an object containing their name and ID
 def get_public_programs():
     try:

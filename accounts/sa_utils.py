@@ -44,13 +44,8 @@ from .dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_
 
 logger = logging.getLogger('main_logger')
 
-SERVICE_ACCOUNT_LOG_NAME = settings.SERVICE_ACCOUNT_LOG_NAME
-SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
-GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
-MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
 IDP = settings.IDP
-DCF_SA_REG_LOG_NAME = settings.DCF_SA_REG_LOG_NAME
 
 class SAModes(object):
     REMOVE_ALL = 1
