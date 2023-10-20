@@ -145,7 +145,7 @@ class DataVersion(models.Model):
         PROTEIN_DATA: 'protein_data',
         FILE_TYPE_DATA: 'file_data'
     }
-    version = models.CharField(max_length=16, null=False, blank=False)
+    version = models.CharField(max_length=64, null=False, blank=False)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
     name = models.CharField(max_length=128, null=False, blank=False)
     active = models.BooleanField(default=True)
