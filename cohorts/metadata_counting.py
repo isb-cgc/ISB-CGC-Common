@@ -57,7 +57,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
     solr_facets_filtered = None
     solr_fields = None
     mutation_build = None
-    data_type = data_type or [DataVersion.BIOSPECIMEN_DATA, DataVersion.TYPE_AVAILABILITY_DATA,
+    data_type = data_type or [DataVersion.BIOSPECIMEN_DATA, DataVersion.FILE_TYPE_DATA,
                               DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA]
 
     results = { 'programs': {} }
@@ -81,7 +81,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
 
-        programs = Program.objects.filter(active=1,is_public=1,owner=User.objects.get(is_superuser=1,is_active=1,is_staff=1))
+        programs = Program.objects.filter(active=1,is_public=1)
 
         if program_id:
             programs = programs.filter(id=program_id)
@@ -198,7 +198,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'collection': source.name,
                     'facets': solr_facets,
                     'fqs': query_set,
-                    'unique': source.shared_id_col,
+                    'unique': source.aggregate_level,
                     'fields': solr_fields,
                     'counts_only': False,
                     'limit': limit if with_records else 0

@@ -202,9 +202,9 @@ def new_cohort(request):
 
     try:
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
-        program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
+        program_list = Program.objects.filter(active=True, is_public=True)
 
-        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+        all_nodes, all_programs = DataNode.get_node_programs()
 
         template_values = {
             'request': request,
@@ -237,10 +237,9 @@ def cohort_detail(request, cohort_id):
     logger.info("[STATUS] Called cohort_detail")
     try:
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
-        program_list = Program.objects.filter(active=True, is_public=True, owner=isb_user)
+        program_list = Program.objects.filter(active=True, is_public=True)
 
-        # TODO: get_node_programs() filter by is_public and owner
-        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+        all_nodes, all_programs = DataNode.get_node_programs()
 
         template_values  = {
             'request': request,
@@ -1087,8 +1086,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                         if ma:
                             ma['category'] = cat['value']
 
-            #data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.TYPE_AVAILABILITY_DATA).get_source_attrs(for_ui=True)
-            data_types = fetch_program_data_types(program_id)
+            data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.FILE_TYPE_DATA).get_source_attrs(for_ui=True)
 
             results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
 
@@ -1163,7 +1161,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
             cohort_progs = cohort.get_programs()
             template_values['programs_this_cohort'] = [x.id for x in cohort_progs]
 
-        all_nodes, all_programs = DataNode.get_node_programs(request.user.is_authenticated)
+        all_nodes, all_programs = DataNode.get_node_programs()
         template_values['all_nodes'] = all_nodes
         template_values['all_programs'] = all_programs
 

@@ -118,31 +118,6 @@ MOLECULAR_DISPLAY_STRINGS = {
 # The data is stored to prevent excessive retrieval
 METADATA_ATTR = {}
 
-### METADATA_DATA_TYPES ###
-# Local storage of the metadata data types, values, and their display strings for a program. This dict takes the form:
-# {
-#   <program id>: {
-#       <data type name>: {
-#           'displ_name': <data type display name>,
-#           'values': {
-#               <data type value>: <data type display value>, [...]
-#           }, [...]
-#       }, [...]
-#   }, [...]
-# }
-# The data is stored to prevent excessive retrieval
-METADATA_DATA_TYPES = {}
-
-### METADATA_DATA_TYPES_DISPLAY ###
-# Local storage of the metadata data types, values, and their display strings keyed against the values instead of the
-# types. This dict takes the form:
-# {
-#   <program id>: {
-#       <data type id>: <data type display string>, [...]
-#   }, [...]
-# }
-# The data is stored to prevent excessive retrieval
-METADATA_DATA_TYPES_DISPLAY = {}
 
 # The set of possible values for metadata_data values
 METADATA_DATA_ATTR = {
@@ -191,7 +166,7 @@ def make_id(length):
 
 def hash_program_attrs(prog_name,source_type,for_faceting,data_type_list=None):
     if not data_type_list:
-        data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.TYPE_AVAILABILITY_DATA,DataVersion.MUTATION_DATA]
+        data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.FILE_TYPE_DATA,DataVersion.MUTATION_DATA]
     return str(hash("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list))))
 
 
@@ -298,60 +273,6 @@ def fetch_file_data_attr(type=None):
         logger.exception(e)
 
 
-def fetch_program_data_types(program, for_display=False):
-    try:
-        cursor = None
-        db = None
-        if not program:
-            program = Program.objects.get(name="TCGA")
-        else:
-            if type(program) is str:
-                program = int(program)
-            if type(program) is int:
-                program = Program.objects.get(id=program)
-
-        if program.name in ["FM","OHSU","MMRF", "GPRP"]:
-            logger.info("Data types are not available for these programs.")
-            return {}
-        if program.id not in METADATA_DATA_TYPES or len(METADATA_DATA_TYPES[program.id]) <= 0:
-
-            METADATA_DATA_TYPES[program.id] = {}
-            METADATA_DATA_TYPES_DISPLAY[program.id] = {}
-
-            preformatted_attr = get_preformatted_attr(program.id)
-
-            db = get_sql_connection()
-            cursor = db.cursor()
-            cursor.callproc('get_program_datatypes', (program.id,))
-            for row in cursor.fetchall():
-                if not row[2] in METADATA_DATA_TYPES[program.id]:
-                    METADATA_DATA_TYPES[program.id][row[2]] = {'name': row[2], 'displ_name': format_for_display(row[2]) if row[2] not in preformatted_attr else row[2], 'values': {}}
-                METADATA_DATA_TYPES[program.id][row[2]]['values'][int(row[0])] = ('Available' if row[1] is None else row[1])
-            cursor.close()
-            cursor = db.cursor(MySQLdb.cursors.DictCursor)
-            cursor.callproc('get_program_display_strings', (program.id,))
-
-            for row in cursor.fetchall():
-                if row['value_name'] is None and row['attr_name'] in METADATA_DATA_TYPES[program.id]:
-                    METADATA_DATA_TYPES[program.id][row['attr_name']]['displ_name'] = row['display_string']
-
-            for data_type in METADATA_DATA_TYPES[program.id]:
-                for value in METADATA_DATA_TYPES[program.id][data_type]['values']:
-                    if not str(value) in METADATA_DATA_TYPES_DISPLAY[program.id]:
-                        METADATA_DATA_TYPES_DISPLAY[program.id][str(value)] = METADATA_DATA_TYPES[program.id][data_type]['displ_name'] + ', ' + METADATA_DATA_TYPES[program.id][data_type]['values'][value]
-
-        if for_display:
-            return copy.deepcopy(METADATA_DATA_TYPES_DISPLAY[program.id])
-        return copy.deepcopy(METADATA_DATA_TYPES[program.id])
-
-    except Exception as e:
-        logger.error('[ERROR] Exception while trying to get data types for program #%s:' % str(program))
-        logger.exception(e)
-    finally:
-        if cursor: cursor.close()
-        if db and db.open: db.close()
-
-
 # Returns the list of attributes for a program, as stored in the METADATA_ATTR[<program>] list
 # If a current list is not found, it is retrieved using the get_metadata_attr sproc.
 #
@@ -367,7 +288,7 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
             if type(program) is int:
                 program = Program.objects.get(id=program)
         if not data_type_list:
-            data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.TYPE_AVAILABILITY_DATA,DataVersion.MUTATION_DATA]
+            data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA,DataVersion.MUTATION_DATA]
         attr_set = hash_program_attrs(program.name,source_type,for_faceting,data_type_list)
         if attr_set not in METADATA_ATTR or len(METADATA_ATTR[attr_set]) <= 0:
             logger.debug("Program attrs for {} not found (hash: {}), building cache".format(program.name,attr_set))
@@ -547,9 +468,6 @@ def get_preformatted_values(program=None):
 def validate_filter_key(col, program):
     prog_attr = fetch_program_attr(program, return_copy=False)
 
-    if not program in METADATA_DATA_TYPES:
-        fetch_program_data_types(program)
-
     if not len(METADATA_DATA_ATTR):
         fetch_file_data_attr()
 
@@ -560,7 +478,6 @@ def validate_filter_key(col, program):
         col = col.split(':')[1]
 
     return col in prog_attr \
-           or (col == 'data_type_availability' and METADATA_DATA_TYPES.get(program,None)) \
            or col in METADATA_DATA_ATTR
 
 

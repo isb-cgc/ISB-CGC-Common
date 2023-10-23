@@ -375,7 +375,6 @@ class BigQuerySupport(BigQueryABC):
         dataset = bqs.bq_client.get_dataset("{}.{}".format(projectId, datasetId))
         is_public = False
         for access in dataset.access_entries:
-            print(access)
             if access.role == "READER" and \
                     ((access.entity_type == "specialGroup" and access.entity_id == "allAuthenticatedUsers") or \
                         (access.entity_type == "iamMember" and access.entity_id == "allUsers")):

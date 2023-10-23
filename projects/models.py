@@ -1,10 +1,29 @@
+#
+# Copyright 2015-2023, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import time
 from builtins import object
 import operator
-
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q
 from functools import reduce
+import logging
+
+logger = logging.getLogger('main_logger')
 
 class ProgramQuerySet(models.QuerySet):
     def get_projects(self):
@@ -57,8 +76,17 @@ class Program(models.Model):
     def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
         prog_attrs = {'attrs': {}, 'by_src': {}}
         datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list)
-        attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
-        for attr in attrs['attrs']:
+        ds_attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
+        q_objects = Q()
+        if for_ui is not None:
+            q_objects &= Q(default_ui_display=for_ui)
+        if for_faceting:
+            q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(
+                id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute__id', flat=True)))
+        attrs = self.attribute_set.filter(q_objects)
+        for attr in attrs:
             prog_attrs['attrs'][attr.name] = {
                 'id': attr.id,
                 'name': attr.name,
@@ -68,10 +96,10 @@ class Program(models.Model):
                 'preformatted': bool(attr.preformatted_values)
             }
 
-        for src in attrs['sources']:
+        for src in ds_attrs['sources']:
             prog_attrs['by_src'][src] = {
-                'attrs': attrs['sources'][src]['attrs'],
-                'name': attrs['sources'][src]['name']
+                'attrs': ds_attrs['sources'][src]['attrs'],
+                'name': ds_attrs['sources'][src]['name']
              }
 
         return prog_attrs
@@ -221,7 +249,7 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #   }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, set_type=None, with_set_map=False, active_only=False):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, with_set_map=False, active_only=False):
         start = time.time()
         # Simple string list of attribute names (warning: will not properly resolve for collision)
         attrs = { 'list': None, 'ids': None }
@@ -232,7 +260,6 @@ class DataSourceQuerySet(models.QuerySet):
             attrs['set_map'] = {}
 
         sources = self.all()
-        attr_set_types = Attribute_Set_Type.objects.filter(datasettype=set_type).values_list('attribute',flat=True) if set_type else None
 
         for ds in sources:
             q_objects = Q()
@@ -240,8 +267,6 @@ class DataSourceQuerySet(models.QuerySet):
                 q_objects &= Q(default_ui_display=for_ui)
             if named_set:
                 q_objects &= Q(name__in=named_set)
-            if set_type:
-                q_objects &= Q(id__in=attr_set_types)
             if active_only:
                 q_objects &= Q(active=True)
             if for_faceting:
@@ -257,18 +282,8 @@ class DataSourceQuerySet(models.QuerySet):
                     'attrs': attr_set.distinct(),
                     'id': ds.id,
                     'name': ds.name,
-                    'data_sets': ds.data_sets.all(),
                     'count_col': ds.count_col
                 }
-
-            if with_set_map:
-                attrs['sources'][ds.id]['attr_sets'] = {}
-                for data_set in attrs['sources'][ds.id]['data_sets']:
-                    attrs['sources'][ds.id]['attr_sets'][data_set.id] = attrs['sources'][ds.id]['attrs'].filter(
-                        id__in=Attribute_Set_Type.objects.select_related('datasettype').filter(
-                            datasettype=data_set
-                        ).values_list('attribute',flat=True)
-                    )
 
             if not attrs['list']:
                 attrs['list'] = list(attr_set.values_list('name', flat=True))
@@ -322,6 +337,8 @@ class DataSource(models.Model):
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     programs = models.ManyToManyField(Program)
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
+    count_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
+    aggregate_level = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     objects = DataSourceManager()
 
     def get_set_type(self):
@@ -433,6 +450,7 @@ class DataNode(models.Model):
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
     data_sources = models.ManyToManyField(DataSource)
+    programs = models.ManyToManyField(Program)
     objects = DataNodeManager()
 
     def __str__(self):
