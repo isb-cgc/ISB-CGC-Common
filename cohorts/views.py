@@ -204,7 +204,7 @@ def new_cohort(request):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True)
 
-        all_nodes, all_programs = DataNode.get_node_programs()
+        all_nodes, all_programs = DataNode.get_node_programs([DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA], True)
 
         template_values = {
             'request': request,
@@ -239,7 +239,7 @@ def cohort_detail(request, cohort_id):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True)
 
-        all_nodes, all_programs = DataNode.get_node_programs()
+        all_nodes, all_programs = DataNode.get_node_programs([DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA])
 
         template_values  = {
             'request': request,
@@ -1054,114 +1054,89 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
         public_program = None if program_id == '0' else Program.objects.get(id=program_id, active=True)
         user = request.user
 
-        if public_program:
-            # Public Program
+        # Public Program
+        filters = None
+
+        # If we want to automatically select some filters for a new cohort, do it here
+        if not cohort_id:
+            # Currently we do not select anything by default
             filters = None
 
-            # If we want to automatically select some filters for a new cohort, do it here
-            if not cohort_id:
-                # Currently we do not select anything by default
-                filters = None
+        case_sample_attr = fetch_program_attr(program_id, return_copy=False)
 
-            case_sample_attr = fetch_program_attr(program_id, return_copy=False)
+        #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
+        molecular_attr = {}
+        molecular_attr_builds = None
 
-            #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
-            molecular_attr = {}
-            molecular_attr_builds = None
-
-            if len(public_program.get_data_sources(data_type=DataVersion.MUTATION_DATA)):
-                molecular_attr = {
-                    'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
-                    'attrs': MOLECULAR_ATTR
-                }
-
-                molecular_attr_builds = [
-                    {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in list(BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys()) if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
-                ]
-
-                # Note which attributes are in which categories
-                for cat in molecular_attr['categories']:
-                    for attr in cat['attrs']:
-                        ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
-                        if ma:
-                            ma['category'] = cat['value']
-
-            data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.FILE_TYPE_DATA).get_source_attrs(for_ui=True)
-
-            results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
-
-            # TODO: Eventually we will rewrite our template to not need this, but for now...
-            attr_counts = []
-            data_type_counts = {}
-            for set in results['counts']:
-                for attr in results['counts'][set]:
-                    if attr == 'data_type_availability':
-                        for id,val in results['counts'][set][attr]['values'].items():
-                            attr_name = val['displ_value'].split(' - ')[0]
-                            attr_val = val['displ_value'].split(' - ')[-1]
-                            if attr_name not in data_type_counts:
-                                data_type_counts[attr_name] = copy.deepcopy(results['counts'][set][attr])
-                                data_type_counts[attr_name]['name'] = attr_name.replace(" ","_")
-                                data_type_counts[attr_name]['displ_name'] = attr_name
-                                data_type_counts[attr_name]['values'] = []
-                            val['displ_value'] = attr_val
-                            val['displ_name'] = attr_val
-                            data_type_counts[attr_name]['values'].append(val)
-                    else:
-                        val_list = [y for x, y in results['counts'][set][attr]['values'].items()]
-                        results['counts'][set][attr].update({'values': val_list})
-                        attr_counts.append(results['counts'][set][attr])
-
-            if len(data_type_counts):
-                attr_counts.extend(y for x, y in data_type_counts.items())
-
-            template_values = {
-                'request': request,
-                'attr_counts': attr_counts,
-                'total_samples': int(results['samples']),
-                'clin_attr': case_sample_attr,
-                'molecular_attr': molecular_attr,
-                'molecular_attr_builds': molecular_attr_builds,
-                'data_types': data_types,
-                'metadata_filters': filters or {},
-                'program': public_program,
-                'node_id': node_id,
-                'metadata_counts': results
+        if len(public_program.get_data_sources(data_type=DataVersion.MUTATION_DATA)):
+            molecular_attr = {
+                'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
+                'attrs': MOLECULAR_ATTR
             }
 
-            if cohort_id:
-                template_values['cohort'] = Cohort.objects.get(id=cohort_id)
+            molecular_attr_builds = [
+                {'value': x, 'displ_text': BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['dataset']+':'+BQ_MOLECULAR_ATTR_TABLES[public_program.name][x]['table']} for x in list(BQ_MOLECULAR_ATTR_TABLES[public_program.name].keys()) if BQ_MOLECULAR_ATTR_TABLES[public_program.name][x] is not None
+            ]
 
-        else:
-            # Requesting User Data filter panel
-            template = 'cohorts/user-data.html'
+            # Note which attributes are in which categories
+            for cat in molecular_attr['categories']:
+                for attr in cat['attrs']:
+                    ma = next((x for x in molecular_attr['attrs'] if x['value'] == attr), None)
+                    if ma:
+                        ma['category'] = cat['value']
 
-            filters = None
+        data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.FILE_TYPE_DATA).get_source_attrs(for_ui=True)
 
-            # If we want to automatically select some filters for a new cohort, do it here
-            if not cohort_id:
-                # Currently we do not select anything by default
-                filters = None
+        results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
 
-            results = user_metadata_counts(user, filters, (cohort_id if cohort_id != 0 else None))
+        # TODO: Eventually we will rewrite our template to not need this, but for now...
+        attr_counts = []
+        data_type_counts = {}
+        for set in results['counts']:
+            for attr in results['counts'][set]:
+                if attr == 'data_type_availability':
+                    for id,val in results['counts'][set][attr]['values'].items():
+                        attr_name = val['displ_value'].split(' - ')[0]
+                        attr_val = val['displ_value'].split(' - ')[-1]
+                        if attr_name not in data_type_counts:
+                            data_type_counts[attr_name] = copy.deepcopy(results['counts'][set][attr])
+                            data_type_counts[attr_name]['name'] = attr_name.replace(" ","_")
+                            data_type_counts[attr_name]['displ_name'] = attr_name
+                            data_type_counts[attr_name]['values'] = []
+                        val['displ_value'] = attr_val
+                        val['displ_name'] = attr_val
+                        data_type_counts[attr_name]['values'].append(val)
+                else:
+                    val_list = [y for x, y in results['counts'][set][attr]['values'].items()]
+                    results['counts'][set][attr].update({'values': val_list})
+                    attr_counts.append(results['counts'][set][attr])
 
-            template_values = {
-                'request': request,
-                'attr_counts': results['count'],
-                'total_samples': int(results['total']),
-                'total_cases': int(results['cases']),
-                'metadata_filters': filters or {},
-                'metadata_counts': results,
-                'program': 0,
-                'node_id': 0
-            }
+        if len(data_type_counts):
+            attr_counts.extend(y for x, y in data_type_counts.items())
+
+        template_values = {
+            'request': request,
+            'attr_counts': attr_counts,
+            'total_samples': int(results['samples']),
+            'clin_attr': case_sample_attr,
+            'molecular_attr': molecular_attr,
+            'molecular_attr_builds': molecular_attr_builds,
+            'data_types': data_types,
+            'metadata_filters': filters or {},
+            'program': public_program,
+            'node_id': node_id,
+            'metadata_counts': results
+        }
+
+        if cohort_id:
+            template_values['cohort'] = Cohort.objects.get(id=cohort_id)
 
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id)
             cohort_progs = cohort.get_programs()
             template_values['programs_this_cohort'] = [x.id for x in cohort_progs]
 
-        all_nodes, all_programs = DataNode.get_node_programs()
+        all_nodes, all_programs = DataNode.get_node_programs([DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA],True)
         template_values['all_nodes'] = all_nodes
         template_values['all_programs'] = all_programs
 

@@ -57,8 +57,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
     solr_facets_filtered = None
     solr_fields = None
     mutation_build = None
-    data_type = data_type or [DataVersion.BIOSPECIMEN_DATA, DataVersion.FILE_TYPE_DATA,
-                              DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA]
+    data_type = data_type or [DataVersion.FILE_TYPE_DATA, DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA]
 
     results = { 'programs': {} }
 
@@ -67,9 +66,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         # Divide our filters into 'mutation' and 'non-mutation' sets
         if inc_filters:
             for key in inc_filters:
-                if 'data_type_availability' in key:
-                        filters[key] = inc_filters[key]
-                elif 'MUT:' in key:
+                if 'MUT:' in key:
                     if not mutation_filters:
                         mutation_filters = {}
                     if not mutation_build:
@@ -91,6 +88,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 programs = programs.filter(id__in=Cohort.objects.get(id=cohort_id).get_programs())
 
         for prog in programs:
+            if "program_name" not in filters:
+                filters["program_name"] = [prog.name]
             results['programs'][prog.id] = {
                 'sets': {},
                 'totals': {}
@@ -104,20 +103,22 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             # filter one program as a time.
             prog_filters = filters
             prog_mut_filters = mutation_filters
-            facet_attrs = sources.get_source_attrs(for_ui=True)
-            prog_attrs = sources.get_source_attrs(for_ui=False,for_faceting=False)
+            facet_attrs = prog.attribute_set.all().filter(for_ui=True)
+            prog_attrs = prog.attribute_set.all().filter(for_ui=True)
+            print(prog_attrs)
             count_attrs = sources.filter(
                 version__data_type__in=data_type
-            ).get_source_attrs(for_ui=False,for_faceting=False, named_set=['sample_barcode', 'case_barcode'])
+            ).get_source_attrs(for_ui=True,for_faceting=False, named_set=['sample_barcode', 'case_barcode'])
             field_attr = None if not fields else sources.filter(
                 version__data_type__in=data_type
-            ).get_source_attrs(for_ui=False,for_faceting=False, named_set=fields)
+            ).get_source_attrs(for_ui=True,for_faceting=False, named_set=fields)
             for source in sources:
                 solr_query = build_solr_query(
-                    prog_filters, with_tags_for_ex=with_tags, subq_join_field=source.shared_id_col
+                    prog_filters, with_tags_for_ex=with_tags, subq_join_field="case_barcode", do_not_exclude=["program_name"]
                 ) if prog_filters else None
+                print(solr_query)
                 solr_mut_query = build_solr_query(
-                    prog_mut_filters, with_tags_for_ex=False, subq_join_field=source.shared_id_col,
+                    prog_mut_filters, with_tags_for_ex=False, subq_join_field="case_barcode", do_not_exclude=["program_name"],
                     comb_with=comb_mut_filters
                 ) if prog_mut_filters else None
                 if solr_mut_query:
@@ -138,14 +139,15 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     solr_facets = build_solr_facets(
                         facet_attrs['sources'][source.id]['attrs'],
                         filter_tags=solr_query.get('filter_tags', None) if solr_query else None, unique='case_barcode',
-                        total_facets=total_counts
+                        total_facets=total_counts, include_nulls=False
                     )
-                    if solr_query:
+                    if solr_query and len(filters) > 1:
                         solr_facets_filtered = build_solr_facets(
-                            facet_attrs['sources'][source.id]['attrs'], unique='case_barcode', total_facets=total_counts
+                            facet_attrs['sources'][source.id]['attrs'], unique='case_barcode', total_facets=total_counts, include_nulls=False
                         )
+                    print(solr_facets)
                 elif with_totals:
-                    solr_facets = build_solr_facets({},None,total_facets=total_counts)
+                    solr_facets = build_solr_facets({},None,total_facets=total_counts, include_nulls=False)
                 if with_records and field_attr:
                     solr_fields = list(set(field_attr['list']))
                 query_set = []
@@ -208,7 +210,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         'collection': source.name,
                         'facets': solr_facets_filtered,
                         'fqs': query_set,
-                        'unique': source.shared_id_col,
+                        'unique': "case_barcode",
                         'counts_only': False,
                         'limit': 0
                     })

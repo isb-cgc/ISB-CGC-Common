@@ -210,6 +210,23 @@ class DataSourceQuerySet(models.QuerySet):
             versions[ds.id] = ds.versions.filter(active=active) if active is not None else ds.versions.all()
         return versions
 
+
+    def get_source_nodes(self):
+        sources = self.all().prefetch_related('datanode_set')
+        nodes = None
+        for ds in sources:
+            nodes = nodes | ds.datanode_set.all() if nodes else ds.datanode_set.all()
+        return nodes.distinct()
+
+
+    def get_source_programs(self):
+        sources = self.all().prefetch_related('programs')
+        progs = None
+        for ds in sources:
+            progs = progs | ds.programs.all() if progs else ds.programs.all()
+        return progs.distinct()
+
+
     # Returns a dict of the datasources with their data set types as an array against their ID (pk)
     def get_source_data_types(self):
         data_types = {}
@@ -456,64 +473,54 @@ class DataNode(models.Model):
     def __str__(self):
         return "{} - {}".format(self.short_name, self.name)
 
+
     @classmethod
-    def get_node_programs(cls, source_type=DataSource.SOLR, data_types=None):
+    def get_node_programs(cls, data_types=None, is_active=None):
         by_node_list = []
         by_prog_list = []
-        by_prog_dict = {}
-        data_types = data_types or [DataVersion.CLINICAL_DATA]
-        nodes = cls.objects.filter(active=True)
+        nodes = None
+        programs = None
+
+        if data_types or is_active is not None:
+            q_objects = Q()
+            if is_active is not None:
+                q_objects &= Q(version__active=is_active)
+            if data_types:
+                q_objects &= Q(version__data_type__in=data_types)
+            data_sources = DataSource.objects.select_related('version').filter(q_objects)
+            nodes = data_sources.get_source_nodes().prefetch_related('programs')
+            programs = data_sources.get_source_programs().prefetch_related('datanode_set')
+        else:
+            nodes = cls.objects.filter(active=True).prefetch_related('programs')
+            programs = Program.objects.all().prefetch_related('datanode_set')
 
         for node in nodes:
-            programs = nodes.filter(id=node.id).prefetch_related(
-                'data_sources', 'data_sources__programs', 'data_sources__version'
-             ).filter(data_sources__source_type=source_type, data_sources__programs__active=True,
-                      data_sources__version__data_type__in=data_types).values(
-                'data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description'
-            ).distinct()
+            by_node_list.append({
+                "id": node.id,
+                "name": node.name,
+                "description": node.description,
+                "short_name": node.short_name,
+                "programs": [{
+                    "id": prog.id,
+                    "name": prog.name,
+                    "description": prog.description
+                } for prog in node.programs.all()]
+            })
 
-            if len(programs):
-                program_list = []
-                for prog in programs:
-                    prog_id = prog["data_sources__programs__id"]
-                    prog_name = prog["data_sources__programs__name"]
-                    prog_desc = prog["data_sources__programs__description"]
-
-                    prog_item = {
-                        "id": prog_id,
-                        "name": prog_name,
-                        "description": prog_desc}
-
-                    if not by_prog_dict.get(prog_id):
-                        by_prog_dict[prog_id] = prog_item.copy()
-                        by_prog_dict[prog_id]["nodes"] = []
-
-                    by_prog_dict[prog_id]["nodes"].append({
-                        "id": node.id,
-                        "name": node.name,
-                        "description": node.description,
-                        "short_name": node.short_name
-                    })
-
-                    program_list.append(prog_item)
-
-                by_node_list.append({
+        for program in programs:
+            by_prog_list.append({
+                "id": program.id,
+                "name": program.name,
+                "description": program.description,
+                "nodes": [{
                     "id": node.id,
                     "name": node.name,
                     "description": node.description,
-                    "short_name": node.short_name,
-                    "programs": program_list
-                })
-
-        for prog_id, prog_info in by_prog_dict.items():
-            by_prog_list.append({
-                "id": prog_id,
-                "name": prog_info["name"],
-                "description": prog_info["description"],
-                "nodes": prog_info["nodes"]
+                    "short_name": node.short_name
+                } for node in program.datanode_set.all() if node in nodes]
             })
 
-        return (by_node_list, by_prog_list)
+        return by_node_list, by_prog_list
 
 
 class Project(models.Model):

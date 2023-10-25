@@ -153,7 +153,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             solr_query['queries']['data_format'] = format_query['queries']['data_format']
 
         if do_filter_count:
-            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique)
+            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique, include_nulls=False)
 
         filter_counts = {}
 

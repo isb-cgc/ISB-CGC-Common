@@ -166,7 +166,7 @@ def make_id(length):
 
 def hash_program_attrs(prog_name,source_type,for_faceting,data_type_list=None):
     if not data_type_list:
-        data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.BIOSPECIMEN_DATA,DataVersion.FILE_TYPE_DATA,DataVersion.MUTATION_DATA]
+        data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA,DataVersion.MUTATION_DATA]
     return str(hash("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list))))
 
 
@@ -369,15 +369,16 @@ def fetch_metadata_value_set(program=None):
 
                 for attr in values['values']:
                     for val in values['values'][attr]:
-                        METADATA_ATTR[attr_set]['attrs'][attr]['values'][val] = {
-                            'displ_value': format_for_display(str(val)) if not METADATA_ATTR[attr_set]['attrs'][attr]['preformatted'] else str(val),
-                        }
+                        if attr in METADATA_ATTR[attr_set]['attrs']:
+                            METADATA_ATTR[attr_set]['attrs'][attr]['values'][val] = {
+                                'displ_value': format_for_display(str(val)) if not METADATA_ATTR[attr_set]['attrs'][attr]['preformatted'] else str(val),
+                            }
 
                 for dv in METADATA_ATTR[attr_set]['by_src'][src]['attrs'].get_display_values():
-                    if dv.raw_value not in METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values']:
-                        METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value] = {}
-                    METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
-
+                    if dv.attribute.name in METADATA_ATTR[attr_set]['attrs']:
+                        if dv.raw_value not in METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values']:
+                            METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value] = {}
+                        METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
 
             # Fetch the tooltip strings for Disease Codes
             tooltips = Attribute_Tooltips.objects.select_related('attribute').filter(attribute__active=1)
