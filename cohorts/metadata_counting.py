@@ -98,25 +98,22 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 id__in=versions,
                 data_type__in=data_type
             )
-            sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
+            sources = prog.get_data_sources(source_type=source_type, versions=prog_versions)
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
             # filter one program as a time.
             prog_filters = filters
             prog_mut_filters = mutation_filters
-            facet_attrs = prog.attribute_set.all().filter(for_ui=True)
-            prog_attrs = prog.attribute_set.all().filter(for_ui=True)
-            print(prog_attrs)
-            count_attrs = sources.filter(
-                version__data_type__in=data_type
-            ).get_source_attrs(for_ui=True,for_faceting=False, named_set=['sample_barcode', 'case_barcode'])
-            field_attr = None if not fields else sources.filter(
-                version__data_type__in=data_type
-            ).get_source_attrs(for_ui=True,for_faceting=False, named_set=fields)
+            facet_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_ui=True, versions=prog_versions)
+            prog_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_ui=True, for_faceting=False, versions=prog_versions)
+            count_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_faceting=False, named_set=["sample_barcode", "case_barcode"], versions=prog_versions)
+            print(prog)
+            print(prog_versions)
+            print(count_attrs)
+            field_attr = None if not fields else prog.get_source_attrs(source_type=DataSource.SOLR, for_faceting=False, named_set=fields, versions=prog_versions)
             for source in sources:
                 solr_query = build_solr_query(
                     prog_filters, with_tags_for_ex=with_tags, subq_join_field="case_barcode", do_not_exclude=["program_name"]
                 ) if prog_filters else None
-                print(solr_query)
                 solr_mut_query = build_solr_query(
                     prog_mut_filters, with_tags_for_ex=False, subq_join_field="case_barcode", do_not_exclude=["program_name"],
                     comb_with=comb_mut_filters
@@ -145,7 +142,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         solr_facets_filtered = build_solr_facets(
                             facet_attrs['sources'][source.id]['attrs'], unique='case_barcode', total_facets=total_counts, include_nulls=False
                         )
-                    print(solr_facets)
                 elif with_totals:
                     solr_facets = build_solr_facets({},None,total_facets=total_counts, include_nulls=False)
                 if with_records and field_attr:
@@ -174,7 +170,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                                     )
                                     if ds.id != source.id and attr_name in prog_attrs['sources'][ds.id]['list'] and mutation_filter_matches_source:
                                         join_clause = ("{!join %s}" % "from={} fromIndex={} to={}".format(
-                                            ds.shared_id_col, ds.name, source.shared_id_col
+                                            "case_barcode", ds.name, "case_barcode"
                                         ))
                                         if fq_operand == 'OR' and len(solr_query['queries'].keys()) > 1:
                                             join_clauses.append(join_clause)
@@ -257,7 +253,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         for prog, prog_result in solr_res['programs'].items():
             metadata_attr_values = fetch_metadata_value_set(prog)
-            sample_count = prog_result['totals']['sample_barcode_count']
+            sample_count = prog_result['totals'].get('sample_barcode_count',0)
             case_count = prog_result['totals']['case_barcode_count']
             for set, set_result in prog_result['sets'].items():
                 facets[set] = {}

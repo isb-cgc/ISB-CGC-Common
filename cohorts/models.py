@@ -75,6 +75,7 @@ class Cohort(models.Model):
     shared = models.ManyToManyField(Shared_Resource)
     last_exported_table = models.CharField(max_length=255, null=True, blank=False)
     last_exported_date = models.DateTimeField(null=True ,blank=False)
+    date_created = models.DateTimeField(auto_now_add=True)
     case_count = models.IntegerField(blank=False, null=False, default=0)
     series_count = models.IntegerField(blank=False, null=False, default=0)
     study_count = models.IntegerField(blank=False, null=False, default=0)

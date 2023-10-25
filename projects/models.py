@@ -30,8 +30,91 @@ class ProgramQuerySet(models.QuerySet):
         return Project.objects.select_related('program').filter(program__in=self.all())
 
 
-    def get_data_sources(self):
-        return DataSource.objects.prefetch_related(Prefetch('programs', queryset=self.all())).distinct()
+    def get_data_sources(self, versions=None):
+        sources = None
+        q_obj = Q(version__in=versions) if versions else Q()
+        for prog in self.all():
+            sources = sources | self.datasource_set.filter(q_obj) if sources else self.datasource_set.filter(q_obj)
+        return sources.distinct()
+
+
+    def get_prog_attr(self, filters=None):
+        attrs = None
+        filters = filters or Q()
+        for prog in self.all():
+            attrs = attrs | prog.attribute_set.filter(filters) if attrs else prog.attribute_set.filter(filters)
+        return attrs.distinct()
+
+    #
+    # returns a dictionary of comprehensive information mapping attributes to this set of programs:
+    #
+    # {
+    #   'list': [<String>, ...],
+    #   'ids': [<Integer>, ...],
+    #   'sources': {
+    #      <data source database ID>: {
+    #         'list': [<String>, ...],
+    #         'attrs': [<Attribute>, ...],
+    #         'id': <Integer>,
+    #         'name': <String>,
+    #         'data_sets': [<DataSetType>, ...],
+    #         'count_col': <Integer>
+    #      }
+    #   }
+    #
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, with_set_map=False, active_only=False):
+        start = time.time()
+        # Simple string list of attribute names (warning: will not properly resolve for collision)
+        attrs = { 'list': None, 'ids': None }
+        # Full source-ID dictionary of attributes
+        if by_source:
+            attrs['sources'] = {}
+        if with_set_map:
+            attrs['set_map'] = {}
+
+        q_objects = Q()
+        if for_ui is not None:
+            q_objects &= Q(default_ui_display=for_ui)
+        if named_set:
+            q_objects &= Q(name__in=named_set)
+        if active_only:
+            q_objects &= Q(active=True)
+        if for_faceting:
+            q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute__id', flat=True)))
+
+        sources = self.all().get_data_sources()
+        prog_attr = self.get_prog_attr(q_objects)
+
+        for ds in sources:
+
+            attr_set = ds.attribute_set.filter(q_objects).intersect(prog_attr)
+
+            if by_source:
+                attrs['sources'][ds.id] = {
+                    'list': list(set(attr_set.values_list('name', flat=True))),
+                    'attrs': attr_set.distinct(),
+                    'id': ds.id,
+                    'name': ds.name,
+                    'count_col': ds.count_col
+                }
+
+            if not attrs['list']:
+                attrs['list'] = list(attr_set.values_list('name', flat=True))
+            else:
+                attrs['list'].extend(list(attr_set.values_list('name', flat=True)))
+            if not attrs['ids']:
+                attrs['ids'] = list(attr_set.values_list('id', flat=True))
+            else:
+                attrs['ids'].extend(list(attr_set.values_list('id', flat=True)))
+
+        attrs['list'] = attrs['list'] and list(set(attrs['list']))
+        attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
+        stop = time.time()
+        logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
+
+        return attrs
 
 
 class ProgramManager(models.Manager):
@@ -59,10 +142,12 @@ class Program(models.Model):
     objects = ProgramManager()
     is_public = models.BooleanField(default=False)
 
-    def get_data_sources(self, data_type=None, source_type=None, active=True):
+    def get_data_sources(self, data_type=None, source_type=None, active=True, versions=None):
         q_objects = Q()
         if active is not None:
             q_objects &= Q(version__active=active)
+        if versions is not None:
+            q_objects &= Q(version__in=versions)
         if data_type:
             if type(data_type) is list:
                 q_objects &= Q(version__data_type__in=data_type)
@@ -73,9 +158,66 @@ class Program(models.Model):
 
         return self.datasource_set.prefetch_related('version').filter(q_objects)
 
-    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
+
+    def get_source_attrs(self, for_ui=None, data_type=None, source_type=None, active=True, versions=None, for_faceting=True,
+                  by_source=True, named_set=None, with_set_map=False, active_only=False):
+        start = time.time()
+        # Simple string list of attribute names (warning: will not properly resolve for collision)
+        attrs = { 'list': None, 'ids': None }
+        # Full source-ID dictionary of attributes
+        if by_source:
+            attrs['sources'] = {}
+        if with_set_map:
+            attrs['set_map'] = {}
+
+        q_objects = Q()
+        if for_ui is not None:
+            q_objects &= Q(default_ui_display=for_ui)
+        if named_set:
+            q_objects &= Q(name__in=named_set)
+        if active_only:
+            q_objects &= Q(active=True)
+        if for_faceting:
+            q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute__id', flat=True)))
+
+        sources = self.get_data_sources(data_type=data_type, source_type=source_type, active=active, versions=versions)
+        prog_attr = self.attribute_set.filter(q_objects)
+        print(prog_attr)
+
+        for ds in sources:
+
+            attr_set = ds.attribute_set.filter(q_objects) & prog_attr
+
+            if by_source:
+                attrs['sources'][ds.id] = {
+                    'list': list(set(attr_set.values_list('name', flat=True))),
+                    'attrs': attr_set.distinct(),
+                    'id': ds.id,
+                    'name': ds.name,
+                    'count_col': ds.count_col
+                }
+
+            if not attrs['list']:
+                attrs['list'] = list(attr_set.values_list('name', flat=True))
+            else:
+                attrs['list'].extend(list(attr_set.values_list('name', flat=True)))
+            if not attrs['ids']:
+                attrs['ids'] = list(attr_set.values_list('id', flat=True))
+            else:
+                attrs['ids'].extend(list(attr_set.values_list('id', flat=True)))
+
+        attrs['list'] = attrs['list'] and list(set(attrs['list']))
+        attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
+        stop = time.time()
+        logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
+
+        return attrs
+
+    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True, versions=None):
         prog_attrs = {'attrs': {}, 'by_src': {}}
-        datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list)
+        datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list, versions=versions)
         ds_attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
         q_objects = Q()
         if for_ui is not None:
@@ -98,7 +240,7 @@ class Program(models.Model):
 
         for src in ds_attrs['sources']:
             prog_attrs['by_src'][src] = {
-                'attrs': ds_attrs['sources'][src]['attrs'],
+                'attrs': ds_attrs['sources'][src]['attrs'] & attrs.distinct(),
                 'name': ds_attrs['sources'][src]['name']
              }
 
@@ -266,15 +408,13 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #   }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, with_set_map=False, active_only=False):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, active_only=False):
         start = time.time()
         # Simple string list of attribute names (warning: will not properly resolve for collision)
         attrs = { 'list': None, 'ids': None }
         # Full source-ID dictionary of attributes
         if by_source:
             attrs['sources'] = {}
-        if with_set_map:
-            attrs['set_map'] = {}
 
         sources = self.all()
 
