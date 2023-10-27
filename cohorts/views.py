@@ -55,7 +55,7 @@ from sharing.service import create_share
 from .models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from projects.models import Program, Project, DataNode
 from accounts.sa_utils import auth_dataset_whitelists_for_user
-from .utils import delete_cohort as utils_delete_cohort
+from .utils import delete_cohort as utils_delete_cohort, get_cohort_stats
 
 BQ_ATTEMPT_MAX = 10
 
@@ -147,18 +147,9 @@ def public_cohort_list(request):
 def cohorts_list(request, is_public=False):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    # check to see if user has read access to 'All TCGA Data' cohort
-    isb_superuser = User.objects.get(is_staff=True, is_superuser=True, is_active=True)
-    superuser_perm = Cohort_Perms.objects.get(user=isb_superuser)
-    user_all_data_perm = Cohort_Perms.objects.filter(user=request.user, cohort=superuser_perm.cohort)
-    if not user_all_data_perm:
-        Cohort_Perms.objects.create(user=request.user, cohort=superuser_perm.cohort, perm=Cohort_Perms.READER)
-
-    # add_data_cohort = Cohort.objects.filter(name='All TCGA Data')
-
     users = User.objects.filter(is_superuser=0)
     cohort_perms = Cohort_Perms.objects.filter(user=request.user).values_list('cohort', flat=True)
-    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-last_date_saved')
+    cohorts = Cohort.objects.filter(id__in=cohort_perms, active=True).order_by('-date_created')
 
     cohorts.has_private_cohorts = False
     shared_users = {}
@@ -261,8 +252,6 @@ def cohort_detail(request, cohort_id):
             messages.error(request, 'You do not have permission to view that cohort.')
             return redirect('cohort_list')
 
-        cohort.mark_viewed(request)
-
         cohort_progs = cohort.get_programs()
         cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
         # Do not show shared users for public cohorts
@@ -322,7 +311,6 @@ def save_cohort(request):
 
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
-            barcodes = json.loads(request.POST.get('barcodes', '{}'))
             apply_filters = request.POST.getlist('apply-filters')
             apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
@@ -344,20 +332,15 @@ def save_cohort(request):
                 cohort_progs = parent.get_programs()
 
             filter_obj = {}
+            attr_ids = []
 
             if len(filters) > 0:
                 for this_filter in filters:
                     tmp = json.loads(this_filter)
-                    key = tmp['feature']['name']
+                    key = tmp['feature']['id']
                     val = tmp['value']['name']
                     program_id = tmp['program']['id']
-
-                    # Note:
-                    # Id used to be same to name, such as [id: 'vital_status', name: 'vital_status']
-                    # Now Id is number, such as [id: 171, name: 'vital_status']
-                    # Commenting out the code below, otherwise filter will be displayed as "171: Alive" to user
-                    # if 'id' in tmp['feature'] and tmp['feature']['id']:
-                    #     key = tmp['feature']['id']
+                    attr_ids.append(tmp['feature']['id'])
 
                     if 'id' in tmp['value'] and tmp['value']['id']:
                         val = tmp['value']['id']
@@ -368,24 +351,21 @@ def save_cohort(request):
                     if key not in filter_obj[program_id]:
                         filter_obj[program_id][key] = {'values': [],}
 
-                    if program_id <= 0 and 'program' not in filter_obj[program_id][key]:
-                        # User Data
-                        filter_obj[program_id][key]['program'] = tmp['user_program']
-
                     filter_obj[program_id][key]['values'].append(val)
 
-            # TODO: needs a quick check on metadata counts here
-            results = {}
+            attrs = {x.id: x for x in Attribute.objects.filter(id__in=attr_ids)}
 
-            found_samples = False
+            data_sources = DataSource.objects.select_related("version").filter(
+                source_type=DataSource.SOLR, aggregate_level="case_barcode", version__in=DataVersion.objects.filter(
+                    data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA]
+                )
+            )
+            results = get_cohort_stats(filters={x: { attrs[w].name: z} for x, y in filter_obj.items() for w,z in y.items() }, sources=data_sources)
 
-            for prog in results:
-                if int(results[prog]['count']) > 0:
-                    found_samples = True
 
-            # Do not allow 0 sample cohorts
-            if not found_samples:
-                messages.error(request, 'The filters selected returned 0 samples. Please alter your filters and try again.')
+            # Do not allow 0 case cohorts
+            if not results["case_barcode"]:
+                messages.error(request, 'The filters selected returned 0 cases. Please alter your filters and try again.')
                 if source:
                     redirect_url = reverse('cohort_details', args=[source])
                 else:
@@ -409,12 +389,13 @@ def save_cohort(request):
 
                 # Create filters applied
                 if filter_obj:
-                    for prog in filter_obj:
+                    for prog, prog_filters in filter_obj.items():
                         prog_obj = Program.objects.get(id=prog)
-                        prog_filters = filter_obj[prog]
                         for this_filter in prog_filters:
-                            for val in prog_filters[this_filter]['values']:
-                                Filter.objects.create(resulting_cohort=cohort, attribute=None, value=val).save()
+                            Filter.objects.create(
+                                resulting_cohort=cohort, program=prog_obj, attribute=attrs[this_filter],
+                                value=Filter.DEFAULT_VALUE_DELIMITER.join(prog_filters[this_filter]['values'])
+                            ).save()
 
                 if not source:
                     redirect_url = reverse('cohort_list')

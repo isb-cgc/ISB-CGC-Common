@@ -29,7 +29,7 @@ from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from projects.models import Attribute, DataVersion, DataSource, Attribute_Display_Values
+from projects.models import Attribute, DataVersion, DataSource, Attribute_Display_Values, Program
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
@@ -421,6 +421,7 @@ class Filter(models.Model):
     filter_group = models.ForeignKey(Filter_Group, null=True, blank=True, on_delete=models.CASCADE)
     operator = models.CharField(max_length=4, null=False, blank=False, choices=OPS, default=OR)
     value_delimiter = models.CharField(max_length=4, null=False, blank=False, default=DEFAULT_VALUE_DELIMITER)
+    program = models.ForeignKey(Program, null=True, blank=True, on_delete=models.CASCADE)
 
     def get_attr_name(self):
         return "{}{}".format(self.attribute.name, self.OP_TO_SUFFIX[self.operator] if self.operator in self.NUMERIC_OPS else "")

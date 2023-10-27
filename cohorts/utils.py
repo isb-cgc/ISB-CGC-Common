@@ -23,14 +23,56 @@ from builtins import object
 
 from .models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
 from .metadata_helpers import *
+from .metadata_counting import count_public_metadata_solr
 from projects.models import Project, Program
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
-
-
 from django.contrib.auth.models import User
 from django.contrib.auth.models import User as Django_User
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist
+
+
+def get_cohort_stats(cohort_id=0, filters=None, sources=None):
+    stats = {
+        'case_barcode': 0,
+        'sample_barcode': 0,
+        'programs': {}
+    }
+
+    try:
+        if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+        elif not filters:
+            raise Exception("If you don't provide a cohort ID, you must provide filters!")
+
+        if not filters:
+            filters = cohort.get_filters_as_dict_simple()[0]
+
+
+        totals = ["case_barcode"]
+
+        for prog in filters:
+            if prog not in stats['programs']:
+                stats['programs'][prog] = {}
+            result = count_public_metadata_solr(None, inc_filters=filters[prog], program_id=prog, with_counts=False)
+            prog_totals = result.get('programs', {}).get(prog,{}).get('totals',None)
+            if prog_totals:
+                for total_count in prog_totals:
+                    total = total_count[0:total_count.rfind("_")]
+                    stats[total] = stats[total] + prog_totals[total_count]
+                    stats['programs'][prog][total] = prog_totals[total_count]
+            else:
+                # Nothing was found--either due to an error, or because nothing matched our filters.
+                for total in totals:
+                    stats[total] = 0
+                    stats['programs'][prog][total] = 0
+
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching cohort stats:")
+        logger.exception(e)
+
+    return stats
 
 
 def delete_cohort(user, cohort_id):

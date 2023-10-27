@@ -184,7 +184,6 @@ class Program(models.Model):
 
         sources = self.get_data_sources(data_type=data_type, source_type=source_type, active=active, versions=versions)
         prog_attr = self.attribute_set.filter(q_objects)
-        print(prog_attr)
 
         for ds in sources:
 

@@ -106,9 +106,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             facet_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_ui=True, versions=prog_versions)
             prog_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_ui=True, for_faceting=False, versions=prog_versions)
             count_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_faceting=False, named_set=["sample_barcode", "case_barcode"], versions=prog_versions)
-            print(prog)
-            print(prog_versions)
-            print(count_attrs)
             field_attr = None if not fields else prog.get_source_attrs(source_type=DataSource.SOLR, for_faceting=False, named_set=fields, versions=prog_versions)
             for source in sources:
                 solr_query = build_solr_query(
