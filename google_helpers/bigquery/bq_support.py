@@ -753,7 +753,7 @@ class BigQuerySupport(BigQueryABC):
                     elif query_param['parameterType']['type'] == 'NUMERIC':
                         operator = "{}{}".format(
                             ">" if re.search(r'_gte?',attr) else "<" if re.search(r'_lte?',attr) else "",
-                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[gt]',attr) else ''
+                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[lg]',attr) else ''
                         )
                         filter_string += "{}{} {} @{}".format(
                             '' if not field_prefix else field_prefix, attr_name,
@@ -784,12 +784,55 @@ class BigQuerySupport(BigQueryABC):
                         btw_counter += 1
                         param_name_2 = '{}_btw_{}'.format(param_name, btw_counter)
                         btw_counter += 1
-                        btw_filter_strings.append("({}{} BETWEEN @{} AND @{})".format(
-                            '' if not field_prefix else field_prefix, attr_name,
-                            param_name_1,
-                            param_name_2
-                        ))
-                        # query_param becomes our template for each pair
+                        # Generate the params for each of the BTW cases
+                        if attr.endswith('_btw'):
+                            ops = ["{}{} > @{}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                param_name_1
+                            )]
+                            # filter_string += " OR ".join(btw_filter_strings)
+                            ops.append("{}{} < @{}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                param_name_2
+                            ))
+                            btw_filter_strings.append(
+                                " AND ".join(ops)
+                            )
+                        elif attr.endswith('_ebtw'):
+                            ops = ["{}{} >= @{}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                param_name_1
+                            )]
+                            # filter_string += " OR ".join(btw_filter_strings)
+                            ops.append("{}{} < @{}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                param_name_2
+                            ))
+                            btw_filter_strings.append(
+                                " AND ".join(ops)
+                            )
+                        elif attr.endswith('_btwe'):
+                            ops = ["{}{} > @{}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                param_name_1
+                            )]
+                            # filter_string += " OR ".join(btw_filter_strings)
+                            ops.append("{}{} <= @{}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                param_name_2
+                            ))
+                            btw_filter_strings.append(
+                                " AND ".join(ops)
+                            )
+                        else:  # attr.endswith('_ebtwe'):
+                            btw_filter_strings.append("{}{} BETWEEN @{} AND @{}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                param_name_1,
+                                param_name_2
+                            ))
+                            # filter_string += " OR ".join(btw_filter_strings)
+
+                    # query_param becomes our template for each pair
                         query_param_1 = copy.deepcopy(query_param)
                         query_param_2 = copy.deepcopy(query_param)
                         query_param_1['name'] = param_name_1
@@ -801,14 +844,40 @@ class BigQuerySupport(BigQueryABC):
                     filter_string += " OR ".join(btw_filter_strings)
                     query_param = query_params
                 else:
-                    # Simple array param
-                    query_param['parameterType']['type'] = "ARRAY"
-                    query_param['parameterType']['arrayType'] = {
-                        'type': parameter_type
-                    }
-                    query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values]}
+                    # String param values that include the % char must be LIKE'd
+                    query_params = []
+                    strings_filter_string = []
+                    values_copy = copy.deepcopy(values)
+                    if parameter_type == 'STRING':
+                        for index, value in enumerate(values_copy):
+                            if '%' in value:
+                                strings_filter_string.append(
+                                    "LOWER({}{}) LIKE LOWER(@{}_{})".format('' if not field_prefix else field_prefix, attr, param_name, index)
+                                )
+                                query_param_like = copy.deepcopy(query_param)
+                                query_param_like['name'] = f'{param_name}_{index}'
+                                query_param_like['parameterType']['type'] = 'STRING'
+                                query_param_like['parameterValue']['value'] = value.lower()
+                                query_params.append(query_param_like)
+                                values_copy[index] = ''
 
-                    filter_string += "LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
+                    # Squeeze out empty strings
+                    values_copy = [value for value in values_copy if value]
+                    if values_copy:
+                        # Simple array param
+                        query_param['parameterType']['type'] = "ARRAY"
+                        query_param['parameterType']['arrayType'] = {
+                            'type': parameter_type
+                        }
+
+
+                        query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values_copy]}
+
+                        strings_filter_string.append("LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name))
+                        query_params.append(query_param)
+
+                    query_param = query_params
+                    filter_string += ' OR '.join(strings_filter_string)
 
             if with_count_toggle:
                 filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
@@ -993,11 +1062,53 @@ class BigQuerySupport(BigQueryABC):
                             continue
                     btw_filter_strings = []
                     for btws in values:
-                        btw_filter_strings.append("{}{} BETWEEN {} AND {}".format(
-                            '' if not field_prefix else field_prefix, attr_name,
-                            btws[0],
-                            btws[1]
-                        ))
+                        if attr.endswith('_btw'):
+                            ops =["{}{} > {}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                btws[0]
+                            )]
+                            # filter_string += " OR ".join(btw_filter_strings)
+                            ops.append("{}{} < {}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                btws[1]
+                            ))
+                            btw_filter_strings.append(
+                                " AND ".join(ops)
+                            )
+                        elif attr.endswith('_ebtw'):
+                            ops =["{}{} >= {}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                btws[0]
+                            )]
+                            # filter_string += " OR ".join(btw_filter_strings)
+                            ops.append("{}{} < {}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                btws[1]
+                            ))
+                            btw_filter_strings.append(
+                                " AND ".join(ops)
+                            )
+                        elif attr.endswith('_btwe'):
+                            ops =["{}{} > {}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                btws[0]
+                            )]
+                            # filter_string += " OR ".join(btw_filter_strings)
+                            ops.append("{}{} <= {}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                btws[1]
+                            ))
+                            btw_filter_strings.append(
+                                " AND ".join(ops)
+                            )
+                        else: # attr.endswith('_ebtwe'):
+                            btw_filter_strings.append("{}{} BETWEEN {} AND {}".format(
+                                '' if not field_prefix else field_prefix, attr_name,
+                                btws[0],
+                                btws[1]
+                            ))
+                            # filter_string += " OR ".join(btw_filter_strings)
+
                     filter_string += " OR ".join(btw_filter_strings)
                 else:
                     if value_op == 'AND':
