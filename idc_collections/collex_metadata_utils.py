@@ -1548,6 +1548,8 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         tables_in_query.append(image_table)
         for filter_bqtable in filter_attr_by_bq['sources']:
             if filter_bqtable not in image_tables and filter_bqtable not in tables_in_query:
+                if filter_bqtable in field_clauses and len(field_clauses[filter_bqtable]):
+                    fields.append(field_clauses[filter_bqtable])
                 filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][filter_bqtable]['list']}
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_filter_and_params(
@@ -1586,7 +1588,7 @@ def get_bq_metadata(filters, fields, data_version, sources_and_attrs=None, group
         # so we add them last
         for field_bqtable in field_attr_by_bq['sources']:
             if field_bqtable not in image_tables and field_bqtable not in tables_in_query:
-                if len(field_clauses[field_bqtable]):
+                if field_bqtable in field_clauses and len(field_clauses[field_bqtable]):
                     fields.append(field_clauses[field_bqtable])
                 source_join = DataSourceJoin.objects.get(
                     from_src__in=[table_info[field_bqtable]['id'], table_info[image_table]['id']],
@@ -1902,6 +1904,8 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
         tables_in_query.append(image_table)
         for filter_bqtable in filter_attr_by_bq['sources']:
             if filter_bqtable not in image_tables and filter_bqtable not in tables_in_query:
+                if filter_bqtable in field_clauses and len(field_clauses[filter_bqtable]):
+                    fields.append(field_clauses[filter_bqtable])
                 filter_set = {x: filters[x] for x in filters if x in filter_attr_by_bq['sources'][filter_bqtable]['list']}
                 if len(filter_set):
                     filter_clauses[filter_bqtable] = BigQuerySupport.build_bq_where_clause(
@@ -1938,7 +1942,7 @@ def get_bq_string(filters, fields, data_version, sources_and_attrs=None, group_b
         # so we add them last
         for field_bqtable in field_attr_by_bq['sources']:
             if field_bqtable not in image_tables and field_bqtable not in tables_in_query:
-                if len(field_clauses[field_bqtable]):
+                if field_bqtable in field_clauses and len(field_clauses[field_bqtable]):
                     fields.append(field_clauses[field_bqtable])
                 source_join = DataSourceJoin.objects.get(
                     from_src__in=[table_info[field_bqtable]['id'], table_info[image_table]['id']],
