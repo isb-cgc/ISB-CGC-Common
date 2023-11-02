@@ -278,8 +278,24 @@ class Program(models.Model):
         return self.name
 
 
-# A data version represents a given release of data, eg. GDC Rel20 or IDC v15
-class DataVersion(models.Model):
+class DataSetTypeQuerySet(models.QuerySet):
+    def get_data_sources(self):
+        sources = None
+        dsts = self.all()
+        for dst in dsts:
+            if not sources:
+                sources = dst.datasource_set.all()
+            else:
+                sources = sources | dst.datasource_set.all()
+        return sources
+
+
+class DataSetTypeManager(models.Manager):
+    def get_queryset(self):
+        return DataSetTypeQuerySet(self.model, using=self._db)
+
+
+class DataSetType(models.Model):
     FILE_DATA = 'F'
     IMAGE_DATA = 'I'
     CLINICAL_DATA = 'C'
@@ -287,6 +303,11 @@ class DataVersion(models.Model):
     MUTATION_DATA = 'M'
     PROTEIN_DATA = 'P'
     FILE_TYPE_DATA = 'T'
+    CASE_SET = 'D'
+    FILE_AVAIL_SET = 'W'
+    MUTATION_SET = 'N'
+    FILE_LIST_SET = 'G'
+    IMAGE_LIST_SET = 'J'
     DATA_TYPES = (
         (FILE_DATA, 'File Data'),
         (IMAGE_DATA, 'Image Data'),
@@ -295,6 +316,11 @@ class DataVersion(models.Model):
         (MUTATION_DATA, 'Mutation Data'),
         (PROTEIN_DATA, 'Protein Data'),
         (FILE_TYPE_DATA, 'File Type Data')
+    )
+    SET_TYPES = (
+        (CASE_SET, 'Case Set'),
+        (FILE_AVAIL_SET, 'Available Files Set'),
+        (MUTATION_SET, 'Mutation Data Set')
     )
     DATA_TYPE_DICT = {
         FILE_DATA: 'File Data',
@@ -305,26 +331,38 @@ class DataVersion(models.Model):
         PROTEIN_DATA: 'Protein Data',
         FILE_TYPE_DATA: 'File Type Data'
     }
-    SET_TYPES = {
-        CLINICAL_DATA: 'case_data',
-        BIOSPECIMEN_DATA: 'case_data',
-        IMAGE_DATA: 'image_data',
-        FILE_DATA: 'file_data',
-        MUTATION_DATA: 'molecular_data',
-        PROTEIN_DATA: 'protein_data',
-        FILE_TYPE_DATA: 'file_data'
+    SET_TYPE_DICT = {
+        CASE_SET: 'Case',
+        FILE_AVAIL_SET: 'File Types',
+        MUTATION_SET: 'Molec',
+        FILE_LIST_SET: 'Files',
+        IMAGE_LIST_SET: 'Images'
     }
-    version = models.CharField(max_length=64, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False)
+    display_name = models.CharField(max_length=256, null=True, blank=True)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
+    set_type = models.CharField(max_length=1, blank=False, null=False, choices=SET_TYPES, default=CASE_SET)
+    objects = DataSetTypeManager()
+
+    def __str__(self):
+        return "{}: {}, {}".format(
+            "{} ({})".format(self.display_name, self.name) if self.display_name is not None else self.name,
+            self.SET_TYPE_DICT[self.set_type],
+            self.DATA_TYPE_DICT[self.data_type]
+        )
+
+
+# A data version represents a given release of data, eg. GDC Rel20 or IDC v15
+class DataVersion(models.Model):
+    version = models.CharField(max_length=64, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False)
     active = models.BooleanField(default=True)
     build = models.CharField(max_length=16, null=True, blank=False)
     programs = models.ManyToManyField(Program)
 
     def __str__(self):
-        return "{}: {} {} ({})".format(
+        return "{}: {} ({})".format(
             self.name,
-            DataVersion.DATA_TYPE_DICT[self.data_type],
             self.version,
             "Active" if self.active else "Inactive"
         )
@@ -493,12 +531,16 @@ class DataSource(models.Model):
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     programs = models.ManyToManyField(Program)
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
+    datasettypes = models.ManyToManyField(DataSetType)
     count_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     aggregate_level = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     objects = DataSourceManager()
 
-    def get_set_type(self):
-        return DataVersion.SET_TYPES[self.version.data_type]
+
+    def get_set_types(self):
+        return [DataSetType.SET_TYPE_DICT[x.attribute_set_type_set__datasettype__set_type]
+                for x in self.attributes_set.prefetch_related("attribute_set_type_set__datasettype").all()]
+
 
     def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None, active=True, all=False):
         if all:
@@ -520,6 +562,15 @@ class DataSource(models.Model):
             attr_set = self.attribute_set.filter(q_objects)
 
         return attr_set
+
+    def __str__(self):
+        return "{} ({}, {}) - {}".format(
+            self.name,
+            self.version.name,
+            self.SOURCE_TYPE_MAP[self.source_type],
+            datasettypes.all()
+        )
+
 
     @staticmethod
     def get_facet_type(attr):
@@ -719,6 +770,17 @@ class AttributeQuerySet(models.QuerySet):
     def get_display_values(self):
         return Attribute_Display_Values.objects.select_related('attribute').filter(attribute__in=self.all())
 
+    def get_attr_set_types(self):
+        return Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all())
+
+    def get_attr_sets(self):
+        sets = {}
+        for set_type in Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all()):
+            if set_type.attribute.name not in sets:
+                sets[set_type.attribute.name] = []
+            sets[set_type.attribute.name].append(set_type.datasettype.data_type)
+        return sets
+
 
 class AttributeManager(models.Manager):
     def get_queryset(self):
@@ -797,6 +859,17 @@ class Attribute(models.Model):
     def __str__(self):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
+
+
+# This model allows for breaking Attributes up beyond the strict DataSource->DataSetType heirarchy,
+# since an attribute might be found in a DataSource housing more than one set type.
+class Attribute_Set_Type(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    datasettype = models.ForeignKey(DataSetType, null=False, blank=False, on_delete=models.CASCADE)
+
+    class Meta(object):
+        unique_together = (("datasettype", "attribute"),)
 
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):

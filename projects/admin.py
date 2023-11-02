@@ -72,7 +72,6 @@ class DataVersion_Admin(admin.ModelAdmin):
         'name',
         'active',
         'version',
-        'data_type',
         'build'
     )
 
