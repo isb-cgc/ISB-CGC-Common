@@ -82,8 +82,9 @@ def _cohort_query_api(request, cohort, data, info):
 def _cohort_preview_query_api(request, data, info):
     filters = data['cohort_def']['filters']
 
+    # Support both collection_name and collection_id. Convert collection_name to collection_id
     if 'collection_id' in filters:
-        filters['collection_id'] = [collection.lower().replace('-', '_') for collection in filters['collection_id']]
+        filters['collection_id'] = [collection.lower().replace('-', '_').replace(' ','_') for collection in filters['collection_id']]
 
     # Always preview query against the active version
     data_version = ImagingDataCommonsVersion.objects.filter(active=True)

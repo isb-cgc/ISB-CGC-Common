@@ -844,13 +844,14 @@ class BigQuerySupport(BigQueryABC):
                     filter_string += " OR ".join(btw_filter_strings)
                     query_param = query_params
                 else:
-                    # String param values that include the % char must be LIKE'd
+                    # String param values that include the % or _char must be LIKE'd. We ignore that \%  or \_
+                    # don't need to be LIKE'd.
                     query_params = []
                     strings_filter_string = []
                     values_copy = copy.deepcopy(values)
                     if parameter_type == 'STRING':
                         for index, value in enumerate(values_copy):
-                            if '%' in value:
+                            if '%' in value or '_' in value:
                                 strings_filter_string.append(
                                     "LOWER({}{}) LIKE LOWER(@{}_{})".format('' if not field_prefix else field_prefix, attr, param_name, index)
                                 )
