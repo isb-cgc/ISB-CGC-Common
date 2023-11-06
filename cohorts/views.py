@@ -53,7 +53,7 @@ from .metadata_counting import *
 from .file_helpers import *
 from sharing.service import create_share
 from .models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
-from projects.models import Program, Project, DataNode
+from projects.models import Program, Project, DataNode, DataSetType
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 from .utils import delete_cohort as utils_delete_cohort, get_cohort_stats
 
@@ -195,7 +195,7 @@ def new_cohort(request):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True)
 
-        all_nodes, all_programs = DataNode.get_node_programs([DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA], True)
+        all_nodes, all_programs = DataNode.get_node_programs([DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA], True)
 
         template_values = {
             'request': request,
@@ -230,7 +230,7 @@ def cohort_detail(request, cohort_id):
         isb_user = Django_User.objects.get(is_staff=True, is_superuser=True, is_active=True)
         program_list = Program.objects.filter(active=True, is_public=True)
 
-        all_nodes, all_programs = DataNode.get_node_programs([DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA])
+        all_nodes, all_programs = DataNode.get_node_programs([DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA])
 
         template_values  = {
             'request': request,
@@ -357,7 +357,7 @@ def save_cohort(request):
 
             data_sources = DataSource.objects.select_related("version").filter(
                 source_type=DataSource.SOLR, aggregate_level="case_barcode", version__in=DataVersion.objects.filter(
-                    data_type__in=[DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA]
+                    data_type__in=[DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA]
                 )
             )
             results = get_cohort_stats(filters={x: { attrs[w].name: z} for x, y in filter_obj.items() for w,z in y.items() }, sources=data_sources)
@@ -1045,11 +1045,11 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
 
         case_sample_attr = fetch_program_attr(program_id, return_copy=False)
 
-        #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.MUTATION_DATA).get_source_attr(for_ui=True)
+        #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataSetType.MUTATION_DATA).get_source_attr(for_ui=True)
         molecular_attr = {}
         molecular_attr_builds = None
 
-        if len(public_program.get_data_sources(data_type=DataVersion.MUTATION_DATA)):
+        if len(public_program.get_data_sources(data_type=DataSetType.MUTATION_DATA)):
             molecular_attr = {
                 'categories': [{'name': MOLECULAR_CATEGORIES[x]['name'], 'value': x, 'count': 0, 'attrs': MOLECULAR_CATEGORIES[x]['attrs']} for x in MOLECULAR_CATEGORIES],
                 'attrs': MOLECULAR_ATTR
@@ -1066,7 +1066,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                     if ma:
                         ma['category'] = cat['value']
 
-        data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataVersion.FILE_TYPE_DATA).get_source_attrs(for_ui=True)
+        data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataSetType.FILE_TYPE_DATA).get_source_attrs(for_ui=True)
 
         results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
 
@@ -1117,7 +1117,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
             cohort_progs = cohort.get_programs()
             template_values['programs_this_cohort'] = [x.id for x in cohort_progs]
 
-        all_nodes, all_programs = DataNode.get_node_programs([DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA],True)
+        all_nodes, all_programs = DataNode.get_node_programs([DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA],True)
         template_values['all_nodes'] = all_nodes
         template_values['all_programs'] = all_programs
 

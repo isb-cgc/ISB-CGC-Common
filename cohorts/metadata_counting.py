@@ -57,7 +57,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
     solr_facets_filtered = None
     solr_fields = None
     mutation_build = None
-    data_type = data_type or [DataVersion.FILE_TYPE_DATA, DataVersion.CLINICAL_DATA, DataVersion.MUTATION_DATA]
+    data_type = data_type or [DataSetType.FILE_TYPE_DATA, DataSetType.CLINICAL_DATA, DataSetType.MUTATION_DATA]
 
     results = { 'programs': {} }
 
@@ -152,7 +152,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         if attr_name in prog_attrs['list']:
                             # If the attribute is from this source, just add the query
                             mutation_filter_matches_source = (
-                                    (source.version.data_type != DataVersion.MUTATION_DATA) or
+                                    (source.version.data_type != DataSetType.MUTATION_DATA) or
                                     (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower()))
                             )
                             if attr_name in prog_attrs['sources'][source.id]['list'] and mutation_filter_matches_source:
@@ -161,7 +161,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                             else:
                                 for ds in sources:
                                     mutation_filter_matches_source = (
-                                        (ds.version.data_type != DataVersion.MUTATION_DATA) or (
+                                        (ds.version.data_type != DataSetType.MUTATION_DATA) or (
                                            attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), ds.name.lower())
                                         )
                                     )

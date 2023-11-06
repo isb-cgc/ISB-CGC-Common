@@ -144,19 +144,20 @@ class Program(models.Model):
 
     def get_data_sources(self, data_type=None, source_type=None, active=True, versions=None):
         q_objects = Q()
+        q_obj_ds = Q()
         if active is not None:
             q_objects &= Q(version__active=active)
         if versions is not None:
             q_objects &= Q(version__in=versions)
         if data_type:
             if type(data_type) is list:
-                q_objects &= Q(version__data_type__in=data_type)
+                q_obj_ds &= Q(version__data_type__in=data_type)
             else:
-                q_objects &= Q(version__data_type=data_type)
+                q_obj_ds &= Q(version__data_type=data_type)
         if source_type:
             q_objects &= Q(source_type=source_type)
 
-        return self.datasource_set.prefetch_related('version').filter(q_objects)
+        return self.datasource_set.select_related('version').filter(q_objects)
 
 
     def get_source_attrs(self, for_ui=None, data_type=None, source_type=None, active=True, versions=None, for_faceting=True,
@@ -279,14 +280,17 @@ class Program(models.Model):
 
 
 class DataSetTypeQuerySet(models.QuerySet):
-    def get_data_sources(self):
+    def get_data_sources(self, is_active=None):
         sources = None
+        q_obj = Q()
+        if is_active is not None:
+            q_obj = Q(version__active=is_active)
         dsts = self.all()
         for dst in dsts:
             if not sources:
-                sources = dst.datasource_set.all()
+                sources = dst.datasource_set.select_related('version').filter(q_obj)
             else:
-                sources = sources | dst.datasource_set.all()
+                sources = sources | dst.datasource_set.select_related('version').filter(q_obj)
         return sources
 
 
@@ -672,12 +676,10 @@ class DataNode(models.Model):
         programs = None
 
         if data_types or is_active is not None:
-            q_objects = Q()
-            if is_active is not None:
-                q_objects &= Q(version__active=is_active)
+            q_obj = Q()
             if data_types:
-                q_objects &= Q(version__data_type__in=data_types)
-            data_sources = DataSource.objects.select_related('version').filter(q_objects)
+                q_obj &= Q(data_type__in=data_types)
+            data_sources = DataSetType.objects.filter(q_obj).get_data_sources(is_active)
             nodes = data_sources.get_source_nodes().prefetch_related('programs')
             programs = data_sources.get_source_programs().prefetch_related('datanode_set')
         else:

@@ -73,7 +73,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
         if data_type == 'dicom':
             file_collection = DataSource.objects.select_related('version').get(
-                source_type=DataSource.SOLR, version__data_type=DataVersion.IMAGE_DATA, version__active=True
+                source_type=DataSource.SOLR, version__data_type=DataSetType.IMAGE_DATA, version__active=True
             )
 
             fields.extend(["file_path", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality"])
@@ -93,7 +93,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         else:
             file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR,
                                                                                version__active=True,
-                                                                               version__data_type=DataVersion.FILE_DATA)
+                                                                               version__data_type=DataSetType.FILE_DATA)
             if data_type == 'igv':
                 fields.extend(["sample_barcode"])
                 col_map.update({

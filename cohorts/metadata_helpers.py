@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2023, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,9 +14,8 @@
 # limitations under the License.
 #
 
-"""
-Helper methods for fetching, curating, and managing cohort metadata
-"""
+# Helper methods for fetching, curating, and managing cohort metadata
+
 from __future__ import division
 
 from builtins import str
@@ -32,7 +31,7 @@ import string
 import time
 from time import sleep
 import re
-from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Tooltips
+from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Tooltips, DataSetType
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
 from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -166,7 +165,7 @@ def make_id(length):
 
 def hash_program_attrs(prog_name,source_type,for_faceting,data_type_list=None):
     if not data_type_list:
-        data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA,DataVersion.MUTATION_DATA]
+        data_type_list = [DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA,DataSetType.MUTATION_DATA]
     return str(hash("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list))))
 
 
@@ -222,7 +221,7 @@ def fetch_file_data_attr(type=None):
             data_sources = DataSource.objects.prefetch_related('programs', 'version').filter(
                 programs__active=True, version__in=DataVersion.objects.filter(
                     Q(active=True),
-                    Q(data_type=(DataVersion.IMAGE_DATA if type == 'dicom' else DataVersion.FILE_DATA))
+                    Q(data_type=(DataSetType.IMAGE_DATA if type == 'dicom' else DataSetType.FILE_DATA))
                 ),
                 source_type=DataSource.SOLR
             ).distinct()
@@ -288,7 +287,7 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
             if type(program) is int:
                 program = Program.objects.get(id=program)
         if not data_type_list:
-            data_type_list = [DataVersion.CLINICAL_DATA,DataVersion.FILE_TYPE_DATA,DataVersion.MUTATION_DATA]
+            data_type_list = [DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA,DataSetType.MUTATION_DATA]
         attr_set = hash_program_attrs(program.name,source_type,for_faceting,data_type_list)
         if attr_set not in METADATA_ATTR or len(METADATA_ATTR[attr_set]) <= 0:
             logger.debug("Program attrs for {} not found (hash: {}), building cache".format(program.name,attr_set))
