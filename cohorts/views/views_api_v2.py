@@ -190,7 +190,7 @@ def cohort_preview_query_api(request):
 # ***Need to add shared cohorts***
 @csrf_exempt
 @api_auth
-@require_http_methods(["GET"])
+@require_http_methods(["POST"])
 def cohort_list_api(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
