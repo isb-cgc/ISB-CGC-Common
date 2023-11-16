@@ -148,7 +148,6 @@ def attributes_list_api(request):
                 for suffix in ['lt', 'lte', 'btw', 'ebtw', 'ebtwe', 'btwe', 'gte', 'gt']:
                     attribute_info_copy = dict(attribute_info)
                     attribute_info_copy['name'] = '{}_{}'.format(attribute.name, suffix)
-                    attribute_info_copy['categorical_values'] = []
                     attributes_info.append(attribute_info_copy)
         data_source = {
             "data_source": source.name,
