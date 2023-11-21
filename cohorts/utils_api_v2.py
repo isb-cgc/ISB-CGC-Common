@@ -50,7 +50,6 @@ def get_idc_data_version(version_number=None):
 
 
 def get_filterSet_api(cohort):
-
     version = cohort.get_data_versions()[0].version_number
     filter_group = cohort.get_filters_as_dict()[0]
 
@@ -103,12 +102,11 @@ def get_query_query(filters, fields, data_version, info, sql):
     data_versions = data_version
     results = get_bq_metadata(
         filters=filters, fields=fields, data_version=data_versions,
-        # limit=min(fetch_count, settings.MAX_BQ_RECORD_RESULT), offset=offset,
         no_submit=True,
         order_by=fields)
     if not results:
         info = {
-                "message": "Error in performing BQ query",
+                "message": "Error in generating manifest",
                 "code": 400
         }
         return info
