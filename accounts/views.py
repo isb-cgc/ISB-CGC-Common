@@ -39,11 +39,11 @@ from .models import *
 from projects.models import User_Data_Tables
 from django.utils.html import escape
 from .sa_utils import verify_service_account, register_service_account, service_account_dict, \
-                     controlled_auth_datasets, have_linked_user
-from .utils import verify_gcp_for_reg, register_or_refresh_gcp, unreg_gcp
+    controlled_auth_datasets, have_linked_user
+from .utils import verify_gcp_for_reg
 
 from .dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
-                        InternalTokenError, RefreshTokenExpired, DCFCommFailure
+    InternalTokenError, RefreshTokenExpired, DCFCommFailure
 
 from json import loads as json_loads
 
@@ -66,9 +66,89 @@ def extended_logout_view(request):
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
         messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
+        messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     return response
+
+
+# GCP RELATED VIEWS
+
+
+'''
+Returns page that has user Google Cloud Projects
+'''
+
+
+# Returns page that has user Google Cloud Projects
+@login_required
+def user_gcp_list(request, user_id):
+    context = {}
+    template = 'isb_cgc/user_gcp_list.html'
+
+    try:
+        if int(request.user.id) == int(user_id):
+
+            try:
+                user = User.objects.get(id=user_id)
+                gcp_list = GoogleProject.objects.filter(user=user, active=1)
+                social_account = SocialAccount.objects.get(user_id=user_id)
+
+                user_details = {
+                    'date_joined': user.date_joined,
+                    'email': user.email,
+                    'extra_data': social_account.extra_data,
+                    'first_name': user.first_name,
+                    'id': user.id,
+                    'last_login': user.last_login,
+                    'last_name': user.last_name
+                }
+
+                # gcp_and_sa_tuples = []
+                is_linked = have_linked_user(user_id)
+                # for gcp in gcp_list:
+                #     if is_linked:
+                #         sa_dicts, sa_err_msg = _build_sa_list_for_gcp(request, user_id, gcp.id, gcp)
+                #         if sa_err_msg is not None:
+                #             template = '500.html'
+                #             return render(request, template, context)
+                #     else:
+                #         sa_dicts = []
+                #     gcp_and_sa_tuples.append((gcp, sa_dicts))
+                # context = {'user': user, 'user_details': user_details, 'gcp_sa_tups': gcp_and_sa_tuples, 'linked': is_linked}
+                context = {'user': user, 'user_details': user_details, 'gcps': gcp_list, 'linked': is_linked}
+
+            except (MultipleObjectsReturned, ObjectDoesNotExist) as e:
+                logger.error("[ERROR] While fetching user GCP list: ")
+                logger.exception(e)
+                messages.error(request,
+                               "There was an error while attempting to list your Google Cloud Projects - please contact feedback@isb-cgc.org.")
+
+        else:
+            messages.error(request, "You are not allowed to view that user's Google Cloud Project list.")
+            logger.warning(
+                "[WARN] While trying to view a user GCP list, saw mismatched IDs. Request ID: {}, GCP list requested: {}".format(
+                    str(request.user.id), str(user_id)))
+            template = '403.html'
+
+    except TokenFailure:
+        messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    except InternalTokenError:
+        messages.error(request,
+                       "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931"))
+    except RefreshTokenExpired:
+        messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
+        return redirect(reverse('user_detail', args=[request.user.id]))
+    except DCFCommFailure:
+        messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
+    except Exception as e:
+        logger.error("[ERROR] While trying to view the GCP list:")
+        logger.exception(e)
+        messages.error(request,
+                       "There was an error while attempting to list your Google Cloud Projects. Please contact feedback@isb-cgc.org.")
+        template = '500.html'
+    return render(request, template, context)
 
 
 def _sa_dict_to_data(retval, gcp_id, sa_dict):
@@ -153,7 +233,7 @@ def verify_gcp(request, user_id):
     try:
 
         gcp_id = request.GET.get('gcp-id', None)
-        is_refresh = bool(request.GET.get('is_refresh', '')=='true')
+        is_refresh = bool(request.GET.get('is_refresh', '') == 'true')
 
         response, status = verify_gcp_for_reg(User.objects.get(id=user_id), gcp_id, is_refresh)
 
@@ -165,10 +245,147 @@ def verify_gcp(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While attempting to verify GCP {}:")
         logger.exception(e)
-        response['message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
+        response[
+            'message'] = 'There was an error while attempting to verify this project. Please verify that you have entered the correct Google Cloud Project ID--not the Number or the Name--and set the permissions correctly.'
         status = '500'
 
     return JsonResponse(response, status=status)
+
+
+@login_required
+def register_gcp(request, user_id):
+    is_refresh = False
+
+    redirect_view = 'user_gcp_list'
+    args = {'user_id': request.user.id}
+
+    try:
+        if request.POST:
+            project_id = request.POST.get('gcp_id', None)
+            register_users = request.POST.getlist('register_users')
+            is_refresh = bool(request.POST.get('is_refresh', '') == 'true')
+
+            register, status = register_or_refresh_gcp(User.objects.get(id=user_id), project_id, register_users,
+                                                       is_refresh)
+
+            gcp = GoogleProject.objects.get(project_id=project_id, active=1)
+
+            if status == 200:
+                if 'message' in register:
+                    messages.info(request, register['message'])
+
+            else:
+                messages.error(request, register['message'])
+
+            if request.POST.get('detail', '') == 'true':
+                redirect_view = 'gcp_detail'
+                args['gcp_id'] = gcp.id
+
+            return redirect(reverse(redirect_view, kwargs=args))
+
+        return render(request, 'isb_cgc/register_gcp.html', {})
+
+    except Exception as e:
+        logger.error("[ERROR] While {} a Google Cloud Project:".format("refreshing" if is_refresh else "registering"))
+        if type(e) is ObjectDoesNotExist:
+            logger.error("GCP {} was not found post-registration.".format(project_id))
+        else:
+            logger.exception(e)
+        messages.error(request,
+                       "There was an error while attempting to register/refresh this Google Cloud Project - please contact feedback@isb-cgc.org.")
+
+    return redirect(reverse(redirect_view, kwargs=args))
+
+
+@login_required
+def gcp_detail(request, user_id, gcp_id):
+    try:
+        logger.info("[INFO] gcp_detail {}:".format(gcp_id))
+        is_linked = have_linked_user(user_id)
+        context = {'is_linked': is_linked, 'gcp': GoogleProject.objects.get(id=gcp_id, active=1), 'sa_list': []}
+        # logger.info("[INFO] Listing SAs for GCP {}:".format(gcp_id))
+        # if settings.SA_VIA_DCF:
+        #     context['sa_list'] = []
+        #     if is_linked:
+        #         gcp_project_id = context['gcp'].project_id
+        #         sa_info, sa_messages = service_account_info_from_dcf_for_project(user_id, gcp_project_id)
+        #         if sa_messages:
+        #             for message in sa_messages:
+        #                 logger.error("[ERROR] {}:".format(message))
+        #                 messages.error(request, message)
+        #             return render(request, 'isb_cgc/gcp_detail.html', context)
+        #
+        #         for sa_dict in sa_info:
+        #             _sa_dict_to_data(context['sa_list'], gcp_id, sa_dict)
+        #
+        # else:
+        #     context['sa_list'] = []
+        #
+        #     active_sas = context['gcp'].active_service_accounts()
+        #     for service_account in active_sas:
+        #         logger.info("[INFO] Listing SA {}:".format(service_account.service_account))
+        #         auth_datasets = service_account.get_auth_datasets()
+        #         sa_data = {}
+        #         context['sa_list'].append(sa_data)
+        #         sa_data['name'] = service_account.service_account
+        #         # for modal names:
+        #         sa_data['esc_name'] = service_account.service_account.replace('@', "-at-").replace('.', '-dot-')
+        #         sa_data['is_expired'] = service_account.is_expired()
+        #         sa_data['authorized_date'] = service_account.authorized_date
+        #         auth_names = []
+        #         auth_ids = []
+        #         sa_data['num_auth'] = len(auth_datasets)
+        #         logger.info("[INFO] Listing ADs for GCP {} {}:".format(gcp_id, len(auth_datasets)))
+        #         for auth_data in auth_datasets:
+        #             auth_names.append(auth_data.name)
+        #             auth_ids.append(str(auth_data.id))
+        #         sa_data['auth_dataset_names'] = ', '.join(auth_names)
+        #         sa_data['auth_dataset_ids'] = ', '.join(auth_ids)
+        #
+        #     # We should get back all service accounts, even ones that have expired (I hope). Note we no longer should be
+        #     # getting back "inactive" service accounts; that is for DCF to sort out and manage internally.
+        #     #
+
+        # we need:
+        #
+        # service_account.get_auth_datasets
+        # dataset names, separated by ","
+        # if we have auth datasets and they are expired, want the authorized_date as: 'M d, Y, g:i a'
+        # dataset ids, separated by ", "
+
+    except Exception as e:
+        logger.error("[ERROR] While detailing a GCP: ")
+        logger.exception(e)
+        messages.error(request,
+                       "Encountered an error while trying to detail this Google Cloud Project - please contact feedback@isb-cgc.org.")
+
+    return render(request, 'isb_cgc/gcp_detail.html', context)
+
+
+@login_required
+def user_gcp_delete(request, user_id, gcp_id):
+    template = 'user_gcp_list'
+
+    try:
+        if request.POST:
+            user = User.objects.get(id=user_id)
+
+            response, status = unreg_gcp(user, gcp_id)
+            if status != 200:
+                if type(response['message']) is list:
+                    for msg in response['message']:
+                        messages.error(request, msg)
+                else:
+                    messages.error(request, response['message'])
+
+                if status == 401:
+                    template = 'user_detail'
+
+    except Exception as e:
+        logger.error("[ERROR] While user ID {} was unregistring GCP {}: ".format(user_id, gcp_id))
+        logger.exception(e)
+
+    return redirect(template, user_id=request.user.id)
 
 
 @login_required
@@ -192,7 +409,8 @@ def verify_sa(request, user_id):
                 datasets = []
 
             logger.info("[INFO] Verifying Service Account {} for datasets {}".format(user_sa, str(datasets)))
-            result = verify_service_account(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust, remove_all)
+            result = verify_service_account(gcp_id, user_sa, datasets, user_email, user_id, is_refresh, is_adjust,
+                                            remove_all)
             logger.info("[INFO] Verified Service Account {} for datasets {}".format(user_sa, str(datasets)))
 
             #
@@ -201,13 +419,14 @@ def verify_sa(request, user_id):
             if 'message' in list(result.keys()):
                 logger.info("[INFO] Gotta message")
                 status = '400'
-                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
+                st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                    'message': '{}: For user {}, {}'.format(user_sa, user_email, result['message'])})
                 # Users attempting to refresh a project they're not on go back to their GCP list (because this GCP was probably removed from it)
                 if 'redirect' in list(result.keys()):
                     result['redirect'] = reverse('user_gcp_list', kwargs={'user_id': request.user.id})
                 if 'user_not_found' in list(result.keys()):
                     gcp = GoogleProject.objects.get(project_id=gcp_id, active=1)
-                    user=User.objects.get(id=request.user.id)
+                    user = User.objects.get(id=request.user.id)
                     gcp.user.set(gcp.user.all().exclude(id=user.id))
                     gcp.save()
             else:
@@ -216,14 +435,17 @@ def verify_sa(request, user_id):
                 #
                 if result['all_user_datasets_verified']:
                     logger.info("[INFO] all verified")
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,user_email)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                        'message': '{}: Service account was successfully verified for user {}.'.format(user_sa,
+                                                                                                       user_email)})
                 else:
                     logger.info("[INFO] not all verified: {}".format(str(result)))
-                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,user_email)})
+                    st_logger.write_struct_log_entry(SERVICE_ACCOUNT_LOG_NAME, {
+                        'message': '{}: Service account was not successfully verified for user {}.'.format(user_sa,
+                                                                                                           user_email)})
                     if 'dcf_messages' in result and \
-                       'dcf_problems' in result['dcf_messages'] and \
-                        len(result['dcf_messages']['dcf_problems']) > 0:
-
+                            'dcf_problems' in result['dcf_messages'] and \
+                            len(result['dcf_messages']['dcf_problems']) > 0:
                         result = {'message': ','.join(result['dcf_messages']['dcf_problems'])}
                         status = '503'
                         return JsonResponse(result, status=status)
@@ -239,7 +461,8 @@ def verify_sa(request, user_id):
         result = {'message': "Your Data Commons Framework identity needs to be reestablished to complete this task."}
         status = '403'
     except InternalTokenError:
-        result = {'message': "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1932")}
+        result = {
+            'message': "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1932")}
         status = '500'
     except RefreshTokenExpired:
         result = {'message': "Your login to the Data Commons Framework has expired. You will need to log in again."}
@@ -250,10 +473,93 @@ def verify_sa(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While verifying Service Accounts: ")
         logger.exception(e)
-        result = {'message': 'There was an error while trying to verify this service account. Please contact feedback@isb-cgc.org.'}
+        result = {
+            'message': 'There was an error while trying to verify this service account. Please contact feedback@isb-cgc.org.'}
         status = '500'
 
     return JsonResponse(result, status=status)
+
+
+@login_required
+def register_sa(request, user_id):
+    try:
+        # This is a Service Account dataset adjustment or an initial load of the service account registration page
+        if request.GET.get('sa_name') or request.GET.get('gcp_id'):
+            template = 'isb_cgc/register_sa.html'
+            context = {
+                'authorized_datasets': controlled_auth_datasets()
+            }
+
+            if request.GET.get('sa_name'):
+                template = 'isb_cgc/adjust_sa.html'
+                sa_dict, sa_msgs = service_account_dict(user_id, request.GET.get('sa_name'))
+                # If there is an error message coming from DCF, which is distinct from exceptions (handled below),
+                # the traditional approach if to pop to user_gcp_list page.
+                # (This is stuff like user is not allowed to ask about the service account.)
+                if sa_msgs:
+                    for sa_msg in sa_msgs:
+                        messages.error(request, sa_msg)
+                    return redirect('user_gcp_list', user_id=user_id)
+
+                context['gcp_id'] = sa_dict['gcp_id']
+                context['sa_dataset_ids'] = sa_dict['sa_dataset_ids']
+                context['sa_name'] = sa_dict['sa_name']
+
+            else:
+                gcp_id = escape(request.GET.get('gcp_id'))
+                crm_service = get_special_crm_resource()
+                gcp = crm_service.projects().get(
+                    projectId=gcp_id).execute()
+                context['gcp_id'] = gcp_id
+                context['default_sa_id'] = gcp['projectNumber'] + '-compute@developer.gserviceaccount.com'
+
+            return render(request, template, context)
+
+        # This is an attempt to formally register (or refresh) the service account, post verification
+        elif request.POST.get('gcp_id'):
+            user_email = request.user.email
+            gcp_id = request.POST.get('gcp_id')
+            user_sa = request.POST.get('user_sa')
+            # Used to be we were handed back datasets even if we were removing everything. Client side code depended
+            # on verification being run to get this done, but we no longer do verification of a full removal.
+            dataset_str = request.POST.get('datasets')
+            datasets = dataset_str.split(',') if dataset_str else []
+            is_refresh = bool(request.POST.get('is_refresh') == 'true')
+            is_adjust = bool(request.POST.get('is_adjust') == 'true')
+            remove_all = bool(request.POST.get('remove_all') == 'true')
+            err_msgs = register_service_account(user_email, user_id, gcp_id, user_sa, datasets, is_refresh, is_adjust,
+                                                remove_all)
+
+            for msg_tuple in err_msgs:
+                if msg_tuple[1] == 'error':
+                    messages.error(request, msg_tuple[0])
+                elif msg_tuple[1] == 'warning':
+                    messages.warning(request, msg_tuple[0])
+                else:
+                    logger.info("[INFO] {}".format(msg_tuple))
+
+            return redirect('user_gcp_list', user_id=user_id)
+        else:
+            messages.error(request, 'There was no Google Cloud Project provided.', 'warning')
+            return redirect('user_gcp_list', user_id=user_id)
+
+    except TokenFailure:
+        messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
+        return redirect(reverse('user_detail', args=[user_id]))
+    except InternalTokenError:
+        messages.error(request,
+                       "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1939"))
+    except RefreshTokenExpired:
+        messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
+        return redirect(reverse('user_detail', args=[user_id]))
+    except DCFCommFailure:
+        messages.error(request, "There was a communications problem contacting the Data Commons Framework.")
+    except Exception as e:
+        logger.error("[ERROR]: Unexpected Exception registering a Service Account {}".format(str(e)))
+        logger.exception(e)
+        messages.error(request, "Unable to register this Service Account - please contact feedback@isb-cgc.org.")
+
+    return redirect('user_gcp_list', user_id=user_id)
 
 
 @login_required
@@ -271,7 +577,8 @@ def delete_sa(request, user_id, sa_name):
         messages.error(request, "Your Data Commons Framework identity needs to be reestablished to complete this task.")
         return redirect(reverse('user_detail', args=[user_id]))
     except InternalTokenError:
-        messages.error(request, "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931"))
+        messages.error(request,
+                       "There was an unexpected internal error {}. Please contact feedback@isb-cgc.org.".format("1931"))
     except RefreshTokenExpired:
         messages.error(request, "Your login to the Data Commons Framework has expired. You will need to log in again.")
         return redirect(reverse('user_detail', args=[user_id]))
@@ -280,7 +587,8 @@ def delete_sa(request, user_id, sa_name):
     except Exception as e:
         logger.error("[ERROR]: Unexpected Exception unregister a Service Account {}".format(str(e)))
         logger.exception(e)
-        messages.error(request, "Encountered an error while trying to remove this service account - please contact feedback@isb-cgc.org.")
+        messages.error(request,
+                       "Encountered an error while trying to remove this service account - please contact feedback@isb-cgc.org.")
 
     return redirect('user_gcp_list', user_id=user_id)
 
@@ -304,13 +612,15 @@ def register_bucket(request, user_id, gcp_id):
                 if bucket.google_project.project_id != gcp.project_id:
                     messages.error(
                         request,
-                        "A bucket with the name {} has already been registered under a different project.".format(escape(bucket_name)) +
+                        "A bucket with the name {} has already been registered under a different project.".format(
+                            escape(bucket_name)) +
                         " If you feel you've received this message in error, please contact feedback@isb-cgc.org."
                     )
                 else:
                     messages.error(
                         request,
-                        "A bucket with the name {} has already been registered under project {}.".format(escape(bucket_name),gcp.project_id) +
+                        "A bucket with the name {} has already been registered under project {}.".format(
+                            escape(bucket_name), gcp.project_id) +
                         " Buckets can only be registered to a project once. If you feel you've received this message in error, please contact feedback@isb-cgc.org."
                     )
                 return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
@@ -355,7 +665,7 @@ def register_bucket(request, user_id, gcp_id):
                     e_message = "HTTP error {0}".format(str(e.resp.status))
                 messages.error(request,
                                'Error returned trying to access bucket {0} in Google Cloud Project {1}: {2}.'.format(
-                                bucket_name, gcp.project_id, e_message))
+                                   bucket_name, gcp.project_id, e_message))
             else:
                 messages.error(request, 'There was an unknown error processing this request.')
 
@@ -376,7 +686,9 @@ def delete_bucket(request, user_id, bucket_id):
         # Check to make sure it's not being used by user data
         user_data_tables = User_Data_Tables.objects.filter(google_bucket_id=bucket_id, project__active=True)
         if len(user_data_tables):
-            messages.error(request, 'The bucket, {0}, is being used for uploaded program data. Please delete the program(s) before deleting this bucket. This includes any programs uploaded by other users to ths same bucket.'.format(bucket.bucket_name))
+            messages.error(request,
+                           'The bucket, {0}, is being used for uploaded program data. Please delete the program(s) before deleting this bucket. This includes any programs uploaded by other users to ths same bucket.'.format(
+                               bucket.bucket_name))
         else:
             bucket.delete()
         return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
@@ -397,12 +709,14 @@ def register_bqdataset(request, user_id, gcp_id):
         else:
             bqdataset_name = bqdataset_name.strip()
             try:
-                BqDataset.objects.get(dataset_name=bqdataset_name,google_project=gcp)
-                messages.error(request,"A dataset with the name {} has already been registered for project {}.".format(escape(bqdataset_name),gcp.project_id))
+                BqDataset.objects.get(dataset_name=bqdataset_name, google_project=gcp)
+                messages.error(request, "A dataset with the name {} has already been registered for project {}.".format(
+                    escape(bqdataset_name), gcp.project_id))
                 return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
             except MultipleObjectsReturned:
-                messages.error(request, "Multiple datasets with the name {} have already been registered for project {}.".format(
-                    escape(bqdataset_name),gcp.project_id))
+                messages.error(request,
+                               "Multiple datasets with the name {} have already been registered for project {}.".format(
+                                   escape(bqdataset_name), gcp.project_id))
                 return redirect('gcp_detail', user_id=user_id, gcp_id=gcp_id)
             except ObjectDoesNotExist:
                 pass
@@ -442,7 +756,6 @@ def register_bqdataset(request, user_id, gcp_id):
 
 @login_required
 def delete_bqdataset(request, user_id, bqdataset_id):
-
     if request.POST:
         gcp_id = request.POST.get('gcp_id')
         bqdataset = BqDataset.objects.get(id=bqdataset_id)
@@ -485,9 +798,10 @@ def get_user_buckets(request, user_id):
             result = {
                 'status': 'error',
                 'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
-                    + "project and GCS bucket before attempting to export."
+                       + "project and GCS bucket before attempting to export."
             }
-            logger.info("[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
+            logger.info(
+                "[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
         else:
             for gcp in gcps:
                 this_proj = {
@@ -502,10 +816,11 @@ def get_user_buckets(request, user_id):
                 result = {
                     'status': 'error',
                     'msg': "No registered GCS buckets were found in your Google Cloud Projects. Please register "
-                        + "at least one bucket in one of your projects before attempting to export."
+                           + "at least one bucket in one of your projects before attempting to export."
                 }
                 logger.info(
-                    "[STATUS] No registered buckets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
+                    "[STATUS] No registered buckets were found for user {} (ID: {}).".format(req_user.email,
+                                                                                             str(req_user.id)))
             else:
                 status = '200'
                 result['status'] = 'success'
@@ -514,15 +829,16 @@ def get_user_buckets(request, user_id):
     except Exception as e:
         logger.error("[ERROR] While retrieving user {}'s registered GCS buckets:".format(str(user_id)))
         logger.exception(e)
-        result = {'message': "There was an error while retrieving your GCS buckets--please contact feedback@isb-cgc.org.".format(str(request.user.id)), 'status': 'error'}
-        status='500'
+        result = {
+            'message': "There was an error while retrieving your GCS buckets--please contact feedback@isb-cgc.org.".format(
+                str(request.user.id)), 'status': 'error'}
+        status = '500'
 
     return JsonResponse(result, status=status)
 
 
 @login_required
-def get_user_datasets(request,user_id):
-
+def get_user_datasets(request, user_id):
     result = None
     status = '200'
 
@@ -546,9 +862,10 @@ def get_user_datasets(request,user_id):
             result = {
                 'status': 'error',
                 'msg': "We couldn't find any Google Cloud Projects registered for you. Please register at least one "
-                    + "project and BigQuery dataset before attempting to export your cohort."
+                       + "project and BigQuery dataset before attempting to export your cohort."
             }
-            logger.info("[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
+            logger.info(
+                "[STATUS] No registered GCPs found for user {} (ID: {}).".format(req_user.email, str(req_user.id)))
         else:
             for gcp in gcps:
                 bqds = [x.dataset_name for x in gcp.bqdataset_set.all()]
@@ -573,10 +890,11 @@ def get_user_datasets(request,user_id):
                 result = {
                     'status': 'error',
                     'msg': "No registered BigQuery datasets were found in your Google Cloud Projects. Please register "
-                        + "at least one dataset in one of your projects before attempting to export your cohort."
+                           + "at least one dataset in one of your projects before attempting to export your cohort."
                 }
                 logger.info(
-                    "[STATUS] No registered datasets were found for user {} (ID: {}).".format(req_user.email,str(req_user.id)))
+                    "[STATUS] No registered datasets were found for user {} (ID: {}).".format(req_user.email,
+                                                                                              str(req_user.id)))
             else:
                 status = '200'
                 result['status'] = 'success'
@@ -585,7 +903,10 @@ def get_user_datasets(request,user_id):
     except Exception as e:
         logger.error("[ERROR] While retrieving user {}'s registered BQ datasets and tables:".format(str(user_id)))
         logger.exception(e)
-        result = {'message': "There was an error while retrieving your datasets and BQ tables. Please contact feedback@isb-cgc.org.".format(str(request.user.id)), 'status': 'error'}
-        status='500'
+        result = {
+            'message': "There was an error while retrieving your datasets and BQ tables. Please contact feedback@isb-cgc.org.".format(
+                str(request.user.id)), 'status': 'error'}
+        status = '500'
 
     return JsonResponse(result, status=status)
+
