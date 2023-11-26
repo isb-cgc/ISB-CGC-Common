@@ -66,18 +66,12 @@ def extended_logout_view(request):
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
         messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
-        messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     return response
 
 
 # GCP RELATED VIEWS
-
-
-'''
-Returns page that has user Google Cloud Projects
-'''
 
 
 # Returns page that has user Google Cloud Projects
@@ -909,4 +903,3 @@ def get_user_datasets(request, user_id):
         status = '500'
 
     return JsonResponse(result, status=status)
-
