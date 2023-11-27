@@ -218,11 +218,10 @@ def fetch_file_data_attr(type=None):
 
     try:
         if not len(METADATA_DATA_ATTR):
-            data_sources = DataSource.objects.prefetch_related('programs', 'version').filter(
+            data_sources = DataSource.objects.select_related('version').prefetch_related('programs', 'datasettypes').filter(
                 programs__active=True, version__in=DataVersion.objects.filter(
-                    Q(active=True),
-                    Q(data_type=(DataSetType.IMAGE_DATA if type == 'dicom' else DataSetType.FILE_DATA))
-                ),
+                    active=True
+                ), datasettypes__data_type=(DataSetType.IMAGE_DATA if type == 'dicom' else DataSetType.FILE_DATA),
                 source_type=DataSource.SOLR
             ).distinct()
             source_attrs = data_sources.get_source_attrs(named_set=metadata_data_attrs)

@@ -75,8 +75,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 else:
                     filters[key.split(':')[-1]] = inc_filters[key]
 
-        versions = DataVersion.objects.filter(data_type__in=versions) if versions and len(versions) else DataVersion.objects.filter(
-            active=True)
+        versions = versions or DataVersion.objects.filter(active=True)
 
         programs = Program.objects.filter(active=1,is_public=1)
 
@@ -95,10 +94,10 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 'totals': {}
             }
             prog_versions = prog.dataversion_set.filter(
-                id__in=versions,
-                data_type__in=data_type
+                id__in=versions
             )
-            sources = prog.get_data_sources(source_type=source_type, versions=prog_versions)
+            sources = prog.get_data_sources(source_type=source_type, versions=prog_versions, data_type=data_type)
+            print(sources)
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
             # filter one program as a time.
             prog_filters = filters
@@ -150,9 +149,10 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         attr_name = 'Variant_Classification' if 'MUT:' in attr else re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
                         # If an attribute is not in this program's attribute listing, then it's ignored
                         if attr_name in prog_attrs['list']:
+
                             # If the attribute is from this source, just add the query
                             mutation_filter_matches_source = (
-                                    (source.version.data_type != DataSetType.MUTATION_DATA) or
+                                    (DataSetType.MUTATION_DATA in source.datasettypes.all().values_list('data_type',flat=True)) or
                                     (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower()))
                             )
                             if attr_name in prog_attrs['sources'][source.id]['list'] and mutation_filter_matches_source:
@@ -161,7 +161,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                             else:
                                 for ds in sources:
                                     mutation_filter_matches_source = (
-                                        (ds.version.data_type != DataSetType.MUTATION_DATA) or (
+                                        (DataSetType.MUTATION_DATA not in ds.datasettypes.all().values_list('data_type',flat=True)) or (
                                            attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), ds.name.lower())
                                         )
                                     )
@@ -208,17 +208,17 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         'limit': 0
                     })
 
-                set_type = source.get_set_type()
-
-                if set_type not in results['programs'][prog.id]['sets']:
-                    results['programs'][prog.id]['sets'][set_type] = {}
-                results['programs'][prog.id]['sets'][set_type][source.name] = solr_result
-                if solr_facets_filtered:
-                    solr_result['filtered_facets'] = solr_result_filtered['facets']
-                for attr in count_attrs['list']:
-                    prog_totals = results['programs'][prog.id]['totals']
-                    if "{}_count".format(attr) not in prog_totals or prog_totals["{}_count".format(attr)] == 0:
-                        prog_totals["{}_count".format(attr)] = solr_result["{}_count".format(attr)] if "{}_count".format(attr) in solr_result else 0
+                set_types = source.get_set_types()
+                for set_type in set_types:
+                    if set_type not in results['programs'][prog.id]['sets']:
+                        results['programs'][prog.id]['sets'][set_type] = {}
+                    results['programs'][prog.id]['sets'][set_type][source.name] = solr_result
+                    if solr_facets_filtered:
+                        solr_result['filtered_facets'] = solr_result_filtered['facets']
+                    for attr in count_attrs['list']:
+                        prog_totals = results['programs'][prog.id]['totals']
+                        if "{}_count".format(attr) not in prog_totals or prog_totals["{}_count".format(attr)] == 0:
+                            prog_totals["{}_count".format(attr)] = solr_result["{}_count".format(attr)] if "{}_count".format(attr) in solr_result else 0
 
         stop = time.time()
 
@@ -234,10 +234,13 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
 
 # Tally counts for metadata filters of public programs
-def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None,comb_mut_filters='OR'):
+def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=None, comb_mut_filters='OR', versions=None):
 
     try:
         logger.info("[STATUS] Entering count_public_metadata")
+
+        versions = DataVersion.objects.filter(version__in=versions) if versions and len(versions) else DataVersion.objects.filter(
+            active=True)
         solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
         facet_types = {
             'facets': {},

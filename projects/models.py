@@ -19,7 +19,7 @@ from builtins import object
 import operator
 from django.db import models
 from django.contrib.auth.models import User
-from django.db.models import Q
+from django.db.models import Q, Prefetch
 from functools import reduce
 import logging
 
@@ -151,13 +151,18 @@ class Program(models.Model):
             q_objects &= Q(version__in=versions)
         if data_type:
             if type(data_type) is list:
-                q_obj_ds &= Q(version__data_type__in=data_type)
+                q_obj_ds &= Q(data_type__in=data_type)
+                q_objects &= Q(datasettypes__data_type__in=data_type)
             else:
-                q_obj_ds &= Q(version__data_type=data_type)
+                q_obj_ds &= Q(data_type=data_type)
+                q_objects &= Q(datasettypes__data_type=data_type)
         if source_type:
             q_objects &= Q(source_type=source_type)
 
-        return self.datasource_set.select_related('version').filter(q_objects)
+        return self.datasource_set.select_related('version').prefetch_related(Prefetch(
+            'datasettypes',
+            queryset=DataSetType.objects.filter(q_obj_ds)
+        )).filter(q_objects)
 
 
     def get_source_attrs(self, for_ui=None, data_type=None, source_type=None, active=True, versions=None, for_faceting=True,
@@ -415,12 +420,26 @@ class DataSourceQuerySet(models.QuerySet):
         data_types = {}
         sources = self.all()
         for ds in sources:
-            data_set_types = ds.data_sets.all()
+            data_set_types = ds.datasettypes.all()
             for data_set_type in data_set_types:
                 if ds.id not in data_types:
                     data_types[ds.id] = []
                 data_types[ds.id].append(data_set_type.data_type)
         return data_types
+
+
+    # Returns a dict of the datasources with their data set types as an array against their ID (pk)
+    def get_source_set_types(self, qualified_name=False):
+        set_types = {}
+        sources = self.all()
+        for ds in sources:
+            data_set_types = ds.datasettypes.all()
+            for data_set_type in data_set_types:
+                if ds.id not in set_types:
+                    set_types[ds.id] = []
+                set_types[ds.id].append(data_set_type.set_type)
+        return set_types
+
 
     # Determines if a set of data sources contains any belonging to an inactive version
     def contains_inactive_versions(self):
@@ -452,7 +471,7 @@ class DataSourceQuerySet(models.QuerySet):
     def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, active_only=False):
         start = time.time()
         # Simple string list of attribute names (warning: will not properly resolve for collision)
-        attrs = { 'list': None, 'ids': None }
+        attrs = { 'list': None, 'ids': None, 'attrs': None }
         # Full source-ID dictionary of attributes
         if by_source:
             attrs['sources'] = {}
@@ -483,6 +502,8 @@ class DataSourceQuerySet(models.QuerySet):
                     'count_col': ds.count_col
                 }
 
+            attrs['attrs'] = attr_set if not attrs['attrs'] else attrs['attrs'] | attr_set
+
             if not attrs['list']:
                 attrs['list'] = list(attr_set.values_list('name', flat=True))
             else:
@@ -494,6 +515,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         attrs['list'] = attrs['list'] and list(set(attrs['list']))
         attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
+        attrs['attrs'].distinct()
         stop = time.time()
         logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
 
@@ -542,8 +564,7 @@ class DataSource(models.Model):
 
 
     def get_set_types(self):
-        return [DataSetType.SET_TYPE_DICT[x.attribute_set_type_set__datasettype__set_type]
-                for x in self.attributes_set.prefetch_related("attribute_set_type_set__datasettype").all()]
+        return [DataSetType.SET_TYPE_DICT[x] for x in self.datasettypes.all().values_list('set_type',flat=True)]
 
 
     def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None, active=True, all=False):
