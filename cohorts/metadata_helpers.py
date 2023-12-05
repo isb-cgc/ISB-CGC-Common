@@ -201,23 +201,27 @@ def get_sql_connection():
 
 def fetch_file_data_attr(type=None):
 
-    if type == 'dicom':
-        metadata_data_attrs = ['Modality', 'BodyPartExamined']
-    elif type == 'pdf':
-        metadata_data_attrs = ['project_short_name']
-    elif type == 'slim':
-        metadata_data_attrs = ['data_type', 'project_short_name']
-    elif type == 'igv':
-        metadata_data_attrs = ['experimental_strategy', 'platform']
-    else:
-        metadata_data_attrs = ['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform']
-
-    metadata_data_attrs.extend(['program_name'])
-    if type != 'dicom':
-        metadata_data_attrs.extend(['disease_code', 'node', 'build'])
-
     try:
-        if not len(METADATA_DATA_ATTR):
+        type = type or "all"
+
+        metadata_data_attrs = ["program_name"]
+
+        if type == 'dicom':
+            metadata_data_attrs.extend(['Modality', 'BodyPartExamined', "collection_id", "CancerType"])
+        elif type == 'pdf':
+            metadata_data_attrs.extend(['project_short_name'])
+        elif type == 'slim':
+            metadata_data_attrs.extend(['data_type', 'project_short_name'])
+        elif type == 'igv':
+            metadata_data_attrs.extend(['experimental_strategy', 'platform'])
+        else:
+            metadata_data_attrs.extend(['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform'])
+
+        if type != 'dicom':
+            metadata_data_attrs.extend(['disease_code', 'node', 'build'])
+
+        if not len(METADATA_DATA_ATTR.get(type,[])):
+            METADATA_DATA_ATTR[type] = {}
             data_sources = DataSource.objects.select_related('version').prefetch_related('programs', 'datasettypes').filter(
                 programs__active=True, version__in=DataVersion.objects.filter(
                     active=True
@@ -240,31 +244,31 @@ def fetch_file_data_attr(type=None):
                 values = query_solr_and_format_result(solr_query)
 
                 for attr in values['values']:
-                    if attr not in METADATA_DATA_ATTR:
-                        METADATA_DATA_ATTR[attr] = {
+                    if attr not in METADATA_DATA_ATTR[type]:
+                        METADATA_DATA_ATTR[type][attr] = {
                             'values': {},
                             'name': attr,
                             'displ_name': source_attrs_data[attr]['display_name']
                         }
                     for val in values['values'][attr]:
-                        if val not in METADATA_DATA_ATTR[attr]['values']:
-                            METADATA_DATA_ATTR[attr]['values'][val] = {
+                        if val not in METADATA_DATA_ATTR[type][attr]['values']:
+                            METADATA_DATA_ATTR[type][attr]['values'][val] = {
                                 'displ_value': display_vals.get(attr,{}).get(val,None) or (format_for_display(str(val)) if not source_attrs_data[attr]['preformatted'] else str(val)),
                                 'value': re.sub(r"[^A-Za-z0-9_\-]", "", re.sub(r"\s+", "-", val)),
                                 'name': val
                             }
                             if attr in tooltips and val in tooltips[attr]:
-                                METADATA_DATA_ATTR[attr]['values'][val]['tooltip'] =  tooltips[attr][val]
+                                METADATA_DATA_ATTR[type][attr]['values'][val]['tooltip'] =  tooltips[attr][val]
 
-                    if 'None' not in METADATA_DATA_ATTR[attr]['values']:
-                        METADATA_DATA_ATTR[attr]['values']['None'] = {
+                    if 'None' not in METADATA_DATA_ATTR[type][attr]['values']:
+                        METADATA_DATA_ATTR[type][attr]['values']['None'] = {
                             'displ_value': 'None',
                             'value': 'None',
                             'name': 'None',
                             'tooltip': ''
                         }
 
-        return copy.deepcopy(METADATA_DATA_ATTR)
+        return copy.deepcopy(METADATA_DATA_ATTR[type])
 
     except Exception as e:
         logger.error('[ERROR] Exception while trying to get file metadata attributes:')

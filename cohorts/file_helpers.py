@@ -88,7 +88,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
 
             if do_filter_count:
-                facet_attr = Attribute.objects.filter(name__in=["collection_id", "Modality", "BodyPartExamined", "tcia_tumorLocation", "primaryAnatomicStructure", "CancerType"])
+                facet_attr = Attribute.objects.filter(name__in=["program_name", "collection_id", "Modality", "BodyPartExamined", "tcia_tumorLocation", "primaryAnatomicStructure", "CancerType"])
 
             # collapse = "StudyInstanceUID"
             unique = "StudyInstanceUID"
@@ -167,8 +167,19 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
 
         query_set = []
+        if data_type == "dicom":
+            # Make sure to filter out the Slide Microscopy images since this is an OHIF tab
+            # TODO: we should change this eventually
+            if not solr_query:
+                solr_query = {'queries': {}}
+            if 'Modality' not in solr_query['queries']:
+                solr_query['queries']['Modality'] = ""
+            solr_query['queries']['Modality'] += "(-Modality:(\"SM\"))"
+
         if solr_query:
             query_set = [y for x, y in solr_query['queries'].items()]
+
+        print(query_set)
         query_params = {
                 "collection": file_collection.name,
                 "fields": fields,
