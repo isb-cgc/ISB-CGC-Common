@@ -97,7 +97,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 id__in=versions
             )
             sources = prog.get_data_sources(source_type=source_type, versions=prog_versions, data_type=data_type)
-            print(sources)
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
             # filter one program as a time.
             prog_filters = filters
@@ -149,10 +148,9 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                         attr_name = 'Variant_Classification' if 'MUT:' in attr else re.sub("(_btw|_lt|_lte|_gt|_gte)", "", attr)
                         # If an attribute is not in this program's attribute listing, then it's ignored
                         if attr_name in prog_attrs['list']:
-
                             # If the attribute is from this source, just add the query
                             mutation_filter_matches_source = (
-                                    (DataSetType.MUTATION_DATA in source.datasettypes.all().values_list('data_type',flat=True)) or
+                                    (DataSetType.MUTATION_DATA not in source.datasettypes.all().values_list('data_type',flat=True)) or
                                     (attr_name == 'Variant_Classification' and re.search(attr.split(":")[1].lower(), source.name.lower()))
                             )
                             if attr_name in prog_attrs['sources'][source.id]['list'] and mutation_filter_matches_source:

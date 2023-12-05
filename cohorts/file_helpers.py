@@ -18,9 +18,10 @@ from __future__ import absolute_import
 from builtins import str
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+from django.db.models import Q, Prefetch
 
-from projects.models import DataVersion, Program
 from cohorts.models import Cohort, Cohort_Perms
+from projects.models import DataSetType, DataSource, DataVersion, Program
 
 from solr_helpers import *
 
@@ -54,14 +55,13 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         if cohort_id:
             Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        fields = ["case_barcode", "project_short_name", "disease_code"]
+        fields = ["case_barcode", "program_name", "disease_code"]
         # col_map: used in the sql ORDER BY clause
         # key: html column attribute 'columnId'
         # value: db table column name
         col_map = {
-                'col-program': 'project_short_name',
-                'col-barcode': 'case_barcode',
-                'col-diseasecode': 'disease_code'
+                'col-program': 'program_name',
+                'col-barcode': 'case_barcode'
             }
 
         facet_attr = None
@@ -72,38 +72,45 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]}
 
         if data_type == 'dicom':
-            file_collection = DataSource.objects.select_related('version').get(
-                source_type=DataSource.SOLR, version__data_type=DataSetType.IMAGE_DATA, version__active=True
-            )
+            file_collection = DataSource.objects.select_related('version').filter(source_type=DataSource.SOLR,
+                version__active=True).prefetch_related(
+                Prefetch('datasettypes',queryset=DataSetType.objects.filter(data_type=DataSetType.IMAGE_DATA))
+            ).filter(datasettypes__set_type=DataSetType.IMAGE_LIST_SET).first()
 
-            fields.extend(["file_path", "StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality"])
+            fields.extend(["StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality", "collection_id", "CancerType"])
 
             col_map.update({
                 'col-studydesc': 'StudyDescription',
                 'col-studyuid': 'StudyInstanceUID',
-                'col-projectname': 'project_short_name'
+                'col-collection': 'collection_id',
+                'col-modality': 'Modality',
+                'col-cancertype': 'CancerType',
             })
 
             if do_filter_count:
-                facet_attr = Attribute.objects.filter(name__in=["disease_code", "Modality", "BodyPartExamined"])
+                facet_attr = Attribute.objects.filter(name__in=["collection_id", "Modality", "BodyPartExamined", "tcia_tumorLocation", "primaryAnatomicStructure", "CancerType"])
 
             # collapse = "StudyInstanceUID"
             unique = "StudyInstanceUID"
 
         else:
-            file_collection = DataSource.objects.select_related('version').get(source_type=DataSource.SOLR,
-                                                                               version__active=True,
-                                                                               version__data_type=DataSetType.FILE_DATA)
+            file_list_dataset = DataSetType.objects.filter(data_type=DataSetType.FILE_DATA,set_type=DataSetType.FILE_LIST_SET)
+            file_collection = DataSource.objects.select_related('version').filter(source_type=DataSource.SOLR,
+                version__active=True).prefetch_related(
+                Prefetch('datasettypes',queryset=file_list_dataset)
+            ).filter(datasettypes__data_type=DataSetType.FILE_DATA,datasettypes__set_type=DataSetType.FILE_LIST_SET).first()
+
             if data_type == 'igv':
                 fields.extend(["sample_barcode"])
                 col_map.update({
-                    'col-sbarcode': 'sample_barcode'
+                    'col-sbarcode': 'sample_barcode',
+                    'col-diseasecode': 'disease_code'
                 })
 
             fields.extend(["index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "experimental_strategy", "data_format",
                            "file_node_id", "case_node_id", "file_size",
-                           "program_name", "node", "file_name", "file_name_key", "build"
+                           "program_name", "node", "file_name", "file_name_key", "build", "project_short_name"
                            ])
             if data_type == 'slim':
                 fields.extend(["StudyInstanceUID", "SeriesInstanceUID", "slide_barcode"])
@@ -192,10 +199,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'case': entry['case_barcode'],
                         'study_uid': entry['StudyInstanceUID'],
                         'study_desc': entry.get('StudyDescription','N/A'),
-                        'disease_code': entry.get('disease_code', 'N/A'),
-                        'project_short_name': entry.get('project_short_name', 'N/A'),
-                        'program': "TCGA",
-                        'file_path': entry.get('file_path', 'N/A')
+                        'cancer_type': entry.get('CancerType', 'N/A'),
+                        'collection_id': entry.get('collection_id', 'N/A'),
+                        'modality': entry.get('Modality', 'N/A'),
+                        'program': entry.get('program_name', 'N/A')
                     })
                 else:
                     whitelist_found = False

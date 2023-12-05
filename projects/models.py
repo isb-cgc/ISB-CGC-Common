@@ -707,7 +707,7 @@ class DataNode(models.Model):
             nodes = cls.objects.filter(active=True).prefetch_related('programs')
             programs = Program.objects.all().prefetch_related('datanode_set')
 
-        for node in nodes:
+        for node in nodes.order_by('short_name'):
             by_node_list.append({
                 "id": node.id,
                 "name": node.name,
@@ -717,10 +717,10 @@ class DataNode(models.Model):
                     "id": prog.id,
                     "name": prog.name,
                     "description": prog.description
-                } for prog in node.programs.all()]
+                } for prog in node.programs.all().order_by('name')]
             })
 
-        for program in programs:
+        for program in programs.order_by('name'):
             by_prog_list.append({
                 "id": program.id,
                 "name": program.name,
@@ -730,7 +730,8 @@ class DataNode(models.Model):
                     "name": node.name,
                     "description": node.description,
                     "short_name": node.short_name
-                } for node in program.datanode_set.all() if node in nodes]
+                } for node in program.datanode_set.all() if node in nodes],
+                "node_list": ", ".join([node.short_name for node in program.datanode_set.all() if node in nodes])
             })
 
         return by_node_list, by_prog_list
