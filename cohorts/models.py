@@ -29,7 +29,7 @@ from django.db.models import Count
 from django.contrib.auth.models import User
 from django.db.models import Q
 from django.utils.html import escape
-from projects.models import Attribute, DataVersion, DataSource, Attribute_Display_Values, Program
+from projects.models import Attribute, DataVersion, CgcDataVersion, DataSource, Attribute_Display_Values, Program
 from django.core.exceptions import ObjectDoesNotExist
 from sharing.models import Shared_Resource
 from functools import reduce
@@ -77,21 +77,7 @@ class Cohort(models.Model):
     last_exported_date = models.DateTimeField(null=True ,blank=False)
     date_created = models.DateTimeField(auto_now_add=True)
     case_count = models.IntegerField(blank=False, null=False, default=0)
-    series_count = models.IntegerField(blank=False, null=False, default=0)
-    study_count = models.IntegerField(blank=False, null=False, default=0)
-    total_disk_size = models.PositiveBigIntegerField(blank=False, null=False, default=0)
-    collections = models.TextField(blank=False, null=False, default="")
-
-    # Returns the names only of the collections found in this Cohort
-    # Return value is an array of strings
-    def get_collection_names(self):
-        collex = self.get_collections()
-        names = collex.distinct().values_list('name', flat=True)
-        return [str(x) for x in names]
-
-    # Determines if the Cohort has only user-owned collections
-    def only_user_data(self):
-        return bool(Collection.objects.filter(id__in=self.get_collections(), is_public=True).count() <= 0)
+    sample_count = models.IntegerField(blank=False, null=False, default=0)
 
     # Returns the highest level of permission the user has.
     def get_perm(self, request):
@@ -104,12 +90,6 @@ class Cohort(models.Model):
 
     def get_owner(self):
         return self.cohort_perms_set.filter(perm=Cohort_Perms.OWNER)[0].user
-
-    # If a Cohort is owned by the IDC Superuser, it's considered public; this checks for the owner and returns a bool
-    # based on that determination
-    def is_public(self):
-        idc_su = User.objects.get(username='idc', is_superuser=True)
-        return (self.cohort_perms_set.get(perm=Cohort_Perms.OWNER).user_id == idc_su.id)
 
     # Create a URI to access our most recent export to a table, if there's a valid date
     def get_last_export_uri(self):
@@ -130,6 +110,10 @@ class Cohort(models.Model):
     def only_active_versions(self):
         return bool(len(self.get_data_versions(active=False)) <= 0)
 
+    def get_programs(self):
+        cohort_filters = Filter.objects.select_related('program').filter(resulting_cohort=self)
+        return Program.objects.filter(id__in=cohort_filters.values_list('program__id', flat=True))
+
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     def get_data_sources(self, source_type=DataSource.SOLR, active=None, current=True, aggregate_level=None):
 
@@ -143,6 +127,18 @@ class Cohort(models.Model):
         sources = attributes.get_data_sources(data_versions, source_type, active, current, aggregate_level)
 
         return sources
+
+    def get_filters_for_counts(self):
+        filters = {}
+        cohort_filters = Filter.objects.select_related('attribute', 'program').filter(resulting_cohort=self)
+        for fltr in cohort_filters:
+            prog_attr = "{}:{}".format(fltr.program.id, fltr.attribute.name)
+            if prog_attr not in filters:
+                filters[prog_attr] = {'values': []}
+            filters[prog_attr]['values'].extend(fltr.value.split(fltr.value_delimiter))
+
+        return filters
+
 
     # Returns the set of filters defining this cohort as a dict organized by data source
     def get_filters_by_data_source(self, source_type=None):
@@ -250,38 +246,28 @@ class Cohort(models.Model):
 
         return filter_sets
 
-    # Returns the set of filters used to create this cohort as a JSON-compatible dict, for use in UI display
+    # Returns the set of filters used to create this cohort as a program-organized JSON-compatible dict,
+    # for use in UI display
     def get_filters_for_ui(self, with_display_vals=False):
         cohort_filters = self.get_filters_as_dict()
+        ui_filters = {}
+        attribute_display_vals = {}
 
-        if with_display_vals:
-            attribute_display_vals = {}
-            for fg in cohort_filters:
-                for filter in fg['filters']:
-                    attr = Attribute.objects.get(filter['id'])
-                    if attr.id not in attribute_display_vals:
-                        attribute_display_vals[attr.id] = attr.get_display_values()
-                    values = filter['values']
-                    filter['values'] = []
-                    for val in values:
-                        filter['values'].append({'value': val, 'display_val': attribute_display_vals[attr.id][val]})
+        for fg in cohort_filters:
+            for filter in fg['filters']:
+                if filter['program_name'] not in ui_filters:
+                    ui_filters[filter['program_name']] = []
+                ui_filter = filter
+                if filter['id'] not in attribute_display_vals:
+                    attr = Attribute.objects.get(id=filter['id'])
+                    attribute_display_vals[attr.id] = attr.get_display_values()
+                values = filter['values']
+                ui_filter['values'] = []
+                for val in values:
+                    ui_filter['values'].append({'value': val, 'display_val': attribute_display_vals[filter['id']].get(val,val) })
+                ui_filters[filter['program_name']].append(ui_filter)
 
-        return cohort_filters
-
-
-# A 'source' Cohort is a cohort which was used to produce a subsequent cohort, either via cloning or set operations
-class Source(models.Model):
-    SET_OPS = 'SET_OPS'
-    CLONE = 'CLONE'
-    SOURCE_TYPES = (
-        (SET_OPS, 'Set Operations'),
-        (CLONE, 'Clone')
-    )
-
-    parent = models.ForeignKey(Cohort, null=True, blank=True, related_name='source_parent', on_delete=models.CASCADE)
-    cohort = models.ForeignKey(Cohort, null=False, blank=False, related_name='source_cohort', on_delete=models.CASCADE)
-    type = models.CharField(max_length=10, choices=SOURCE_TYPES)
-    notes = models.CharField(max_length=1024, blank=True)
+        return ui_filters
 
 
 class Cohort_Perms(models.Model):
@@ -310,6 +296,7 @@ class Filter_Group(models.Model):
     id = models.AutoField(primary_key=True)
     resulting_cohort = models.ForeignKey(Cohort, null=False, blank=False, on_delete=models.CASCADE)
     operator = models.CharField(max_length=1, blank=False, null=False, choices=OPS, default=AND)
+    data_version = models.ForeignKey(CgcDataVersion, null=False, blank=False, on_delete=models.CASCADE)
 
     def get_filter_set(self):
         return self.filter_set.all().get_filter_set()
@@ -340,7 +327,9 @@ class FilterQuerySet(models.QuerySet):
             flat_dict = fltr.get_filter_flat()
             flat_dict.update({
                 'id': fltr.attribute.id,
-                'display_name': fltr.attribute.display_name
+                'display_name': fltr.attribute.display_name,
+                'program': fltr.program.id,
+                'program_name': fltr.program.name
             })
             filters.append(flat_dict)
         return filters
@@ -466,10 +455,10 @@ class Filter(models.Model):
         else:
             delimiter = cls.DEFAULT_VALUE_DELIMITER
         if not delimiter:
-            logger.warn("[WARNING] No valid delimiter value available for this set of values: {}".format(
+            logger.warning("[WARNING] No valid delimiter value available for this set of values: {}".format(
                 filter_value_full)
             )
-            logger.warn("[WARNING] Failing over to complex delimiter '$$%%'.")
+            logger.warning("[WARNING] Failing over to complex delimiter '$$%%'.")
             delimiter = cls.FAILOVER_DELIMITER
         return delimiter
 

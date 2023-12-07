@@ -48,6 +48,8 @@ urlpatterns = [
     url(r'^unshare_cohort/(?P<cohort_id>\d+)/',     views.unshare_cohort, name='unshare_cohort'),
     url(r'^save_cohort_comment/',                   views.save_comment, name='save_cohort_comment'),
     url(r'^download_filelist/$',                    views.streaming_csv_view, name='download_filelist'),
+    url(r'^download_ids/(?P<cohort_id>\d+)/$',      views.cohort_ids, name='download_ids'),
+
     url(r'^download_filelist/(?P<cohort_id>\d+)/',  views.streaming_csv_view, name='download_cohort_filelist'),
 
 

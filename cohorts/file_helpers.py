@@ -21,6 +21,7 @@ from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.db.models import Q, Prefetch
 
 from cohorts.models import Cohort, Cohort_Perms
+from .utils import get_cohort_cases
 from projects.models import DataSetType, DataSource, DataVersion, Program
 
 from solr_helpers import *
@@ -141,17 +142,15 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         solr_query = build_solr_query(inc_filters, with_tags_for_ex=do_filter_count) if inc_filters else None
 
         if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
             if not solr_query:
                 solr_query = {'queries': {}}
 
             file_collection_name = file_collection.name.lower()
 
             if file_collection_name.startswith('files'):
-                cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
-                solr_query['queries']['cohort'] = "{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples))
-            else:
-                cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases))
+                cohort_cases = get_cohort_cases(cohort_id)
+                solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
 
         if format_filter:
             format_query = build_solr_query(format_filter, with_tags_for_ex=False)
@@ -179,7 +178,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         if solr_query:
             query_set = [y for x, y in solr_query['queries'].items()]
 
-        print(query_set)
         query_params = {
                 "collection": file_collection.name,
                 "fields": fields,
@@ -223,6 +221,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         for whitelist in whitelists:
                             if whitelist in access:
                                 whitelist_found = True
+                    for key in entry:
+                        if type(entry[key]) is list:
+                            entry[key] = ", ".join([str(x) for x in entry[key]]) if len(entry[key]) > 1 else entry[key][0]
 
                     file_list.append({
                         'sample': entry.get('sample_barcode', 'N/A'),

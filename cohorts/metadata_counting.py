@@ -51,8 +51,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
     logger.info("[STATUS] Entering Solr metadata counter")
     comb_mut_filters = comb_mut_filters.upper()
-    mutation_filters = None
-    filters = {}
     solr_facets = None
     solr_facets_filtered = None
     solr_fields = None
@@ -62,13 +60,25 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
     results = { 'programs': {} }
 
     try:
+        if cohort_id:
+            inc_filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts()
         start = time.time()
+        prog_filters = {}
         # Divide our filters into 'mutation' and 'non-mutation' sets
+        print(inc_filters)
         if inc_filters:
             for key in inc_filters:
+                prog = int(key.split(":")[0])
+                if prog not in prog_filters:
+                    prog_filters[prog] = {
+                        'mutation_filters': None,
+                        'filters': {}
+                    }
+                filters = prog_filters[prog]['filters']
                 if 'MUT:' in key:
-                    if not mutation_filters:
-                        mutation_filters = {}
+                    if not prog_filters[prog]['mutation_filters']:
+                        prog_filters[prog]['mutation_filters'] = {}
+                    mutation_filters = prog_filters[prog]['mutation_filters']
                     if not mutation_build:
                         mutation_build = key.split(":")[1]
                     mutation_filters[key] = inc_filters[key]
@@ -76,7 +86,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     filters[key.split(':')[-1]] = inc_filters[key]
 
         versions = versions or DataVersion.objects.filter(active=True)
-
         programs = Program.objects.filter(active=1,is_public=1)
 
         if program_id:
@@ -87,6 +96,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 programs = programs.filter(id__in=Cohort.objects.get(id=cohort_id).get_programs())
 
         for prog in programs:
+            filters = prog_filters[prog.id]['filters'] if prog.id in prog_filters else {}
+            mutation_filters = prog_filters[prog.id]['mutation_filters'] if prog.id in prog_filters else None
             if "program_name" not in filters:
                 filters["program_name"] = [prog.name]
             results['programs'][prog.id] = {
@@ -97,9 +108,10 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 id__in=versions
             )
             sources = prog.get_data_sources(source_type=source_type, versions=prog_versions, data_type=data_type)
+            if not len(sources):
+                raise Exception("[ERROR] No data sources found for this program!")
             # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
             # filter one program as a time.
-            prog_filters = filters
             prog_mut_filters = mutation_filters
             facet_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_ui=True, versions=prog_versions)
             prog_attrs = prog.get_source_attrs(source_type=DataSource.SOLR, for_ui=True, for_faceting=False, versions=prog_versions)
@@ -107,8 +119,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             field_attr = None if not fields else prog.get_source_attrs(source_type=DataSource.SOLR, for_faceting=False, named_set=fields, versions=prog_versions)
             for source in sources:
                 solr_query = build_solr_query(
-                    prog_filters, with_tags_for_ex=with_tags, subq_join_field="case_barcode", do_not_exclude=["program_name"]
-                ) if prog_filters else None
+                    filters, with_tags_for_ex=with_tags, subq_join_field="case_barcode", do_not_exclude=["program_name"]
+                ) if filters else None
                 solr_mut_query = build_solr_query(
                     prog_mut_filters, with_tags_for_ex=False, subq_join_field="case_barcode", do_not_exclude=["program_name"],
                     comb_with=comb_mut_filters
@@ -177,16 +189,6 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     if fq_operand == 'OR' and len(query_set) > 1:
                         query_set = ["{}({})".format("".join(join_clauses)," OR ".join(query_set))]
 
-                if cohort_id:
-                    source_name = source.name.lower()
-                    if source_name.startswith('files'):
-                        cohort_samples = Cohort.objects.get(id=cohort_id).get_cohort_samples()
-                        query_set.append("{!terms f=sample_barcode}" + "{}".format(",".join(cohort_samples)))
-
-                    else:
-                        cohort_cases = Cohort.objects.get(id=cohort_id).get_cohort_cases()
-                        query_set.append("{!terms f=case_barcode}" + "{}".format(",".join(cohort_cases)))
-
                 solr_result = query_solr_and_format_result({
                     'collection': source.name,
                     'facets': solr_facets,
@@ -242,7 +244,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
         solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
         facet_types = {
             'facets': {},
-            'filtered_facets': None if not inc_filters else {}
+            'filtered_facets': None if not inc_filters and not cohort_id else {}
         }
         facets = facet_types['facets']
         filtered_facets = facet_types['filtered_facets']

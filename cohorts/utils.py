@@ -21,10 +21,10 @@ from builtins import str
 from past.utils import old_div
 from builtins import object
 
-from .models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
+from .models import Cohort, Cohort_Perms, Filter, Cohort_Comments, Filter_Group
 from .metadata_helpers import *
 from .metadata_counting import count_public_metadata_solr
-from projects.models import Project, Program
+from projects.models import Program, CgcDataVersion
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from django.contrib.auth.models import User
 from django.contrib.auth.models import User as Django_User
@@ -54,6 +54,7 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
         for prog in filters:
             if prog not in stats['programs']:
                 stats['programs'][prog] = {}
+
             result = count_public_metadata_solr(None, inc_filters=filters[prog], program_id=prog, with_counts=False)
             prog_totals = result.get('programs', {}).get(prog,{}).get('totals',None)
             if prog_totals:
@@ -108,53 +109,100 @@ def delete_cohort(user, cohort_id):
     return cohort_info
 
 
-def create_cohort(user, filters=None, name=None, source_id=None, case_insens=True):
+def create_cohort(user, filters=None, name=None, desc=None, source_id=None, version=None, stats=None, case_insens=True):
 
-    if not filters and not name:
-        # Can't save/edit a cohort when nothing is being changed!
+    if not filters and not name and not desc:
+        logger.error("[ERROR] Can't create/edit a cohort when nothing is being changed!")
         return None
 
     source = None
-    source_progs = None
 
     if source_id:
-        source = Cohort.objects.filter(id=source_id).first()
-        source_progs = source.get_program_names()
+        source = Cohort.objects.get(id=source_id)
 
     if source and not filters or (len(filters) <= 0):
-        # If we're only changing the name, just edit the cohort and return
+        # If we're only changing the name or desc, just edit the cohort and return
         if name:
             source.name = name
+        if desc:
+            source.description = desc
         source.save()
         return { 'cohort_id': source.id }
 
     # Make and save cohort
+    settings = {
+        "name": name,
+        "description": desc
+    }
 
-    barcodes = None
+    if not stats:
+        logger.warning("[WARNING] Cohort counts were not provided--these values will be set to zero.")
+    else:
+        settings['case_count'] = stats.get('case_barcode', 0)
+        settings['sample_count'] = stats.get('sample_barcode', 0)
 
-    # Create new cohort
-    cohort = Cohort.objects.create(name=name)
+    cohort = Cohort.objects.create(**settings)
     cohort.save()
 
     # Set permission for user to be owner
     perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
     perm.save()
 
-    # if there's a source, deactivate it and link it to the new cohort
-    if source:
-        source.active = False
-        source.save()
-        Source.objects.create(parent=source, cohort=cohort, type=Source.FILTERS).save()
-
     # TODO: Need to convert filters into a datasource attribute set
     # Make and save filters
-    for prog in filters:
-        prog_obj = Program.objects.get(name=prog, is_public=1, active=1)
-        prog_filters = filters[prog]
-        for this_filter in prog_filters:
-            for val in prog_filters[this_filter]:
-                    Filter.objects.create(resulting_cohort=cohort, attribute=None,
-                                           value=val).save()
+    filter_set = []
+    # For now, any set of filters in a cohort is a single 'group'; this allows us to, in the future,
+    # let a user specify a different operator between groups (eg. (filter a AND filter b) OR (filter c AND filter D)
+    version = version or CgcDataVersion.objects.get(active=True)
+    grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND, data_version=version)
+    progs = Program.objects.filter(id__in=[int(x) for x in filters.keys()], is_public=1, active=1)
+    for prog in progs:
+        prog_filters = filters[prog.id]
+        attrs = Attribute.objects.filter(id__in=[int(x) for x in prog_filters.keys()])
+        for attr in attrs:
+            filter_values = prog_filters[attr.id]['values']
+            # TODO: Need to beef up continuous numeric support and switch to sliders
+            op = Filter.OR #if attr not in cont_numeric_attr else Filter.BTW
+            # if type(filter_values) is dict:
+            #     op = Filter.STR_TO_OP.get(filter_values['op'], op)
+            #     filter_values = filter_values['values']
+            # elif type(filter_values) is list and type(filter_values[0]) is dict:
+            #     # complex query eg. 'age_at_diagnosis = None OR 45-67'
+            #     nested_attr[attr] = filter_values
+            #     continue
+            delimiter = Filter.get_delimiter(filter_values)
+            filter_set.append(Filter(
+                resulting_cohort=cohort,
+                attribute=attr,
+                value=delimiter.join([str(x) for x in filter_values]),
+                filter_group=grouping,
+                value_delimiter=delimiter,
+                operator=op,
+                program=prog
+            ))
 
+        Filter.objects.bulk_create(filter_set)
 
     return {'cohort_id': cohort.id}
+
+def get_cohort_cases(cohort_id):
+    try:
+        result = count_public_metadata_solr(None,cohort_id,None,None,fields=["case_barcode"], with_counts=False,with_records=True,limit=64000)
+        ids = []
+        for prog in result['programs']:
+            program = Program.objects.get(id=prog)
+            set = result['programs'][prog]['sets']['Case']
+            for src in set:
+                for case in set[src]['docs']:
+                    ids.append({
+                        'program': program.name,
+                        'case_barcode': case['case_barcode']
+                    })
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to fetch cohort case list:")
+        logger.exception(e)
+
+    return ids
+
+

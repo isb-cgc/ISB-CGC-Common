@@ -361,6 +361,117 @@ class DataSetType(models.Model):
         )
 
 
+class CgcDataVersionQuerySet(models.QuerySet):
+
+    # Return all the data sources corresponding to this queryset
+    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None):
+        sources = None
+        cgcdvs = self.all()
+        source_qs = Q()
+        version_qs = Q()
+        for cgcdv in cgcdvs:
+            if active is not None:
+                version_qs &= Q(active=active)
+            if current is not None:
+                version_qs &= Q(current=current)
+            versions = cgcdv.dataversion_set.filter(version_qs).distinct()
+            if not sources:
+                sources = versions.get_data_sources()
+            else:
+                sources = sources | versions.get_data_sources()
+        if source_type:
+            source_qs &= Q(source_type=source_type)
+        if aggregate_level:
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            source_qs &= Q(aggregate_level__in=aggregate_level)
+        return sources.distinct().filter(source_qs)
+
+    # Return all display strings in this queryset, either as a list (joined=False) or as a string (joined=True)
+    def get_displays(self, joined=False, delimiter="; "):
+        displays = []
+        cgcdvs = self.all()
+        for cgcdv in cgcdvs:
+            displays.append(cgcdv.get_display())
+        return displays if not joined else delimiter.join(displays)
+
+    # Return all the DataVersions which have this CgcDataVersion
+    def get_data_versions(self, active=None, current=None):
+        cgcdvs = self.all()
+        version_qs = Q()
+        versions = None
+        for cgcdv in cgcdvs:
+            if active is not None:
+                version_qs &= Q(active=active)
+            if current is not None:
+                version_qs &= Q(current=current)
+            versions = cgcdv.dataversion_set.filter(version_qs).distinct()
+        return versions
+
+
+class CgcDataVersionManager(models.Manager):
+    def get_queryset(self):
+        return CgcDataVersionQuerySet(self.model, using=self._db)
+
+
+class CgcDataVersion(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False)
+    version_number = models.CharField(max_length=128, null=False, blank=False)
+    version_uid = models.CharField(max_length=128, null=True)
+    date_active = models.DateField(auto_now_add=True, null=False, blank=False)
+    active = models.BooleanField(default=True, null=False, blank=False)
+    objects = CgcDataVersionManager()
+
+    def get_data_sources(self, active=None, source_type=None, aggregate_level=None):
+        versions = self.dataversion_set.filter(active=active).distinct() if active is not None else self.dataversion_set.all().distinct()
+
+        return versions.get_data_sources(source_type=source_type, aggregate_level=aggregate_level).distinct()
+
+
+    def get_display(self):
+        return self.__str__()
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return "{} Version {} {}".format(self.name, self.version_number, self.date_active)
+
+
+class DataVersionQuerySet(models.QuerySet):
+    def get_data_sources(self, source_type=None, aggregate_level=None):
+        sources = None
+        q_objs = Q()
+        if aggregate_level:
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            q_objs &= Q(aggregate_level__in=aggregate_level)
+        if source_type:
+            q_objs &= Q(source_type=source_type)
+        dvs = self.all()
+        for dv in dvs:
+            if not sources:
+                sources = dv.datasource_set.filter(q_objs)
+            else:
+                sources = sources | dv.datasource_set.filter(q_objs)
+        return sources
+
+    def get_active_cgc_versions(self):
+        cgc_versions = None
+        dvs = self.all()
+        for dv in dvs:
+            if not cgc_versions:
+                cgc_versions = dv.cgc_versions.filter(active=True)
+            else:
+                cgc_versions = cgc_versions | dv.cgc_versions.filter(active=True)
+
+        return cgc_versions
+
+
+class DataVersionManager(models.Manager):
+    def get_queryset(self):
+        return DataVersionQuerySet(self.model, using=self._db)
+
+
 # A data version represents a given release of data, eg. GDC Rel20 or IDC v15
 class DataVersion(models.Model):
     version = models.CharField(max_length=64, null=False, blank=False)
@@ -368,6 +479,8 @@ class DataVersion(models.Model):
     active = models.BooleanField(default=True)
     build = models.CharField(max_length=16, null=True, blank=False)
     programs = models.ManyToManyField(Program)
+    cgc_versions = models.ManyToManyField(CgcDataVersion)
+    objects = DataVersionManager()
 
     def __str__(self):
         return "{}: {} ({})".format(

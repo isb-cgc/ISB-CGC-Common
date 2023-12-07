@@ -40,7 +40,7 @@ from django.conf import settings
 from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.urls import reverse
-from django.db.models import Count
+from django.db.models import Count, Prefetch
 from django.http import HttpResponse, JsonResponse
 from django.http import StreamingHttpResponse
 from django.shortcuts import render, redirect
@@ -50,9 +50,10 @@ from django.utils.html import escape
 
 from .metadata_helpers import *
 from .metadata_counting import *
+from .utils import create_cohort, get_cohort_cases
 from .file_helpers import *
 from sharing.service import create_share
-from .models import Cohort, Cohort_Perms, Source, Filter, Cohort_Comments
+from .models import Cohort, Cohort_Perms, Filter, Cohort_Comments
 from projects.models import Program, Project, DataNode, DataSetType
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 from .utils import delete_cohort as utils_delete_cohort, get_cohort_stats
@@ -253,25 +254,19 @@ def cohort_detail(request, cohort_id):
             return redirect('cohort_list')
 
         cohort_progs = cohort.get_programs()
-        cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': ('isb-cgc' if x.owner == isb_user and x.is_public else 'user-data')} for x in cohort_progs ]
-        # Do not show shared users for public cohorts
-        if not cohort.is_public():
-            shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
-            shared_with_users = User.objects.filter(id__in=shared_with_ids)
+        cohort_programs = [ {'id': x.id, 'name': escape(x.name), 'type': 'isb-cgc'} for x in cohort_progs ]
+        shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
+        shared_with_users = User.objects.filter(id__in=shared_with_ids)
 
         template = 'cohorts/cohort_details.html'
         template_values['cohort'] = cohort
-        template_values['total_samples'] = cohort.sample_size()
-        template_values['total_cases'] = cohort.case_size()
+        template_values['total_samples'] = cohort.sample_count
+        template_values['total_cases'] = cohort.case_count
         template_values['shared_with_users'] = shared_with_users
         template_values['cohort_programs'] = cohort_programs
         template_values['export_url'] = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
         template_values['programs_this_cohort'] = [x['id'] for x in cohort_programs]
-        template_values['creation_filters'] = cohort.get_creation_filters()
-        template_values['current_filters'] = cohort.get_current_filters()
-        template_values['revision_history'] = cohort.get_revision_history()
-        template_values['only_user_data'] = cohort.only_user_data()
-        template_values['has_user_data'] = cohort.has_user_data()
+        template_values['current_filters'] = cohort.get_filters_for_ui(True)
 
         logger.info("[STATUS] Completed cohort_detail")
 
@@ -292,7 +287,6 @@ def cohort_detail(request, cohort_id):
 def save_cohort(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
-    parent = None
     cohort_progs = None
     redirect_url = reverse('cohort_list')
 
@@ -300,36 +294,32 @@ def save_cohort(request):
 
         if request.POST:
             name = request.POST.get('name')
+            desc = request.POST.get('desc')
             blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
-            match = blacklist.search(str(name))
-            if match:
+            match_name = blacklist.search(str(name))
+            match_desc = blacklist.search(str(desc))
+            if match_name or match_desc:
                 # XSS risk, log and fail this cohort save
-                match = blacklist.findall(str(name))
-                logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+str(match))
-                messages.error(request, "Your cohort's name contains invalid characters; please choose another name." )
+                match_name = blacklist.findall(str(name))
+                match_desc = blacklist.findall(str(desc))
+                match_name and logger.error('[ERROR] While saving a cohort, saw a malformed name: '+name+', characters: '+str(match_name))
+                match_desc and logger.error(
+                    '[ERROR] While saving a cohort, saw a malformed name: ' + desc + ', characters: ' + str(match_desc))
+                messages.error(request, "Your cohort's name and/or description contain invalid characters; please edit them." )
                 return redirect(redirect_url)
 
+            # If we're just editing a cohort's name or description, that ID is provided as the 'source'
             source = request.POST.get('source')
             filters = request.POST.getlist('filters')
-            apply_filters = request.POST.getlist('apply-filters')
-            apply_barcodes = request.POST.getlist('apply-barcodes')
             apply_name = request.POST.getlist('apply-name')
+            apply_desc = request.POST.getlist('apply-desc')
             mut_comb_with = request.POST.get('mut_filter_combine')
 
-            # we only deactivate the source if we are applying filters to a previously-existing
-            # source cohort
-            deactivate_sources = (len(filters) > 0) and source is not None and source != 0
-
-            # If we're only changing the name, just edit the cohort and update it
-            if apply_name and not apply_filters and not deactivate_sources and not apply_barcodes:
-                Cohort.objects.filter(id=source).update(name=name)
+            # If we're only changing the name or desc, just edit the cohort and update it
+            if apply_name or apply_desc:
+                Cohort.objects.filter(id=source).update(name=name, description=desc)
                 messages.info(request, 'Changes applied successfully.')
                 return redirect(reverse('cohort_details', args=[source]))
-
-            # Given cohort_id is the only source id.
-            if source:
-                parent = Cohort.objects.get(id=source)
-                cohort_progs = parent.get_programs()
 
             filter_obj = {}
             attr_ids = []
@@ -355,13 +345,12 @@ def save_cohort(request):
 
             attrs = {x.id: x for x in Attribute.objects.filter(id__in=attr_ids)}
 
-            data_sources = DataSource.objects.select_related("version").filter(
-                source_type=DataSource.SOLR, aggregate_level="case_barcode", version__in=DataVersion.objects.filter(
-                    data_type__in=[DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA]
-                )
-            )
-            results = get_cohort_stats(filters={x: { attrs[w].name: z} for x, y in filter_obj.items() for w,z in y.items() }, sources=data_sources)
+            data_sources = DataSource.objects.select_related("version").filter(source_type=DataSource.SOLR,
+                   version__active=True).prefetch_related(
+                Prefetch('datasettypes', queryset=DataSetType.objects.filter(data_type__in=[DataSetType.CLINICAL_DATA, DataSetType.FILE_TYPE_DATA]))
+            ).filter(datasettypes__set_type__in=[DataSetType.CASE_SET, DataSetType.FILE_AVAIL_SET]).distinct()
 
+            results = get_cohort_stats(filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }, sources=data_sources)
 
             # Do not allow 0 case cohorts
             if not results["case_barcode"]:
@@ -371,35 +360,11 @@ def save_cohort(request):
                 else:
                     redirect_url = reverse('cohort')
             else:
-                if deactivate_sources:
-                    parent.active = False
-                    parent.save()
-
-                # Create new cohort
-                cohort = Cohort.objects.create(name=name)
-                cohort.save()
-
-                # Set permission for user to be owner
-                perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-                perm.save()
-
-                # Create the source if it was given
-                if source:
-                    Source.objects.create(parent=parent, cohort=cohort, type=Source.FILTERS).save()
-
-                # Create filters applied
-                if filter_obj:
-                    for prog, prog_filters in filter_obj.items():
-                        prog_obj = Program.objects.get(id=prog)
-                        for this_filter in prog_filters:
-                            Filter.objects.create(
-                                resulting_cohort=cohort, program=prog_obj, attribute=attrs[this_filter],
-                                value=Filter.DEFAULT_VALUE_DELIMITER.join(prog_filters[this_filter]['values'])
-                            ).save()
+                cohort = create_cohort(request.user, filter_obj, name, desc, stats=results, case_insens=True)
 
                 if not source:
                     redirect_url = reverse('cohort_list')
-                    messages.info(request, 'Cohort "%s" created successfully.' % escape(cohort.name))
+                    messages.info(request, 'Cohort created successfully with ID {}.'.format(cohort['cohort_id']))
                 else:
                     redirect_url = reverse('cohort_details', args=[cohort.id])
                     messages.info(request, 'Changes applied successfully.')
@@ -553,39 +518,7 @@ def share_cohort(request, cohort_id=0):
 def clone_cohort(request, cohort_id):
     if debug: logger.debug('[STATUS] Called '+sys._getframe().f_code.co_name)
     redirect_url = 'cohort_details'
-    return_to = None
-    try:
-
-        parent_cohort = Cohort.objects.get(id=cohort_id)
-        new_name = 'Copy of %s' % parent_cohort.name
-        cohort = Cohort.objects.create(name=new_name)
-        cohort.description = parent_cohort.description
-        cohort.save()
-
-        # Clone the filters
-        filters = Filter.objects.filter(resulting_cohort=parent_cohort)
-        # ...but only if there are any (there may not be)
-        if filters.__len__() > 0:
-            filters_list = []
-            for filter_pair in filters:
-                filters_list.append(Filter(name=filter_pair.name, value=filter_pair.value, resulting_cohort=cohort, program=filter_pair.program))
-            Filter.objects.bulk_create(filters_list)
-
-        # Set source
-        source = Source(parent=parent_cohort, cohort=cohort, type=Source.CLONE)
-        source.save()
-
-        # Set permissions
-        perm = Cohort_Perms(cohort=cohort, user=request.user, perm=Cohort_Perms.OWNER)
-        perm.save()
-
-        return_to = reverse(redirect_url,args=[cohort.id])
-
-    except Exception as e:
-        messages.error(request, 'There was an error while trying to clone this cohort. It may not have been properly created.')
-        logger.error('[ERROR] While trying to clone cohort {}:')
-        logger.exception(e)
-        return_to = reverse(redirect_url, args=[parent_cohort.id])
+    return_to = reverse(redirect_url, args=[cohort_id])
 
     return redirect(return_to)
 
@@ -605,6 +538,43 @@ def save_comment(request):
         'content': escape(obj.content)
     }
     return HttpResponse(json.dumps(return_obj), status=200)
+
+
+@login_required
+@csrf_protect
+def cohort_ids(request, cohort_id):
+    try:
+        # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
+        if cohort_id:
+            Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=request.user.id)
+
+        cohort = Cohort.objects.get(id=cohort_id)
+        ids = get_cohort_cases(cohort_id)
+
+        rows = (["Case listing for Cohort '{}'".format(cohort.name)],)
+        rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
+        rows += (["Programs: {}".format(", ".join(list(cohort.get_programs().values_list('name', flat=True))))],)
+        rows += (["Program","Case Barcode"],)
+
+        for id in ids:
+            rows += ([id['program'], id['case_barcode']],)
+
+        pseudo_buffer = Echo()
+        writer = csv.writer(pseudo_buffer)
+        response = StreamingHttpResponse((writer.writerow(row) for row in rows),
+                                         content_type="text/csv")
+
+        timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
+        filename = 'cohort_{}_ids_{}.csv'.format(cohort.id, timestamp)
+        response['Content-Disposition'] = 'attachment; filename=' + filename
+        response.set_cookie("downloadToken", request.GET.get('downloadToken'))
+
+    except ObjectDoesNotExist as e:
+        logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
+        logger.exception(e)
+        messages.error("User {} does not have permission to cohort {}.".format(request.user.email, str(cohort_id)))
+
+    return response
 
 
 @csrf_protect
@@ -665,7 +635,7 @@ def filelist(request, cohort_id=None, panel_type=None):
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             cohort.perm = cohort.get_perm(request)
-            programs_this_cohort = cohort.get_program_names()
+            programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
             export_url = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
         else:
@@ -865,7 +835,7 @@ def streaming_csv_view(request, cohort_id=None):
             for file in file_list:
                 rows += ([file['case'], file['sample'], file['program'], file['platform'], file['exp_strat'], file['datacat'],
                           file['datatype'], file['dataformat'], file['file_node_id'], file['cloudstorage_location'], file['index_file_id'], file['index_name'],
-                          file['filesize'], file['access'].replace("-", " ")],)
+                          file['filesize'], file['access']],)
             pseudo_buffer = Echo()
             writer = csv.writer(pseudo_buffer)
             response = StreamingHttpResponse((writer.writerow(row) for row in rows),
