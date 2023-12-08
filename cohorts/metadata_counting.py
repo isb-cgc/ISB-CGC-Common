@@ -64,11 +64,15 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
             inc_filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts()
         start = time.time()
         prog_filters = {}
-        # Divide our filters into 'mutation' and 'non-mutation' sets
-        print(inc_filters)
+        # Divide our filters into 'mutation' and 'non-mutation' sets per program
         if inc_filters:
             for key in inc_filters:
+                # The number proceeding the attribute name is either its ID, or, the ID of the program it's from
+                # Which is determined by the presence of the program_id variable
                 prog = int(key.split(":")[0])
+                if program_id:
+                    # Leading ID is attribute ID - ignore
+                    prog = program_id
                 if prog not in prog_filters:
                     prog_filters[prog] = {
                         'mutation_filters': None,
@@ -198,6 +202,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                     'counts_only': False,
                     'limit': limit if with_records else 0
                 })
+
                 if solr_facets_filtered:
                     solr_result_filtered = query_solr_and_format_result({
                         'collection': source.name,
@@ -241,7 +246,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         versions = DataVersion.objects.filter(version__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
-        solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, comb_mut_filters=comb_mut_filters)
+        solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, versions=versions, comb_mut_filters=comb_mut_filters)
         facet_types = {
             'facets': {},
             'filtered_facets': None if not inc_filters and not cohort_id else {}
