@@ -91,8 +91,8 @@ def oauth2_login(request):
         dcf_auth_url = DCF_AUTH_URL
         if idp:
             dcf_auth_url += "?idp={}".format(idp)
-            if settings.DCF_TEST and settings.DCF_UPSTREAM_EXPIRES_IN_SEC:
-                dcf_auth_url += "&upstream_expires_in={}".format(settings.DCF_UPSTREAM_EXPIRES_IN_SEC)
+            #if settings.DCF_TEST and settings.DCF_UPSTREAM_EXPIRES_IN_SEC:
+            #    dcf_auth_url += "&upstream_expires_in={}&refresh_token_expires_in={}".format(settings.DCF_UPSTREAM_EXPIRES_IN_SEC, settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)
         authorization_url, state = oauth.authorization_url(dcf_auth_url)
 
 
@@ -452,7 +452,8 @@ def oauth2_callback(request):
         link_callback = request.build_absolute_uri(reverse('dcf_link_callback'))
 
         callback = '{}?redirect={}'.format(DCF_GOOGLE_URL, link_callback)
-
+#        if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC:
+#            callback += "&expires_in={}".format(int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)//4)
         return HttpResponseRedirect(callback)
     finally:
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '0'
