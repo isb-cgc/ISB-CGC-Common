@@ -35,20 +35,28 @@ DENYLIST_RE = settings.DENYLIST_RE
 @require_http_methods(["GET"])
 def versions_list_api(request):
 
-    idc_data_versions = ImagingDataCommonsVersion.objects.all()
-    versions_info = {"versions": []}
-    for version in idc_data_versions:
-        version_data = dict(
-                # name = version.name,
-                idc_data_version = version.version_number,
-                # version_uid = version.version_uid,
-                date_active = version.date_active,
-                active = version.active
-                # active = version.active,
-                # data_sources = []
-        )
+    try:
+        idc_data_versions = ImagingDataCommonsVersion.objects.all()
+        versions_info = {"versions": []}
+        for version in idc_data_versions:
+            version_data = dict(
+                    # name = version.name,
+                    idc_data_version = version.version_number,
+                    # version_uid = version.version_uid,
+                    date_active = version.date_active,
+                    active = version.active
+                    # active = version.active,
+                    # data_sources = []
+            )
 
-        versions_info["versions"].append(version_data)
+            versions_info["versions"].append(version_data)
+    except Exception as e:
+        logger.error("[ERROR] While trying to retrieve collection details")
+        logger.exception(e)
+        versions_info = {
+            "message": f"Error {e} while trying to retrieve versions details.",
+            "code": 500
+        }
 
     return JsonResponse(versions_info)
 
@@ -56,22 +64,18 @@ def versions_list_api(request):
 @api_auth
 @require_http_methods(["GET"])
 def collections_list_api(request):
-
     collections_info = {"collections": []}
-    programs = Program.objects.all()
-
     try:
-
         collections = Collection.objects.filter(collection_type='O', access="Public")
-
         for collection in collections:
             if collection.active:
                 data = {
-                    "cancer_type": collection.cancer_type,
                     "collection_id": collection.collection_id,
+                    "cancer_type": collection.cancer_type,
                     "date_updated": collection.date_updated,
                     "description": collection.description,
-                    "doi": collection.doi,
+                    "source_doi": collection.doi,
+                    "source_url": collection.source_url,
                     "image_types": collection.image_types,
                     "location": collection.location,
                     "species": collection.species,
@@ -79,16 +83,13 @@ def collections_list_api(request):
                     "supporting_data": collection.supporting_data
                 }
                 collections_info['collections'].append(data)
-
-
     except Exception as e:
         logger.error("[ERROR] While trying to retrieve collection details")
         logger.exception(e)
         collections_info = {
-            "message": "Error while trying to retrieve collection details.",
-            "code": 400
+            "message": f"Error {e} while trying to retrieve collection details.",
+            "code": 500
         }
-
 
     return JsonResponse(collections_info)
 
@@ -96,14 +97,8 @@ def collections_list_api(request):
 @api_auth
 @require_http_methods(["GET"])
 def analysis_results_list_api(request):
-    # **** Hack warning ****
-    # The webap DB does not currently map collections to IDC versions
-    # Until that mapping is included, we do that here
-
     data_version = get_idc_data_version('')
-
     collections_info = {"analysisResults": []}
-    programs = Program.objects.all()
 
     try:
         if data_version.version_number == '1.0':
@@ -113,27 +108,26 @@ def analysis_results_list_api(request):
 
         for collection in collections:
             data = {
-                "active": collection.active,
+                # "active": collection.active,
+                "analysis_result_id": collection.collection_id,
                 "analysisArtifacts": collection.analysis_artifacts,
                 "cancer_type": collection.cancer_type,
                 "collections": collection.collections,
                 "date_updated": collection.date_updated,
-                "description": collection.name,
+                "description": collection.description,
                 "doi": collection.doi,
                 "location": collection.location,
-                "subject_count": collection.subject_count,
-                "idc_data_versions": ["1.0"] if data_version.version_number=='1.0' else ["1.0","2.0"]}
+                "subjects": collection.subject_count,
+                "title": collection.name,
+            }
             collections_info['analysisResults'].append(data)
-
-
     except Exception as e:
         logger.error("[ERROR] While trying to retrieve analysis result details")
         logger.exception(e)
         collections_info = {
-            "message": "Error while trying to retrieve analysis result details.",
-            "code": 400
+            "message": f"Error {e} while trying to retrieve analysis result details.",
+            "code": 500
         }
-
 
     return JsonResponse(collections_info)
 
@@ -142,70 +136,85 @@ def analysis_results_list_api(request):
 @require_http_methods(["GET"])
 def attributes_list_api(request):
 
-    data_version = get_idc_data_version('')
-
     try:
-        data_source_name = request.GET.get('data_source')
-        if data_source_name:
-            if data_source_name == "idc-dev.metadata.dicom_pivot_wave0":
-                raise ObjectDoesNotExist
-            if not DataSource.objects.filter(name=data_source_name):
-                raise ObjectDoesNotExist
-
-    except ObjectDoesNotExist:
-        return JsonResponse(
-            dict(
-                message="The  data source, {}, is not part of the specified version {}".format(
-                    data_source_name, data_version.version_number),
-                code=400
-            )
-        )
-
-    response = {"idc_data_version": data_version.version_number,
-                "data_sources": []}
-
-    if data_version.active:
-        if data_source_name:
-            sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B') \
-                .filter(name=data_source_name).distinct()
-        else:
-            sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(
-                source_type='B').distinct()
-    else:
-        if data_source_name:
-            sources = data_version.dataversion_set.all().get_data_sources().filter(source_type='B') \
-                .filter(name=data_source_name).distinct()
-        else:
-            sources = data_version.dataversion_set.all().get_data_sources().\
-                exclude(name="idc-dev.metadata.dicom_pivot_wave0").filter(source_type='B').distinct()
-
-
-
-    for source in sources:
-        attributes = source.get_attr(for_faceting=False).filter(default_ui_display=True)
-
-        attributes_info = []
-        for attribute in attributes:
-            if 'clinical_' in attribute.name:
-                pass
-            attribute_info = {
-                "name": attribute.name,
-                "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
-                "active": attribute.active,
-                "units": attribute.units,
+        data_version = get_idc_data_version('')
+        response = {"idc_data_version": data_version.version_number, "data_sources": []}
+        sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B').distinct()
+        for source in sources:
+            attributes = sorted(source.get_attr(for_faceting=False).filter(default_ui_display=True), key=lambda d: d.name.lower())
+            attributes_info = []
+            for attribute in attributes:
+                if 'clinical_' in attribute.name:
+                    pass
+                attribute_info = {
+                    "name": attribute.name,
+                    "data_type": dict(Attribute.DATA_TYPES)[attribute.data_type],
+                    # "active": attribute.active,
+                    "units": attribute.units,
+                }
+                attributes_info.append(attribute_info)
+                if attribute_info['data_type'] == 'Continuous Numeric':
+                    for suffix in ['lt', 'lte', 'btw', 'ebtw', 'ebtwe', 'btwe', 'gte', 'gt']:
+                        attribute_info_copy = dict(attribute_info)
+                        attribute_info_copy['name'] = '{}_{}'.format(attribute.name, suffix)
+                        attributes_info.append(attribute_info_copy)
+            data_source = {
+                "data_source": source.name,
+                'filters': attributes_info
             }
-            attributes_info.append(attribute_info)
-            if attribute_info['data_type'] == 'Continuous Numeric':
-                for suffix in ['lt', 'lte', 'btw', 'ebtw', 'ebtwe', 'btwe', 'gte', 'gt']:
-                    attribute_info_copy = dict(attribute_info)
-                    attribute_info_copy['name'] = '{}_{}'.format(attribute.name, suffix)
-                    attributes_info.append(attribute_info_copy)
-        data_source = {
-            "data_source": source.name,
-            'filters': attributes_info
+            response["data_sources"].append(data_source)
+    except Exception as e:
+        logger.error("[ERROR] While trying to retrieve analysis result details")
+        logger.exception(e)
+        response = {
+            "message": f"Error {e} while trying to retrieve analysis result details.",
+            "code": 500
         }
-        response["data_sources"].append(data_source)
 
+    return JsonResponse(response)
+
+
+@api_auth
+@require_http_methods(["GET"])
+def queryfields_list_api(request):
+    try:
+        data_version = get_idc_data_version('')
+        response = {"idc_data_version": data_version.version_number, "data_sources": []}
+
+
+        sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True,
+                                                                                      source_type=DataSource.BIGQUERY)
+
+        # Get the ANCILLARY (TCGA) query fields
+        image_sources = sources.prefetch_related('data_sets').filter(data_sets__data_type=DataSetType.ANCILLARY_DATA)
+        image_source_attr = image_sources.get_source_attrs(for_faceting=False, active_only=True, for_ui=True )
+
+        for source in image_source_attr['sources'].values():
+            fields = sorted(source['list'], key=str.lower)
+            data_source = {
+                "data_source": source['name'],
+                'fields': fields
+            }
+            response["data_sources"].append(data_source)
+
+        # Now get the IMAGE (dicom_pivot) query fields
+        image_sources = sources.prefetch_related('data_sets').filter(data_sets__data_type=DataSetType.IMAGE_DATA)
+        image_source_attr = image_sources.get_source_attrs(for_faceting=False, active_only=True)
+        for source in image_source_attr['sources'].values():
+            fields = source['list']
+            fields.sort(key=str.casefold)
+            data_source = {
+                "data_source": source['name'],
+                'fields': fields
+            }
+        response["data_sources"].append(data_source)
+    except Exception as e:
+        logger.error("[ERROR] While trying to retrieve analysis result details")
+        logger.exception(e)
+        response = {
+            "message": f"Error {e} while trying to retrieve analysis result details.",
+            "code": 500
+        }
 
     return JsonResponse(response)
 
