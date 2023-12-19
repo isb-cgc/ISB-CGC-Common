@@ -371,6 +371,7 @@ class Filter(models.Model):
     LTE = 'LE'
     GT = 'G'
     LT = 'L'
+    EQ = 'E'
     AND = 'A'
     OR = 'O'
     OPS = (
@@ -383,9 +384,10 @@ class Filter(models.Model):
         (GT, '_gt'),
         (LT, '_lt'),
         (AND, '_and'),
-        (OR, '_or')
+        (OR, '_or'),
+        (EQ, '_eq')
     )
-    NUMERIC_OPS = [BTW, EBTW, BTWE, EBTWE, GTE, LTE, GT, LT]
+    NUMERIC_OPS = [BTW, EBTW, BTWE, EBTWE, GTE, LTE, GT, LT, EQ]
     STR_TO_OP = {
         'BTW': BTW,
         'EBTW': EBTW,
@@ -396,7 +398,8 @@ class Filter(models.Model):
         'LT': LT,
         'GT': GT,
         'LTE': LTE,
-        'GTE': GTE
+        'GTE': GTE,
+        'EQ': EQ
     }
     OP_TO_STR = {
         BTW: 'BTW',
@@ -408,7 +411,8 @@ class Filter(models.Model):
         LT: 'LT',
         GT: 'GT',
         LTE: 'LTE',
-        GTE: 'GTE'
+        GTE: 'GTE',
+        EQ: 'EQ'
     }
     OP_TO_SUFFIX = {
         BTW: '_btw',
@@ -420,7 +424,8 @@ class Filter(models.Model):
         GT: '_gt',
         LT: '_lt',
         AND: '_and',
-        OR: '_or'
+        OR: '_or',
+        EQ: '_eq'
     }
     DEFAULT_VALUE_DELIMITER = ','
     ALTERNATIVE_VALUE_DELIMITERS = [';', '|', '^', ':']
