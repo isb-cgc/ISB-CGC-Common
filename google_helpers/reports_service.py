@@ -24,7 +24,7 @@ GOOGLE_APPLICATION_CREDENTIALS = settings.GOOGLE_APPLICATION_CREDENTIALS
 
 SUPERADMIN_FOR_REPORTS = settings.SUPERADMIN_FOR_REPORTS
 
-
+# DELETE ME
 def get_reports_resource():
 
     credentials = ServiceAccountCredentials.from_json_keyfile_name(
