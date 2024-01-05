@@ -55,7 +55,6 @@ def save_cohort_api(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
     try:
         body = json.loads(request.body.decode('utf-8'))
-        # user = User.objects.get(email=request.GET.get('email', ''))
         try:
             user = User.objects.get(email=body['email'])
         except Exception as e:
@@ -214,10 +213,7 @@ def cohort_preview_query_api(request):
 def cohort_list_api(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
-    print(request.GET.get('email', ''))
     try:
-        # response = cohorts_list(request)
-
         body = json.loads(request.body.decode('utf-8'))
         try:
             user = User.objects.get(email=body['email'])
@@ -245,7 +241,6 @@ def cohort_list_api(request):
             for filter, value in cohortMetadata['filterSet']['filters'].items():
                 if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
                     cohortMetadata['filterSet']['filters'][filter] = to_numeric_list(value)
-
             cohortList.append(cohortMetadata)
 
         response = {"cohorts": cohortList}
@@ -266,7 +261,6 @@ def cohort_list_api(request):
 def delete_cohort_api(request):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
     cohort_info = []
-    print(request.GET.get('email', ''))
     try:
         body = json.loads(request.body.decode('utf-8'))
         try:
@@ -282,7 +276,6 @@ def delete_cohort_api(request):
         cohort_ids = body["cohort_ids"]
 
         for cohort_id in cohort_ids['cohorts']:
-            # result = _delete_cohort_api(user, cohort_id)
             result = _delete_cohort(user, cohort_id)
             cohort_info.append({"cohort_id": cohort_id, "result": result})
         cohort_info = {"cohorts": cohort_info}
