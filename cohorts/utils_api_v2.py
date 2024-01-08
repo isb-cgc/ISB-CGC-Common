@@ -31,11 +31,14 @@ DENYLIST_RE = settings.DENYLIST_RE
 # filter value like [[35,45], [65,75]] is returned as ["[35,45]","[65,75]"] when you get
 # the filterSet. This script converts it back to numeric.
 def to_numeric_list(item):
+    # If item is a list, then recursively convert each element of the list
     if isinstance(item, list):
         for index, thing in enumerate(item):
             item[index] = to_numeric_list(thing)
+    # If the item is not a list, then we assume it is single string value or already a numeric
     elif isinstance(item, str):
-        item = json.loads(item)
+          # if it is a string, then convert it to a float
+          item = float(item)
     return item
 
 

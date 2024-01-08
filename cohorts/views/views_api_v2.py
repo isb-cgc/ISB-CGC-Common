@@ -218,7 +218,7 @@ def cohort_list_api(request):
         try:
             user = User.objects.get(email=body['email'])
         except Exception as e:
-            logger.error("[ERROR] While trying to save cohort: ")
+            logger.error("[ERROR] While trying to list cohorts: ")
             logger.exception(e)
             response = {
                 "message": f"{body['email']} is not a known user",
