@@ -509,7 +509,7 @@ def build_explorer_context(is_dicofdic, source, versions, filters, fields, order
                 if disk_size and 'total_instance_size' in source_metadata:
                     attr_by_source['totals']['disk_size'] = convert_disk_size(source_metadata['total_instance_size'])
             return attr_by_source
-        
+
         return context
 
     except Exception as e:
@@ -820,6 +820,20 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
             )
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
+        if not raw_format:
+            for counts in ['facets', 'filtered_facets']:
+                facet_set = results.get(counts, {})
+                for source in facet_set:
+                    facets = facet_set[source]['facets']
+                    if facets and 'BodyPartExamined' in facets:
+                        if 'Kidney' in facets['BodyPartExamined']:
+                            if 'KIDNEY' in facets['BodyPartExamined']:
+                                facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
+                            else:
+                                facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
+                            del facets['BodyPartExamined']['Kidney']
+                    if not facets:
+                        logger.debug("[STATUS] Facets not seen for {}".format(source))
 
         if not counts_only:
             if 'SeriesNumber' in fields:
@@ -1330,7 +1344,7 @@ def get_bq_facet_counts(filters, facets, data_versions, sources_and_attrs=None):
 # fields: list of columns to return, string format only
 # data_versions: QuerySet<DataVersion> of the data versions(s) to search
 # static_fields: Dict of field names and values for a fixed column
-# returns: 
+# returns:
 #   no_submit is False: { 'results': <BigQuery API v2 result set>, 'schema': <TableSchema Obj> }
 #   no_submit is True: { 'sql_string': <BigQuery API v2 compatible SQL Standard SQL parameterized query>,
 #     'params': <BigQuery API v2 compatible parameter set> }
