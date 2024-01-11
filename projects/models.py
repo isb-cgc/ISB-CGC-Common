@@ -234,14 +234,15 @@ class Program(models.Model):
                 ).values_list('attribute__id', flat=True)))
         attrs = self.attribute_set.filter(q_objects)
         for attr in attrs:
-            prog_attrs['attrs'][attr.name] = {
-                'id': attr.id,
-                'name': attr.name,
-                'displ_name': attr.display_name,
-                'values': {},
-                'type': attr.data_type,
-                'preformatted': bool(attr.preformatted_values)
-            }
+            if attr.name in ds_attrs['list']:
+                prog_attrs['attrs'][attr.name] = {
+                    'id': attr.id,
+                    'name': attr.name,
+                    'displ_name': attr.display_name,
+                    'values': {},
+                    'type': attr.data_type,
+                    'preformatted': bool(attr.preformatted_values)
+                }
 
         for src in ds_attrs['sources']:
             prog_attrs['by_src'][src] = {

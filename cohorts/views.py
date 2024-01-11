@@ -1013,7 +1013,10 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
             # Currently we do not select anything by default
             filters = None
 
-        case_sample_attr = fetch_program_attr(program_id, return_copy=False)
+        print("Pulling clinical attr")
+        case_sample_attr = fetch_program_attr(program_id, return_copy=False, data_type_list=[DataSetType.CLINICAL_DATA])
+        print("Pulling file avail attr")
+        data_types = fetch_program_attr(program_id, return_copy=False, data_type_list=[DataSetType.FILE_TYPE_DATA])
 
         #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataSetType.MUTATION_DATA).get_source_attr(for_ui=True)
         molecular_attr = {}
@@ -1036,34 +1039,16 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
                     if ma:
                         ma['category'] = cat['value']
 
-        data_types = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataSetType.FILE_TYPE_DATA).get_source_attrs(for_ui=True)
-
         results = public_metadata_counts(filters, (cohort_id if int(cohort_id) > 0 else None), user, program_id)
 
         # TODO: Eventually we will rewrite our template to not need this, but for now...
         attr_counts = []
-        data_type_counts = {}
+        data_type_counts = []
         for set in results['counts']:
             for attr in results['counts'][set]:
-                if attr == 'data_type_availability':
-                    for id,val in results['counts'][set][attr]['values'].items():
-                        attr_name = val['displ_value'].split(' - ')[0]
-                        attr_val = val['displ_value'].split(' - ')[-1]
-                        if attr_name not in data_type_counts:
-                            data_type_counts[attr_name] = copy.deepcopy(results['counts'][set][attr])
-                            data_type_counts[attr_name]['name'] = attr_name.replace(" ","_")
-                            data_type_counts[attr_name]['displ_name'] = attr_name
-                            data_type_counts[attr_name]['values'] = []
-                        val['displ_value'] = attr_val
-                        val['displ_name'] = attr_val
-                        data_type_counts[attr_name]['values'].append(val)
-                else:
-                    val_list = [y for x, y in results['counts'][set][attr]['values'].items()]
-                    results['counts'][set][attr].update({'values': val_list})
-                    attr_counts.append(results['counts'][set][attr])
-
-        if len(data_type_counts):
-            attr_counts.extend(y for x, y in data_type_counts.items())
+                val_list = [y for x, y in results['counts'][set][attr]['values'].items()]
+                results['counts'][set][attr].update({'values': val_list})
+                attr_counts.append(results['counts'][set][attr])
 
         template_values = {
             'request': request,
