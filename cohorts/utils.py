@@ -45,6 +45,7 @@ def _get_cohort_stats(cohort_id=0, filters=None, sources=None):
         'PatientID': 0,
         'StudyInstanceUID': 0,
         'SeriesInstanceUID': 0,
+        'total_instance_size': 0,
         'collections': []
     }
 
