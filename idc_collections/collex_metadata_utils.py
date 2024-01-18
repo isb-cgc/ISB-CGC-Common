@@ -820,6 +820,20 @@ def get_collex_metadata(filters, fields, record_limit=3000, offset=0, counts_onl
             )
         stop = time.time()
         logger.debug("Metadata received: {}".format(stop-start))
+        if not raw_format:
+            for counts in ['facets', 'filtered_facets']:
+                facet_set = results.get(counts, {})
+                for source in facet_set:
+                    facets = facet_set[source]['facets']
+                    if facets and 'BodyPartExamined' in facets:
+                        if 'Kidney' in facets['BodyPartExamined']:
+                            if 'KIDNEY' in facets['BodyPartExamined']:
+                                facets['BodyPartExamined']['KIDNEY'] += facets['BodyPartExamined']['Kidney']
+                            else:
+                                facets['BodyPartExamined']['KIDNEY'] = facets['BodyPartExamined']['Kidney']
+                            del facets['BodyPartExamined']['Kidney']
+                    if not facets:
+                        logger.debug("[STATUS] Facets not seen for {}".format(source))
 
         if not counts_only:
             if 'SeriesNumber' in fields:

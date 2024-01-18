@@ -77,9 +77,9 @@ def save_cohort_api(request):
         filters_by_name = {}
         for filter, value in filters.items():
             if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
-                name = filter.rsplit('_', 1)[0]
-                op = filter.rsplit('_', 1)[-1]
-                filters_by_name[name] = dict(
+                attribute_name = filter.rsplit('_', 1)[0]
+                op = filter.rsplit('_', 1)[-1].upper()
+                filters_by_name[attribute_name] = dict(
                     op= op,
                     values = value
                 )
@@ -89,14 +89,17 @@ def save_cohort_api(request):
         for attr in Attribute.objects.filter(name__in=list(filters_by_name.keys())).values('id', 'name'):
             filters_by_id[str(attr['id'])] = filters_by_name[attr['name']]
         response = _save_cohort(user, filters=filters_by_id, name=cohort_name, desc=description, version=version,
-                                no_stats=True)
+                                no_stats=version.active==False)
         cohort_id = response['cohort_id']
         idc_data_version = Cohort.objects.get(id=cohort_id).get_data_versions()[0].version_number
+
         response['filterSet'] = {'idc_data_version': idc_data_version, 'filters': response.pop('filters')}
 
 
         for filter, value in response['filterSet']['filters'].items():
-            if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
+            if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btwe', '_gte' '_gt')):
+                response['filterSet']['filters'][filter] = to_numeric_list(value['values'])
+            if filter.endswith(('_btw',)):
                 response['filterSet']['filters'][filter] = to_numeric_list(value)
 
         cohort_properties = dict(
