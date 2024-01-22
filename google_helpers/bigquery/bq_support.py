@@ -698,7 +698,7 @@ class BigQuerySupport(BigQueryABC):
         # Standard query filters
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
-            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?|_eq', attr) else attr
             if attr_name not in attr_filters:
                 attr_filters[attr_name] = {
                     'OP': 'OR',
@@ -750,7 +750,7 @@ class BigQuerySupport(BigQueryABC):
                     elif query_param['parameterType']['type'] == 'NUMERIC':
                         operator = "{}{}".format(
                             ">" if re.search(r'_gte?',attr) else "<" if re.search(r'_lte?',attr) else "",
-                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[lg]',attr) else ''
+                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[lg]',attr) or attr.endswith('_eq') else ''
                         )
                         filter_string += "{}{} {} @{}".format(
                             '' if not field_prefix else field_prefix, attr_name,

@@ -188,8 +188,8 @@ def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, 
             
         for attr in attrs:
             stripped_attr = attr if (not '_' in attr) else \
-                attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte','ebtwe','ebtw','btwe', 'btw', 'lte', 'lt'] else \
-                attr.rsplit('_', 1)[0]
+                attr if not attr.rsplit('_', 1)[1] in ['gt', 'gte','ebtwe','ebtw','btwe', 'btw', 'lte', 'lt', 'eq'] else \
+                    attr.rsplit('_', 1)[0]
     
             for id, source in attr_data['sources'].items():
                 if stripped_attr in source['list']:
