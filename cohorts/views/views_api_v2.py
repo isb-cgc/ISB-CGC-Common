@@ -19,14 +19,11 @@ import sys
 
 import json
 import logging
-import copy
 
-from django.contrib import messages
 from django.contrib.auth.models import User
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import render, redirect
 from django.views.decorators.csrf import csrf_protect, csrf_exempt
 from django.views.decorators.http import require_http_methods
 from ..decorators import api_auth
@@ -37,6 +34,7 @@ from cohorts.utils_api_v2 import to_numeric_list, get_filterSet_api, get_idc_dat
     _cohort_preview_query_api, _cohort_query_api
 from ..views.views import _save_cohort,_delete_cohort
 
+NUMERIC_OPS = ('_btw', '_ebtw', '_btwe', '_ebtwe', '_gte', '_lte', '_gt', '_lt', '_eq')
 BQ_ATTEMPT_MAX = 10
 
 debug = settings.DEBUG # RO global for this file
@@ -76,10 +74,10 @@ def save_cohort_api(request):
         # We first need to convert the filters to a form accepted by _save_cohorts
         filters_by_name = {}
         for filter, value in filters.items():
-            if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
-                name = filter.rsplit('_', 1)[0]
-                op = filter.rsplit('_', 1)[-1]
-                filters_by_name[name] = dict(
+            if filter.endswith(NUMERIC_OPS):
+                attribute_name = filter.rsplit('_', 1)[0]
+                op = filter.rsplit('_', 1)[-1].upper()
+                filters_by_name[attribute_name] = dict(
                     op= op,
                     values = value
                 )
@@ -89,14 +87,15 @@ def save_cohort_api(request):
         for attr in Attribute.objects.filter(name__in=list(filters_by_name.keys())).values('id', 'name'):
             filters_by_id[str(attr['id'])] = filters_by_name[attr['name']]
         response = _save_cohort(user, filters=filters_by_id, name=cohort_name, desc=description, version=version,
-                                no_stats=True)
+                                no_stats=version.active==False)
         cohort_id = response['cohort_id']
         idc_data_version = Cohort.objects.get(id=cohort_id).get_data_versions()[0].version_number
+
         response['filterSet'] = {'idc_data_version': idc_data_version, 'filters': response.pop('filters')}
 
 
         for filter, value in response['filterSet']['filters'].items():
-            if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
+            if filter.endswith(NUMERIC_OPS):
                 response['filterSet']['filters'][filter] = to_numeric_list(value)
 
         cohort_properties = dict(
@@ -141,9 +140,9 @@ def cohort_query_api(request, cohort_id=0):
         body = json.loads(request.body.decode('utf-8'))
         try:
             user = User.objects.get(email=body['email'])
-        except:
+        except Exception as exc:
             logger.error("[ERROR] While trying to save cohort: ")
-            logger.exception(e)
+            logger.exception(exc)
             info = {
                 "message": f"{body['email']} is not a known user",
                 "code": 401,
@@ -239,7 +238,9 @@ def cohort_list_api(request):
                 "filterSet": get_filterSet_api(cohort)
             }
             for filter, value in cohortMetadata['filterSet']['filters'].items():
-                if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
+                # if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
+                #     if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
+                if filter.endswith(NUMERIC_OPS):
                     cohortMetadata['filterSet']['filters'][filter] = to_numeric_list(value)
             cohortList.append(cohortMetadata)
 
@@ -265,9 +266,9 @@ def delete_cohort_api(request):
         body = json.loads(request.body.decode('utf-8'))
         try:
             user = User.objects.get(email=body['email'])
-        except:
+        except Exception as exc:
             logger.error("[ERROR] While trying to save cohort: ")
-            logger.exception(e)
+            logger.exception(exc)
             response = {
                 "message": f"{body['email']} is not a known user",
                 "code": 401,

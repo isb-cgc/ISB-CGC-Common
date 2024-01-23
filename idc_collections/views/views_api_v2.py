@@ -30,6 +30,7 @@ logger = logging.getLogger('main_logger')
 
 DENYLIST_RE = settings.DENYLIST_RE
 
+NUMERIC_OPS = ('_btw', '_ebtw', '_btwe', '_ebtwe', '_gte', '_lte', '_gt', '_lt', '_eq')
 # Return a list of defined IDC versions
 @api_auth
 @require_http_methods(["GET"])
@@ -152,12 +153,15 @@ def attributes_list_api(request):
                     # "active": attribute.active,
                     "units": attribute.units,
                 }
-                attributes_info.append(attribute_info)
                 if attribute_info['data_type'] == 'Continuous Numeric':
-                    for suffix in ['lt', 'lte', 'btw', 'ebtw', 'ebtwe', 'btwe', 'gte', 'gt']:
+                    # for suffix in ['lt', 'lte', 'btw', 'ebtw', 'ebtwe', 'btwe', 'gte', 'gt', 'eq']:
+                    for suffix in NUMERIC_OPS:
                         attribute_info_copy = dict(attribute_info)
-                        attribute_info_copy['name'] = '{}_{}'.format(attribute.name, suffix)
+                        attribute_info_copy['name'] = '{}{}'.format(attribute.name, suffix)
                         attributes_info.append(attribute_info_copy)
+                else:
+                    attributes_info.append(attribute_info)
+
             data_source = {
                 "data_source": source.name,
                 'filters': attributes_info

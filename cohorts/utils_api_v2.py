@@ -17,15 +17,15 @@ from __future__ import absolute_import
 
 import logging
 import copy
-import json
 
 from django.conf import settings
 from idc_collections.models import ImagingDataCommonsVersion
 from idc_collections.collex_metadata_utils import get_bq_metadata, get_bq_string
-from google_helpers.bigquery.bq_support import BigQuerySupport
 
 logger = logging.getLogger('main_logger')
 DENYLIST_RE = settings.DENYLIST_RE
+
+NUMERIC_OPS = ('_btw', '_ebtw', '_btwe', '_ebtwe', '_gte', '_lte', '_gt', '_lt', '_eq')
 
 # All the filter values in the filterSet of a cohort are saved as strings. Particularly, a
 # filter value like [[35,45], [65,75]] is returned as ["[35,45]","[65,75]"] when you get
@@ -38,7 +38,10 @@ def to_numeric_list(item):
     # If the item is not a list, then we assume it is single string value or already a numeric
     elif isinstance(item, str):
           # if it is a string, then convert it to a float
-          item = float(item)
+          try:
+              item = int(item)
+          except ValueError:
+              item = float(item)
     return item
 
 
@@ -71,7 +74,7 @@ def _cohort_query_api(request, cohort, data, info):
             for collection in filters['collection_id']:
                 collections.append(collection.lower().replace('-', '_'))
             filters['collection_id'] = collections
-        if filter.endswith(('_lt', '_lte', '_ebtw', '_ebtwe', '_btw', '_btwe', '_gte' '_gt')):
+        if filter.endswith(NUMERIC_OPS):
            filters[filter] = to_numeric_list(value)
 
     data_version = cohort.get_data_versions()
