@@ -698,7 +698,7 @@ class BigQuerySupport(BigQueryABC):
         # Standard query filters
         for attr, values in list(other_filters.items()):
             is_btw = re.search('_e?btwe?', attr.lower()) is not None
-            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?', attr) else attr
+            attr_name = attr[:attr.rfind('_')] if re.search('_[gl]te?|_e?btwe?|_eq', attr) else attr
             if attr_name not in attr_filters:
                 attr_filters[attr_name] = {
                     'OP': 'OR',
@@ -745,15 +745,12 @@ class BigQuerySupport(BigQueryABC):
                     # Single scalar param
                     query_param['parameterValue']['value'] = values[0]
                     if query_param['parameterType']['type'] == 'STRING':
-                        if '%' in values[0] or case_insens:
-                            filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr_name, param_name)
-                        else:
-                            filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
-                                                                 param_name)
+                        filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
+                                                             param_name)
                     elif query_param['parameterType']['type'] == 'NUMERIC':
                         operator = "{}{}".format(
                             ">" if re.search(r'_gte?',attr) else "<" if re.search(r'_lte?',attr) else "",
-                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[lg]',attr) else ''
+                            '=' if re.search(r'_[lg]te',attr) or not re.search(r'_[lg]',attr) or attr.endswith('_eq') else ''
                         )
                         filter_string += "{}{} {} @{}".format(
                             '' if not field_prefix else field_prefix, attr_name,
@@ -844,41 +841,14 @@ class BigQuerySupport(BigQueryABC):
                     filter_string += " OR ".join(btw_filter_strings)
                     query_param = query_params
                 else:
-                    # String param values that include the % or _char must be LIKE'd. We ignore that \%  or \_
-                    # don't need to be LIKE'd.
-                    query_params = []
-                    strings_filter_string = []
-                    values_copy = copy.deepcopy(values)
-                    if parameter_type == 'STRING':
-                        for index, value in enumerate(values_copy):
-                            if '%' in value or '_' in value:
-                                strings_filter_string.append(
-                                    "LOWER({}{}) LIKE LOWER(@{}_{})".format('' if not field_prefix else field_prefix, attr, param_name, index)
-                                )
-                                query_param_like = copy.deepcopy(query_param)
-                                query_param_like['name'] = f'{param_name}_{index}'
-                                query_param_like['parameterType']['type'] = 'STRING'
-                                query_param_like['parameterValue']['value'] = value.lower()
-                                query_params.append(query_param_like)
-                                values_copy[index] = ''
+                    # Simple array param
+                    query_param['parameterType']['type'] = "ARRAY"
+                    query_param['parameterType']['arrayType'] = {
+                        'type': parameter_type
+                    }
+                    query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values]}
 
-                    # Squeeze out empty strings
-                    values_copy = [value for value in values_copy if value]
-                    if values_copy:
-                        # Simple array param
-                        query_param['parameterType']['type'] = "ARRAY"
-                        query_param['parameterType']['arrayType'] = {
-                            'type': parameter_type
-                        }
-
-
-                        query_param['parameterValue'] = {'arrayValues': [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values_copy]}
-
-                        strings_filter_string.append("LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name))
-                        query_params.append(query_param)
-
-                    query_param = query_params
-                    filter_string += ' OR '.join(strings_filter_string)
+                    filter_string += "LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
                 filter_string = "({}) OR @{}_filtering = 'not_filtering'".format(filter_string,param_name)
