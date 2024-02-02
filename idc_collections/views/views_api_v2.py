@@ -182,11 +182,13 @@ def attributes_list_api(request):
 @require_http_methods(["GET"])
 def queryfields_list_api(request, version=""):
     try:
+        if version == 'current':
+            version = ""
         try:
             data_version = get_idc_data_version(version)
         except:
             response = {
-                "message": f"Supplied idc_data_version {version} is invalid. Query the /versions endpoint for defined versions.",
+                "message": f"Supplied idc_data_version '{version}' is invalid. Query the /versions endpoint for defined versions.",
                 "code": 400
             }
             return JsonResponse(response)
