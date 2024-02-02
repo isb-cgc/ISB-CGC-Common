@@ -20,7 +20,7 @@ from idc_collections.models import Program, Collection, DataSetType, ImagingData
 from django.views.decorators.http import require_http_methods
 from cohorts.decorators import api_auth
 
-from cohorts.utils_api_v1 import get_idc_data_version
+from cohorts.utils_api_v2 import get_idc_data_version
 
 from solr_helpers import *
 
@@ -139,7 +139,7 @@ def attributes_list_api(request):
 
     try:
         data_version = get_idc_data_version('')
-        response = {"idc_data_version": data_version.version_number, "data_sources": []}
+        response = {"data_sources": []}
         sources = data_version.dataversion_set.filter(active=True).get_data_sources().filter(source_type='B').distinct()
         for source in sources:
             attributes = sorted(source.get_attr(for_faceting=False).filter(default_ui_display=True), key=lambda d: d.name.lower())
@@ -180,14 +180,25 @@ def attributes_list_api(request):
 
 @api_auth
 @require_http_methods(["GET"])
-def queryfields_list_api(request):
+def queryfields_list_api(request, version=""):
     try:
-        data_version = get_idc_data_version('')
-        response = {"idc_data_version": data_version.version_number, "data_sources": []}
-
-
-        sources = ImagingDataCommonsVersion.objects.get(active=True).get_data_sources(active=True,
-                                                                                      source_type=DataSource.BIGQUERY)
+        if version == 'current':
+            version = ""
+        try:
+            data_version = get_idc_data_version(version)
+        except:
+            response = {
+                "message": f"Supplied idc_data_version '{version}' is invalid. Query the /versions endpoint for defined versions.",
+                "code": 400
+            }
+            return JsonResponse(response)
+        response = {
+            "idc_data_version": data_version.version_number,
+            "data_sources": [],
+            "code": 200
+        }
+        sources = ImagingDataCommonsVersion.objects.filter(version_number=data_version.version_number) \
+            .get_data_sources(source_type=DataSource.BIGQUERY)
 
         # Get the ANCILLARY (TCGA) query fields
         image_sources = sources.prefetch_related('data_sets').filter(data_sets__data_type=DataSetType.ANCILLARY_DATA)
