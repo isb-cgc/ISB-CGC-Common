@@ -16,15 +16,17 @@
 
 from django.conf.urls import url, include
 from allauth.socialaccount.providers.google import urls as google_urls, views as google_views
+from allauth import urls as allauth_urls
 
 from . import views, dcf_views
 
 
 urlpatterns = [
     url(r'^', include(google_urls)),
+    url(r'^', include(allauth_urls)),
     # url(r'^logout', account_views.logout, name='account_logout'),
     url(r'^logout', views.extended_logout_view, name='account_logout'),
-    url(r'^login/$', google_views.oauth2_login, name='account_login'),
+    # url(r'^login/$', google_views.oauth2_login, name='account_login'),
     # Following urls for new DCF flows
     url(r'^dcf_login/$', dcf_views.oauth2_login, name='dcf_login'),
     url(r'^dcf_simple_logout/$', dcf_views.dcf_simple_logout, name='dcf_simple_logout'),
