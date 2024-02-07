@@ -156,6 +156,7 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
     version = version or CgcDataVersion.objects.get(active=True)
     grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND, data_version=version)
     progs = Program.objects.filter(id__in=[int(x) for x in filters.keys()], is_public=1, active=1)
+    print(filters)
     for prog in progs:
         prog_filters = filters[prog.id]
         attrs = Attribute.objects.filter(id__in=[int(x) for x in prog_filters.keys()])
@@ -181,9 +182,10 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
                 program=prog
             ))
 
-        Filter.objects.bulk_create(filter_set)
+    Filter.objects.bulk_create(filter_set)
 
     return {'cohort_id': cohort.id}
+
 
 def get_cohort_cases(cohort_id):
     try:
