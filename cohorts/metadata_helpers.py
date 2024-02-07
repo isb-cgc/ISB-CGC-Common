@@ -280,7 +280,7 @@ def fetch_file_data_attr(type=None):
 #
 # program: database ID of the program being requested
 #
-def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False, data_type_list=None, return_copy=True):
+def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False, data_type_list=None, return_copy=True, with_node=False):
     try:
         if not program:
             program = Program.objects.get(name="TCGA")
@@ -294,11 +294,14 @@ def fetch_program_attr(program, source_type=DataSource.SOLR, for_faceting=False,
         attr_set = hash_program_attrs(program.name,source_type,for_faceting,data_type_list)
         if attr_set not in METADATA_ATTR or len(METADATA_ATTR[attr_set]) <= 0:
             logger.debug("Program attrs for {} not found (hash: {}), building cache".format(program.name,attr_set))
-            METADATA_ATTR[attr_set] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list)
+            METADATA_ATTR[attr_set] = program.get_attrs(source_type=source_type, for_faceting=for_faceting, data_type_list=data_type_list, with_node=True)
         else:
             logger.debug("Hash {} found for program {} attributes".format(attr_set,program.name))
+
         if return_copy:
             return copy.deepcopy(METADATA_ATTR[attr_set]['attrs'])
+        if with_node:
+            return METADATA_ATTR[attr_set]['attrs'], METADATA_ATTR[attr_set]['by_node']
         return METADATA_ATTR[attr_set]['attrs']
 
     except Exception as e:

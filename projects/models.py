@@ -220,7 +220,7 @@ class Program(models.Model):
 
         return attrs
 
-    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True, versions=None):
+    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True, versions=None, with_node=False):
         prog_attrs = {'attrs': {}, 'by_src': {}}
         datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list, versions=versions)
         ds_attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
@@ -243,6 +243,14 @@ class Program(models.Model):
                     'type': attr.data_type,
                     'preformatted': bool(attr.preformatted_values)
                 }
+
+        if with_node:
+            nodes = self.datanode_set.all()
+            node_attrs = nodes.get_attrs(for_ui=for_ui, for_faceting=for_faceting, per_node=True)
+            prog_attrs['by_node'] = {}
+            for node in nodes:
+                node_attrs_list = node_attrs[node.short_name].values_list('name', flat=True)
+                prog_attrs['by_node'][node.short_name] = {x: prog_attrs['attrs'][x] for x in prog_attrs['attrs'] if x in node_attrs_list }
 
         for src in ds_attrs['sources']:
             prog_attrs['by_src'][src] = {
@@ -765,23 +773,24 @@ class DataNodeQuerySet(models.QuerySet):
                 sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
         return sources
 
-    def get_attrs(self, per_node=False):
-        attrs = None
-        sources = None
+    def get_attrs(self, for_ui=True, for_faceting=True, per_node=True):
+        node_attrs = None
         for dn in self.all():
+            q_objects = Q()
+            if for_ui is not None:
+                q_objects &= Q(default_ui_display=for_ui)
+            if for_faceting:
+                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(
+                    id__in=Attribute_Ranges.objects.filter(
+                        attribute__in=dn.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                    ).values_list('attribute__id', flat=True)))
+            attrs = dn.attribute_set.filter(q_objects)
             if per_node:
-                attrs = {} if not attrs else attrs
-                src_attrs = dn.data_sources.all().get_source_attrs(for_faceting=False,for_ui=False)
-                attrs[dn.id] = {
-                    'name': dn.short_name,
-                    'full_name': dn.name,
-                    'attrs': [{'name': x.name, 'display_name': x.display_name, 'type': Attribute.DATA_TYPE_MAP[x.data_type] } for x in src_attrs['attrs']]
-                }
-                return attrs
+                node_attrs = node_attrs or {}
+                node_attrs[dn.short_name] = attrs.distinct()
             else:
-                sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
-                attrs = sources.get_source_attrs(for_faceting=False,for_ui=False)
-        return attrs
+                node_attrs = attrs if not node_attrs else attrs | node_attrs
+        return node_attrs
 
 
 class DataNodeManager(models.Manager):
@@ -959,6 +968,7 @@ class Attribute(models.Model):
     preformatted_values = models.BooleanField(default=False)
     default_ui_display = models.BooleanField(default=True)
     data_sources = models.ManyToManyField(DataSource)
+    nodes = models.ManyToManyField(DataNode)
     programs = models.ManyToManyField(Program)
     units = models.CharField(max_length=256, blank=True, null=True)
     objects = AttributeManager()
@@ -990,6 +1000,9 @@ class Attribute(models.Model):
 
     def get_programs(self):
         return self.programs.values_list('name', flat=True)
+
+    def get_nodes(self):
+        return self.nodes.values_list('short_name', flat=True)
 
     def get_ranges(self):
         return self.attribute_ranges_set.all()

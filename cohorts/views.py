@@ -1001,19 +1001,13 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
         logger.info('[INFO] Getting cohort panel for node_id {}, program_id {}'.format(node_id, program_id))
 
         # Check program ID against public programs
-        # Program_id == 0 for User Data
-        public_program = None if program_id == '0' else Program.objects.get(id=program_id, active=True)
+        public_program = Program.objects.get(id=program_id, active=True)
         user = request.user
 
-        # Public Program
+        # If we want to automatically select some filters, do it here
         filters = None
 
-        # If we want to automatically select some filters for a new cohort, do it here
-        if not cohort_id:
-            # Currently we do not select anything by default
-            filters = None
-
-        case_sample_attr = fetch_program_attr(program_id, return_copy=False, data_type_list=[DataSetType.CLINICAL_DATA])
+        case_attr, node_attrs = fetch_program_attr(program_id, return_copy=False, data_type_list=[DataSetType.CLINICAL_DATA], with_node=True)
         data_types = fetch_program_attr(program_id, return_copy=False, data_type_list=[DataSetType.FILE_TYPE_DATA])
 
         #molecular_attr = public_program.get_data_sources(source_type=DataSource.SOLR, data_type=DataSetType.MUTATION_DATA).get_source_attr(for_ui=True)
@@ -1052,7 +1046,8 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
             'request': request,
             'attr_counts': attr_counts,
             'total_samples': int(results['samples']),
-            'clin_attr': case_sample_attr,
+            'case_attr': case_attr,
+            'node_case_attr': node_attrs,
             'molecular_attr': molecular_attr,
             'molecular_attr_builds': molecular_attr_builds,
             'data_types': data_types,

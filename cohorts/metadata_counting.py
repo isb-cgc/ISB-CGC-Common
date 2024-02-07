@@ -68,11 +68,11 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         if inc_filters:
             for key in inc_filters:
                 # The number proceeding the attribute name is either its ID, or, the ID of the program it's from
-                # Which is determined by the presence of the program_id variable
+                # Which is determined by the presence of the cohort_id variable
                 prog = int(key.split(":")[0])
-                if program_id:
-                    # Leading ID is attribute ID - ignore
+                if not cohort_id:
                     prog = program_id
+
                 if prog not in prog_filters:
                     prog_filters[prog] = {
                         'mutation_filters': None,
