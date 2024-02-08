@@ -371,7 +371,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
         query_set = query_set or {}
         full_query_str += query_str
 
-        if with_tags_for_ex and do_not_exclude and attr not in do_not_exclude:
+        if with_tags_for_ex and ((do_not_exclude is None) or (attr not in do_not_exclude)):
             filter_tags = filter_tags or {}
             tag = "f{}".format(str(count))
             filter_tags[attr] = tag
@@ -447,7 +447,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
         query_set = query_set or {}
         full_query_str += query_str
 
-        if with_tags_for_ex and do_not_exclude and attr not in do_not_exclude:
+        if with_tags_for_ex and ((do_not_exclude is None) or (attr not in do_not_exclude)):
             filter_tags = filter_tags or {}
             tag = "f{}".format(str(count))
             filter_tags[attr] = tag
