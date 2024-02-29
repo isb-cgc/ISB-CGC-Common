@@ -263,10 +263,15 @@ class PasswordHistory(models.Model):
 
 def set_password_expiration(sender, request, user, **kwargs):
     try:
-        pwd_exp, created = PasswordExpiration.objects.update_or_create(user=user)
-        pwd_exp.expiration_date = utc_now_plus_expiry()
-        logger.info("[STATUS] Setting password expiration date to {} for user {}".format(pwd_exp.expiration_date, user.email if user.email else user.username))
-        pwd_exp.save()
+        try:
+            is_social = SocialAccount.objects.get(user=user)
+        except ObjectDoesNotExist as e:
+            is_social = None
+        if is_social is None:
+            pwd_exp, created = PasswordExpiration.objects.update_or_create(user=user)
+            pwd_exp.expiration_date = utc_now_plus_expiry()
+            logger.info("[STATUS] Setting password expiration date to {} for user {}".format(pwd_exp.expiration_date, user.email if user.email else user.username))
+            pwd_exp.save()
     except Exception as e:
         logger.exception(e)
 
@@ -304,9 +309,6 @@ def password_change_handler(sender, request, user, **kwargs):
 
 def check_password_expired(sender, request, user, **kwargs):
     try:
-        # redirect if force password change is set
-        logger.info(user)
-        logger.info(request)
         try:
             is_social = SocialAccount.objects.get(user=user)
         except ObjectDoesNotExist as e:
