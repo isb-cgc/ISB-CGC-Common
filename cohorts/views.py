@@ -31,7 +31,6 @@ import time
 import django
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
-from google_helpers.bigquery.export_support import BigQueryExportCohort, BigQueryExportFileList
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User, AnonymousUser
@@ -264,7 +263,6 @@ def cohort_detail(request, cohort_id):
         template_values['total_cases'] = cohort.case_count
         template_values['shared_with_users'] = shared_with_users
         template_values['cohort_programs'] = cohort_programs
-        template_values['export_url'] = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'cohort'})
         template_values['programs_this_cohort'] = [x['id'] for x in cohort_programs]
         template_values['current_filters'] = cohort.get_filters_for_ui(True)
 
@@ -637,10 +635,8 @@ def filelist(request, cohort_id=None, panel_type=None):
             cohort.perm = cohort.get_perm(request)
             programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
-            export_url = reverse('export_cohort_data', kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
         else:
             download_url = reverse("download_filelist")
-            export_url = reverse('export_data', kwargs={'export_type': 'file_manifest'})
 
         logger.debug("[STATUS] Returning response from cohort_filelist")
 
@@ -648,7 +644,6 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
-                                            'export_url': export_url,
                                             'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,

@@ -791,6 +791,11 @@ def register_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
         # DCF requires this to be in the header. OAuth2 library glues this onto the auth header stuff:
         headers = {'Content-Type': 'application/json'}
         resp = _dcf_call(DCF_GOOGLE_SA_REGISTER_URL, user_id, mode='post', post_body=json_dumps(sa_data), headers=headers)
+
+        # for RAS refresh token testing
+        #params_dict = {
+        #    'expires_in': int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)//4} if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC else None
+        #resp = _dcf_call(DCF_GOOGLE_SA_REGISTER_URL, user_id, mode='post', post_body=json_dumps(sa_data), params_dict=params_dict, headers=headers)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA registration failed (user {})".format(user_id))
         raise e
@@ -821,6 +826,12 @@ def extend_sa_at_dcf(user_id, gcp_id, service_account_id, phs_map):
     try:
         full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, service_account_id)
         resp = _dcf_call(full_url, user_id, mode='patch')
+
+        # for TEST only: limiting bucket access based on refresh token expiration
+        #
+        #params_dict = {
+        #    'expires_in': int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)//4} if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC else None
+        #resp = _dcf_call(full_url, user_id, mode='patch', params_dict=params_dict)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA extension failed (user {})".format(user_id))
         raise e
@@ -873,6 +884,12 @@ def adjust_sa_at_dcf(user_id, gcp_id, service_account_id, datasets, phs_map):
         headers = {'Content-Type': 'application/json'}
         full_url = '{0}{1}'.format(DCF_GOOGLE_SA_URL, service_account_id)
         resp = _dcf_call(full_url, user_id, mode='patch', post_body=json_dumps(patch_doc), headers=headers)
+
+        # for test only: limit dcf refresh token expiration time
+        #
+        #params_dict = {
+        #    'expires_in': int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)//4 } if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC else None
+        #resp = _dcf_call(full_url, user_id, mode='patch', post_body=json_dumps(patch_doc), params_dict=params_dict, headers=headers)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         logger.error("[ERROR] Attempt to contact DCF for SA dataset removal failed (user {})".format(user_id))
         raise e
@@ -1194,8 +1211,12 @@ def refresh_at_dcf(user_id):
     # Call DCF to refresh the linkage.
     #
 
+    ## only for testing purpose
+    #
+    #params_dict = {'expires_in': int(settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC)//4} if settings.DCF_TEST and settings.DCF_REFRESH_TOKEN_EXPIRES_IN_SEC else None
     try:
         resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='patch')
+    #    resp = _dcf_call(DCF_GOOGLE_URL, user_id, mode='patch', params_dict=params_dict)
     except (TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure) as e:
         throw_later = e
     except Exception as e:
