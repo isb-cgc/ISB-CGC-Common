@@ -241,7 +241,8 @@ class Program(models.Model):
                     'displ_name': attr.display_name,
                     'values': {},
                     'type': attr.data_type,
-                    'preformatted': bool(attr.preformatted_values)
+                    'preformatted': bool(attr.preformatted_values),
+                    'units': attr.units or None
                 }
 
         if with_node:
