@@ -1,5 +1,5 @@
 # 
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2024, Institute for Systems Biology
 # 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -45,10 +45,6 @@ urlpatterns = [
     url(r'^users/(?P<user_id>\d+)/gcp_detail/(?P<gcp_id>\d+)/$', views.gcp_detail, name='gcp_detail'),
     url(r'^users/(?P<user_id>\d+)/register_gcp/$', views.register_gcp, name='register_gcp'),
     url(r'^users/(?P<user_id>\d+)/verify_gcp/$', views.verify_gcp, name='verify_gcp'),
-    url(r'^users/(?P<user_id>\d+)/register_sa/$', views.register_sa, name='register_sa'),
-    url(r'^users/(?P<user_id>\d+)/verify_sa/$', views.verify_sa, name='verify_sa'),
-    url(r'^users/(?P<user_id>\d+)/adjust_sa/$', views.register_sa, name='adjust_sa'),
-    url(r'^users/(?P<user_id>\d+)/delete_sa/(?P<sa_name>[-a-zA-Z0-9@.]+)/$', views.delete_sa, name='delete_sa'),
     url(r'^users/(?P<user_id>\d+)/register_bucket/(?P<gcp_id>\d+)/$', views.register_bucket, name='register_bucket'),
     url(r'^users/(?P<user_id>\d+)/delete_bucket/(?P<bucket_id>\d+)/$', views.delete_bucket, name='delete_bucket'),
     url(r'^users/(?P<user_id>\d+)/register_bqdataset/(?P<gcp_id>\d+)/$', views.register_bqdataset, name='register_bqdataset'),
