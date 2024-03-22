@@ -38,5 +38,18 @@ urlpatterns = [
     # url(r'^dcf_user_data/$', dcf_views.dcf_get_user_data, name='dcf_get_user_data'),
     # url(r'^dcf_unlink/$', dcf_views.dcf_unlink, name='dcf_unlink'),
     # url(r'^dcf_link_redo/$', dcf_views.dcf_link_redo, name='dcf_link_redo'),
+
+    # Google Cloud Project related
+    url(r'^users/(?P<user_id>\d+)/gcp_list/$', views.user_gcp_list, name='user_gcp_list'),
+    url(r'^users/(?P<user_id>\d+)/gcp_delete/(?P<gcp_id>\d+)/$', views.user_gcp_delete, name='user_gcp_delete'),
+    url(r'^users/(?P<user_id>\d+)/gcp_detail/(?P<gcp_id>\d+)/$', views.gcp_detail, name='gcp_detail'),
+    url(r'^users/(?P<user_id>\d+)/register_gcp/$', views.register_gcp, name='register_gcp'),
+    url(r'^users/(?P<user_id>\d+)/verify_gcp/$', views.verify_gcp, name='verify_gcp'),
+    url(r'^users/(?P<user_id>\d+)/register_bucket/(?P<gcp_id>\d+)/$', views.register_bucket, name='register_bucket'),
+    url(r'^users/(?P<user_id>\d+)/delete_bucket/(?P<bucket_id>\d+)/$', views.delete_bucket, name='delete_bucket'),
+    url(r'^users/(?P<user_id>\d+)/register_bqdataset/(?P<gcp_id>\d+)/$', views.register_bqdataset, name='register_bqdataset'),
+    url(r'^users/(?P<user_id>\d+)/delete_bqdataset/(?P<bqdataset_id>\d+)/$', views.delete_bqdataset, name='delete_bqdataset'),
+    url(r'^users/(?P<user_id>\d+)/datasets/$', views.get_user_datasets, name='dataset_info'),
+    url(r'^users/(?P<user_id>\d+)/buckets/$', views.get_user_buckets, name='bucket_info'),
 ]
 
