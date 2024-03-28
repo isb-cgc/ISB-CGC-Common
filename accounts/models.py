@@ -18,9 +18,14 @@ from builtins import str
 from builtins import object
 from django.db import models
 from django.contrib.auth.models import User
+from allauth.account.signals import password_changed, password_set, user_signed_up, password_reset, user_logged_in
+from django.conf import settings
+from django.db.models import signals
 import logging
-import datetime
+from datetime import datetime, timezone, timedelta
 import pytz
+from django.core.exceptions import ObjectDoesNotExist
+from allauth.socialaccount.models import SocialAccount
 
 logger = logging.getLogger('main_logger')
 
@@ -225,3 +230,101 @@ class UserOptInStatus(models.Model):
 
     def __str__(self):
         return "{} UserOptInStatus [{}]".format(self.user, self.opt_in_status)
+
+
+def utc_now_plus_expiry():
+    return datetime.now(timezone.utc) + timedelta(days=settings.ACCOUNTS_PASSWORD_EXPIRATION)
+
+
+def utc_now():
+    return datetime.now(timezone.utc)
+
+
+class PasswordExpiration(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    expiration_date = models.DateTimeField(null=False, blank=False, default=utc_now_plus_expiry)
+
+    def expired(self):
+        return self.expiration_date <= utc_now()
+
+    def warn(self):
+        return (self.expiration_date-utc_now()) < timedelta(seconds=settings.ACCOUNTS_PASSWORD_EXPIRATION_WARN)
+
+
+class PasswordHistory(models.Model):
+    try:
+        user = models.ForeignKey(User, on_delete=models.CASCADE)
+        password_hash = models.CharField(max_length=256, blank=False, null=False)
+        date_added = models.DateTimeField(null=False, blank=False, default=utc_now)
+        unique_together = (("user", "password_hash"),)
+    except Exception as e:
+        logger.exception(e)
+
+
+def set_password_expiration(sender, request, user, **kwargs):
+    try:
+        try:
+            is_social = SocialAccount.objects.get(user=user)
+        except ObjectDoesNotExist as e:
+            is_social = None
+        if is_social is None:
+            pwd_exp, created = PasswordExpiration.objects.update_or_create(user=user)
+            pwd_exp.expiration_date = utc_now_plus_expiry()
+            logger.info("[STATUS] Setting password expiration date to {} for user {}".format(pwd_exp.expiration_date, user.email if user.email else user.username))
+            pwd_exp.save()
+    except Exception as e:
+        logger.exception(e)
+
+
+def add_password_history(sender, request, user, **kwargs):
+    try:
+        pwd_history = PasswordHistory.objects.filter(user=user).order_by('-date_added')
+        # We only store a limited number of old passwords to prevent re-use; check to see
+        # if we're at the limit and if so, delete the oldest and add in this one
+        if len(pwd_history) >= settings.ACCOUNTS_PASSWORD_HISTORY:
+            pwd_history.last().delete()
+        PasswordHistory.objects.update_or_create(user=user, password_hash=user.password)
+        logger.info("[STATUS] Added password history entry for user {}".format(user.email if user.email else user.username))
+    except Exception as e:
+        logger.exception(e)
+
+
+def user_added_handler(sender, instance, created, **kwargs):
+    try:
+        # Passwords are actually *set* via set_password
+        if instance._password is None:
+            return
+        set_password_expiration(sender, None, instance)
+    except Exception as e:
+        logger.exception(e)
+
+
+def password_change_handler(sender, request, user, **kwargs):
+    try:
+        add_password_history(sender, request, user)
+        set_password_expiration(sender, request, user)
+    except Exception as e:
+        logger.exception(e)
+
+
+def check_password_expired(sender, request, user, **kwargs):
+    try:
+        try:
+            is_social = SocialAccount.objects.get(user=user)
+        except ObjectDoesNotExist as e:
+            is_social = None
+        if is_social is None:
+            password_expr = PasswordExpiration.objects.get(user=user)
+            if password_expr.expired():
+                # set flag for middleware to pick up
+                request.redirect_to_password_change = True
+    except Exception as e:
+        logger.exception(e)
+
+
+signals.post_save.connect(user_added_handler, sender=settings.AUTH_USER_MODEL, dispatch_uid="post_save:user_added_handler")
+user_signed_up.connect(set_password_expiration,dispatch_uid="user_signed_up:set_password_expiration")
+user_logged_in.connect(check_password_expired,dispatch_uid="user_logged_in:check_password_expired")
+password_set.connect(password_change_handler,dispatch_uid="password_set:password_change_handler")
+password_changed.connect(password_change_handler,dispatch_uid="password_changed:password_change_handler")
+password_reset.connect(password_change_handler,dispatch_uid="password_reset:password_change_handler")
