@@ -40,7 +40,7 @@ from projects.models import User_Data_Tables
 from django.utils.html import escape
 from .sa_utils import verify_service_account, register_service_account, service_account_dict, \
                      controlled_auth_datasets, have_linked_user
-from .utils import verify_gcp_for_reg, register_or_refresh_gcp, unreg_gcp
+from .utils import verify_gcp_for_reg
 
 from .dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
                         InternalTokenError, RefreshTokenExpired, DCFCommFailure
