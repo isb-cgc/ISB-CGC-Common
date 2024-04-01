@@ -19,7 +19,7 @@ from builtins import str
 from builtins import object
 import traceback
 import time
-import datetime
+from datetime import datetime, timezone, timedelta
 import pytz
 
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
@@ -635,7 +635,7 @@ def _register_service_account_dcf(user_email, user_id, gcp_id, user_sa, datasets
                     activity,
                     user_sa,
                     user_gcp,
-                    datetime.datetime.utcnow()
+                    datetime.utcnow()
                 )
             )
 
@@ -741,7 +741,7 @@ def auth_dataset_whitelists_for_user(user_id):
         return None
     nih_user = nih_users.first()
     expired_time = nih_user.NIH_assertion_expiration
-    now_time = pytz.utc.localize(datetime.datetime.utcnow())
+    now_time = pytz.utc.localize(datetime.utcnow())
     if now_time >= expired_time:
         logger.info("[STATUS] Access for user {} has expired.".format(nih_user.user.email))
         return None
@@ -1212,9 +1212,9 @@ def get_nih_user_details(user_id, force_logout):
     if nih_user.active:
         expired_time = nih_user.NIH_assertion_expiration
         # If we need to have the access expire in just a few minutes for testing, this is one way to fake it:
-        # testing_expire_hack = datetime.timedelta(minutes=-((60 * 23) + 55))
+        # testing_expire_hack = timedelta(minutes=-((60 * 23) + 55))
         # expired_time = expired_time + testing_expire_hack
-        now_time = pytz.utc.localize(datetime.datetime.utcnow())
+        now_time = pytz.utc.localize(datetime.utcnow())
         if now_time >= expired_time:
             logger.info("[INFO] Expired user hit user info page and was deactivated {}.".format(expired_time, now_time))
             nih_user.active = False
