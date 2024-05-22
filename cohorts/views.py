@@ -213,7 +213,7 @@ def new_cohort(request):
         logger.error("[ERROR] Exception while trying to new a cohort:")
         logger.exception(e)
         messages.error(request, "There was an error while trying to load new cohort's details page.")
-        if request.user.is_authenticated():
+        if request.user.is_authenticated:
             return redirect('cohort_list')
         else:
             return redirect('')
