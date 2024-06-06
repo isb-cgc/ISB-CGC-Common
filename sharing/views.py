@@ -4,6 +4,8 @@ from django.http import HttpResponseRedirect, JsonResponse
 from django.urls import reverse
 from sharing.models import Shared_Resource
 from django.contrib import messages
+from django_otp.decorators import otp_required
+
 
 def sharing_add(request, sharing_id=0):
     template = 'sharing/sharing_detail.html'
@@ -63,6 +65,7 @@ def sharing_add(request, sharing_id=0):
         return render(request, template, context)
 
 @login_required
+@otp_required
 def sharing_remove(request, sharing_id=0):
 
     if request.POST.get('owner'):

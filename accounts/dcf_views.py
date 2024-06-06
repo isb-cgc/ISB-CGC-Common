@@ -28,6 +28,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.shortcuts import redirect
 from django.contrib.auth.models import User
+from django_otp.decorators import otp_required
 from django.urls import reverse
 from django.http import HttpResponseRedirect
 
@@ -63,6 +64,7 @@ DCF_LOGOUT_URL = settings.DCF_LOGOUT_URL
 
 
 @login_required
+@otp_required
 def oauth2_login(request):
     """
     First step of OAuth2 login to DCF. Just build the URL that we send back to the browser in the refresh request
@@ -113,6 +115,7 @@ def oauth2_login(request):
 
 
 @login_required
+@otp_required
 def dcf_simple_logout(request):
     """
     If the user is trying to login with an NIH ID already in use by somebody else, or if they are already linked
@@ -135,6 +138,7 @@ def dcf_simple_logout(request):
 
 
 @login_required
+@otp_required
 def oauth2_callback(request):
     """
     Second step of OAuth2 login to DCF. Takes the response redirect URL that DCF returned to the user's browser,
@@ -460,6 +464,7 @@ def oauth2_callback(request):
 
 
 @login_required
+@otp_required
 def dcf_link_callback(request):
     """
     When the user comes back from Google/DCF after linking, this routine gets called. It provides us with any error
@@ -690,6 +695,7 @@ def dcf_link_callback(request):
 
 
 @login_required
+@otp_required
 def dcf_link_extend(request):
     """
     Put a user's GoogleID in the ACL groups for 24 (more) hours:
@@ -797,6 +803,7 @@ def _finish_the_link(user_id, user_email, expiration_time, st_logger, refresh_fi
 
 
 @login_required
+@otp_required
 def dcf_disconnect_user(request):
     """
     In the new DCF world, to 'unlink' means we both need to tell DCF to 'unlink' the user,

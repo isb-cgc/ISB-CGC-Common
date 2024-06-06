@@ -35,6 +35,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User, AnonymousUser
 from django.contrib.auth.models import User as Django_User
+from django_otp.decorators import otp_required
 from django.conf import settings
 from django.core import serializers
 from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
@@ -139,11 +140,13 @@ def get_cases_by_cohort(cohort_id):
 
 
 @login_required
+@otp_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
 
 
 @login_required
+@otp_required
 def cohorts_list(request, is_public=False):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
@@ -222,6 +225,7 @@ def new_cohort(request):
 
 
 @login_required
+@otp_required
 def cohort_detail(request, cohort_id):
     if debug: logger.debug('Called {}'.format(sys._getframe().f_code.co_name))
 
@@ -281,6 +285,7 @@ def cohort_detail(request, cohort_id):
 
 
 @login_required
+@otp_required
 @csrf_protect
 def save_cohort(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -377,6 +382,7 @@ def save_cohort(request):
 
 
 @login_required
+@otp_required
 @csrf_protect
 def delete_cohort(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
@@ -397,6 +403,7 @@ def delete_cohort(request):
 
 
 @login_required
+@otp_required
 @csrf_protect
 def share_cohort(request, cohort_id=0):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -512,6 +519,7 @@ def share_cohort(request, cohort_id=0):
 
 
 @login_required
+@otp_required
 @csrf_protect
 def clone_cohort(request, cohort_id):
     if debug: logger.debug('[STATUS] Called '+sys._getframe().f_code.co_name)
@@ -522,6 +530,7 @@ def clone_cohort(request, cohort_id):
 
 
 @login_required
+@otp_required
 @csrf_protect
 def save_comment(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -539,6 +548,7 @@ def save_comment(request):
 
 
 @login_required
+@otp_required
 @csrf_protect
 def cohort_ids(request, cohort_id):
     try:
@@ -854,6 +864,7 @@ def streaming_csv_view(request, cohort_id=None):
 
 
 @login_required
+@otp_required
 def unshare_cohort(request, cohort_id=0):
 
     cohort_set = None
@@ -1073,6 +1084,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
 
 # Master method for exporting data types to BQ, GCS, etc.
 @login_required
+@otp_required
 @csrf_protect
 def export_data(request, cohort_id=None, export_type=None, export_sub_type=None):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)

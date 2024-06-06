@@ -29,6 +29,7 @@ from django.http import JsonResponse, HttpResponseNotFound
 from django.conf import settings
 from django.db import connection
 from django.urls import reverse
+from django_otp.decorators import otp_required
 from collections import OrderedDict
 from projects.models import Program, Project
 from sharing.service import create_share
@@ -44,6 +45,7 @@ BLACKLIST_RE = settings.BLACKLIST_RE
 
 
 @login_required
+@otp_required
 def program_list(request):
     template = 'projects/program_list.html'
 
@@ -57,6 +59,7 @@ def program_list(request):
 
 
 @login_required
+@otp_required
 def program_detail(request, program_id=0):
     # """ if debug: logger.debug('Called ' + sys._getframe().f_code.co_name) """
     template = 'projects/program_detail.html'

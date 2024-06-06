@@ -130,7 +130,6 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         self.bucket_path = bucket_path
         self.file_name = file_name
 
-
     def _table_to_gcs(self, file_format, dataset_and_table, export_type, query_job=None):
 
         bq_client = bigquery.Client()
