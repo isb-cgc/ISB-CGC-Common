@@ -139,14 +139,24 @@ def get_sample_case_list_solr(user, inc_filters=None, cohort_id=None, program_id
                 'sets': {},
                 'totals': {}
             }
-            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA, DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA])
+            prog_versions = prog.dataversion_set.filter(id__in=versions, data_type__in=[
+                DataVersion.BIOSPECIMEN_DATA, DataVersion.IMAGE_DATA, DataVersion.MUTATION_DATA,
+                DataVersion.CLINICAL_DATA, DataVersion.TYPE_AVAILABILITY_DATA
+            ])
             list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.BIOSPECIMEN_DATA)
             if not len(list_versions):
+                # If there is no biospecimen version to pull a sample list from, use clinical
                 list_versions = prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
             all_sources = prog.get_data_sources(source_type=source_type).filter(version__in=prog_versions)
             source = prog.get_data_sources(source_type=source_type).filter(version__in=list_versions).first()
-            # This code is structured to allow for a filterset of the type {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only
-            # filter one program as a time.
+            if not source:
+                # The Biospec source might only exist as a source_type other than what we'd like--in that case, fall
+                # back on Clinical
+                source = prog.get_data_sources(source_type=source_type).filter(
+                    version__in=prog.dataversion_set.filter(id__in=versions, data_type=DataVersion.CLINICAL_DATA)
+                ).first()
+            # This code is structured to allow for a filterset of the type
+            # {<program_id>: {<attr>: [<value>, <value>...]}} but currently we only filter one program as a time.
             prog_filters = filters
             prog_mut_filters = mutation_filters
             attrs = all_sources.get_source_attrs(for_faceting=False)
@@ -327,9 +337,11 @@ def get_cases_by_cohort(cohort_id):
         if cursor: cursor.close()
         if db and db.open: db.close()
 
+
 @login_required
 def public_cohort_list(request):
     return cohorts_list(request, is_public=True)
+
 
 @login_required
 def cohorts_list(request, is_public=False, workbook_id=0, worksheet_id=0, create_workbook=False):
@@ -581,6 +593,7 @@ def cohort_detail(request, cohort_id):
 
     return render(request, template, template_values)
 
+
 '''
 Saves a cohort, adds the new cohort to an existing worksheet, then redirected back to the worksheet display
 '''
@@ -589,9 +602,7 @@ def save_cohort_for_existing_workbook(request):
     return save_cohort(request=request, workbook_id=request.POST.get('workbook_id'), worksheet_id=request.POST.get("worksheet_id"))
 
 
-'''
-Saves a cohort, adds the new cohort to a new worksheet, then redirected back to the worksheet display
-'''
+# Saves a cohort, adds the new cohort to a new worksheet, then redirected back to the worksheet display
 @login_required
 def save_cohort_for_new_workbook(request):
     return save_cohort(request=request, workbook_id=None, worksheet_id=None, create_workbook=True)
@@ -1411,17 +1422,12 @@ def filelist(request, cohort_id=None, panel_type=None):
 
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
-        return redirect('/user_landing')
+        if request.user.is_anonymous:
+            return redirect('dashboard')
+        return redirect('cohort_list')
 
     try:
-        metadata_data_attr_builds = {
-            'HG19': fetch_build_data_attr('HG19', panel_type, cohort_id is None),
-            'HG38': fetch_build_data_attr('HG38', panel_type, cohort_id is None)
-        }
-
-        build = request.GET.get('build', 'HG19')
-
-        metadata_data_attr = metadata_data_attr_builds[build]
+        metadata_data_attr = fetch_file_data_attr(panel_type)
 
         has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
@@ -1433,7 +1439,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             if request.GET.get('case_barcode', None):
                 inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, build=build, access=has_access, data_type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, access=has_access, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -1456,15 +1462,6 @@ def filelist(request, cohort_id=None, panel_type=None):
                         attr_val['count'] = 0
                     attr_values.append(attr_val)
                 metadata_data_attr[attr]['values'] = attr_values
-
-        for attr_build in metadata_data_attr_builds:
-            if attr_build != build:
-                for attr in metadata_data_attr_builds[attr_build]:
-                    for val in metadata_data_attr_builds[attr_build][attr]['values']:
-                        metadata_data_attr_builds[attr_build][attr]['values'][val]['count'] = 0
-                    metadata_data_attr_builds[attr_build][attr]['values'] = [metadata_data_attr_builds[attr_build][attr]['values'][x] for x in
-                                                                             metadata_data_attr_builds[attr_build][attr]['values']]
-            metadata_data_attr_builds[attr_build] = [metadata_data_attr_builds[attr_build][x] for x in metadata_data_attr_builds[attr_build]]
 
         cohort = None
         has_user_data = False
@@ -1498,14 +1495,13 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
                                             'export_url': export_url,
-                                            'metadata_data_attr': metadata_data_attr_builds,
+                                            'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'dicom_viewer_url': settings.DICOM_VIEWER,
                                             'slim_viewer_url': settings.SLIM_VIEWER,
                                             'has_user_data': has_user_data,
-                                            'build': build,
                                             'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -1556,8 +1552,6 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
             sort_order = int(request.GET.get('sort_order'))
             params['sort_order'] = sort_order
 
-        build = request.GET.get('build','HG19')
-
         has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
 
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
@@ -1565,18 +1559,22 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, build=build, access=has_access, data_type=panel_type, do_filter_count=do_filter_count, **params)
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, access=has_access,
+                              data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
         if do_filter_count:
-            metadata_data_attr = fetch_build_data_attr(build, panel_type, cohort_id is None)
+            metadata_data_attr = fetch_file_data_attr(panel_type)
             if len(result['metadata_data_counts']):
                 for attr in result['metadata_data_counts']:
                     if attr in metadata_data_attr:
                         for val in result['metadata_data_counts'][attr]:
-                            # TODO: This needs to be adjusted to not assume values coming out of the attribute fetcher are all that's valid.
+                            # TODO: This needs to be adjusted to not assume values coming out of the
+                            #  attribute fetcher are all that's valid.
                             if attr != 'program_name':
-                                metadata_data_attr.get(attr, {}).get('values', {}).get(val, {})['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
+                                metadata_data_attr.get(attr, {}).get('values', {}).get(
+                                    val, {}
+                                )['count'] = result['metadata_data_counts'].get(attr,{}).get(val, 0)
                             else:
                                 if val in progs:
                                     vals = metadata_data_attr.get(attr, {}).get('values', {})
@@ -1606,8 +1604,12 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
         logger.exception(e)
         status=500
         if cohort_id:
-            result={'redirect': reverse('cohort_details', args=[cohort_id]),
-                    'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."}
+            result = {
+                'redirect': reverse(
+                    'cohort_details', args=[cohort_id]
+                ),
+                'message': "Encountered an error while trying to fetch this cohort's filelist--please contact the administrator."
+            }
         else:
             result = {'redirect': reverse('landing_page', args=[]),
                     'message': "Encountered an error while trying to fetch filelist--please contact the administrator."}
@@ -1672,23 +1674,18 @@ def streaming_csv_view(request, cohort_id=None):
         total_expected = int(request.GET.get('total', '0'))
 
         if total_expected == 0:
-            logger.warn("[ERROR] Didn't receive a total--using MAX_FILE_LIST_ENTRIES.")
+            logger.warn("[WARNING] Didn't receive a total--using MAX_FILE_LIST_ENTRIES {}.".format(MAX_FILE_LIST_ENTRIES))
             total_expected = MAX_FILE_LIST_ENTRIES
 
         limit = total_expected+10 if total_expected < MAX_FILE_LIST_ENTRIES else MAX_FILE_LIST_ENTRIES
 
         file_list = None
 
-        build = escape(request.GET.get('build', 'HG19'))
-
-        if not re.compile(r'[Hh][Gg](19|38)').search(build):
-            raise Exception("Invalid build supplied")
-
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
-        items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit, build=build)
+        items = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, limit=limit)
 
         if 'file_list' in items:
             file_list = items['file_list']
@@ -1699,23 +1696,21 @@ def streaming_csv_view(request, cohort_id=None):
                 messages.error(request, "There was an error while attempting to retrieve this file list - please contact the administrator.")
             if cohort_id:
                 return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
-            else:
-                return redirect(reverse('user_landing'))
+            return redirect(reverse('dashboard'))
 
         if len(file_list) < total_expected:
             messages.error(request, 'Only %d files found out of %d expected!' % (len(file_list), total_expected))
             if cohort_id:
                 return redirect(reverse('cohort_filelist', kwargs={'cohort_id': cohort_id}))
-            else:
-                return redirect(reverse('user_landing'))
+            return redirect(reverse('dashboard'))
 
         if len(file_list) > 0:
             """A view that streams a large CSV file."""
             # Generate a sequence of rows. The range is based on the maximum number of
             # rows that can be handled by a single sheet in most spreadsheet
             # applications.
-            cohort_string = "Cohort '{}', ".format(cohort.name) if cohort else ""
-            rows = (["File listing for {}Build {}".format(cohort_string, build)],)
+            cohort_string = " for Cohort '{}', ".format(cohort.name) if cohort else ""
+            rows = (["File listing{}".format(cohort_string,)],)
             rows += (["Case", "Sample", "Program", "Platform", "Exp. Strategy", "Data Category", "Data Type",
                       "Data Format", "GDC File UUID", "GCS Location", "GDC Index File UUID", "Index File GCS Location", "File Size (B)", "Access Type"],)
             for file in file_list:
@@ -1728,7 +1723,7 @@ def streaming_csv_view(request, cohort_id=None):
                                              content_type="text/csv")
             timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
             cohort_string = 'cohort_{}_'.format(str(cohort_id)) if cohort_id else ''
-            filename = 'file_list_{}build_{}_{}.csv'.format(cohort_string, build, timestamp)
+            filename = 'file_list_{}{}.csv'.format(cohort_string, timestamp)
             response['Content-Disposition'] = 'attachment; filename=' + filename
             response.set_cookie("downloadToken", request.GET.get('downloadToken'))
             return response
@@ -2047,7 +2042,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         file_name = None
 
         # If destination is BQ
-        table = None
+        dest_table = None
 
         if export_dest == 'table':
             dataset = request.POST.get('project-dataset', '').split(":")[1]
@@ -2072,19 +2067,19 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             bq_proj_id = gcp.project_id
 
             if request.POST.get('table-type', '') == 'new':
-                table = request.POST.get('new-table-name', None)
-                if table:
+                dest_table = request.POST.get('new-table-name', None)
+                if dest_table:
                     # Check the user-provided table name against the whitelist for Google BQ table names
                     # truncate at max length regardless of what we received
-                    table = request.POST.get('new-table-name', '')[0:1024]
+                    dest_table = request.POST.get('new-table-name', '')[0:1024]
                     tbl_whitelist = re.compile(r'([^A-Za-z0-9_])',re.UNICODE)
-                    match = tbl_whitelist.search(str(table))
+                    match = tbl_whitelist.search(str(dest_table))
                     if match:
                         messages.error(request,"There are invalid characters in your table name; only numbers, "
                            + "letters, and underscores are permitted.")
                         return redirect(redirect_url)
                 else:
-                    table = request.POST.get('table-name', None)
+                    dest_table = request.POST.get('table-name', None)
 
         elif export_dest == 'gcs':
             bq_proj_id = settings.GCLOUD_PROJECT_ID
@@ -2098,10 +2093,10 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                         + " periods (.), slashes, dashes, and underscores are permitted.")
                     return redirect(redirect_url)
 
-        if not table:
+        if not dest_table:
             table_str_start = "isb_cgc_cohort_files" if cohort_id else "isb_cgc_files"
             cohort_id_str = "_{}".format(cohort_id) if cohort_id else ""
-            table = "{}{}_{}_{}".format(
+            dest_table = "{}{}_{}_{}".format(
                 table_str_start,
                 cohort_id_str,
                 re.sub(r"[\s,\.'-]+","_",req_user.email.split('@')[0].lower()),
@@ -2109,13 +2104,8 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             )
 
         if not file_name:
-            file_name = table
+            file_name = dest_table
         file_name += ('.json' if 'JSON' in file_format and '.json' not in file_name else '.csv' if '.csv' not in file_name else '') + ".gz"
-
-        build = escape(request.POST.get('build', 'HG19')).lower()
-
-        if export_type == 'file_manifest' and not re.compile(r'[Hh][Gg](19|38)').search(build):
-            raise Exception("Invalid build supplied")
 
         filter_conditions = ""
         union_queries = []
@@ -2138,13 +2128,17 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # if files are linked to a sample, we only export them if the specific sample is in the cohort.
 
         if export_type == 'file_manifest':
+            file_tables = DataSource.objects.select_related('version').filter(
+                version__active=1, source_type=DataSource.BIGQUERY, version__data_type=DataVersion.FILE_DATA
+            )
+
+            print("File tables seen: {}".format(file_tables))
             if cohort_id:
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
-                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
-                      md.index_file_id as index_file_gdc_uuid,
+                      md.file_node_id, md.case_node_id, md.project_short_name, {cohort_id} as cohort_id, build, 
+                      md.index_file_name_key as index_file_cloud_storage_location, md.index_file_id, 
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                      FROM `{metadata_table}` md
                      JOIN (SELECT case_barcode, sample_barcode
@@ -2156,7 +2150,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                      WHERE TRUE {filter_conditions}
                      GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                       md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      file_node_id, case_node_id, md.project_short_name, cohort_id, build, date_added, 
                       md.index_file_name_key, md.index_file_id
                      ORDER BY md.sample_barcode
                 """
@@ -2164,37 +2158,42 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                 query_string_base = """
                      SELECT md.sample_barcode, md.case_barcode, md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes,
                       md.platform, md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
-                      md.file_node_id as gdc_file_uuid, md.case_node_id as gdc_case_uuid, md.project_short_name,
-                      {cohort_id} as cohort_id, "{build}" as build, md.index_file_name_key as index_file_cloud_storage_location,
-                      md.index_file_id as index_file_gdc_uuid,
+                      md.file_node_id, md.case_node_id, md.project_short_name,
+                      {cohort_id} as cohort_id, build, md.index_file_name_key as index_file_cloud_storage_location,
+                      md.index_file_id,
                       PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_added
                      FROM `{metadata_table}` md
                      WHERE TRUE {filter_conditions}
                      GROUP BY md.sample_barcode, md.case_barcode, cloud_storage_location, file_size_bytes,
                       md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
-                      gdc_file_uuid, gdc_case_uuid, md.project_short_name, cohort_id, build, date_added, 
+                      file_node_id, case_node_id, md.project_short_name, cohort_id, build, date_added, 
                       md.index_file_name_key, md.index_file_id
                      ORDER BY md.sample_barcode
                 """
 
             cohort_id_str = cohort_id if cohort_id else 0
-            query_string = query_string_base.format(
-                metadata_table=settings.BQ_FILE_MANIFEST_TABLE_ID[build.upper()],
-                deployment_project=settings.BIGQUERY_PROJECT_ID,
-                deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
-                deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
-                filter_conditions=filter_conditions,
-                cohort_id=cohort_id_str,
-                date_added=date_added,
-                build=build,
-                tz=settings.TIME_ZONE
-            )
+            for tbl in file_tables:
+                union_queries.append(query_string_base.format(
+                    metadata_table=tbl.name,
+                    deployment_project=settings.BIGQUERY_PROJECT_ID,
+                    deployment_dataset=settings.BIGQUERY_COHORT_DATASET_ID,
+                    deployment_cohort_table=settings.BIGQUERY_COHORT_TABLE_ID,
+                    filter_conditions=filter_conditions,
+                    cohort_id=cohort_id_str,
+                    date_added=date_added,
+                    tz=settings.TIME_ZONE
+                ))
 
-            query_string = '#standardSQL\n'+query_string
+            if len(union_queries) > 1:
+                query_string = ") UNION ALL (".join(union_queries)
+                query_string = '(' + query_string + ')'
+            else:
+                query_string = union_queries[0]
+            query_string = '#standardSQL\n' + query_string
 
             if export_dest == 'table':
                 # Store file manifest to BigQuery
-                bcs = BigQueryExportFileList(bq_proj_id, dataset, table, user_project=True)
+                bcs = BigQueryExportFileList(bq_proj_id, dataset, dest_table, user_project=True)
                 result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
@@ -2205,7 +2204,8 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
         # Exporting Cohort Records
         elif export_type == 'cohort':
             query_string_base = """
-                SELECT DISTINCT cs.cohort_id, cs.case_barcode, cs.sample_barcode, clin.case_node_id as case_gdc_uuid, clin.project_short_name,
+                SELECT DISTINCT cs.cohort_id, cs.case_barcode, cs.sample_barcode, 
+                clin.case_node_id, clin.project_short_name,
                   PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_added
                 FROM `{deployment_project}.{deployment_dataset}.{deployment_cohort_table}` cs
                 JOIN `{program_bioclin_table}` clin
@@ -2226,7 +2226,10 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
                     cohort_programs = Program.objects.filter(active=True, is_public=True)
 
             for program in cohort_programs:
-
+                bioclin_tables = DataSource.objects.filter(
+                    version__active=1, source_type=DataSource.BIGQUERY,
+                    version__data_type=DataVersion.BIOSPECIMEN_DATA, programs__id=program.id
+                )
                 union_queries.append(
                     query_string_base.format(
                         program_bioclin_table=settings.BQ_PROG_BIOCLIN_TABLE_ID[program.name],
@@ -2249,7 +2252,7 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
 
             # Export the data
             if export_dest == 'table':
-                bcs = BigQueryExportCohort(bq_proj_id, dataset, table, user_project=True)
+                bcs = BigQueryExportCohort(bq_proj_id, dataset, dest_table, user_project=True)
                 result = bcs.export_cohort_query_to_bq(query_string, filter_params, cohort_id)
             elif export_dest == 'gcs':
                 # Store file list to BigQuery
@@ -2278,13 +2281,13 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             if result['status'] == 'long_running':
                 result['message'] = "The export of {} to {} ".format(
                     msg_cohort_str,
-                    "table {}:{}.{}".format(bq_proj_id, dataset, table)
+                    "table {}:{}.{}".format(bq_proj_id, dataset, dest_table)
                     if export_dest == 'table' else "GCS file gs://{}/{}".format(gcs_bucket, file_name)
                 ) + "is underway; check your {} in 1-2 minutes for the results.".format("BQ dataset" if export_dest == 'table' else "GCS bucket")
             else:
                 result['message'] = "{} was successfully exported to {}.".format(
                     msg_cohort_str,
-                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, table, result['message'])
+                    "table {}:{}.{} ({} rows)".format(bq_proj_id, dataset, dest_table, result['message'])
                     if export_dest == 'table' else "GCS file gs://{}/{} ({})".format(
                         gcs_bucket, file_name, result['message']
                     )

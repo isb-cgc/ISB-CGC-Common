@@ -44,8 +44,7 @@ FILE_LIST_EXPORT_SCHEMA = {
             'mode': 'REQUIRED'
         }, {
             'name': 'sample_barcode',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
+            'type': 'STRING'
         }, {
             'name': 'project_short_name',
             'type': 'STRING',
@@ -59,10 +58,10 @@ FILE_LIST_EXPORT_SCHEMA = {
             'type': 'STRING',
             'mode': 'REQUIRED'
         }, {
-            'name': 'gdc_file_uuid',
+            'name': 'file_node_id',
             'type': 'STRING'
         }, {
-            'name': 'gdc_case_uuid',
+            'name': 'case_node_id',
             'type': 'STRING'
         }, {
             'name': 'platform',
@@ -86,7 +85,7 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'file_size_bytes',
             'type': 'INTEGER'
         }, {
-            'name': 'index_file_gdc_uuid',
+            'name': 'index_file_id',
             'type': 'STRING'
         }, {
             'name': 'index_file_cloud_storage_location',
@@ -107,8 +106,7 @@ COHORT_EXPORT_SCHEMA = {
             'mode': 'REQUIRED'
         }, {
             'name': 'sample_barcode',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
+            'type': 'STRING'
         }, {
             'name': 'project_short_name',
             'type': 'STRING',
@@ -118,7 +116,7 @@ COHORT_EXPORT_SCHEMA = {
             'type': 'TIMESTAMP',
             'mode': 'REQUIRED'
         }, {
-            'name': 'case_gdc_uuid',
+            'name': 'case_node_id',
             'type': 'STRING'
         }
     ]
@@ -444,8 +442,8 @@ class BigQueryExportFileList(BigQueryExport):
             'build': data['build'],
             'case_barcode': data['case'],
             'project_short_name': data['project_short_name'],
-            'gdc_case_uuid': data['case_node_id'],
-            'gdc_file_uuid': data['file_node_id'],
+            'case_node_id': data['case_node_id'],
+            'file_node_id': data['file_node_id'],
             'platform': data['platform'],
             'exp_strategy': data['exp_strat'],
             'data_category': data['datacat'],
@@ -455,9 +453,9 @@ class BigQueryExportFileList(BigQueryExport):
             'file_size_bytes': data['file_size'],
             'date_added': date_added
         }
-        if 'index_file_gdc_uuid' in data:
+        if 'index_file_node_id' in data:
             entry_dict['index_file_cloud_storage_location'] = data['index_file_cloudstorage_location'],
-            entry_dict['index_file_gdc_uuid'] = data['index_file_gdc_uuid']
+            entry_dict['index_file_node_id'] = data['index_file_node_id']
             
         return entry_dict
 
@@ -517,7 +515,7 @@ class BigQueryExportCohort(BigQueryExport):
             'date_added': date_added
         }
         if self._uuids and sample['sample_barcode'] in self._uuids:
-            entry_dict['case_gdc_uuid'] = self._uuids[sample['sample_barcode']]
+            entry_dict['case_node_id'] = self._uuids[sample['sample_barcode']]
 
         return entry_dict
 

@@ -55,6 +55,7 @@ SERVICE_ACCOUNT_BLACKLIST_PATH = settings.SERVICE_ACCOUNT_BLACKLIST_PATH
 GOOGLE_ORG_WHITELIST_PATH = settings.GOOGLE_ORG_WHITELIST_PATH
 MANAGED_SERVICE_ACCOUNTS_PATH = settings.MANAGED_SERVICE_ACCOUNTS_PATH
 
+
 @login_required
 def extended_logout_view(request):
     response = None
@@ -64,7 +65,7 @@ def extended_logout_view(request):
     except Exception as e:
         logger.error("[ERROR] While attempting to log out:")
         logger.exception(e)
-        messages.error(request,"There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
+        messages.error(request, "There was an error while attempting to log out - please contact feedback@isb-cgc.org.")
         return redirect(reverse('user_detail', args=[request.user.id]))
 
     return response
@@ -72,9 +73,7 @@ def extended_logout_view(request):
 # GCP RELATED VIEWS
 
 
-'''
-Returns page that has user Google Cloud Projects
-'''
+# Returns page that has user Google Cloud Projects
 @login_required
 def user_gcp_list(request, user_id):
     context = {}
