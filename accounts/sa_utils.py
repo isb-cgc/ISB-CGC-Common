@@ -29,7 +29,6 @@ from django.contrib.auth.models import User
 from google_helpers.stackdriver import StackDriverLogger
 
 import logging
-from .service_obj import ServiceAccountBlacklist, GoogleOrgWhitelist, ManagedServiceAccounts
 from .models import *
 from django.conf import settings
 
