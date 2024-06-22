@@ -29,23 +29,22 @@ from django.contrib.auth.models import User
 from google_helpers.stackdriver import StackDriverLogger
 
 import logging
-from .service_obj import ServiceAccountBlacklist, GoogleOrgWhitelist, ManagedServiceAccounts
 from .models import *
 from django.conf import settings
 
-from .dcf_support import get_stored_dcf_token, verify_sa_at_dcf, register_sa_at_dcf, extend_sa_at_dcf, \
+from .dcf_support import get_stored_dcf_token, \
                         TokenFailure, RefreshTokenExpired, InternalTokenError, DCFCommFailure, \
-                        GoogleLinkState, get_auth_elapsed_time, unregister_sa, \
+                        GoogleLinkState, get_auth_elapsed_time, \
                         get_google_link_from_user_dict, get_projects_from_user_dict, \
                         get_nih_id_from_user_dict, user_data_token_to_user_dict, get_user_data_token_string, \
-                        compare_google_ids, service_account_info_from_dcf, \
-                        remove_sa_datasets_at_dcf, adjust_sa_at_dcf, service_account_info_from_dcf_for_project_and_sa, \
-                        service_account_info_from_dcf_for_project
+                        compare_google_ids
+
 
 logger = logging.getLogger('main_logger')
 
 LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
 IDP = settings.IDP
+
 
 class SAModes(object):
     REMOVE_ALL = 1

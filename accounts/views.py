@@ -37,8 +37,7 @@ from .models import *
 from django.utils.html import escape
 from .sa_utils import controlled_auth_datasets, have_linked_user
 
-from .dcf_support import service_account_info_from_dcf_for_project, unregister_sa, TokenFailure, \
-                        InternalTokenError, RefreshTokenExpired, DCFCommFailure
+from .dcf_support import TokenFailure, InternalTokenError, RefreshTokenExpired, DCFCommFailure
 
 from json import loads as json_loads
 
