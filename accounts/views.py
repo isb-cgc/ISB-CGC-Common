@@ -46,8 +46,6 @@ logger = logging.getLogger('main_logger')
 
 @login_required
 def extended_logout_view(request):
-    response = None
-
     try:
         response = account_views.logout(request)
     except Exception as e:
