@@ -253,7 +253,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'case_node_id': entry.get('case_node_id', 'N/A'),
                         'file_node_id': entry.get('file_node_id', 'N/A'),
                         'index_file_id': (entry.get('index_file_id', 'N/A')),
-                        'project_short_name': entry.get('project_short_name_gdc', None) or entry.get('project_short_name_gdc', None) or 'N/A',
+                        'project_short_name': entry.get('project_short_name_gdc', None) or entry.get('project_short_name_pdc', None) or 'N/A',
                         'node': entry.get('node', 'N/A'),
                         'cohort_id': cohort_id
                     })
