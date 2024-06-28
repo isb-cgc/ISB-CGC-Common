@@ -63,7 +63,7 @@ class StackDriverLogger(object):
             logger.error("Exception while calling logging API: {0}.".format(e.__class__.__name__))
             logger.exception(e)
 
-    def write_text_log_entry(self, log_name, log_text, severity="INFO" ):
+    def write_text_log_entry(self, log_name, log_text, severity="INFO"):
         self.write_log_entries(log_name, [{
             'severity': severity,
             'textPayload': log_text
@@ -74,4 +74,3 @@ class StackDriverLogger(object):
         from django.conf import settings
         project_name = settings.GCLOUD_PROJECT_ID
         return cls(project_name)
-

@@ -89,7 +89,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
 
             if do_filter_count:
-                facet_attr = Attribute.objects.filter(name__in=["program_name", "collection_id", "Modality", "BodyPartExamined", "tcia_tumorLocation", "primaryAnatomicStructure", "CancerType"])
+                facet_attr = Attribute.objects.filter(name__in=[
+                    "program_name", "collection_id", "Modality", "BodyPartExamined", "tcia_tumorLocation",
+                    "primaryAnatomicStructure", "CancerType"]
+                )
 
             # collapse = "StudyInstanceUID"
             unique = "StudyInstanceUID"
@@ -111,7 +114,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             fields.extend(["index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "experimental_strategy", "data_format",
                            "file_node_id", "case_node_id", "file_size",
-                           "program_name", "node", "file_name", "file_name_key", "build", "project_short_name"
+                           "program_name", "node", "file_name", "file_name_key", "build", "project_short_name_gdc",
+                           "project_short_name_pdc"
                            ])
             if data_type == 'slim':
                 fields.extend(["StudyInstanceUID", "SeriesInstanceUID", "slide_barcode"])
@@ -129,8 +133,9 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             if do_filter_count:
                 facet_names = [
-                    'disease_code', 'project_short_name', 'node', 'build', 'data_format', 'data_category',
-                    'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform', 'program_name'
+                    'disease_code', 'project_short_name_gdc', 'project_short_name_pdc', 'node', 'build', 'data_format',
+                    'data_category', 'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform',
+                    'program_name'
                 ]
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
@@ -244,12 +249,12 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'datacat': entry.get('data_category', 'N/A'),
                         'datatype': entry.get('data_type', 'N/A'),
                         'dataformat': entry.get('data_format', 'N/A'),
-                        'program':  entry.get('program_name', None) or entry.get('project_short_name', '').split('-')[0],
-                        'case_node_id': entry.get('case_node_id', None) or entry.get('case_gdc_id', 'N/A'),
-                        'file_node_id': entry.get('file_node_id', None) or entry.get('file_gdc_id', 'N/A'),
+                        'program':  entry.get('program_name', 'N/A'),
+                        'case_node_id': entry.get('case_node_id', 'N/A'),
+                        'file_node_id': entry.get('file_node_id', 'N/A'),
                         'index_file_id': (entry.get('index_file_id', 'N/A')),
-                        'project_short_name': entry.get('project_short_name', 'N/A'),
-                        'node': entry.get('node', 'GDC'),
+                        'project_short_name': entry.get('project_short_name_gdc', None) or entry.get('project_short_name_pdc', None) or 'N/A',
+                        'node': entry.get('node', 'N/A'),
                         'cohort_id': cohort_id
                     })
 

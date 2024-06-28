@@ -209,9 +209,9 @@ def fetch_file_data_attr(type=None):
         if type == 'dicom':
             metadata_data_attrs.extend(['Modality', 'BodyPartExamined', "collection_id", "CancerType"])
         elif type == 'pdf':
-            metadata_data_attrs.extend(['project_short_name'])
+            metadata_data_attrs.extend(['project_short_name_gdc'])
         elif type == 'slim':
-            metadata_data_attrs.extend(['data_type', 'project_short_name'])
+            metadata_data_attrs.extend(['data_type', 'project_short_name_gdc'])
         elif type == 'igv':
             metadata_data_attrs.extend(['experimental_strategy', 'platform'])
         else:
