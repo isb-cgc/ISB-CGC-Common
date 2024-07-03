@@ -76,7 +76,7 @@ class BigQuerySupport(BigQueryABC):
         self.table_schema = table_schema
 
     def _full_table_id(self):
-        return "{}.{}.{}".format(project=self.project_id, dataset=self.dataset_id, table=self.table_id)
+        return "{}.{}.{}".format(self.project_id, self.dataset_id, self.table_id)
 
     def _streaming_insert(self, rows):
 
@@ -93,7 +93,9 @@ class BigQuerySupport(BigQueryABC):
             else:
                 next_rows = copy.deepcopy(rows[index:next])
 
-            response = self.bq_client.insert_rows(self._full_table_id(), rows)
+            # For some reason the Google BQ client is insisting on the selected_fields entry despite
+            # indicating it's optional for dict insertions. For now we just echo the Schema back at itself
+            response = self.bq_client.insert_rows(self._full_table_id(), next_rows, selected_fields=self.bq_client.get_table(self._full_table_id()).schema)
             index = next
 
         return response
