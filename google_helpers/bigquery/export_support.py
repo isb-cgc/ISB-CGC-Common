@@ -247,7 +247,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                 logger.error("[ERROR] {}".format(msg))
             elif not to_temp:
                 # Check the table
-                export_table = bq_client.get_table(self._full_table_id())
+                export_table = self.bq_client.get_table(self._full_table_id())
                 if not export_table:
                     logger.error("[ERROR] Export table {} not found".format(self._full_table_id()))
                     result['status'] = 'error'
@@ -324,7 +324,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 class BigQueryExportFileList(BigQueryExport):
 
     def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None, for_cohort=False):
-        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA, for_cohort)
+        super().__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA, for_cohort=for_cohort)
 
     def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -393,9 +393,9 @@ class BigQueryExportFileList(BigQueryExport):
 
 class BigQueryExportCohort(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None):
+    def __init__(self, project_id, dataset_id, table_id, uuids=None, bucket_path=None, file_name=None, for_cohort=True):
         self._uuids = uuids
-        super(BigQueryExportCohort, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA)
+        super().__init__(project_id, dataset_id, table_id, bucket_path, file_name, COHORT_EXPORT_SCHEMA, for_cohort=for_cohort)
 
     def _build_row(self, sample):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

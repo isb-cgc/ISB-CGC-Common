@@ -139,7 +139,6 @@ class Cohort(models.Model):
 
         return filters
 
-
     # Returns the set of filters defining this cohort as a dict organized by data source
     def get_filters_by_data_source(self, source_type=None):
 
@@ -232,19 +231,29 @@ class Cohort(models.Model):
     # Produce a BigQuery filter clause and parameters; this is for *programmatic* use of BQ, NOT copy-paste into
     # the console
     def get_filters_for_bq(self, prefix=None, suffix=None, counts=False, schema=None):
-
-        filter_sets = []
-
+        cohort_filters = []
+        cohort_params = []
         group_filter_dict = self.get_filters_as_dict()
+        prog_filters = {}
 
         for group in group_filter_dict:
-            group_filters = {x['name']: { 'op': x['op'], 'values': [y for y in x['values']]} for x in group['filters']}
-            filter_sets.append(BigQuerySupport.build_bq_filter_and_params(
-                group_filters, field_prefix=prefix, param_suffix=suffix, with_count_toggle=counts,
-                type_schema=schema
-             ))
+            for fltr in group['filters']:
+                if fltr['program_name'] not in prog_filters:
+                    prog_filters[fltr['program_name']] = {}
+                prog_fltr = prog_filters[fltr['program_name']]
+                prog_fltr[fltr['name']] = [y for y in fltr['values']]
 
-        return filter_sets
+        for prog in prog_filters:
+            prog_suffix = "{}{}".format((suffix+"_") if suffix else "", prog)
+            prog_filters_and_params = BigQuerySupport.build_bq_filter_and_params(
+                prog_filters[prog], field_prefix=prefix, param_suffix=prog_suffix, with_count_toggle=counts,
+                type_schema=schema
+             )
+            prog_filter = "(program_name='{}' AND ({}))".format(prog, prog_filters_and_params['filter_string'])
+            cohort_filters.append(prog_filter)
+            cohort_params.extend(prog_filters_and_params['parameters'])
+
+        return {'filter_string': " OR ".join(cohort_filters), 'parameters': cohort_params}
 
     # Returns the set of filters used to create this cohort as a program-organized JSON-compatible dict,
     # for use in UI display

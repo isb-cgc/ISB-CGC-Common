@@ -569,7 +569,7 @@ class BigQuerySupport(BigQueryABC):
             filter_string = ''
             param_name = attr + '{}'.format('_{}'.format(param_suffix) if param_suffix else '')
 
-            query_param = ScalarQueryParameter(param_name, parameter_type)
+            query_param = ScalarQueryParameter(param_name, parameter_type, None)
 
             if 'None' in values:
                 values.remove('None')
@@ -581,13 +581,13 @@ class BigQuerySupport(BigQueryABC):
                 if len(values) == 1:
                     # Scalar param
                     query_param.value = values[0]
-                    if query_param.type == 'STRING':
+                    if query_param.type_ == 'STRING':
                         if '%' in values[0] or case_insens:
                             filter_string += "LOWER({}{}) LIKE LOWER(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
                         else:
                             filter_string += "{}{} = @{}".format('' if not field_prefix else field_prefix, attr,
                                                                  param_name)
-                    elif query_param.type == 'INT64':
+                    elif query_param.type_ == 'INT64':
                         if attr.endswith('_gt') or attr.endswith('_gte'):
                             filter_string += "{}{} >{} @{}".format(
                                 '' if not field_prefix else field_prefix, attr[:attr.rfind('_')],
@@ -623,7 +623,7 @@ class BigQuerySupport(BigQueryABC):
 
                 else:
                     # Array param
-                    query_param = ArrayQueryParameter(param_name, parameter_typem, [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values])
+                    query_param = ArrayQueryParameter(param_name, parameter_type, [{'value': x.lower() if parameter_type == 'STRING' else x} for x in values])
                     filter_string += "LOWER({}{}) IN UNNEST(@{})".format('' if not field_prefix else field_prefix, attr, param_name)
 
             if with_count_toggle:
