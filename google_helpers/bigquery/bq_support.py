@@ -25,8 +25,7 @@ from google_helpers.bigquery.abstract import BigQueryABC
 from google.cloud import bigquery
 from google.cloud.bigquery.table import Table
 from google.cloud.bigquery.schema import SchemaField
-from google.cloud.bigquery import ArrayQueryParameter, ScalarQueryParameter, StructQueryParameter
-from google.cloud.bigquery import QueryJob, QueryJobConfig
+from google.cloud.bigquery import ArrayQueryParameter, ScalarQueryParameter, StructQueryParameter, QueryJob, QueryJobConfig
 from googleapiclient.errors import HttpError
 
 logger = logging.getLogger('main_logger')
@@ -172,7 +171,7 @@ class BigQuerySupport(BigQueryABC):
             table_found = True if table else False
 
         except Exception as e:
-            logger.warn("Table {} was not found.".format(self._full_table_id()))
+            logger.info("Table {} was not found.".format(self._full_table_id()))
 
         return table_found
 
@@ -192,9 +191,9 @@ class BigQuerySupport(BigQueryABC):
     def _insert_table(self, desc):
         table = None
         try:
-            table = self.bq_client.create_table(Table(
-                self._full_table_id(), self.table_schema, description=desc
-            ))
+            table = Table(self._full_table_id(), [SchemaField(x['name'], x['type'], mode=x.get('mode', None)) for x in self.table_schema['fields']])
+            table.description = desc
+            table = self.bq_client.create_table(table)
         except Exception as e:
             logger.error("[ERROR] Couldn't create table {}".format(self._full_table_id()))
             logger.exception(e)
@@ -312,13 +311,24 @@ class BigQuerySupport(BigQueryABC):
         not_done = True
         next_page_token = None
         while not_done:
-            row_iter = bq_client.list_rows(query_job.destination, max_results=fetch_size, page_token=next_page_token)
+            row_iter = self.bq_client.list_rows(query_job.destination, max_results=fetch_size, page_token=next_page_token)
             for x in row_iter:
                 result.extend(x)
             next_page_token = row_iter.next_page_token
             not_done = next_page_token is not None
 
         return result
+
+    # Apply a dataViewer IAM role to the specified user
+    def set_table_access(self, user_email):
+        this_table_policy = self.bq_client.get_iam_policy(self._full_table_id())
+        this_table_policy.bindings.append({
+            "role": "roles/bigquery.dataViewer",
+            "members": [
+                "user:{}".format(user_email)
+            ]
+        })
+        self.bq_client.set_iam_policy(self._full_table_id(), policy=this_table_policy)
 
     # Add rows to the table specified by project.dataset.table
     # Note that this is a class method therefor the rows must be supplied formatted ready

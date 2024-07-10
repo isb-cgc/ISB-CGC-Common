@@ -35,10 +35,6 @@ MAX_INSERT = settings.MAX_BQ_INSERT
 FILE_LIST_EXPORT_SCHEMA = {
     'fields': [
         {
-            'name': 'cohort_id',
-            'type': 'INTEGER',
-            'mode': 'REQUIRED'
-        }, {
             'name': 'case_barcode',
             'type': 'STRING',
             'mode': 'REQUIRED'
@@ -46,11 +42,15 @@ FILE_LIST_EXPORT_SCHEMA = {
             'name': 'sample_barcode',
             'type': 'STRING'
         }, {
+            'name': 'program_name',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
             'name': 'project_short_name',
             'type': 'STRING',
             'mode': 'REQUIRED'
         }, {
-            'name': 'date_added',
+            'name': 'date_exported',
             'type': 'TIMESTAMP',
             'mode': 'REQUIRED'
         }, {
@@ -97,10 +97,6 @@ FILE_LIST_EXPORT_SCHEMA = {
 COHORT_EXPORT_SCHEMA = {
     'fields': [
         {
-            'name': 'cohort_id',
-            'type': 'INTEGER',
-            'mode': 'REQUIRED'
-        }, {
             'name': 'case_barcode',
             'type': 'STRING',
             'mode': 'REQUIRED'
@@ -112,7 +108,11 @@ COHORT_EXPORT_SCHEMA = {
             'type': 'STRING',
             'mode': 'REQUIRED'
         }, {
-            'name': 'date_added',
+            'name': 'program_name',
+            'type': 'STRING',
+            'mode': 'REQUIRED'
+        }, {
+            'name': 'date_exported',
             'type': 'TIMESTAMP',
             'mode': 'REQUIRED'
         }, {
@@ -125,7 +125,13 @@ COHORT_EXPORT_SCHEMA = {
 
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema):
+    def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema, for_cohort=False):
+        if for_cohort:
+            table_schema['fields'].append({
+            'name': 'cohort_id',
+            'type': 'INTEGER',
+            'mode': 'REQUIRED'
+        })
         super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema)
         self.bucket_path = bucket_path
         self.file_name = file_name
@@ -211,6 +217,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         return result
 
     def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False):
+        print(query)
+        print(parameters)
         query_job = self.insert_bq_query_job(query, parameters, write_disposition=write_disp)
 
         query_job = self.await_job_is_done(query_job)
@@ -277,7 +285,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         if not is_temp:
             check_dataset_table = self._confirm_dataset_and_table(desc)
             write_disp = 'WRITE_EMPTY'
-            status = check_dataset_table.get('status',None)
+            status = check_dataset_table.get('status', None)
             if status == 'ERROR':
                 return check_dataset_table
             elif status == 'TABLE_EXISTS':
@@ -315,8 +323,8 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
 class BigQueryExportFileList(BigQueryExport):
 
-    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None):
-        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA)
+    def __init__(self, project_id, dataset_id, table_id, bucket_path=None, file_name=None, for_cohort=False):
+        super(BigQueryExportFileList, self).__init__(project_id, dataset_id, table_id, bucket_path, file_name, FILE_LIST_EXPORT_SCHEMA, for_cohort)
 
     def _build_row(self, data):
         date_added = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -441,3 +449,13 @@ class BigQueryExportCohort(BigQueryExport):
             desc = "BQ Export cohort table from ISB-CGC, cohort ID {}".format(str(cohort_id))
 
         return self.export_query_to_bq(desc, query, parameters, "cohort")
+
+
+EXPORT_CLASSES = {
+    'file': BigQueryExportFileList,
+    'cohort': BigQueryExportCohort
+}
+
+
+def get_export_class(export_type):
+    return EXPORT_CLASSES.get(export_type, None)
