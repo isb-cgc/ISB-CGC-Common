@@ -273,7 +273,7 @@ def cohort_detail(request, cohort_id):
             'cohort_programs': cohort_programs,
             'programs_this_cohort': [x['id'] for x in cohort_programs],
             'current_filters': cohort.get_filters_for_ui(True),
-            'is_social': bool(len(request.user.socialaccount_set.all()) > 0)
+            'is_social': bool(request.user.is_authenticated and (len(request.user.socialaccount_set.all()) > 0))
         })
 
     except ObjectDoesNotExist:
