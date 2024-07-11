@@ -272,7 +272,8 @@ def cohort_detail(request, cohort_id):
             'shared_with_users': shared_with_users,
             'cohort_programs': cohort_programs,
             'programs_this_cohort': [x['id'] for x in cohort_programs],
-            'current_filters': cohort.get_filters_for_ui(True)
+            'current_filters': cohort.get_filters_for_ui(True),
+            'is_social': bool(len(request.user.socialaccount_set.all()) > 0)
         })
 
     except ObjectDoesNotExist:
@@ -646,12 +647,12 @@ def filelist(request, cohort_id=None, panel_type=None):
                 metadata_data_attr[attr]['values'] = attr_values
 
         cohort = None
-        has_user_data = False
         programs_this_cohort = []
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
+
             export_url = reverse("export_cohort_data", kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
         else:
             download_url = reverse("download_filelist")
@@ -669,7 +670,7 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'sel_file_max': MAX_SEL_FILES,
                                             'dicom_viewer_url': settings.DICOM_VIEWER,
                                             'slim_viewer_url': settings.SLIM_VIEWER,
-                                            'has_user_data': has_user_data,
+                                            'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
                                             'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
