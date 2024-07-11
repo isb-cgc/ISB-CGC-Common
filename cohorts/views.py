@@ -1307,6 +1307,10 @@ def export_data(request, cohort_id=None, export_type=None, versions=None):
             }, status=400)
         else:
             bcs.set_table_access(req_user.email)
+            if export_type == 'file_manifest' and for_cohort:
+                cohort.last_exported_table = dest_table
+                cohort.last_exported_date = datetime.datetime.utcnow()
+                cohort.save()
             msg_template = get_template('isb_cgc/bq-manifest-export-msg.html')
             msg = msg_template.render(context={
                 'tables': [{
