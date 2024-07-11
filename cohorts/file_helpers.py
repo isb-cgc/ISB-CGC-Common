@@ -38,7 +38,7 @@ FILTER_DATA_FORMAT = {
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
                  sort_order=0, access=None, data_type=None, do_filter_count=True):
 
-    if not user or user.is_anonymous:
+    if cohort_id and (not user or user.is_anonymous):
         raise Exception("A user must be supplied to view a cohort's files.")
 
     if not inc_filters:

@@ -90,6 +90,9 @@ FILE_LIST_EXPORT_SCHEMA = {
         }, {
             'name': 'index_file_cloud_storage_location',
             'type': 'STRING'
+        }, {
+            'name': 'node',
+            'type': 'STRING'
         }
     ]
 }
@@ -118,6 +121,12 @@ COHORT_EXPORT_SCHEMA = {
         }, {
             'name': 'case_node_id',
             'type': 'STRING'
+        }, {
+            'name': 'sample_node_id',
+            'type': 'STRING'
+        }, {
+            'name': 'node',
+            'type': 'STRING'
         }
     ]
 }
@@ -126,13 +135,14 @@ COHORT_EXPORT_SCHEMA = {
 class BigQueryExport(BigQueryExportABC, BigQuerySupport):
 
     def __init__(self, project_id, dataset_id, table_id, bucket_path, file_name, table_schema, for_cohort=False):
+        table_schema_base = deepcopy(table_schema)
         if for_cohort:
-            table_schema['fields'].append({
+            table_schema_base['fields'].append({
             'name': 'cohort_id',
             'type': 'INTEGER',
             'mode': 'REQUIRED'
         })
-        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema)
+        super(BigQueryExport, self).__init__(project_id, dataset_id, table_id, table_schema=table_schema_base)
         self.bucket_path = bucket_path
         self.file_name = file_name
 
@@ -258,6 +268,7 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                         logger.info("[STATUS] Successfully exported {} into BQ table {}".format(export_type, self._full_table_id()))
                         result['status'] = 'success'
                         result['message'] = int(export_table.num_rows)
+                        result['table_id'] = self._full_table_id()
                     else:
                         logger.warning("[WARNING] Rows not found, job info:")
                         msg = "Table {} created, but no rows found. Export of {} may not have succeeded".format(
@@ -275,9 +286,10 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
                     'table_id': query_job.destination.split(".")[2]
                 }
         else:
-            logger.error("[WARNING] Export is taking a long time to run, informing user.")
+            logger.warning("[WARNING] Export is taking a long time to run, informing user.")
             result['status'] = 'long_running'
             result['jobId'] = query_job.job_id
+            result['table_id'] = self._full_table_id()
 
         return result
 
@@ -452,7 +464,7 @@ class BigQueryExportCohort(BigQueryExport):
 
 
 EXPORT_CLASSES = {
-    'file': BigQueryExportFileList,
+    'file_manifest': BigQueryExportFileList,
     'cohort': BigQueryExportCohort
 }
 

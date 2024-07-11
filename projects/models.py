@@ -30,11 +30,30 @@ class ProgramQuerySet(models.QuerySet):
     def get_projects(self):
         return Project.objects.select_related('program').filter(program__in=self.all())
 
-    def get_data_sources(self, versions=None):
+    def get_data_sources(self, versions=None, data_type=None, source_type=None):
         sources = None
-        q_obj = Q(version__in=versions) if versions else Q()
+        q_obj = Q()
+        if versions:
+            q_obj &= Q(version__in=versions)
+        if source_type:
+            q_obj &= Q(source_type=source_type)
+        ds_q_obj = Q()
+        if data_type:
+            if type(data_type) == list:
+                ds_q_obj = Q(data_type__in=data_type)
+                q_obj &= Q(datasettypes__data_type__in=data_type)
+            else:
+                ds_q_obj = Q(data_type=data_type)
+                q_obj &= Q(datasettypes__data_type=data_type)
+
         for prog in self.all():
-            data_sources = prog.datasource_set.filter(q_obj) if not data_sources else data_sources | prog.datasource_set.filter(q_obj)
+            sources = prog.datasource_set.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(ds_q_obj)
+            )).filter(q_obj) if not sources else sources | prog.datasource_set.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(ds_q_obj)
+            )).filter(q_obj)
         return sources.distinct()
 
     def get_prog_attr(self, filters=None):
