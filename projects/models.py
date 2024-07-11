@@ -1,16 +1,144 @@
+#
+# Copyright 2015-2023, Institute for Systems Biology
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#    http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+import time
 from builtins import object
 import operator
-
 from django.db import models
 from django.contrib.auth.models import User
-from django.db.models import Q
-from data_upload.models import UserUpload
-from accounts.models import GoogleProject, Bucket, BqDataset
-from sharing.models import Shared_Resource
+from django.db.models import Q, Prefetch
 from functools import reduce
+import logging
+
+logger = logging.getLogger('main_logger')
+
+
+class ProgramQuerySet(models.QuerySet):
+    def get_projects(self):
+        return Project.objects.select_related('program').filter(program__in=self.all())
+
+    def get_data_sources(self, versions=None, data_type=None, source_type=None):
+        sources = None
+        q_obj = Q()
+        if versions:
+            q_obj &= Q(version__in=versions)
+        if source_type:
+            q_obj &= Q(source_type=source_type)
+        ds_q_obj = Q()
+        if data_type:
+            if type(data_type) == list:
+                ds_q_obj = Q(data_type__in=data_type)
+                q_obj &= Q(datasettypes__data_type__in=data_type)
+            else:
+                ds_q_obj = Q(data_type=data_type)
+                q_obj &= Q(datasettypes__data_type=data_type)
+
+        for prog in self.all():
+            sources = prog.datasource_set.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(ds_q_obj)
+            )).filter(q_obj) if not sources else sources | prog.datasource_set.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(ds_q_obj)
+            )).filter(q_obj)
+        return sources.distinct()
+
+    def get_prog_attr(self, filters=None):
+        attrs = None
+        filters = filters or Q()
+        for prog in self.all():
+            attrs = attrs | prog.attribute_set.filter(filters) if attrs else prog.attribute_set.filter(filters)
+        return attrs.distinct()
+
+    #
+    # returns a dictionary of comprehensive information mapping attributes to this set of programs:
+    #
+    # {
+    #   'list': [<String>, ...],
+    #   'ids': [<Integer>, ...],
+    #   'sources': {
+    #      <data source database ID>: {
+    #         'list': [<String>, ...],
+    #         'attrs': [<Attribute>, ...],
+    #         'id': <Integer>,
+    #         'name': <String>,
+    #         'data_sets': [<DataSetType>, ...],
+    #         'count_col': <Integer>
+    #      }
+    #   }
+    #
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, with_set_map=False, active_only=False):
+        start = time.time()
+        # Simple string list of attribute names (warning: will not properly resolve for collision)
+        attrs = { 'list': None, 'ids': None }
+        # Full source-ID dictionary of attributes
+        if by_source:
+            attrs['sources'] = {}
+        if with_set_map:
+            attrs['set_map'] = {}
+
+        q_objects = Q()
+        if for_ui is not None:
+            q_objects &= Q(default_ui_display=for_ui)
+        if named_set:
+            q_objects &= Q(name__in=named_set)
+        if active_only:
+            q_objects &= Q(active=True)
+        if for_faceting:
+            q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute__id', flat=True)))
+
+        sources = self.all().get_data_sources()
+        prog_attr = self.get_prog_attr(q_objects)
+
+        for ds in sources:
+
+            attr_set = ds.attribute_set.filter(q_objects).intersect(prog_attr)
+
+            if by_source:
+                attrs['sources'][ds.id] = {
+                    'list': list(set(attr_set.values_list('name', flat=True))),
+                    'attrs': attr_set.distinct(),
+                    'id': ds.id,
+                    'name': ds.name,
+                    'count_col': ds.count_col
+                }
+
+            if not attrs['list']:
+                attrs['list'] = list(attr_set.values_list('name', flat=True))
+            else:
+                attrs['list'].extend(list(attr_set.values_list('name', flat=True)))
+            if not attrs['ids']:
+                attrs['ids'] = list(attr_set.values_list('id', flat=True))
+            else:
+                attrs['ids'].extend(list(attr_set.values_list('id', flat=True)))
+
+        attrs['list'] = attrs['list'] and list(set(attrs['list']))
+        attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
+        stop = time.time()
+        logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
+
+        return attrs
 
 
 class ProgramManager(models.Manager):
+    def get_queryset(self):
+        return ProgramQuerySet(self.model, using=self._db)
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -29,90 +157,134 @@ class Program(models.Model):
     name = models.CharField(max_length=255, null=True)
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now_add=True)
     objects = ProgramManager()
-    owner = models.ForeignKey(User, on_delete=models.CASCADE)
     is_public = models.BooleanField(default=False)
-    shared = models.ManyToManyField(Shared_Resource)
 
-    '''
-    Sets the last viewed time for a cohort
-    '''
-    def mark_viewed(self, request, user=None):
-        if user is None:
-            user = request.user
-
-        last_view = self.program_last_view_set.filter(user=user)
-        if last_view is None or len(last_view) is 0:
-            last_view = self.program_last_view_set.create(user=user)
-        else:
-            last_view = last_view[0]
-
-        last_view.save(False, True)
-
-        return last_view
-
-    def get_data_sources(self, data_type=None, source_type=None, active=True):
+    def get_data_sources(self, data_type=None, source_type=None, active=True, versions=None):
         q_objects = Q()
+        q_obj_ds = Q()
         if active is not None:
             q_objects &= Q(version__active=active)
+        if versions is not None:
+            q_objects &= Q(version__in=versions)
         if data_type:
             if type(data_type) is list:
-                q_objects &= Q(version__data_type__in=data_type)
+                q_obj_ds &= Q(data_type__in=data_type)
+                q_objects &= Q(datasettypes__data_type__in=data_type)
             else:
-                q_objects &= Q(version__data_type=data_type)
+                q_obj_ds &= Q(data_type=data_type)
+                q_objects &= Q(datasettypes__data_type=data_type)
         if source_type:
             q_objects &= Q(source_type=source_type)
 
-        return self.datasource_set.prefetch_related('version').filter(q_objects)
+        return self.datasource_set.select_related('version').prefetch_related(Prefetch(
+            'datasettypes',
+            queryset=DataSetType.objects.filter(q_obj_ds)
+        )).filter(q_objects)
 
-    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True):
+    def get_source_attrs(self, for_ui=None, data_type=None, source_type=None, active=True, versions=None, for_faceting=True,
+                  by_source=True, named_set=None, with_set_map=False, active_only=False):
+        start = time.time()
+        # Simple string list of attribute names (warning: will not properly resolve for collision)
+        attrs = { 'list': None, 'ids': None }
+        # Full source-ID dictionary of attributes
+        if by_source:
+            attrs['sources'] = {}
+        if with_set_map:
+            attrs['set_map'] = {}
+
+        q_objects = Q()
+        if for_ui is not None:
+            q_objects &= Q(default_ui_display=for_ui)
+        if named_set:
+            q_objects &= Q(name__in=named_set)
+        if active_only:
+            q_objects &= Q(active=True)
+        if for_faceting:
+            q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute__id', flat=True)))
+
+        sources = self.get_data_sources(data_type=data_type, source_type=source_type, active=active, versions=versions)
+        prog_attr = self.attribute_set.filter(q_objects)
+
+        for ds in sources:
+
+            attr_set = ds.attribute_set.filter(q_objects) & prog_attr
+
+            if by_source:
+                attrs['sources'][ds.id] = {
+                    'list': list(set(attr_set.values_list('name', flat=True))),
+                    'attrs': attr_set.distinct(),
+                    'id': ds.id,
+                    'name': ds.name,
+                    'count_col': ds.count_col
+                }
+
+            if not attrs['list']:
+                attrs['list'] = list(attr_set.values_list('name', flat=True))
+            else:
+                attrs['list'].extend(list(attr_set.values_list('name', flat=True)))
+            if not attrs['ids']:
+                attrs['ids'] = list(attr_set.values_list('id', flat=True))
+            else:
+                attrs['ids'].extend(list(attr_set.values_list('id', flat=True)))
+
+        attrs['list'] = attrs['list'] and list(set(attrs['list']))
+        attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
+        stop = time.time()
+        logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
+
+        return attrs
+
+    def get_attrs(self, source_type, for_ui=True, data_type_list=None, for_faceting=True, versions=None, with_node=False):
         prog_attrs = {'attrs': {}, 'by_src': {}}
-        datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list)
-        attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
-        for attr in attrs['attrs']:
-            prog_attrs['attrs'][attr.name] = {
-                'id': attr.id,
-                'name': attr.name,
-                'displ_name': attr.display_name,
-                'values': {},
-                'type': attr.data_type,
-                'preformatted': bool(attr.preformatted_values)
-            }
+        datasources = self.get_data_sources(source_type=source_type, data_type=data_type_list, versions=versions)
+        ds_attrs = datasources.get_source_attrs(for_ui=for_ui, for_faceting=for_faceting)
+        q_objects = Q()
+        if for_ui is not None:
+            q_objects &= Q(default_ui_display=for_ui)
+        if for_faceting:
+            q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(
+                id__in=Attribute_Ranges.objects.filter(
+                    attribute__in=self.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                ).values_list('attribute__id', flat=True)))
+        attrs = self.attribute_set.filter(q_objects)
+        for attr in attrs:
+            if attr.name in ds_attrs['list']:
+                prog_attrs['attrs'][attr.name] = {
+                    'id': attr.id,
+                    'name': attr.name,
+                    'displ_name': attr.display_name,
+                    'values': {},
+                    'type': attr.data_type,
+                    'preformatted': bool(attr.preformatted_values),
+                    'units': attr.units or None
+                }
 
-        for src in attrs['sources']:
+        if with_node:
+            nodes = self.datanode_set.all()
+            node_attrs = nodes.get_attrs(for_ui=for_ui, for_faceting=for_faceting, per_node=True)
+            prog_attrs['by_node'] = {}
+            for node in nodes:
+                node_attrs_list = node_attrs[node.short_name].values_list('name', flat=True)
+                prog_attrs['by_node'][node.short_name] = {x: prog_attrs['attrs'][x] for x in prog_attrs['attrs'] if x in node_attrs_list }
+
+        for src in ds_attrs['sources']:
             prog_attrs['by_src'][src] = {
-                'attrs': attrs['sources'][src]['attrs'],
-                'name': attrs['sources'][src]['name']
+                'attrs': ds_attrs['sources'][src]['attrs'] & attrs.distinct(),
+                'name': ds_attrs['sources'][src]['name']
              }
 
         return prog_attrs
 
-    def get_metadata_tables(self):
-        return self.public_metadata_tables_set.first()
-
-    def get_data_tables(self):
-        return self.public_data_tables_set.all()
-    
-    def get_all_projects(self):
-        return self.project_set.filter(active=1)
+    def get_projects(self, active=None):
+        if active is not None:
+            return self.project_set.filter(active=active)
+        return self.project_set.filter()
 
     @classmethod
-    def get_user_programs(cls, user, includeShared=True, includePublic=False):
-        programs = user.program_set.filter(active=True)
-        if includeShared:
-            sharedPrograms = cls.objects.filter(shared__matched_user=user, shared__active=True, active=True)
-            programs = programs | sharedPrograms
-        if includePublic:
-            publicPrograms = cls.objects.filter(is_public=True, active=True)
-            programs = programs | publicPrograms
-
-        programs = programs.distinct()
-
-        return programs
-
-    @classmethod
-    def get_programs(cls, name=None, desc=None, public=True):
+    def get_programs(cls, name=None, desc=None, public=True, active=None):
         params = {}
         if public is not None:
             params['is_public'] = public
@@ -120,38 +292,58 @@ class Program(models.Model):
             params['name__icontains'] = name
         if desc is not None:
             params['desc__icontains'] = desc
+        if active is not None:
+            params['active'] = active
 
         results = cls.objects.filter(**params)
 
         return results
 
     @classmethod
-    def get_public_programs(cls, name=None, desc=None):
-        return cls.get_programs(name, desc, 1)
+    def get_public_programs(cls, name=None, desc=None, active=None):
+        return cls.get_programs(name, desc, 1, active)
 
     @classmethod
-    def get_private_programs(cls, name=None, desc=None):
-        return cls.get_programs(name, desc, 0)
+    def get_private_programs(cls, name=None, desc=None, active=None):
+        return cls.get_programs(name, desc, 0, active)
 
     def __str__(self):
         return self.name
 
 
-class Program_Last_View(models.Model):
-    program = models.ForeignKey(Program, blank=False, on_delete=models.CASCADE)
-    user = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
-    last_view = models.DateTimeField(auto_now=True)
+class DataSetTypeQuerySet(models.QuerySet):
+    def get_data_sources(self, is_active=None):
+        sources = None
+        q_obj = Q()
+        if is_active is not None:
+            q_obj = Q(version__active=is_active)
+        dsts = self.all()
+        for dst in dsts:
+            if not sources:
+                sources = dst.datasource_set.select_related('version').filter(q_obj)
+            else:
+                sources = sources | dst.datasource_set.select_related('version').filter(q_obj)
+        return sources
 
 
-# A data version represents a given release of data, eg. GDC Rel20 or TCIA 2019
-class DataVersion(models.Model):
+class DataSetTypeManager(models.Manager):
+    def get_queryset(self):
+        return DataSetTypeQuerySet(self.model, using=self._db)
+
+
+class DataSetType(models.Model):
     FILE_DATA = 'F'
     IMAGE_DATA = 'I'
     CLINICAL_DATA = 'C'
     BIOSPECIMEN_DATA = 'B'
     MUTATION_DATA = 'M'
     PROTEIN_DATA = 'P'
-    TYPE_AVAILABILITY_DATA = 'D'
+    FILE_TYPE_DATA = 'T'
+    CASE_SET = 'D'
+    FILE_AVAIL_SET = 'W'
+    MUTATION_SET = 'N'
+    FILE_LIST_SET = 'G'
+    IMAGE_LIST_SET = 'J'
     DATA_TYPES = (
         (FILE_DATA, 'File Data'),
         (IMAGE_DATA, 'Image Data'),
@@ -159,7 +351,14 @@ class DataVersion(models.Model):
         (BIOSPECIMEN_DATA, 'Biospecimen Data'),
         (MUTATION_DATA, 'Mutation Data'),
         (PROTEIN_DATA, 'Protein Data'),
-        (TYPE_AVAILABILITY_DATA, 'File Data Availability')
+        (FILE_TYPE_DATA, 'File Type Data')
+    )
+    SET_TYPES = (
+        (CASE_SET, 'Case Set'),
+        (FILE_AVAIL_SET, 'Available Files Set'),
+        (MUTATION_SET, 'Mutation Data Set'),
+        (FILE_LIST_SET, 'File List Set'),
+        (IMAGE_LIST_SET, 'Images Set')
     )
     DATA_TYPE_DICT = {
         FILE_DATA: 'File Data',
@@ -168,40 +367,227 @@ class DataVersion(models.Model):
         BIOSPECIMEN_DATA: 'Biospecimen Data',
         MUTATION_DATA: 'Mutation Data',
         PROTEIN_DATA: 'Protein Data',
-        TYPE_AVAILABILITY_DATA: 'File Data Availability'
+        FILE_TYPE_DATA: 'File Type Data'
     }
-    SET_TYPES = {
-        CLINICAL_DATA: 'case_data',
-        BIOSPECIMEN_DATA: 'case_data',
-        TYPE_AVAILABILITY_DATA: 'data_type_data',
-        MUTATION_DATA: 'molecular_data',
-        PROTEIN_DATA: 'protein_data'
+    # These terms should be simple terms with no spaces for dict key usage
+    SET_TYPE_DICT = {
+        CASE_SET: 'Case',
+        FILE_AVAIL_SET: 'FileTypes',
+        MUTATION_SET: 'Molec',
+        FILE_LIST_SET: 'Files',
+        IMAGE_LIST_SET: 'Images'
     }
-    version = models.CharField(max_length=16, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False)
+    display_name = models.CharField(max_length=256, null=True, blank=True)
     data_type = models.CharField(max_length=1, blank=False, null=False, choices=DATA_TYPES, default=CLINICAL_DATA)
+    set_type = models.CharField(max_length=1, blank=False, null=False, choices=SET_TYPES, default=CASE_SET)
+    objects = DataSetTypeManager()
+
+    def __str__(self):
+        return "{}: {}, {}".format(
+            "{} ({})".format(self.display_name, self.name) if self.display_name is not None else self.name,
+            self.SET_TYPE_DICT[self.set_type],
+            self.DATA_TYPE_DICT[self.data_type]
+        )
+
+
+class CgcDataVersionQuerySet(models.QuerySet):
+
+    # Return all the data sources corresponding to this queryset
+    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None):
+        sources = None
+        cgcdvs = self.all()
+        source_qs = Q()
+        version_qs = Q()
+        for cgcdv in cgcdvs:
+            if active is not None:
+                version_qs &= Q(active=active)
+            if current is not None:
+                version_qs &= Q(current=current)
+            versions = cgcdv.dataversion_set.filter(version_qs).distinct()
+            if not sources:
+                sources = versions.get_data_sources()
+            else:
+                sources = sources | versions.get_data_sources()
+        if source_type:
+            source_qs &= Q(source_type=source_type)
+        if aggregate_level:
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            source_qs &= Q(aggregate_level__in=aggregate_level)
+        return sources.distinct().filter(source_qs)
+
+    # Return all display strings in this queryset, either as a list (joined=False) or as a string (joined=True)
+    def get_displays(self, joined=False, delimiter="; "):
+        displays = []
+        cgcdvs = self.all()
+        for cgcdv in cgcdvs:
+            displays.append(cgcdv.get_display())
+        return displays if not joined else delimiter.join(displays)
+
+    # Return all the DataVersions which have this CgcDataVersion
+    def get_data_versions(self, active=None, current=None):
+        cgcdvs = self.all()
+        version_qs = Q()
+        versions = None
+        for cgcdv in cgcdvs:
+            if active is not None:
+                version_qs &= Q(active=active)
+            if current is not None:
+                version_qs &= Q(current=current)
+            versions = cgcdv.dataversion_set.filter(version_qs).distinct()
+        return versions
+
+
+class CgcDataVersionManager(models.Manager):
+    def get_queryset(self):
+        return CgcDataVersionQuerySet(self.model, using=self._db)
+
+
+class CgcDataVersion(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    name = models.CharField(max_length=128, null=False, blank=False)
+    version_number = models.CharField(max_length=128, null=False, blank=False)
+    version_uid = models.CharField(max_length=128, null=True)
+    date_active = models.DateField(auto_now_add=True, null=False, blank=False)
+    active = models.BooleanField(default=True, null=False, blank=False)
+    objects = CgcDataVersionManager()
+
+    def get_data_sources(self, active=None, source_type=None, aggregate_level=None):
+        versions = self.dataversion_set.filter(active=active).distinct() if active is not None else self.dataversion_set.all().distinct()
+
+        return versions.get_data_sources(source_type=source_type, aggregate_level=aggregate_level).distinct()
+
+
+    def get_display(self):
+        return self.__str__()
+
+    def __repr__(self):
+        return self.__str__()
+
+    def __str__(self):
+        return "{} Version {} {}".format(self.name, self.version_number, self.date_active)
+
+
+class DataVersionQuerySet(models.QuerySet):
+    def get_data_sources(self, source_type=None, aggregate_level=None):
+        sources = None
+        q_objs = Q()
+        if aggregate_level:
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            q_objs &= Q(aggregate_level__in=aggregate_level)
+        if source_type:
+            q_objs &= Q(source_type=source_type)
+        dvs = self.all()
+        for dv in dvs:
+            if not sources:
+                sources = dv.datasource_set.filter(q_objs)
+            else:
+                sources = sources | dv.datasource_set.filter(q_objs)
+        return sources
+
+    def get_active_cgc_versions(self):
+        cgc_versions = None
+        dvs = self.all()
+        for dv in dvs:
+            if not cgc_versions:
+                cgc_versions = dv.cgc_versions.filter(active=True)
+            else:
+                cgc_versions = cgc_versions | dv.cgc_versions.filter(active=True)
+
+        return cgc_versions
+
+
+class DataVersionManager(models.Manager):
+    def get_queryset(self):
+        return DataVersionQuerySet(self.model, using=self._db)
+
+
+# A data version represents a given release of data, eg. GDC Rel20 or IDC v15
+class DataVersion(models.Model):
+    version = models.CharField(max_length=64, null=False, blank=False)
     name = models.CharField(max_length=128, null=False, blank=False)
     active = models.BooleanField(default=True)
     build = models.CharField(max_length=16, null=True, blank=False)
     programs = models.ManyToManyField(Program)
+    cgc_versions = models.ManyToManyField(CgcDataVersion)
+    objects = DataVersionManager()
 
     def __str__(self):
-        return "{}: {} {} ({})".format(
+        return "{}: {} ({})".format(
             self.name,
-            DataVersion.DATA_TYPE_DICT[self.data_type],
             self.version,
             "Active" if self.active else "Inactive"
         )
 
 
 class DataSourceQuerySet(models.QuerySet):
+    # simple dict version of the QuerySet
     def to_dicts(self):
+        sources = self.all()
         return [{
             "id": ds.id,
             "name": ds.name,
-            "version": "{}: {}".format(ds.name, ds.version),
+            "versions": ["{}: {}".format(dv.name, dv.version) for dv in self.versions.all()],
             "type": ds.source_type,
 
-        } for ds in self.select_related('version').all()]
+        } for ds in sources]
+
+    # Returns all versions to which these data sources belong
+    # @active: optional, boolean
+    def get_source_versions(self, active=None):
+        versions = {}
+        sources = self.all()
+        for ds in sources:
+            versions[ds.id] = ds.versions.filter(active=active) if active is not None else ds.versions.all()
+        return versions
+
+    def get_source_nodes(self):
+        sources = self.all().prefetch_related('datanode_set')
+        nodes = None
+        for ds in sources:
+            nodes = nodes | ds.datanode_set.all() if nodes else ds.datanode_set.all()
+        return nodes.distinct()
+
+    def get_source_programs(self):
+        sources = self.all().prefetch_related('programs')
+        progs = None
+        for ds in sources:
+            progs = progs | ds.programs.all() if progs else ds.programs.all()
+        return progs.distinct()
+
+    # Returns a dict of the datasources with their data set types as an array against their ID (pk)
+    def get_source_data_types(self):
+        data_types = {}
+        sources = self.all()
+        for ds in sources:
+            data_set_types = ds.datasettypes.all()
+            for data_set_type in data_set_types:
+                if ds.id not in data_types:
+                    data_types[ds.id] = []
+                data_types[ds.id].append(data_set_type.data_type)
+        return data_types
+
+    # Returns a dict of the datasources with their data set types as an array against their ID (pk)
+    def get_source_set_types(self, qualified_name=False):
+        set_types = {}
+        sources = self.all()
+        for ds in sources:
+            data_set_types = ds.datasettypes.all()
+            for data_set_type in data_set_types:
+                if ds.id not in set_types:
+                    set_types[ds.id] = []
+                set_types[ds.id].append(data_set_type.set_type)
+        return set_types
+
+    # Determines if a set of data sources contains any belonging to an inactive version
+    def contains_inactive_versions(self):
+        contains_inactive = False
+        sources = self.all()
+        for ds in sources:
+            if len(ds.versions.filter(active=False)) > 0:
+                contains_inactive = True
+                break
+        return contains_inactive
 
     #
     # returns a dictionary of comprehensive information mapping attributes to this set of data sources:
@@ -209,7 +595,6 @@ class DataSourceQuerySet(models.QuerySet):
     # {
     #   'list': [<String>, ...],
     #   'ids': [<Integer>, ...],
-    #   'attrs': [<Attribute>, ...],
     #   'sources': {
     #      <data source database ID>: {
     #         'list': [<String>, ...],
@@ -219,46 +604,58 @@ class DataSourceQuerySet(models.QuerySet):
     #         'data_sets': [<DataSetType>, ...],
     #         'count_col': <Integer>
     #      }
-    #  }
+    #   }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, all=False):
-        attrs = { 'list': None, 'attrs': None, 'ids': None }
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, active_only=False):
+        start = time.time()
+        # Simple string list of attribute names (warning: will not properly resolve for collision)
+        attrs = { 'list': None, 'ids': None, 'attrs': None }
+        # Full source-ID dictionary of attributes
         if by_source:
             attrs['sources'] = {}
 
-        for ds in self.select_related('version').all():
-            if all:
-                q_objects = Q()
-            else:
-                q_objects = Q(active=True)
-                if for_ui:
-                    q_objects &= Q(default_ui_display=for_ui)
-                if named_set:
-                    q_objects &= Q(name__in=named_set)
-                if for_faceting:
-                    q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(id__in=Attribute_Ranges.objects.filter(
-                            attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC,active=True)
-                        ).values_list('attribute__id', flat=True)))
+        sources = self.all()
+
+        for ds in sources:
+            q_objects = Q()
+            if for_ui is not None:
+                q_objects &= Q(default_ui_display=for_ui)
+            if named_set:
+                q_objects &= Q(name__in=named_set)
+            if active_only:
+                q_objects &= Q(active=True)
+            if for_faceting:
+                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(id__in=Attribute_Ranges.objects.filter(
+                        attribute__in=ds.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                    ).values_list('attribute__id', flat=True)))
 
             attr_set = ds.attribute_set.filter(q_objects)
 
             if by_source:
                 attrs['sources'][ds.id] = {
-                    'list': attr_set.values_list('name', flat=True).distinct(),
+                    'list': list(set(attr_set.values_list('name', flat=True))),
                     'attrs': attr_set.distinct(),
-                    'shared_id_col': ds.shared_id_col,
+                    'id': ds.id,
                     'name': ds.name,
-                    'data_type': ds.version.data_type
+                    'count_col': ds.count_col
                 }
 
-            attrs['list'] = attr_set.values_list('name', flat=True) if not attrs['list'] else (attrs['list'] | attr_set.values_list('name', flat=True))
-            attrs['attrs'] = attr_set if not attrs['attrs'] else (attrs['attrs'] | attr_set)
-            attrs['ids'] = attr_set.values_list('id', flat=True) if not attrs['ids'] else (
-                        attrs['ids'] | attr_set.values_list('id', flat=True))
+            attrs['attrs'] = attr_set if not attrs['attrs'] else attrs['attrs'] | attr_set
 
-        attrs['list'] = attrs['list'].distinct() if attrs['list'] else None
-        attrs['attrs'] = attrs['attrs'].distinct() if attrs['attrs'] else None
-        attrs['ids'] = attrs['ids'].distinct() if attrs['ids'] else None
+            if not attrs['list']:
+                attrs['list'] = list(attr_set.values_list('name', flat=True))
+            else:
+                attrs['list'].extend(list(attr_set.values_list('name', flat=True)))
+            if not attrs['ids']:
+                attrs['ids'] = list(attr_set.values_list('id', flat=True))
+            else:
+                attrs['ids'].extend(list(attr_set.values_list('id', flat=True)))
+
+        attrs['list'] = attrs['list'] and list(set(attrs['list']))
+        attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
+        attrs['attrs'].distinct()
+        stop = time.time()
+        logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
 
         return attrs
 
@@ -297,12 +694,14 @@ class DataSource(models.Model):
     name = models.CharField(max_length=128, null=False, blank=False, unique=True)
     version = models.ForeignKey(DataVersion, on_delete=models.CASCADE)
     programs = models.ManyToManyField(Program)
-    shared_id_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     source_type = models.CharField(max_length=1, null=False, blank=False, default=SOLR, choices=SOURCE_TYPES)
+    datasettypes = models.ManyToManyField(DataSetType)
+    count_col = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
+    aggregate_level = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     objects = DataSourceManager()
 
-    def get_set_type(self):
-        return DataVersion.SET_TYPES[self.version.data_type]
+    def get_set_types(self):
+        return [DataSetType.SET_TYPE_DICT[x] for x in self.datasettypes.all().values_list('set_type',flat=True)]
 
     def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None, active=True, all=False):
         if all:
@@ -325,6 +724,15 @@ class DataSource(models.Model):
 
         return attr_set
 
+    def __str__(self):
+        return "{} ({}, {}) - {}".format(
+            self.name,
+            self.version.name,
+            self.SOURCE_TYPE_MAP[self.source_type],
+            datasettypes.all()
+        )
+
+
     @staticmethod
     def get_facet_type(attr):
         if attr.data_type == Attribute.CONTINUOUS_NUMERIC and len(Attribute_Ranges.objects.filter(attribute=attr)) > 0:
@@ -340,6 +748,21 @@ class DataSource(models.Model):
 
     class Meta(object):
         unique_together = (("name", "version", "source_type"),)
+
+
+# Simple mapping of two data sources and the columns which can be used to join data between them
+class DataSourceJoin(models.Model):
+    from_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="from_data_source")
+    from_src_col = models.CharField(max_length=64, null=False, blank=False)
+    to_src = models.ForeignKey(DataSource, on_delete=models.CASCADE, related_name="to_data_source")
+    to_src_col = models.CharField(max_length=64, null=False, blank=False)
+
+    def get_col(self, source_name):
+        if source_name == self.from_src.name:
+            return self.from_src_col
+        elif source_name == self.to_src.name:
+            return self.to_src_col
+        return None
 
 
 class DataNodeQuerySet(models.QuerySet):
@@ -364,23 +787,24 @@ class DataNodeQuerySet(models.QuerySet):
                 sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
         return sources
 
-    def get_attrs(self, per_node=False):
-        attrs = None
-        sources = None
+    def get_attrs(self, for_ui=True, for_faceting=True, per_node=True):
+        node_attrs = None
         for dn in self.all():
+            q_objects = Q()
+            if for_ui is not None:
+                q_objects &= Q(default_ui_display=for_ui)
+            if for_faceting:
+                q_objects &= (Q(data_type=Attribute.CATEGORICAL) | Q(data_type=Attribute.CATEGORICAL_NUMERIC) | Q(
+                    id__in=Attribute_Ranges.objects.filter(
+                        attribute__in=dn.attribute_set.all().filter(data_type=Attribute.CONTINUOUS_NUMERIC)
+                    ).values_list('attribute__id', flat=True)))
+            attrs = dn.attribute_set.filter(q_objects)
             if per_node:
-                attrs = {} if not attrs else attrs
-                src_attrs = dn.data_sources.all().get_source_attrs(for_faceting=False,for_ui=False)
-                attrs[dn.id] = {
-                    'name': dn.short_name,
-                    'full_name': dn.name,
-                    'attrs': [{'name': x.name, 'display_name': x.display_name, 'type': Attribute.DATA_TYPE_MAP[x.data_type] } for x in src_attrs['attrs']]
-                }
-                return attrs
+                node_attrs = node_attrs or {}
+                node_attrs[dn.short_name] = attrs.distinct()
             else:
-                sources = dn.data_sources.all() if not sources else sources | dn.data_sources.all()
-                attrs = sources.get_source_attrs(for_faceting=False,for_ui=False)
-        return attrs
+                node_attrs = attrs if not node_attrs else attrs | node_attrs
+        return node_attrs
 
 
 class DataNodeManager(models.Manager):
@@ -395,300 +819,96 @@ class DataNode(models.Model):
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
     data_sources = models.ManyToManyField(DataSource)
+    programs = models.ManyToManyField(Program)
     objects = DataNodeManager()
 
     def __str__(self):
         return "{} - {}".format(self.short_name, self.name)
 
+
     @classmethod
-    def get_node_programs(cls, is_authenticated=False):
+    def get_node_programs(cls, data_types=None, is_active=None):
         by_node_list = []
         by_prog_list = []
-        by_prog_dict = {}
-        nodes = cls.objects.filter(active=True)
+        nodes = None
+        programs = None
 
-        for node in nodes:
-            programs = nodes.filter(id=node.id).prefetch_related(
-                'data_sources', 'data_sources__programs', 'data_sources__version'
-             ).filter(data_sources__source_type=DataSource.SOLR, data_sources__programs__active=True,
-                      data_sources__version__data_type__in=[DataVersion.CLINICAL_DATA]).values(
-                'data_sources__programs__id', 'data_sources__programs__name','data_sources__programs__description'
-            ).distinct()
+        if data_types or is_active is not None:
+            q_obj = Q()
+            if data_types:
+                q_obj &= Q(data_type__in=data_types)
+            data_sources = DataSetType.objects.filter(q_obj).get_data_sources(is_active)
+            nodes = data_sources.get_source_nodes().prefetch_related('programs')
+            programs = data_sources.get_source_programs().prefetch_related('datanode_set')
+        else:
+            nodes = cls.objects.filter(active=True).prefetch_related('programs')
+            programs = Program.objects.all().prefetch_related('datanode_set')
 
-            if len(programs):
-                program_list = []
-                for prog in programs:
-                    prog_id = prog["data_sources__programs__id"]
-                    prog_name = prog["data_sources__programs__name"]
-                    prog_desc = prog["data_sources__programs__description"]
+        for node in nodes.order_by('short_name'):
+            by_node_list.append({
+                "id": node.id,
+                "name": node.name,
+                "description": node.description,
+                "short_name": node.short_name,
+                "programs": [{
+                    "id": prog.id,
+                    "name": prog.name,
+                    "description": prog.description
+                } for prog in node.programs.all().order_by('name')]
+            })
 
-                    prog_item = {
-                        "id": prog_id,
-                        "name": prog_name,
-                        "description": prog_desc}
-
-                    if not by_prog_dict.get(prog_id):
-                        by_prog_dict[prog_id] = prog_item.copy()
-                        by_prog_dict[prog_id]["nodes"] = []
-
-                    by_prog_dict[prog_id]["nodes"].append({
-                        "id": node.id,
-                        "name": node.name,
-                        "description": node.description,
-                        "short_name": node.short_name
-                    })
-
-                    program_list.append(prog_item)
-
-                by_node_list.append({
+        for program in programs.order_by('name'):
+            by_prog_list.append({
+                "id": program.id,
+                "name": program.name,
+                "description": program.description,
+                "nodes": [{
                     "id": node.id,
                     "name": node.name,
                     "description": node.description,
-                    "short_name": node.short_name,
-                    "programs": program_list
-                })
-
-        for prog_id, prog_info in by_prog_dict.items():
-            by_prog_list.append({
-                "id": prog_id,
-                "name": prog_info["name"],
-                "description": prog_info["description"],
-                "nodes": prog_info["nodes"]
+                    "short_name": node.short_name
+                } for node in program.datanode_set.all() if node in nodes],
+                "node_list": ", ".join([node.short_name for node in program.datanode_set.all() if node in nodes])
             })
 
-        if is_authenticated:
-            by_node_list.append({
-                "id": 0,
-                "name": "User",
-                "description": "User",
-                "short_name": "User",
-                "programs": [{
-                    "id": 0,
-                    "name": "User Data",
-                    "description": "User Data"
-                    }]
-            })
-            by_prog_list.append({
-                "id": 0,
-                "name": "User Data",
-                "description": "User Data",
-                "nodes": [{
-                    "id": 0,
-                    "name": "User Data",
-                    "description": "User Data",
-                    "short_name": "User"
-                    }]
-            })
-
-        return (by_node_list, by_prog_list)
+        return by_node_list, by_prog_list
 
 
 class Project(models.Model):
-    id = models.AutoField(primary_key=True, null=False, blank=False)
-    name = models.CharField(max_length=255)
+    id = models.AutoField(primary_key=True, null=False, blank=False) # Auto-generated numeric
+    short_name = models.CharField(max_length=15, null=False, blank=False) # Eg. TCGA-BRCA
+    name = models.CharField(max_length=255) # Eg. Framingham Heart Study
     description = models.TextField(null=True, blank=True)
     active = models.BooleanField(default=True)
-    last_date_saved = models.DateTimeField(auto_now_add=True)
-    owner = models.ForeignKey(User, on_delete=models.CASCADE)
     program = models.ForeignKey(Program, on_delete=models.CASCADE)
-    extends = models.ForeignKey("self", null=True, blank=True, on_delete=models.CASCADE)
-
-    @classmethod
-    def get_public_projects(cls, by_name=False):
-        proj_list = {} if by_name else []
-        for proj in cls.objects.select_related('program').filter(active=True, program__is_public=True, owner=User.objects.get(username="isb", is_staff=True, is_active=True, is_superuser=True)):
-            if by_name:
-                proj_list["{}-{}".format(proj.program.name,proj.name)] = {'name': "{}-{}".format(proj.program.name,proj.name), 'id': proj.id, 'program_name': proj.program.name}
-            else:
-                proj_list.append({'name': "{}-{}".format(proj.program.name,proj.name), 'id': proj.id, 'program_name': proj.program.name})
-        return proj_list
-
-    @classmethod
-    def get_user_projects(cls, user, includeShared=True):
-        programs = user.program_set.filter(active=True)
-        if includeShared:
-            sharedPrograms = Program.objects.filter(shared__matched_user=user, shared__active=True, active=True)
-            programs = programs | sharedPrograms
-            programs = programs.distinct()
-
-        return cls.objects.filter(active=True, program__in=programs)
-
-    '''
-    Sets the last viewed time for a cohort
-    '''
-    def mark_viewed(self, request, user=None):
-        if user is None:
-            user = request.user
-
-        last_view = self.project_last_view_set.filter(user=user)
-        if last_view is None or len(last_view) is 0:
-            last_view = self.project_last_view_set.create(user=user)
-        else:
-            last_view = last_view[0]
-
-        last_view.save(False, True)
-
-        return last_view
-
-    '''
-    Get the root/parent project of this project's extension hierarchy, and its depth
-    '''
-    def get_my_root_and_depth(self):
-        root = self.id
-        depth = 1
-        ancestor = self.extends.id if self.extends is not None else None
-
-
-        while ancestor is not None:
-            ancProject = Project.objects.get(id=ancestor)
-            ancestor = ancProject.extends.id if ancProject.extends is not None else None
-            depth += 1
-            root = ancProject.id
-
-        return {'root': root, 'depth': depth}
-
-    def get_status_with_message(self):
-        status = 'Complete'
-        message = None
-        for datatable in self.user_data_tables_set.all():
-            if datatable.data_upload is not None and datatable.data_upload.status is not 'Complete':
-                status = datatable.data_upload.status
-                message = datatable.data_upload.message
-        return {'status': status, 'errmsg': message}
-
-    def get_file_count(self):
-        count = 0
-        for datatable in self.user_data_tables_set.all():
-            if datatable.data_upload is not None:
-                count += datatable.data_upload.useruploadedfile_set.count()
-        return count
-
-    def get_bq_tables(self):
-        result = []
-        for datatable in self.user_data_tables_set.all():
-            project_id = datatable.google_project.project_id
-            dataset_name = datatable.google_bq_dataset.dataset_name
-            bq_tables = datatable.project_bq_tables_set.all()
-            for bq_table in bq_tables:
-                result.append('{0}:{1}.{2}'.format(project_id, dataset_name, bq_table.bq_table_name))
-        return result
+    is_public = models.BooleanField(default=False)
 
     def __str__(self):
-        return self.name
+        return "{} ({}), {}".format(self.short_name, self.name,
+                                    "Public" if self.is_public else "Private (owner: {})".format(self.owner.email))
 
     class Meta(object):
         verbose_name_plural = "projects"
 
 
-class Project_Last_View(models.Model):
-    project = models.ForeignKey(Project, blank=False, on_delete=models.CASCADE)
-    user = models.ForeignKey(User, null=False, blank=False, on_delete=models.CASCADE)
-    last_view = models.DateTimeField(auto_now=True)
-
-
-class User_Feature_Definitions(models.Model):
-    project = models.ForeignKey(Project, null=False, on_delete=models.CASCADE)
-    feature_name = models.CharField(max_length=200)
-    bq_map_id = models.CharField(max_length=200)
-    is_numeric = models.BooleanField(default=False)
-    shared_map_id = models.CharField(max_length=128, null=True, blank=True)
-
-
-class User_Feature_Counts(models.Model):
-    feature = models.ForeignKey(User_Feature_Definitions, null=False, on_delete=models.CASCADE)
-    value = models.TextField()
-    count = models.IntegerField()
-
-
-class User_Data_Tables(models.Model):
-    metadata_data_table = models.CharField(max_length=200)
-    metadata_samples_table = models.CharField(max_length=200)
-    feature_definition_table = models.CharField(max_length=200, default=User_Feature_Definitions._meta.db_table)
-    user = models.ForeignKey(User, null=False, on_delete=models.CASCADE)
-    project = models.ForeignKey(Project, null=False, on_delete=models.CASCADE)
-    data_upload = models.ForeignKey(UserUpload, null=True, blank=True, on_delete=models.CASCADE)
-    google_project = models.ForeignKey(GoogleProject, on_delete=models.CASCADE)
-    google_bucket = models.ForeignKey(Bucket, on_delete=models.CASCADE)
-    google_bq_dataset = models.ForeignKey(BqDataset, on_delete=models.CASCADE)
-
-    class Meta(object):
-        verbose_name = "user data table"
-        verbose_name_plural = "user data tables"
-
-class Project_BQ_Tables(models.Model):
-    user_data_table = models.ForeignKey(User_Data_Tables, on_delete=models.CASCADE)
-    bq_table_name = models.CharField(max_length=400)
-
-    def __str__(self):
-        return self.bq_table_name
-
-
-class Public_Data_Tables(models.Model):
-    program = models.ForeignKey(Program, null=False, on_delete=models.CASCADE)
-    build = models.CharField(max_length=25, null=True)
-    data_table = models.CharField(max_length=100)
-    bq_dataset = models.CharField(max_length=100, null=True)
-    annot2data_table = models.CharField(max_length=100, null=True)
-
-    class Meta(object):
-        verbose_name = "Public Data Table"
-        verbose_name_plural = "Public Data Tables"
-
-    def __str__(self):
-        return "{} [{}] Data Tables".format(self.program.name,self.build)
-
-
-class Public_Annotation_Tables(models.Model):
-    program = models.ForeignKey(Program, null=False, on_delete=models.CASCADE)
-    annot_table = models.CharField(max_length=100, null=True)
-    annot2sample_table = models.CharField(max_length=100, null=True)
-    annot2biospec_table = models.CharField(max_length=100, null=True)
-    annot2clin_table = models.CharField(max_length=100, null=True)
-
-    class Meta(object):
-        verbose_name = "Public Annotation Table"
-        verbose_name_plural = "Public Annotation Tables"
-
-    def __str__(self):
-        return self.program__name + " Annotation Tables"
-
-class Public_Metadata_Tables(models.Model):
-    program = models.ForeignKey(Program, null=False, on_delete=models.CASCADE)
-    data_tables = models.ForeignKey(Public_Data_Tables, on_delete=models.CASCADE)
-    samples_table = models.CharField(max_length=100)
-    attr_table = models.CharField(max_length=100)
-    clin_table = models.CharField(max_length=100)
-    biospec_table = models.CharField(max_length=100)
-    projects_table = models.CharField(max_length=100,  null=True)
-    annot_tables = models.ForeignKey(Public_Annotation_Tables, null=True, on_delete=models.CASCADE)
-    sample_data_availability_table = models.CharField(max_length=100)
-    sample_data_type_availability_table = models.CharField(max_length=100)
-    bq_dataset = models.CharField(max_length=100, null=True)
-    clin_bq_table = models.CharField(max_length=100, null=True)
-    biospec_bq_table = models.CharField(max_length=100, null=True)
-
-    class Meta(object):
-        verbose_name = "Public Metadata Table"
-        verbose_name_plural = "Public Metadata Tables"
-
-    def __str__(self):
-        return self.samples_table
-
-
 class AttributeQuerySet(models.QuerySet):
 
-    def get_data_sources(self, versions=None, source_type=None, active=True):
+    def get_data_sources(self, versions=None, source_type=None, active=None, current=True, aggregate_level=None):
         q_objects = Q()
         if versions:
-            q_objects &= Q(id__in=versions.get_data_sources())
+            q_objects &= Q(id__in=versions.get_data_sources(current=current, active=active))
         if source_type:
             q_objects &= Q(source_type=source_type)
+        if aggregate_level:
+            aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
+            q_objects &= Q(aggregate_level__in=aggregate_level)
 
         data_sources = None
-        for attr in self.all():
+        attrs = self.all()
+        for attr in attrs:
             data_sources = attr.data_sources.filter(q_objects) if not data_sources else (data_sources|attr.data_sources.filter(q_objects))
 
-        return data_sources.distinct()
+        return data_sources.distinct() if data_sources else None
 
     def get_attr_ranges(self, as_dict=False):
         if as_dict:
@@ -702,7 +922,8 @@ class AttributeQuerySet(models.QuerySet):
 
     def get_facet_types(self):
         facet_types = {}
-        attr_with_ranges = {x[0]: x[1] for x in Attribute_Ranges.objects.select_related('attribute').filter(attribute__in=self.all()).values_list('attribute__id','attribute__data_type')}
+        attr_with_ranges = {x[0]: x[1] for x in Attribute_Ranges.objects.select_related('attribute').filter(
+            attribute__in=self.all()).values_list('attribute__id','attribute__data_type')}
         for attr in self.all():
             facet_types[attr.id] = DataSource.QUERY if attr.data_type == Attribute.CONTINUOUS_NUMERIC and attr.id in attr_with_ranges else DataSource.TERMS
         return facet_types
@@ -710,29 +931,46 @@ class AttributeQuerySet(models.QuerySet):
     def get_display_values(self):
         return Attribute_Display_Values.objects.select_related('attribute').filter(attribute__in=self.all())
 
+    def get_attr_set_types(self):
+        return Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all())
+
+    def get_attr_sets(self):
+        sets = {}
+        for set_type in Attribute_Set_Type.objects.select_related('attribute', 'datasettype').filter(attribute__in=self.all()):
+            if set_type.attribute.name not in sets:
+                sets[set_type.attribute.name] = []
+            sets[set_type.attribute.name].append(set_type.datasettype.data_type)
+        return sets
 
 
 class AttributeManager(models.Manager):
     def get_queryset(self):
         return AttributeQuerySet(self.model, using=self._db)
 
+
 # A field which is available in data sources. Attributes may be linked to numerous data sources.
 class Attribute(models.Model):
     CONTINUOUS_NUMERIC = 'N'
+    CATEGORICAL_NUMERIC = 'M'
     CATEGORICAL = 'C'
     TEXT = 'T'
     STRING = 'S'
+    DATE = 'D'
     DATA_TYPES = (
         (CONTINUOUS_NUMERIC, 'Continuous Numeric'),
         (CATEGORICAL, 'Categorical String'),
+        (CATEGORICAL_NUMERIC, 'Categorical Number'),
         (TEXT, 'Text'),
-        (STRING, 'String')
+        (STRING, 'String'),
+        (DATE, 'Date')
     )
     DATA_TYPE_MAP = {
         CONTINUOUS_NUMERIC: 'Continuous Numeric',
         CATEGORICAL: 'Categorical String',
+        CATEGORICAL_NUMERIC: 'Categorical Number',
         TEXT: 'Text',
-        STRING: 'String'
+        STRING: 'String',
+        DATE: 'Date'
     }
     id = models.AutoField(primary_key=True, null=False, blank=False)
     name = models.CharField(max_length=64, null=False, blank=False)
@@ -744,6 +982,9 @@ class Attribute(models.Model):
     preformatted_values = models.BooleanField(default=False)
     default_ui_display = models.BooleanField(default=True)
     data_sources = models.ManyToManyField(DataSource)
+    nodes = models.ManyToManyField(DataNode)
+    programs = models.ManyToManyField(Program)
+    units = models.CharField(max_length=256, blank=True, null=True)
     objects = AttributeManager()
 
     @classmethod
@@ -771,12 +1012,29 @@ class Attribute(models.Model):
 
         return self.data_sources.prefetch_related('version').filter(q_obj).values_list('name', flat=True)
 
+    def get_programs(self):
+        return self.programs.values_list('name', flat=True)
+
+    def get_nodes(self):
+        return self.nodes.values_list('short_name', flat=True)
+
     def get_ranges(self):
         return self.attribute_ranges_set.all()
 
     def __str__(self):
         return "{} ({}), Type: {}".format(
             self.name, self.display_name, self.data_type)
+
+
+# This model allows for breaking Attributes up beyond the strict DataSource->DataSetType heirarchy,
+# since an attribute might be found in a DataSource housing more than one set type.
+class Attribute_Set_Type(models.Model):
+    id = models.AutoField(primary_key=True, null=False, blank=False)
+    attribute = models.ForeignKey(Attribute, null=False, blank=False, on_delete=models.CASCADE)
+    datasettype = models.ForeignKey(DataSetType, null=False, blank=False, on_delete=models.CASCADE)
+
+    class Meta(object):
+        unique_together = (("datasettype", "attribute"),)
 
 
 class Attribute_Display_ValuesQuerySet(models.QuerySet):
@@ -811,7 +1069,8 @@ class Attribute_Display_Values(models.Model):
 
     def __str__(self):
         return "{} - {}".format(self.raw_value, self.display_value)
-    
+
+
 # Attributes with tooltips for their values can use this model to record them
 class Attribute_Tooltips(models.Model):
     id = models.AutoField(primary_key=True, null=False, blank=False)
