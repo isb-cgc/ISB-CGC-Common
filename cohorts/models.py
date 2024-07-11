@@ -96,8 +96,8 @@ class Cohort(models.Model):
         if not self.last_exported_date:
             return None
         return "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
-            settings.BIGQUERY_USER_DATA_PROJECT_ID,
-            settings.BIGQUERY_USER_MANIFEST_DATASET,
+            settings.BIGQUERY_EXPORT_PROJECT_ID,
+            settings.BIGQUERY_EXPORT_DATASET_ID,
             self.last_exported_table.split('.')[-1]
         )
 
