@@ -669,7 +669,7 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'sel_file_max': MAX_SEL_FILES,
                                             'dicom_viewer_url': settings.DICOM_VIEWER,
                                             'slim_viewer_url': settings.SLIM_VIEWER,
-                                            'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
+                                            'is_social': bool(request.user.is_authenticated and (len(request.user.socialaccount_set.all()) > 0)),
                                             'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
