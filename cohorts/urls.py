@@ -36,7 +36,7 @@ urlpatterns = [
     url(r'^filelist_ajax/(?P<cohort_id>\d+)/panel/(?P<panel_type>[A-Za-z]+)/$',
                                                     views.filelist_ajax, name='cohort_filelist_ajax_panel'),
     url(r'^save_cohort/',                           views.save_cohort, name='save_cohort'),
-    url(r'^export/(?P<export_type>cohort|file_manifest)/$',
+    url(r'^export/(?P<export_type>file_manifest)/$',
                                                     views.export_data, name='export_data'),
     url(r'^export/(?P<cohort_id>\d+)/(?P<export_type>cohort|file_manifest)/$',
                                                     views.export_data, name='export_cohort_data'),
@@ -48,10 +48,10 @@ urlpatterns = [
     url(r'^unshare_cohort/(?P<cohort_id>\d+)/',     views.unshare_cohort, name='unshare_cohort'),
     url(r'^save_cohort_comment/',                   views.save_comment, name='save_cohort_comment'),
     url(r'^download_filelist/$',                    views.streaming_csv_view, name='download_filelist'),
+    url(r'^export_file_manifest/$',                    views.export_data, name='export_file_manifest'),
     url(r'^download_ids/(?P<cohort_id>\d+)/$',      views.cohort_ids, name='download_ids'),
 
     url(r'^download_filelist/(?P<cohort_id>\d+)/',  views.streaming_csv_view, name='download_cohort_filelist'),
-
 
     url(r'^get_metadata_ajax/$',                                                         views.get_metadata, name='metadata_count_ajax'),
     url(r'^filter_panel/(?P<node_id>\d+)/(?P<program_id>\d+)/$',                         views.get_cohort_filter_panel, name='cohort_filter_panel'),

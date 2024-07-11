@@ -25,18 +25,36 @@ import logging
 
 logger = logging.getLogger('main_logger')
 
+
 class ProgramQuerySet(models.QuerySet):
     def get_projects(self):
         return Project.objects.select_related('program').filter(program__in=self.all())
 
-
-    def get_data_sources(self, versions=None):
+    def get_data_sources(self, versions=None, data_type=None, source_type=None):
         sources = None
-        q_obj = Q(version__in=versions) if versions else Q()
-        for prog in self.all():
-            sources = sources | self.datasource_set.filter(q_obj) if sources else self.datasource_set.filter(q_obj)
-        return sources.distinct()
+        q_obj = Q()
+        if versions:
+            q_obj &= Q(version__in=versions)
+        if source_type:
+            q_obj &= Q(source_type=source_type)
+        ds_q_obj = Q()
+        if data_type:
+            if type(data_type) == list:
+                ds_q_obj = Q(data_type__in=data_type)
+                q_obj &= Q(datasettypes__data_type__in=data_type)
+            else:
+                ds_q_obj = Q(data_type=data_type)
+                q_obj &= Q(datasettypes__data_type=data_type)
 
+        for prog in self.all():
+            sources = prog.datasource_set.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(ds_q_obj)
+            )).filter(q_obj) if not sources else sources | prog.datasource_set.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(ds_q_obj)
+            )).filter(q_obj)
+        return sources.distinct()
 
     def get_prog_attr(self, filters=None):
         attrs = None
@@ -163,7 +181,6 @@ class Program(models.Model):
             'datasettypes',
             queryset=DataSetType.objects.filter(q_obj_ds)
         )).filter(q_objects)
-
 
     def get_source_attrs(self, for_ui=None, data_type=None, source_type=None, active=True, versions=None, for_faceting=True,
                   by_source=True, named_set=None, with_set_map=False, active_only=False):
@@ -339,7 +356,9 @@ class DataSetType(models.Model):
     SET_TYPES = (
         (CASE_SET, 'Case Set'),
         (FILE_AVAIL_SET, 'Available Files Set'),
-        (MUTATION_SET, 'Mutation Data Set')
+        (MUTATION_SET, 'Mutation Data Set'),
+        (FILE_LIST_SET, 'File List Set'),
+        (IMAGE_LIST_SET, 'Images Set')
     )
     DATA_TYPE_DICT = {
         FILE_DATA: 'File Data',
@@ -350,9 +369,10 @@ class DataSetType(models.Model):
         PROTEIN_DATA: 'Protein Data',
         FILE_TYPE_DATA: 'File Type Data'
     }
+    # These terms should be simple terms with no spaces for dict key usage
     SET_TYPE_DICT = {
         CASE_SET: 'Case',
-        FILE_AVAIL_SET: 'File Types',
+        FILE_AVAIL_SET: 'FileTypes',
         MUTATION_SET: 'Molec',
         FILE_LIST_SET: 'Files',
         IMAGE_LIST_SET: 'Images'
@@ -521,7 +541,6 @@ class DataSourceQuerySet(models.QuerySet):
             versions[ds.id] = ds.versions.filter(active=active) if active is not None else ds.versions.all()
         return versions
 
-
     def get_source_nodes(self):
         sources = self.all().prefetch_related('datanode_set')
         nodes = None
@@ -529,14 +548,12 @@ class DataSourceQuerySet(models.QuerySet):
             nodes = nodes | ds.datanode_set.all() if nodes else ds.datanode_set.all()
         return nodes.distinct()
 
-
     def get_source_programs(self):
         sources = self.all().prefetch_related('programs')
         progs = None
         for ds in sources:
             progs = progs | ds.programs.all() if progs else ds.programs.all()
         return progs.distinct()
-
 
     # Returns a dict of the datasources with their data set types as an array against their ID (pk)
     def get_source_data_types(self):
@@ -550,7 +567,6 @@ class DataSourceQuerySet(models.QuerySet):
                 data_types[ds.id].append(data_set_type.data_type)
         return data_types
 
-
     # Returns a dict of the datasources with their data set types as an array against their ID (pk)
     def get_source_set_types(self, qualified_name=False):
         set_types = {}
@@ -562,7 +578,6 @@ class DataSourceQuerySet(models.QuerySet):
                     set_types[ds.id] = []
                 set_types[ds.id].append(data_set_type.set_type)
         return set_types
-
 
     # Determines if a set of data sources contains any belonging to an inactive version
     def contains_inactive_versions(self):
@@ -685,10 +700,8 @@ class DataSource(models.Model):
     aggregate_level = models.CharField(max_length=128, null=False, blank=False, default="case_barcode")
     objects = DataSourceManager()
 
-
     def get_set_types(self):
         return [DataSetType.SET_TYPE_DICT[x] for x in self.datasettypes.all().values_list('set_type',flat=True)]
-
 
     def get_source_attr(self, for_ui=None, for_faceting=True, named_set=None, active=True, all=False):
         if all:

@@ -38,7 +38,7 @@ FILTER_DATA_FORMAT = {
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
                  sort_order=0, access=None, data_type=None, do_filter_count=True):
 
-    if not user:
+    if cohort_id and (not user or user.is_anonymous):
         raise Exception("A user must be supplied to view a cohort's files.")
 
     if not inc_filters:
@@ -53,7 +53,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
-        if cohort_id:
+        if cohort_id and user_id:
             Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
         fields = ["case_barcode", "program_name", "disease_code"]

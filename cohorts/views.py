@@ -31,6 +31,7 @@ import time
 import django
 from google_helpers.bigquery.cohort_support import BigQuerySupport
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
+from django.template.loader import get_template
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.models import User, AnonymousUser
@@ -57,6 +58,7 @@ from .models import Cohort, Cohort_Perms, Filter, Cohort_Comments
 from projects.models import Program, Project, DataNode, DataSetType
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 from .utils import delete_cohort as utils_delete_cohort, get_cohort_stats
+from google_helpers.bigquery.export_support import get_export_class
 
 BQ_ATTEMPT_MAX = 10
 
@@ -262,15 +264,17 @@ def cohort_detail(request, cohort_id):
         shared_with_users = User.objects.filter(id__in=shared_with_ids)
 
         template = 'cohorts/cohort_details.html'
-        template_values['cohort'] = cohort
-        template_values['total_samples'] = cohort.sample_count
-        template_values['total_cases'] = cohort.case_count
-        template_values['shared_with_users'] = shared_with_users
-        template_values['cohort_programs'] = cohort_programs
-        template_values['programs_this_cohort'] = [x['id'] for x in cohort_programs]
-        template_values['current_filters'] = cohort.get_filters_for_ui(True)
-
-        logger.info("[STATUS] Completed cohort_detail")
+        template_values.update({
+            'cohort': cohort,
+            'export_url': reverse('export_cohort_data', kwargs={'cohort_id': cohort.id, 'export_type': "cohort"}),
+            'total_samples': cohort.sample_count,
+            'total_cases': cohort.case_count,
+            'shared_with_users': shared_with_users,
+            'cohort_programs': cohort_programs,
+            'programs_this_cohort': [x['id'] for x in cohort_programs],
+            'current_filters': cohort.get_filters_for_ui(True),
+            'is_social': bool(len(request.user.socialaccount_set.all()) > 0)
+        })
 
     except ObjectDoesNotExist:
         messages.error(request, 'The cohort you were looking for does not exist.')
@@ -597,10 +601,15 @@ def filelist(request, cohort_id=None, panel_type=None):
     if cohort_id == 0:
         messages.error(request, 'Cohort requested does not exist.')
         if request.user.is_anonymous:
-            return redirect('dashboard')
-        return redirect('cohort_list')
+            return redirect(reverse('landing_page'))
+        return redirect(reverse('cohort_list'))
 
     try:
+        user = request.user
+        if cohort_id is not None and user.is_anonymous:
+            messages.error(request, 'To view a cohort\'s files you must be logged in.')
+            return redirect(reverse('landing_page'))
+
         metadata_data_attr = fetch_file_data_attr(panel_type)
 
         has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
@@ -638,29 +647,30 @@ def filelist(request, cohort_id=None, panel_type=None):
                 metadata_data_attr[attr]['values'] = attr_values
 
         cohort = None
-        has_user_data = False
         programs_this_cohort = []
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
-            cohort.perm = cohort.get_perm(request)
             programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
+
+            export_url = reverse("export_cohort_data", kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
         else:
             download_url = reverse("download_filelist")
-
+            export_url = reverse("export_data")
         logger.debug("[STATUS] Returning response from cohort_filelist")
 
         return render(request, template, {'request': request,
                                             'cohort': cohort,
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
+                                            'export_url': export_url,
                                             'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
                                             'sel_file_max': MAX_SEL_FILES,
                                             'dicom_viewer_url': settings.DICOM_VIEWER,
                                             'slim_viewer_url': settings.SLIM_VIEWER,
-                                            'has_user_data': has_user_data,
+                                            'is_social': bool(len(request.user.socialaccount_set.all()) > 0),
                                             'programs_this_cohort': programs_this_cohort})
     except Exception as e:
         logger.error("[ERROR] While trying to view the cohort file list: ")
@@ -1086,7 +1096,7 @@ def get_cohort_filter_panel(request, cohort_id=0, node_id=0, program_id=0):
 @login_required
 @otp_required
 @csrf_protect
-def export_data(request, cohort_id=None, export_type=None, export_sub_type=None):
+def export_data(request, cohort_id=None, export_type=None, versions=None):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
 
     redirect_url = reverse('filelist') if not cohort_id else reverse('cohort_filelist', args=[cohort_id])
@@ -1095,9 +1105,229 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
     result = None
 
     try:
-        pass
-    except Exception as e:
+        req_user = User.objects.get(id=request.user.id)
+        req = request.GET or request.POST
+
+        if export_type not in ["file_manifest", "cohort"]:
+            raise Exception("Unrecognized export type seen: {}".format(export_type))
+
+        BqExportClass = get_export_class(export_type)
+
+        dataset = settings.BIGQUERY_EXPORT_DATASET_ID
+        bq_proj_id = settings.BIGQUERY_EXPORT_PROJECT_ID
+
+        cohort = None
+        for_cohort = False
         if cohort_id:
+            cohort = Cohort.objects.get(id=cohort_id)
+            for_cohort = True
+            try:
+                Cohort_Perms.objects.get(user=req_user, cohort=cohort)
+            except ObjectDoesNotExist as e:
+                messages.error(request, "You must be the owner of a cohort, or have been granted access by the owner, "
+                               + "in order to export its data.")
+                return redirect(redirect_url)
+
+        timestamp = datetime.datetime.utcnow()
+        dest_table = "{}manifest_{}".format(
+            ((("cohort_{}_".format(str(cohort.id))) if cohort else "") + "file_" if export_type == 'file_manifest' else ""),
+            timestamp.strftime('%Y%m%d_%H%M%S')
+        )
+
+        filter_conditions = ""
+        cohort_conditions = ""
+        union_queries = []
+        inc_filters = json.loads(req.get('filters', '{}'))
+        if inc_filters.get('case_barcode'):
+            case_barcode = inc_filters.get('case_barcode')
+            inc_filters['case_barcode'] = ["%{}%".format(case_barcode),]
+
+        filter_params = None
+        if len(inc_filters):
+            filter_and_params = BigQuerySupport.build_bq_filter_and_params(inc_filters, field_prefix='md.' if export_type == 'file_manifest' else None)
+            filter_params = filter_and_params['parameters']
+            filter_conditions = "AND {}".format(filter_and_params['filter_string'])
+        if for_cohort:
+            cohort_filter_and_params = cohort.get_filters_for_bq()
+            cohort_conditions = cohort_filter_and_params['filter_string']
+            filter_params = filter_params or []
+            filter_params.extend(cohort_filter_and_params['parameters'])
+
+        date_added = timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Our BQ exporter class instance
+        bcs = BqExportClass(bq_proj_id, dataset, dest_table, for_cohort=for_cohort)
+
+        # TODO: support versioning!
+        versions = versions or DataVersion.objects.filter(active=True)
+
+        # Exporting File Manifest
+        # Some files only have case barcodes, but some have sample barcodes. We have to make sure
+        # to export any files linked to a case if any sample from that case is in the cohort, but
+        # if files are linked to a sample, we only export them if the specific sample is in the cohort
+        if export_type == 'file_manifest':
+            file_tables = DataSource.objects.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(data_type=DataSetType.FILE_DATA)
+            )).filter(
+                source_type=DataSource.BIGQUERY, version__in=versions, datasettypes__data_type=DataSetType.FILE_DATA
+            )
+
+            cohort_table = DataSource.objects.prefetch_related(Prefetch(
+                'datasettypes',
+                queryset=DataSetType.objects.filter(data_type=DataSetType.CLINICAL_DATA)
+            )).filter(
+                source_type=DataSource.BIGQUERY, version__in=versions, datasettypes__data_type=DataSetType.CLINICAL_DATA
+            ).first()
+
+            if for_cohort:
+                query_string_base = """
+                     WITH cohort_table AS (
+                        SELECT sample_barcode, case_barcode
+                        FROM `{cohort_table}`
+                        WHERE {cohort_conditions}
+                     ) 
+                     SELECT md.sample_barcode, md.case_barcode, md.program_name, 
+                      md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes, md.platform, 
+                      md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                      md.node, md.file_node_id, md.case_node_id, 
+                      COALESCE(md.project_short_name_pdc,md.project_short_name_gdc) AS project_short_name, 
+                      {cohort_id} as cohort_id, build, md.index_file_name_key as index_file_cloud_storage_location, 
+                      md.index_file_id, PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_exported
+                     FROM `{metadata_table}` md
+                     JOIN cohort_table ct
+                     ON ((ct.sample_barcode IS NOT NULL AND ct.sample_barcode=md.sample_barcode) OR (ct.case_barcode=md.case_barcode))
+                     WHERE TRUE {filter_conditions}
+                     GROUP BY md.sample_barcode, md.case_barcode, md.program_name, cloud_storage_location, file_size_bytes,
+                      md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                      file_node_id, case_node_id, project_short_name, cohort_id, build, date_exported, 
+                      md.index_file_name_key, md.index_file_id, md.node
+                     ORDER BY md.sample_barcode
+                """
+            else:
+                query_string_base = """
+                     SELECT md.sample_barcode, md.case_barcode, md.program_name, 
+                      COALESCE(md.project_short_name_pdc,md.project_short_name_gdc) AS project_short_name, 
+                      md.file_name_key as cloud_storage_location, md.file_size as file_size_bytes, md.platform, 
+                      md.data_type, md.data_category, md.experimental_strategy as exp_strategy, md.data_format,
+                      md.node, md.file_node_id, md.case_node_id, build, 
+                      md.index_file_name_key as index_file_cloud_storage_location, md.index_file_id,
+                      PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}", "{tz}") as date_exported
+                     FROM `{metadata_table}` md
+                     WHERE TRUE {filter_conditions}
+                     GROUP BY md.sample_barcode, md.case_barcode, md.program_name, cloud_storage_location, file_size_bytes,
+                      md.platform, md.data_type, md.data_category, exp_strategy, md.data_format,
+                      file_node_id, case_node_id, project_short_name, build, date_exported, 
+                      md.index_file_name_key, md.index_file_id, md.node
+                     ORDER BY md.sample_barcode
+                """
+
+            cohort_id_str = cohort_id if cohort_id else 0
+            for tbl in file_tables:
+                union_queries.append(query_string_base.format(
+                    cohort_conditions=cohort_conditions,
+                    cohort_table=cohort_table.name,
+                    metadata_table=tbl.name,
+                    filter_conditions=filter_conditions,
+                    cohort_id=cohort_id_str,
+                    date_added=date_added,
+                    tz=settings.TIME_ZONE
+                ))
+
+            if len(union_queries) > 1:
+                query_string = ") UNION ALL (".join(union_queries)
+                query_string = '(' + query_string + ')'
+            else:
+                query_string = union_queries[0]
+            query_string = '#standardSQL\n' + query_string
+
+            # Store file manifest to BigQuery
+            result = bcs.export_file_list_query_to_bq(query_string, filter_params, cohort_id)
+
+            # Set user permissions
+
+        # Exporting Cohort Records
+        elif export_type == 'cohort':
+            query_string_base = """
+                 WITH cohort_table AS (
+                    SELECT sample_barcode, case_barcode
+                    FROM `{cohort_table}`
+                    WHERE {cohort_conditions}
+                 )             
+                SELECT DISTINCT {cohort_id} AS cohort_id, clin.case_barcode, clin.sample_barcode, clin.case_node_id, 
+                clin.sample_node_id, clin.program_name, 
+                COALESCE(clin.project_short_name_pdc, clin.project_short_name_gdc) AS project_short_name,
+                PARSE_TIMESTAMP("%Y-%m-%d %H:%M:%S","{date_added}") as date_exported, clin.node
+                FROM cohort_table ct
+                JOIN `{metadata_table}` clin
+                ON clin.case_barcode = ct.case_barcode
+                WHERE TRUE {filter_conditions}
+                ORDER BY clin.program_name, clin.sample_barcode
+            """
+
+            case_table = cohort.get_programs().get_data_sources(versions=versions, data_type=DataSetType.CLINICAL_DATA, source_type=DataSource.BIGQUERY).first()
+            union_queries.append(
+                query_string_base.format(
+                    cohort_conditions=cohort_conditions,
+                    cohort_table=case_table.name,
+                    metadata_table=case_table.name,
+                    filter_conditions=filter_conditions,
+                    cohort_id=cohort_id,
+                    date_added=date_added,
+                    tz=settings.TIME_ZONE
+                )
+            )
+
+            if len(union_queries) > 1:
+                query_string = ") UNION ALL (".join(union_queries)
+                query_string = '(' + query_string + ')'
+            else:
+                query_string = union_queries[0]
+            query_string = '#standardSQL\n' + query_string
+
+            # Export the data
+            result = bcs.export_cohort_query_to_bq(query_string, filter_params, cohort_id)
+
+        if for_cohort:
+            if export_type == 'file_manifest':
+                msg_cohort_str = "cohort {}'s file manifest".format(cohort_id)
+            else:
+                msg_cohort_str = "cohort {}".format(cohort_id)
+        else:
+            msg_cohort_str = "file manifest"
+
+        # If export fails, we warn the user
+        if result['status'] == 'error':
+            response = JsonResponse({
+                    'message': result.get(
+                        'message',
+                        "We were unable to export {}--please contact the administrator.".format(msg_cohort_str)
+                    ),
+                'status': 400
+            }, status=400)
+        else:
+            bcs.set_table_access(req_user.email)
+            msg_template = get_template('isb_cgc/bq-manifest-export-msg.html')
+            msg = msg_template.render(context={
+                'tables': [{
+                    'full_id':  result['table_id'],
+                    'uri': "https://console.cloud.google.com/bigquery?p={}&d={}&t={}&page=table".format(
+                        settings.BIGQUERY_EXPORT_PROJECT_ID,
+                        settings.BIGQUERY_EXPORT_DATASET_ID,
+                        dest_table
+                    ),
+                    'error': result['status'] == 'error'}],
+                'long_running': bool(result['status'] == 'long_running'),
+                'errors': bool(result['status'] == 'error'),
+                'email': request.user.email
+            })
+            response = JsonResponse({
+                'status': 200,
+                'message': msg
+            }, status=200)
+
+    except Exception as e:
+        if for_cohort:
             if export_type == 'file_manifest':
                 cohort_error_str = "cohort {}'s file manifest".format(cohort_id)
             else:
@@ -1113,4 +1343,6 @@ def export_data(request, cohort_id=None, export_type=None, export_sub_type=None)
             'message': "There was an error while trying to export your file list - please contact the administrator."
         }
 
-    return JsonResponse(result, status=status)
+    response.set_cookie("downloadToken", req.get('downloadToken'))
+
+    return response
