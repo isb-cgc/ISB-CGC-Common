@@ -123,18 +123,6 @@ METADATA_DATA_ATTR = {
 
 }
 
-
-METADATA_DATA_AVAIL_PLOT_MAP = {
-    'Aligned_Reads': 'DNAseq_data',
-    'Copy_Number_Segment_Masked': 'cnvrPlatform',
-    'DNA_Methylation_Beta': 'methPlatform',
-    'miRNA_Gene_Quantification': 'mirnPlatform',
-    'miRNA_Isoform_Quantification': 'mirnPlatform',
-    'mRNA_Gene_Quantification': 'gexpPlatform',
-    'mRNA_Isoform_Quantification': 'gexpPlatform',
-    'Protein_Quantification': 'rppaPlatform',
-}
-
 ISB_CGC_PROJECTS = {
     'list': [],
 }
@@ -218,9 +206,9 @@ def fetch_file_data_attr(type=None):
             metadata_data_attrs.extend(['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform'])
 
         if type != 'dicom':
-            metadata_data_attrs.extend(['disease_code', 'node', 'build'])
+            metadata_data_attrs.extend(['disease_code', 'node', 'build', 'access'])
 
-        if not len(METADATA_DATA_ATTR.get(type,[])):
+        if not len(METADATA_DATA_ATTR.get(type, [])):
             METADATA_DATA_ATTR[type] = {}
             data_sources = DataSource.objects.select_related('version').prefetch_related('programs', 'datasettypes').filter(
                 programs__active=True, version__in=DataVersion.objects.filter(
@@ -229,7 +217,7 @@ def fetch_file_data_attr(type=None):
                 source_type=DataSource.SOLR
             ).distinct()
             source_attrs = data_sources.get_source_attrs(named_set=metadata_data_attrs)
-            source_attrs_data = {x.name: {'display_name': x.display_name, 'preformatted': (x.preformatted_values == 1)} for x in source_attrs['attrs']}
+            source_attrs_data = {x.name: {'id': x.id, 'display_name': x.display_name, 'preformatted': (x.preformatted_values == 1)} for x in source_attrs['attrs']}
             display_vals = source_attrs['attrs'].get_display_values().to_dict(False)
             tooltips = {x.attribute.name: { x.value: x.tooltip} for x in Attribute_Tooltips.objects.select_related('attribute').filter(attribute__in=source_attrs['attrs'])}
 
@@ -248,7 +236,8 @@ def fetch_file_data_attr(type=None):
                         METADATA_DATA_ATTR[type][attr] = {
                             'values': {},
                             'name': attr,
-                            'displ_name': source_attrs_data[attr]['display_name']
+                            'displ_name': source_attrs_data[attr]['display_name'],
+                            'id': source_attrs_data[attr]['id']
                         }
                     for val in values['values'][attr]:
                         if val not in METADATA_DATA_ATTR[type][attr]['values']:
