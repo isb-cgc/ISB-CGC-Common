@@ -17,13 +17,13 @@
 from django.contrib import admin
 from django.contrib.auth.models import User
 
-from accounts.models import NIH_User, Bucket, GoogleProject, ServiceAccount, AuthorizedDataset, ServiceAccountAuthorizedDatasets
+from accounts.models import NIH_User, AuthorizedDataset
 from allauth.socialaccount.models import SocialToken, SocialApp
 
 # Required import otherwise SocialToken is not registered before unregistering
 from allauth.socialaccount.admin import SocialTokenAdmin, SocialAppAdmin
 
-
+@admin.register(NIH_User)
 class NIH_UserAdmin(admin.ModelAdmin):
     list_display = (
         'user',
@@ -41,40 +41,6 @@ class NIH_UserAdmin(admin.ModelAdmin):
         return obj.NIH_assertion[:10] + '...'
 
 
-class BucketAdmin(admin.ModelAdmin):
-    list_display = (
-        'google_project',
-        'bucket_name',
-        'bucket_permissions'
-    )
-
-
-class GoogleProjectAdmin(admin.ModelAdmin):
-    list_display = (
-        'project_name',
-        'project_id'
-    )
-
-
-@admin.register(ServiceAccount)
-class ServiceAccountAdmin(admin.ModelAdmin):
-    list_display = (
-        'google_project',
-        'service_account',
-        'authorized_date',
-        'active'
-    )
-
-
-@admin.register(ServiceAccountAuthorizedDatasets)
-class ServiceAccountAuthorizedDatasetsAdmin(admin.ModelAdmin):
-    list_display = (
-        'service_account',
-        'authorized_date',
-        'authorized_dataset'
-    )
-
-
 @admin.register(AuthorizedDataset)
 class AuthorizedDatasetAdmin(admin.ModelAdmin):
     list_display = (
@@ -83,11 +49,6 @@ class AuthorizedDatasetAdmin(admin.ModelAdmin):
         'acl_google_group',
         'public'
     )
-
-
-admin.site.register(NIH_User, NIH_UserAdmin)
-admin.site.register(Bucket, BucketAdmin)
-admin.site.register(GoogleProject, GoogleProjectAdmin)
 
 # Hides the SocialToken model from the admin pages
 admin.site.unregister(SocialToken)

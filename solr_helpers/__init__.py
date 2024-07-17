@@ -304,7 +304,7 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
 
 
 # Build a query string for Solr
-def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset=0, subq_join_field=None):
+def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset=0, subq_join_field=None, do_not_exclude=None):
 
     continuous_num = Attribute.get_ranged_attrs(False)
     continuous_num_list = list(continuous_num.values_list('name',flat=True))
@@ -371,7 +371,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
         query_set = query_set or {}
         full_query_str += query_str
 
-        if with_tags_for_ex:
+        if with_tags_for_ex and ((do_not_exclude is None) or (attr not in do_not_exclude)):
             filter_tags = filter_tags or {}
             tag = "f{}".format(str(count))
             filter_tags[attr] = tag
@@ -447,7 +447,7 @@ def build_solr_query(filters, comb_with='OR', with_tags_for_ex=False, tag_offset
         query_set = query_set or {}
         full_query_str += query_str
 
-        if with_tags_for_ex:
+        if with_tags_for_ex and ((do_not_exclude is None) or (attr not in do_not_exclude)):
             filter_tags = filter_tags or {}
             tag = "f{}".format(str(count))
             filter_tags[attr] = tag

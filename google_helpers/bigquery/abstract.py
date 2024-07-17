@@ -30,10 +30,6 @@ class BigQueryABC(with_metaclass(ABCMeta, object)):
         pass
 
     @abstractmethod
-    def _build_request_body_from_rows(self, rows):
-        pass
-
-    @abstractmethod
     def _confirm_table_schema(self):
         pass
 
