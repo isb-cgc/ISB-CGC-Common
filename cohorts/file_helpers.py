@@ -113,9 +113,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             fields.extend(["index_file_name_key", "access", "acl", "platform",
                            "data_type", "data_category", "experimental_strategy", "data_format",
-                           "file_node_id", "case_node_id", "file_size",
-                           "program_name", "node", "file_name", "file_name_key", "build", "project_short_name_gdc",
-                           "project_short_name_pdc"
+                           "file_node_id", "case_node_id", "file_size", "program_name", "node", "file_name",
+                           "file_name_key", "build", "project_short_name_gdc", "project_short_name_pdc"
                            ])
             if data_type == 'slim':
                 fields.extend(["StudyInstanceUID", "SeriesInstanceUID", "slide_barcode"])
@@ -135,7 +134,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 facet_names = [
                     'disease_code', 'project_short_name_gdc', 'project_short_name_pdc', 'node', 'build', 'data_format',
                     'data_category', 'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform',
-                    'program_name'
+                    'program_name', 'access'
                 ]
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
