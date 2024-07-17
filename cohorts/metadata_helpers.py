@@ -123,18 +123,6 @@ METADATA_DATA_ATTR = {
 
 }
 
-
-METADATA_DATA_AVAIL_PLOT_MAP = {
-    'Aligned_Reads': 'DNAseq_data',
-    'Copy_Number_Segment_Masked': 'cnvrPlatform',
-    'DNA_Methylation_Beta': 'methPlatform',
-    'miRNA_Gene_Quantification': 'mirnPlatform',
-    'miRNA_Isoform_Quantification': 'mirnPlatform',
-    'mRNA_Gene_Quantification': 'gexpPlatform',
-    'mRNA_Isoform_Quantification': 'gexpPlatform',
-    'Protein_Quantification': 'rppaPlatform',
-}
-
 ISB_CGC_PROJECTS = {
     'list': [],
 }
