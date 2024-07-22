@@ -21,7 +21,7 @@ import logging
 from urllib.parse import quote as urllib2_quote
 import google.cloud.logging as stackdriver_logging
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 class StackDriverLogger(object):

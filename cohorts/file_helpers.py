@@ -26,7 +26,7 @@ from projects.models import DataSetType, DataSource, DataVersion, Program
 
 from solr_helpers import *
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 FILTER_DATA_FORMAT = {
     'igv': 'BAM',

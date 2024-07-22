@@ -54,7 +54,7 @@ from json import loads as json_loads
 #import httplib as http_client
 #http_client.HTTPConnection.debuglevel = 1
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 DCF_AUTH_URL = settings.DCF_AUTH_URL
 DCF_TOKEN_URL = settings.DCF_TOKEN_URL

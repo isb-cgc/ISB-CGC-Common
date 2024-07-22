@@ -27,7 +27,7 @@ import pytz
 from django.core.exceptions import ObjectDoesNotExist
 from allauth.socialaccount.models import SocialAccount
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 class NIH_User(models.Model):

@@ -39,7 +39,7 @@ import json
 import requests
 import logging
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 BLACKLIST_RE = settings.BLACKLIST_RE
 

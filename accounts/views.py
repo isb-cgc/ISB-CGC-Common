@@ -41,7 +41,7 @@ from .dcf_support import TokenFailure, InternalTokenError, RefreshTokenExpired, 
 
 from json import loads as json_loads
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 @login_required
