@@ -35,7 +35,7 @@ from sharing.models import Shared_Resource
 from functools import reduce
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 class CohortQuerySet(models.QuerySet):

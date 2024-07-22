@@ -25,7 +25,7 @@ import sys
 
 debug = settings.DEBUG # RO global for this file
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 MOLECULAR_CATEGORIES = {

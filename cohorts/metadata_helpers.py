@@ -43,7 +43,7 @@ from django.conf import settings
 
 debug = settings.DEBUG # RO global for this file
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 warnings.filterwarnings("ignore", "No data - zero rows fetched, selected, or processed")
 

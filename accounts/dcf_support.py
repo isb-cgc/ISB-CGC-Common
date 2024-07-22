@@ -35,7 +35,7 @@ from base64 import urlsafe_b64decode
 from json import loads as json_loads, dumps as json_dumps
 
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 DCF_TOKEN_URL = settings.DCF_TOKEN_URL
 DCF_GOOGLE_URL = settings.DCF_GOOGLE_URL
