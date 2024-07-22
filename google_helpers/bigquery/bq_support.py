@@ -28,7 +28,7 @@ from google.cloud.bigquery.schema import SchemaField
 from google.cloud.bigquery import ArrayQueryParameter, ScalarQueryParameter, StructQueryParameter, QueryJob, QueryJobConfig
 from googleapiclient.errors import HttpError
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS

@@ -23,7 +23,7 @@ from django.db.models import Q, Prefetch
 from functools import reduce
 import logging
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 class ProgramQuerySet(models.QuerySet):

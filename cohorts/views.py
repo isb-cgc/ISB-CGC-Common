@@ -69,7 +69,7 @@ MAX_SEL_FILES = settings.MAX_FILES_IGV
 BLACKLIST_RE = settings.BLACKLIST_RE
 BQ_SERVICE = None
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 def convert(data):
     if isinstance(data, basestring):

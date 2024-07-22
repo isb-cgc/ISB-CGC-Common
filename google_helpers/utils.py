@@ -22,7 +22,7 @@ from googleapiclient.errors import HttpError
 from http.client import HTTPException
 import logging
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 #

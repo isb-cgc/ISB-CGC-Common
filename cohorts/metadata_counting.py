@@ -40,7 +40,7 @@ MAX_FILE_LIST_ENTRIES = settings.MAX_FILE_LIST_REQUEST
 MAX_SEL_FILES = settings.MAX_FILES_IGV
 BQ_SERVICE = None
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 '''------------------------------------- Begin metadata counting methods -------------------------------------'''

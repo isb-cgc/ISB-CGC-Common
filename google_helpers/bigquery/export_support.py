@@ -28,7 +28,7 @@ from google_helpers.bigquery.bq_support import BigQuerySupport
 
 BQ_ATTEMPT_MAX = 10
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
 
