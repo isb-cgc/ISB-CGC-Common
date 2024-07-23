@@ -333,7 +333,7 @@ def save_cohort(request):
                     key = tmp['feature']['id']
                     val = tmp['value']['name']
                     program_id = tmp['program']['id']
-                    attr_ids.append(tmp['feature']['id'])
+                    attr_ids.append(int(tmp['feature']['id']))
 
                     if 'id' in tmp['value'] and tmp['value']['id']:
                         val = tmp['value']['id']
