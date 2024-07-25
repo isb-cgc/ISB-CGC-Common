@@ -25,6 +25,7 @@ from google_helpers.bigquery.abstract import BigQueryABC
 
 from google.cloud.bigquery.table import Table
 from google.cloud.bigquery.schema import SchemaField
+from google.cloud import bigquery
 from google.cloud.bigquery import QueryJob, QueryJobConfig
 from googleapiclient.errors import HttpError
 from .utils import build_bq_filter_and_params as build_bq_flt_prm, build_bq_where_clase as build_bq_clause
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
+
 
 class BigQuerySupport(BigQueryABC):
 
