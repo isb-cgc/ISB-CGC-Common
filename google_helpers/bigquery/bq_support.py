@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2023, Institute for Systems Biology
+# Copyright 2015-2024, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ from uuid import uuid4
 import copy
 from django.conf import settings
 from google_helpers.bigquery.abstract import BigQueryABC
-from google.cloud import bigquery
+
 from google.cloud.bigquery.table import Table
 from google.cloud.bigquery.schema import SchemaField
 from google.cloud.bigquery import QueryJob, QueryJobConfig
@@ -33,23 +33,6 @@ logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
-
-MOLECULAR_CATEGORIES = {
-    'nonsilent': {
-        'name': 'Non-silent',
-        'attrs': [
-            'Missense_Mutation',
-            'Nonsense_Mutation',
-            'Nonstop_Mutation',
-            'Frame_Shift_Del',
-            'Frame_Shift_Ins',
-            'In_Frame_Del',
-            'In_Frame_Ins',
-            'Translation_Start_Site',
-        ]
-    }
-}
-
 
 class BigQuerySupport(BigQueryABC):
 
