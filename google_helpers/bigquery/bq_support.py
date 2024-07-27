@@ -28,7 +28,7 @@ from google.cloud.bigquery.schema import SchemaField
 from google.cloud import bigquery
 from google.cloud.bigquery import QueryJob, QueryJobConfig
 from googleapiclient.errors import HttpError
-from .utils import build_bq_filter_and_params as build_bq_flt_prm, build_bq_where_clase as build_bq_clause
+from .utils import build_bq_filter_and_params as build_bq_flt_prm, build_bq_where_clause as build_bq_clause
 
 logger = logging.getLogger(__name__)
 
