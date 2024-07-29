@@ -56,7 +56,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         if cohort_id and user_id:
             Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=user_id)
 
-        fields = ["case_barcode", "program_name", "disease_code"]
+        fields = ["case_barcode", "program_name"]
         # col_map: used in the sql ORDER BY clause
         # key: html column attribute 'columnId'
         # value: db table column name
@@ -107,8 +107,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             if data_type == 'igv':
                 fields.extend(["sample_barcode"])
                 col_map.update({
-                    'col-sbarcode': 'sample_barcode',
-                    'col-diseasecode': 'disease_code'
+                    'col-sbarcode': 'sample_barcode'
                 })
 
             fields.extend(["index_file_name_key", "access", "acl", "platform",
@@ -121,7 +120,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             col_map.update({
                 'col-filename': 'file_name',
-                'col-diseasecode': 'disease_code',
                 'col-exp-strategy': 'experimental_strategy',
                 'col-platform': 'platform',
                 'col-datacat': 'data_category',
@@ -132,7 +130,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             if do_filter_count:
                 facet_names = [
-                    'disease_code', 'project_short_name_gdc', 'project_short_name_pdc', 'node', 'build', 'data_format',
+                    'project_short_name_gdc', 'project_short_name_pdc', 'node', 'build', 'data_format',
                     'data_category', 'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform',
                     'program_name', 'access'
                 ]
@@ -232,7 +230,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                     file_list.append({
                         'sample': entry.get('sample_barcode', 'N/A'),
                         'case': entry.get('case_barcode', 'N/A'),
-                        'disease_code': entry.get('disease_code', 'N/A'),
                         'build': entry.get('build', 'N/A'),
                         'study_uid': entry.get('StudyInstanceUID', 'N/A'),
                         'series_uid': entry.get('SeriesInstanceUID', 'N/A'),

@@ -206,7 +206,7 @@ def fetch_file_data_attr(type=None):
             metadata_data_attrs.extend(['data_type', 'data_category', 'experimental_strategy', 'data_format', 'platform'])
 
         if type != 'dicom':
-            metadata_data_attrs.extend(['disease_code', 'node', 'build', 'access'])
+            metadata_data_attrs.extend(['node', 'build', 'access'])
 
         if not len(METADATA_DATA_ATTR.get(type, [])):
             METADATA_DATA_ATTR[type] = {}
@@ -987,7 +987,7 @@ def get_sample_metadata(barcode):
         cursor = db.cursor()
 
         cursor.execute("""
-            SELECT case_barcode, sample_barcode, disease_code, project_short_name, program_name
+            SELECT case_barcode, sample_barcode, project_short_name, program_name
             FROM {}
             WHERE sample_barcode = {}
         """.format(program_tables.samples_table, "%s"), (barcode,))
@@ -995,7 +995,6 @@ def get_sample_metadata(barcode):
         for row in cursor.fetchall():
             result['case_barcode'] = row[0]
             result['sample_barcode'] = row[1]
-            result['disease_code'] = row[2]
             result['project'] = row[3]
             result['program'] = row[4]
 
