@@ -125,7 +125,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 'col-datacat': 'data_category',
                 'col-datatype': 'data_type',
                 'col-dataformat': 'data_format',
-                'col-filesize': 'file_size'
+                'col-filesize': 'file_size',
+                'col-access': 'access'
             })
 
             if do_filter_count:
