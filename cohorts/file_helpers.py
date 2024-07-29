@@ -30,8 +30,11 @@ logger = logging.getLogger(__name__)
 
 FILTER_DATA_FORMAT = {
     'igv': 'BAM',
-    'slim': 'SVS',
     'pdf': 'PDF'
+}
+
+FILTER_DATA_TYPE = {
+    'pdf': 'Pathology report'
 }
 
 
@@ -68,9 +71,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         facet_attr = None
         collapse = None
         format_filter = None
+        type_filter = None
 
-        if data_type in ('igv', 'slim', 'pdf'):
-            format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]}
+        if data_type in ('igv', 'pdf'):
+            format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]} if data_type in FILTER_DATA_FORMAT else None
+            type_filter = {'data_type': FILTER_DATA_TYPE[data_type]} if data_type in FILTER_DATA_TYPE else None
 
         if data_type == 'dicom':
             file_collection = DataSource.objects.select_related('version').filter(source_type=DataSource.SOLR,
@@ -78,7 +83,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 Prefetch('datasettypes',queryset=DataSetType.objects.filter(data_type=DataSetType.IMAGE_DATA))
             ).filter(datasettypes__set_type=DataSetType.IMAGE_LIST_SET).first()
 
-            fields.extend(["StudyDescription", "StudyInstanceUID", "BodyPartExamined", "Modality", "collection_id", "CancerType"])
+            fields.extend(["StudyDescription", "slide_barcode", "Modality", "StudyInstanceUID", "BodyPartExamined", "Modality", "collection_id", "CancerType"])
 
             col_map.update({
                 'col-studydesc': 'StudyDescription',
@@ -115,8 +120,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                            "file_node_id", "case_node_id", "file_size", "program_name", "node", "file_name",
                            "file_name_key", "build", "project_short_name_gdc", "project_short_name_pdc"
                            ])
-            if data_type == 'slim':
-                fields.extend(["StudyInstanceUID", "SeriesInstanceUID", "slide_barcode"])
 
             col_map.update({
                 'col-filename': 'file_name',
@@ -161,6 +164,12 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 solr_query = {'queries': {}}
             solr_query['queries']['data_format'] = format_query['queries']['data_format']
 
+        if type_filter:
+            type_query = build_solr_query(type_filter, with_tags_for_ex=False)
+            if not solr_query:
+                solr_query = {'queries': {}}
+            solr_query['queries']['data_type'] = type_query['queries']['data_type']
+
         if do_filter_count:
             facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique, include_nulls=False)
 
@@ -170,13 +179,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
         query_set = []
         if data_type == "dicom":
-            # Make sure to filter out the Slide Microscopy images since this is an OHIF tab
-            # TODO: we should change this eventually
             if not solr_query:
                 solr_query = {'queries': {}}
-            if 'Modality' not in solr_query['queries']:
-                solr_query['queries']['Modality'] = ""
-            solr_query['queries']['Modality'] += "(-Modality:(\"SM\"))"
 
         if solr_query:
             query_set = [y for x, y in solr_query['queries'].items()]
@@ -196,7 +200,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             query_params.update({
                 "unique": "StudyInstanceUID"
             })
-        elif data_type == 'all' or data_type == 'slim' or data_type == 'pdf':
+        elif data_type == 'all' or data_type == 'pdf':
             query_params.update({
                 "unique": "file_name"
             })
@@ -209,7 +213,8 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 if data_type == 'dicom':
                     file_list.append({
                         'case': entry['case_barcode'],
-                        'study_uid': entry['StudyInstanceUID'],
+                        'study_uid': entry.get('StudyInstanceUID', 'N/A'),
+                        'slide_barcode': entry.get('slide_barcode', 'N/A'),
                         'study_desc': entry.get('StudyDescription','N/A'),
                         'cancer_type': entry.get('CancerType', 'N/A'),
                         'collection_id': entry.get('collection_id', 'N/A'),
@@ -232,15 +237,13 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'sample': entry.get('sample_barcode', 'N/A'),
                         'case': entry.get('case_barcode', 'N/A'),
                         'build': entry.get('build', 'N/A'),
-                        'study_uid': entry.get('StudyInstanceUID', 'N/A'),
-                        'series_uid': entry.get('SeriesInstanceUID', 'N/A'),
-                        'slide_barcode': entry.get('slide_barcode', 'N/A'),
                         'cloudstorage_location': entry.get('file_name_key', 'N/A'),
                         'index_name': entry.get('index_file_name_key', 'N/A'),
                         'access': entry.get('access', 'N/A'),
                         'user_access': str(entry.get('access', 'N/A') != 'controlled' or whitelist_found),
                         'filename': entry.get('file_name', None) or entry.get('file_name_key', '').split("/")[-1] or 'N/A',
                         'filesize': entry.get('file_size', 'N/A'),
+                        'modality': entry.get('modality', 'N/A'),
                         'exp_strat': entry.get('experimental_strategy', 'N/A'),
                         'platform': entry.get('platform', 'N/A'),
                         'datacat': entry.get('data_category', 'N/A'),
