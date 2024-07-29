@@ -374,7 +374,7 @@ def fetch_metadata_value_set(program=None):
                             METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value] = {}
                         METADATA_ATTR[attr_set]['attrs'][dv.attribute.name]['values'][dv.raw_value]['displ_value'] = dv.display_value
 
-            # Fetch the tooltip strings for Disease Codes
+            # Fetch tooltips
             tooltips = Attribute_Tooltips.objects.select_related('attribute').filter(attribute__active=1)
 
             for tip in tooltips:

@@ -387,9 +387,9 @@ def save_cohort(request):
 def delete_cohort(request):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     redirect_url = 'cohort_list'
-    cohort_ids = request.POST.getlist('id')
+    cohortIds = request.POST.getlist('id')
     cohorts_not_deleted = {}
-    for cohort in cohort_ids:
+    for cohort in cohortIds:
         info = utils_delete_cohort(request.user, cohort)
         if 'message' in info:
             cohorts_not_deleted[cohort] = info
@@ -398,6 +398,8 @@ def delete_cohort(request):
         msg_base = "cohort ID {}: {}"
         msgs = [msg_base.format(x, cohorts_not_deleted[x]['message']) for x in cohorts_not_deleted]
         messages.error(request, "The following cohorts couldn't be deleted (reasons included): {}".format("\n".join(msgs)))
+    else:
+        messages.info(request, "Successfully deleted cohort(s): {}".format(", ".join(cohortIds)))
 
     return redirect(reverse(redirect_url))
 
