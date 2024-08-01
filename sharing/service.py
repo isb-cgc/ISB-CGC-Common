@@ -15,7 +15,7 @@ EMAIL_SERVICE_API_URL = settings.EMAIL_SERVICE_API_URL
 EMAIL_SERVICE_API_KEY = settings.EMAIL_SERVICE_API_KEY
 NOTIFICATION_EMAIL_FROM_ADDRESS = settings.NOTIFICATION_EMAIL_FROM_ADDRESS
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 def send_email_message(message_data):

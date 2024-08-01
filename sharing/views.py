@@ -4,6 +4,8 @@ from django.http import HttpResponseRedirect, JsonResponse
 from django.urls import reverse
 from sharing.models import Shared_Resource
 from django.contrib import messages
+from django_otp.decorators import otp_required
+
 
 def sharing_add(request, sharing_id=0):
     template = 'sharing/sharing_detail.html'
@@ -31,19 +33,7 @@ def sharing_add(request, sharing_id=0):
         redirect_id_key = ''
         title = ''
 
-        if shared.program_set.count() > 0:
-            type = 'programs'
-            title = 'Program'
-            redirect_page = 'program_detail'
-            redirect_id_key = 'program_id'
-            resource = shared.program_set.all().first()
-        elif shared.workbook_set.count() > 0:
-            type = 'workbooks'
-            title = 'Workbook'
-            redirect_page = 'workbook_detail'
-            redirect_id_key = 'workbook_id'
-            resource = shared.workbook_set.all().first()
-        elif shared.cohort_set.count() > 0:
+        if shared.cohort_set.count() > 0:
             type = 'cohorts'
             title = 'Cohort'
             redirect_page = 'cohort_details'
@@ -60,15 +50,6 @@ def sharing_add(request, sharing_id=0):
             redirect_page = 'landing_page'
         return redirect(redirect_page)
 
-    if message != "" :
-        context = {
-            'type': 'workbooks',
-            'title': "Unknown",
-            'resource': resource,
-            'shared'  : shared,
-            'message' : message
-        }
-        return render(request, template, context)
 
     if request.user.is_authenticated:
         return HttpResponseRedirect(reverse(redirect_page, kwargs={
@@ -84,6 +65,7 @@ def sharing_add(request, sharing_id=0):
         return render(request, template, context)
 
 @login_required
+@otp_required
 def sharing_remove(request, sharing_id=0):
 
     if request.POST.get('owner'):

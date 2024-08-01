@@ -28,7 +28,7 @@ STORAGE_SCOPES = [
 
 def get_storage_resource(for_user_project=False):
 
-    creds_file = settings.GOOGLE_APPLICATION_CREDENTIALS if not for_user_project else settings.MONITORING_SA_ACCESS_CREDENTIALS
+    creds_file = settings.GOOGLE_APPLICATION_CREDENTIALS
 
     credentials = GoogleCredentials.from_stream(creds_file).create_scoped(STORAGE_SCOPES)
     service = build_with_retries('storage', 'v1', credentials, 2)
