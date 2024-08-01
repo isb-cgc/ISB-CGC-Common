@@ -7,7 +7,7 @@ from django.conf import settings
 
 
 debug = settings.DEBUG
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 WEBAPP_LOGIN_LOG_NAME = settings.WEBAPP_LOGIN_LOG_NAME
 

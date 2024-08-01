@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2020, Institute for Systems Biology
+# Copyright 2015-2023, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import pytz
 from django.core.exceptions import ObjectDoesNotExist
 from allauth.socialaccount.models import SocialAccount
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 
 class NIH_User(models.Model):
@@ -71,36 +71,6 @@ class NIH_User(models.Model):
             logger.error("[ERROR] While deleting user authorized datasets for {}: ".format(self.NIH_username))
             logger.exception(e)
         return result
-
-
-class GoogleProject(models.Model):
-    user = models.ManyToManyField(User)
-    project_name = models.CharField(max_length=150)
-    project_id = models.CharField(max_length=150)
-    big_query_dataset = models.CharField(max_length=150, null=True)
-    active = models.BooleanField(default=False, null=False)
-
-    def __str__(self):
-        return "{} ({})".format(self.project_name, self.project_id)
-
-    def active_service_accounts(self):
-        return self.serviceaccount_set.filter(active=1)
-
-
-class Bucket(models.Model):
-    google_project = models.ForeignKey(GoogleProject, null=False, on_delete=models.CASCADE)
-    bucket_name = models.CharField(null=True,max_length=155, unique=True)
-    bucket_permissions = models.TextField(null=True)
-
-    def __str__(self):
-        return self.bucket_name
-
-class BqDataset(models.Model):
-    google_project = models.ForeignKey(GoogleProject, null=False, on_delete=models.CASCADE)
-    dataset_name = models.CharField(null=False, max_length=155)
-
-    class Meta(object):
-        unique_together = (("google_project", "dataset_name"),)
 
 
 class AuthorizedDataset(models.Model):
@@ -156,45 +126,6 @@ class UserAuthorizedDatasets(models.Model):
 
     def __repr__(self):
         return self.__str__()
-
-
-class ServiceAccount(models.Model):
-    google_project = models.ForeignKey(GoogleProject, null=False, on_delete=models.CASCADE)
-    service_account = models.CharField(max_length=1024, null=False)
-    active = models.BooleanField(default=False, null=False)
-    authorized_date = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        auth_datasets = AuthorizedDataset.objects.filter(
-            id__in=ServiceAccountAuthorizedDatasets.objects.filter(
-                service_account=self).values_list('authorized_dataset', flat=True
-            )
-        ).values_list('name','whitelist_id')
-
-        return '{service_account} of project {google_project} authorized for datasets: {datasets}'.format(
-            service_account=self.service_account,
-            google_project=str(self.google_project),
-            datasets=", ".join([x[0]+' ['+x[1]+']' for x in auth_datasets])
-        )
-
-    def get_auth_datasets(self):
-        result = None
-        try:
-            result = AuthorizedDataset.objects.filter(id__in=self.serviceaccountauthorizeddatasets_set.all().values_list('authorized_dataset', flat=True))
-        except Exception as e:
-            logger.error("[ERROR] While retrieving authorized datasets: ")
-            logger.exception(e)
-        return result
-
-    def is_expired(self):
-        expired_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(days=-7, minutes=10))
-        return self.authorized_date < expired_time
-
-
-class ServiceAccountAuthorizedDatasets(models.Model):
-    service_account = models.ForeignKey(ServiceAccount, null=False, on_delete=models.CASCADE)
-    authorized_dataset = models.ForeignKey(AuthorizedDataset, null=False, on_delete=models.CASCADE)
-    authorized_date = models.DateTimeField(auto_now=True)
 
 
 class DCFToken(models.Model):

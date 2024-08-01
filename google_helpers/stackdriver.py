@@ -1,5 +1,5 @@
 #
-# Copyright 2015-2019, Institute for Systems Biology
+# Copyright 2015-2024, Institute for Systems Biology
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -17,81 +17,53 @@
 from future import standard_library
 standard_library.install_aliases()
 from builtins import object
-import logging as logger
+import logging
 from urllib.parse import quote as urllib2_quote
+import google.cloud.logging as stackdriver_logging
 
-from oauth2client.service_account import ServiceAccountCredentials
-from googleapiclient import discovery
-from httplib2 import Http
-from .utils import execute_with_retries, build_with_retries
+logger = logging.getLogger(__name__)
 
 
 class StackDriverLogger(object):
-    LOGGING_SCOPES = [
-        'https://www.googleapis.com/auth/cloud-platform',
-        'https://www.googleapis.com/auth/logging.admin',
-        'https://www.googleapis.com/auth/logging.write'
-    ]
 
-    def __init__(self, project_name, credentials):
+    def __init__(self, project_name):
         self.project_name = project_name
-        self.credentials = credentials
-
-    def _get_service(self):
-        http_auth = self.credentials.authorize(Http())
-        service = build_with_retries('logging', 'v2', None, 2, http=http_auth)
-        return service, http_auth
+        self.logging_client = stackdriver_logging.Client(project=self.project_name)
 
     def write_log_entries(self, log_name, log_entry_array):
         """ Creates log entries using the StackDriver logging API.
 
             Args:
-                log_name: Log name. Will be URL encoded (see code).
-                log_entry_array: List of log entries. See https://cloud.google.com/logging/docs/api/reference/rest/v2/LogEntry
+                log_name: Log name.
+                log_entry_array: List of log entries of the form { textPayload: <message>, severity: <log level> }
         """
         try:
-            client, http_auth = self._get_service()
+            client = self.logging_client
         except Exception as e:
-            logger.error("get_logging_resource failed: {}".format(e.message))
+            logger.error("failed to get a logging client: {}".format(e.message))
+            logger.exception(e)
             return
 
-        # Create a POST body for the write log entries request(Payload).
-        log_name_param = "projects/{project_id}/logs/{log_name}".format(
-            project_id=self.project_name,
-            log_name=urllib2_quote(log_name, safe='')
-        )
-
-        body = {
-            "logName": log_name_param,
-            "resource": {
-                "type": "gce_instance",
-                "labels": {
-                    "zone": "us-central1-a"
-                }
-            },
-            "entries": log_entry_array
-        }
+        stackdriver_logger = client.logger(name=log_name)
 
         try:
-            # try this a few times to avoid the deadline exceeded problem
-            request = client.entries().write(body=body)
-            response = execute_with_retries(request, 'WRITE_LOG_ENTRIES', 2)
-
-            if response:
-                logger.error("Unexpected response from logging API: {}".format(response))
+            if len(log_entry_array) > 1:
+                # Batch commit multiple entries
+                batch = stackdriver_logger.batch()
+                for log_entry in log_entry_array:
+                    batch.log(log_entry['textPayload'], severity=log_entry['severity'])
+                batch.commit()
+            else:
+                # otherwise a single-write will be fine
+                log_entry = log_entry_array[0]
+                stackdriver_logger.log(log_entry['textPayload'], severity=log_entry['severity'])
 
         except Exception as e:
             # If we still get an exception, figure out what the type is:
             logger.error("Exception while calling logging API: {0}.".format(e.__class__.__name__))
             logger.exception(e)
 
-    def write_struct_log_entry(self, log_name, log_entry, severity="DEFAULT"):
-        self.write_log_entries(log_name, [{
-            'severity': severity,
-            'jsonPayload': log_entry
-        }])
-
-    def write_text_log_entry(self, log_name, log_text, severity="DEFAULT" ):
+    def write_text_log_entry(self, log_name, log_text, severity="INFO"):
         self.write_log_entries(log_name, [{
             'severity': severity,
             'textPayload': log_text
@@ -101,8 +73,4 @@ class StackDriverLogger(object):
     def build_from_django_settings(cls):
         from django.conf import settings
         project_name = settings.GCLOUD_PROJECT_ID
-        credentials = ServiceAccountCredentials.from_json_keyfile_name(
-            settings.GOOGLE_APPLICATION_CREDENTIALS, cls.LOGGING_SCOPES)
-
-        return cls(project_name, credentials)
-
+        return cls(project_name)

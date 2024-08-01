@@ -18,7 +18,7 @@ import logging
 from django.conf import settings
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
 
@@ -74,7 +74,7 @@ class BigQueryGcsPathSupport(BigQuerySupport):
             )
         )
 
-        if 'status' in response and response['status'] == 'TABLE_MADE':
+        if response.get('status', None) == 'TABLE_MADE':
             if paths:
                 rows = []
                 for gdc_file_id in paths:

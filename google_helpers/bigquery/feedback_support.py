@@ -18,7 +18,7 @@ import logging
 from django.conf import settings
 from google_helpers.bigquery.bq_support import BigQuerySupport
 
-logger = logging.getLogger('main_logger')
+logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
 
@@ -26,7 +26,7 @@ MAX_INSERT = settings.MAX_BQ_INSERT
 class BigQueryFeedbackSupport(BigQuerySupport):
 
     def __init__(self):
-        super(BigQueryFeedbackSupport, self).__init__(settings.BIGQUERY_DATA_PROJECT_ID,
+        super(BigQueryFeedbackSupport, self).__init__(settings.BIGQUERY_PROJECT_ID,
                                                      settings.BIGQUERY_FEEDBACK_DATASET,
                                                      settings.BIGQUERY_FEEDBACK_TABLE)
 
