@@ -193,7 +193,7 @@ class Cohort(models.Model):
 
         for fg in filter_groups:
             filters = fg.filter_set.all().get_filter_set_array()
-            group_filters = {x['name']: {'values': [attr_dvals.get(x['id'], {}).get(y, y) for y in x['values']], 'op': x['op']} for x in filters}
+            group_filters = {x['name']: x['values'] for x in filters}
 
             filter_sets.append(BigQuerySupport.build_bq_where_clause(
                 group_filters, join_with_space=True, field_prefix=prefix, encapsulated=False,
