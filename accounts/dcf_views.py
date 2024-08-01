@@ -262,7 +262,7 @@ def oauth2_callback(request):
         #
 
         try:
-            resp = dcf.get(settings.DCF_KEY_URL)
+            resp = dcf.get(None)
         except Exception as e:
             logger.error("[ERROR] Could not retrieve key from DCF")
             logger.exception(e)

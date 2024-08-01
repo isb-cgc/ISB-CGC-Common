@@ -42,8 +42,8 @@ from .dcf_support import get_stored_dcf_token, \
 
 logger = logging.getLogger(__name__)
 
-LOG_NAME_ERA_LOGIN_VIEW = settings.LOG_NAME_ERA_LOGIN_VIEW
-IDP = settings.IDP
+LOG_NAME_ERA_LOGIN_VIEW = None
+IDP = None
 
 
 class SAModes(object):
