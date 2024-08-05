@@ -481,5 +481,5 @@ class BigQuerySupport(BigQueryABC):
                               type_schema=None, encapsulated=True, continuous_numerics=None, case_insens=True,
                               value_op='OR'):
 
-        build_bq_clause(filters, join_with_space, comb_with, field_prefix, type_schema, encapsulated,
+        return build_bq_clause(filters, join_with_space, comb_with, field_prefix, type_schema, encapsulated,
                         continuous_numerics, case_insens, value_op)
