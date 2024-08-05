@@ -56,11 +56,11 @@ from json import loads as json_loads
 
 logger = logging.getLogger(__name__)
 
-DCF_AUTH_URL = settings.DCF_AUTH_URL
-DCF_TOKEN_URL = settings.DCF_TOKEN_URL
-DCF_REVOKE_URL = settings.DCF_REVOKE_URL
-DCF_GOOGLE_URL = settings.DCF_GOOGLE_URL
-DCF_LOGOUT_URL = settings.DCF_LOGOUT_URL
+DCF_AUTH_URL = None
+DCF_TOKEN_URL = None
+DCF_REVOKE_URL = None
+DCF_GOOGLE_URL = None
+DCF_LOGOUT_URL = None
 
 
 @login_required
