@@ -37,11 +37,11 @@ from json import loads as json_loads, dumps as json_dumps
 
 logger = logging.getLogger(__name__)
 
-DCF_TOKEN_URL = settings.DCF_TOKEN_URL
-DCF_GOOGLE_URL = settings.DCF_GOOGLE_URL
-DCF_URL_URL = settings.DCF_URL_URL
-DCF_REVOKE_URL = settings.DCF_REVOKE_URL
-DCF_REFRESH_LOG_NAME = settings.DCF_REFRESH_LOG_NAME
+DCF_TOKEN_URL = None
+DCF_GOOGLE_URL = None
+DCF_URL_URL = None
+DCF_REVOKE_URL = None
+DCF_REFRESH_LOG_NAME = None
 
 class DCFCommFailure(Exception):
     """Thrown if we have problems communicating with DCF """
@@ -832,7 +832,7 @@ def calc_expiration_time(returned_expiration_str):
         exp_secs = float(returned_expiration_str)
         returned_expiration_time = pytz.utc.localize(datetime.datetime.utcfromtimestamp(exp_secs))
 
-    login_expiration_seconds = settings.DCF_LOGIN_EXPIRATION_SECONDS
+    login_expiration_seconds = None
     calc_expiration_time = pytz.utc.localize(datetime.datetime.utcnow() + datetime.timedelta(
         seconds=login_expiration_seconds))
     if returned_expiration_time:
