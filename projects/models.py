@@ -139,6 +139,10 @@ class ProgramManager(models.Manager):
     def get_queryset(self):
         return ProgramQuerySet(self.model, using=self._db)
 
+    def name_id_map(self):
+        id_map = {x.name: x.id for x in self}
+        return id_map
+
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
         q_objects = []
@@ -295,7 +299,7 @@ class Program(models.Model):
         if active is not None:
             params['active'] = active
 
-        results = cls.objects.filter(**params)
+        results = cls.objects.prefetch_related('project_set').filter(**params)
 
         return results
 
@@ -729,9 +733,11 @@ class DataSource(models.Model):
             self.name,
             self.version.name,
             self.SOURCE_TYPE_MAP[self.source_type],
-            datasettypes.all()
+            self.datasettypes.all()
         )
 
+    def __repr__(self):
+        return self.__str__()
 
     @staticmethod
     def get_facet_type(attr):
@@ -739,12 +745,6 @@ class DataSource(models.Model):
             return DataSource.QUERY
         else:
             return DataSource.TERMS
-
-    def __str__(self):
-        return self.name
-
-    def __repr__(self):
-        return self.name
 
     class Meta(object):
         unique_together = (("name", "version", "source_type"),)

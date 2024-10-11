@@ -61,6 +61,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 
     try:
         if cohort_id:
+            # Ignore inc_filters if we have a cohort_id, because this allows us to get a proper
+            # format for use with our Solr methods
             inc_filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts()
         start = time.time()
         prog_filters = {}
@@ -68,9 +70,9 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         if inc_filters:
             for key in inc_filters:
                 # The number proceeding the attribute name is either its ID, or, the ID of the program it's from
-                # Which is determined by the presence of the cohort_id variable
+                # If no program_id or cohort_id is provided, we assume the number is the program_id which sourced this attribute
                 prog = int(key.split(":")[0])
-                if not cohort_id:
+                if not cohort_id and program_id:
                     prog = program_id
 
                 if prog not in prog_filters:

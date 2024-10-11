@@ -48,7 +48,6 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
         if not filters:
             filters = cohort.get_filters_as_dict_simple()[0]
 
-
         totals = ["case_barcode"]
 
         for prog in filters:
@@ -119,9 +118,11 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
 
     if source_id:
         source = Cohort.objects.get(id=source_id)
+        if filters:
+            logger.warning("[WARNING] Saw attempt to edit a cohort's filters--this is no longer allowed!")
 
-    if source and not filters or (len(filters) <= 0):
-        # If we're only changing the name or desc, just edit the cohort and return
+    if source and (name or desc):
+        # If we're only editing, just edit the cohort and return
         if name:
             source.name = name
         if desc:
@@ -156,7 +157,6 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
     version = version or CgcDataVersion.objects.get(active=True)
     grouping = Filter_Group.objects.create(resulting_cohort=cohort, operator=Filter_Group.AND, data_version=version)
     progs = Program.objects.filter(id__in=[int(x) for x in filters.keys()], is_public=1, active=1)
-    print(filters)
     for prog in progs:
         prog_filters = filters[prog.id]
         attrs = Attribute.objects.filter(id__in=[int(x) for x in prog_filters.keys()])
@@ -187,20 +187,29 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
     return {'cohort_id': cohort.id}
 
 
-def get_cohort_cases(cohort_id):
+def get_cohort_cases(cohort_id=0, filters=None, as_dict=False):
     try:
-        result = count_public_metadata_solr(None,cohort_id,None,None,fields=["case_barcode"], with_counts=False,with_records=True,limit=64000)
-        ids = []
-        for prog in result['programs']:
-            program = Program.objects.get(id=prog)
-            set = result['programs'][prog]['sets']['Case']
+        result = count_public_metadata_solr(None,cohort_id,filters,None,fields=["case_barcode"], with_counts=False,with_records=True)
+        ids = [] if not as_dict else {}
+        progs = Program.objects.filter(id__in=result['programs'].keys())
+        for program in progs:
+            set = result['programs'][program.id]['sets']['Case']
+            if as_dict and program.name not in ids:
+                ids[program.name] = {'case_count': 0, 'sample_count': 0, 'cases': [], 'samples': []}
             for src in set:
                 for case in set[src]['docs']:
-                    ids.append({
-                        'program': program.name,
-                        'case_barcode': case['case_barcode']
-                    })
-
+                    if as_dict:
+                        ids[program.name]['cases'].append(case['case_barcode'])
+                        if 'sample_barcode' in case:
+                            ids[program.name]['samples'].append(case['sample_barcode'])
+                    else:
+                        ids.append({
+                            'program': program.name,
+                            'case_barcode': case['case_barcode']
+                        })
+            if as_dict:
+                ids[program.name]['case_count'] = len(ids[program.name]['cases'])
+                ids[program.name]['sample_count'] = len(ids[program.name]['samples'])
     except Exception as e:
         logger.error("[ERROR] While trying to fetch cohort case list:")
         logger.exception(e)
