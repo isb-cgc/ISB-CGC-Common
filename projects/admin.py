@@ -20,6 +20,7 @@ from projects.models import Project, Program, DataSource, DataVersion, Attribute
     Attribute_Display_Values, Attribute_Ranges, DataNode, DataSourceJoin
 
 
+@admin.register(Program)
 class Program_Admin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -30,6 +31,7 @@ class Program_Admin(admin.ModelAdmin):
     exclude = ('shared',)
 
 
+@admin.register(Project)
 class Project_Admin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -41,6 +43,7 @@ class Project_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(DataSource)
 class DataSource_Admin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -49,6 +52,7 @@ class DataSource_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(DataSourceJoin)
 class DataSourceJoin_Admin(admin.ModelAdmin):
     list_display = (
         'from_src_col',
@@ -58,6 +62,7 @@ class DataSourceJoin_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(DataNode)
 class DataNode_Admin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -67,6 +72,7 @@ class DataNode_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(DataVersion)
 class DataVersion_Admin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -76,6 +82,7 @@ class DataVersion_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(Attribute)
 class Attribute_Admin(admin.ModelAdmin):
     list_display = (
         'name',
@@ -90,6 +97,7 @@ class Attribute_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(Attribute_Display_Values)
 class Attribute_Display_Values_Admin(admin.ModelAdmin):
     list_display = (
         'attribute',
@@ -98,6 +106,7 @@ class Attribute_Display_Values_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(Attribute_Tooltips)
 class Attribute_Tooltips_Admin(admin.ModelAdmin):
     list_display = (
         'attribute',
@@ -106,6 +115,7 @@ class Attribute_Tooltips_Admin(admin.ModelAdmin):
     )
 
 
+@admin.register(Attribute_Ranges)
 class Attribute_Ranges_Admin(admin.ModelAdmin):
     list_display = (
         'type',
@@ -120,13 +130,3 @@ class Attribute_Ranges_Admin(admin.ModelAdmin):
         'label'
     )
 
-admin.site.register(Program, Program_Admin)
-admin.site.register(Project, Project_Admin)
-admin.site.register(DataSource, DataSource_Admin)
-admin.site.register(DataSourceJoin, DataSourceJoin_Admin)
-admin.site.register(DataVersion, DataVersion_Admin)
-admin.site.register(Attribute, Attribute_Admin)
-admin.site.register(Attribute_Display_Values, Attribute_Display_Values_Admin)
-admin.site.register(Attribute_Ranges, Attribute_Ranges_Admin)
-admin.site.register(Attribute_Tooltips, Attribute_Tooltips_Admin)
-admin.site.register(DataNode, DataNode_Admin)
