@@ -81,6 +81,9 @@ def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with
     mutation_filters = {}
     other_filters = {}
 
+    if param_suffix:
+        param_suffix = re.sub(r'[^A-Za-z0-9_]', "_", param_suffix)
+
     # Split mutation filters into their own set, because of repeat use of the same attrs
     for attr in filters:
         if 'MUT:' in attr:

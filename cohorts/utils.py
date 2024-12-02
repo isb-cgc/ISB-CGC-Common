@@ -23,7 +23,7 @@ from builtins import object
 
 from .models import Cohort, Cohort_Perms, Filter, Cohort_Comments, Filter_Group
 from .metadata_helpers import *
-from .metadata_counting import count_public_metadata_solr
+from .metadata_counting import count_public_metadata_solr, get_bq_metadata
 from projects.models import Program, CgcDataVersion
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from django.contrib.auth.models import User
@@ -189,7 +189,13 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
 
 def get_cohort_cases(cohort_id=0, filters=None, as_dict=False):
     try:
-        result = count_public_metadata_solr(None,cohort_id,filters,None,fields=["case_barcode"], with_counts=False,with_records=True)
+        if cohort_id:
+            # Ignore filters if we have a cohort_id, because this allows us to get a proper
+            # format for use with our BQ methods
+            filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts()
+
+        result = get_bq_metadata(filters,fields=["program_name", "case_barcode"], group_by=["program_name", "case_barcode"], order_by=["program_name", "case_barcode"])
+        print(result)
         ids = [] if not as_dict else {}
         progs = Program.objects.filter(id__in=result['programs'].keys())
         for program in progs:
