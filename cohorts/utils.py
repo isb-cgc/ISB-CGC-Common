@@ -67,7 +67,6 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
                     stats[total] = 0
                     stats['programs'][prog][total] = 0
 
-
     except Exception as e:
         logger.error("[ERROR] While fetching cohort stats:")
         logger.exception(e)
@@ -194,32 +193,91 @@ def get_cohort_cases(cohort_id=0, filters=None, as_dict=False):
             # format for use with our BQ methods
             filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts()
 
-        result = get_bq_metadata(filters,fields=["program_name", "case_barcode"], group_by=["program_name", "case_barcode"], order_by=["program_name", "case_barcode"])
-        print(result)
-        ids = [] if not as_dict else {}
-        progs = Program.objects.filter(id__in=result['programs'].keys())
-        for program in progs:
-            set = result['programs'][program.id]['sets']['Case']
-            if as_dict and program.name not in ids:
-                ids[program.name] = {'case_count': 0, 'sample_count': 0, 'cases': [], 'samples': []}
-            for src in set:
-                for case in set[src]['docs']:
-                    if as_dict:
-                        ids[program.name]['cases'].append(case['case_barcode'])
-                        if 'sample_barcode' in case:
-                            ids[program.name]['samples'].append(case['sample_barcode'])
-                    else:
-                        ids.append({
-                            'program': program.name,
-                            'case_barcode': case['case_barcode']
-                        })
+        result = get_bq_metadata(filters, fields=["program_name", "case_barcode"],
+                                 group_by=["program_name", "case_barcode"], order_by=["program_name", "case_barcode"])
+        cohort_cases = [] if not as_dict else {}
+
+        prog_col = -1
+        case_col = -1
+        for idx, col in enumerate(result['schema']):
+            if col.name == 'program_name':
+                prog_col = idx
+            if col.name == 'case_barcode':
+                case_col = idx
+
+        for row in result['rows']:
+            prog_name = row[prog_col]
+            case = row[case_col]
+            if as_dict and prog_name not in cohort_cases:
+                cohort_cases[prog_name] = {'case_count': 0, 'cases': []}
+
             if as_dict:
-                ids[program.name]['case_count'] = len(ids[program.name]['cases'])
-                ids[program.name]['sample_count'] = len(ids[program.name]['samples'])
+                cohort_cases[prog_name]['cases'].append(case)
+            else:
+                cohort_cases.append({
+                    'program': prog_name,
+                    'case_barcode': case
+                })
+            if as_dict:
+                cohort_cases[prog_name]['case_count'] += 1
     except Exception as e:
         logger.error("[ERROR] While trying to fetch cohort case list:")
         logger.exception(e)
 
-    return ids
+    return cohort_cases
 
+
+def get_cohort_files(cohort_id=0, filters=None, offset=None, page=None, fetch_count=5000):
+    try:
+        if cohort_id:
+            # Ignore filters if we have a cohort_id, because this allows us to get a proper
+            # format for use with our BQ methods
+            filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts()
+
+        fields = [
+            "case_barcode", "case_node_id", "sample_barcode", "sample_node_id", "program_name", "project_short_name_gdc",
+            "project_short_name_pdc", "node", "file_node_id", "access", "acl", "data_format", "data_type", "data_category",
+            "platform", "experimental_strategy", "file_size",  "file_name", "file_name_key", "index_file_id",
+            "index_file_name_key", "build"
+        ]
+        result = get_bq_metadata(filters, fields=fields,
+            order_by=["program_name", "case_barcode", "sample_barcode", "node"],
+            field_data_type=[DataSetType.FILE_DATA], paginated=True
+         )
+
+        cohort_files = []
+        schema_map = {}
+
+        for idx, col in enumerate(result['schema']):
+            if col.name == 'program_name':
+                prog_col = idx
+            if col.name == 'case_barcode':
+                case_col = idx
+            schema_map[idx] = col.name
+
+        for row in result['rows']:
+            prog_name = row[prog_col]
+            case = row[case_col]
+            if as_dict and prog_name not in cohort_files:
+                cohort_files[prog_name] = {'case_count': 0, 'cases': {}}
+            if as_dict and case not in cohort_files[prog_name]['cases']:
+                cohort_files[prog_name]['cases'][case] = {
+                    'files': [],
+                    'file_count': 0
+                }
+            case_file = {schema_map[x]: row[x] for x in row}
+            if as_dict:
+                cohort_files[prog_name]['cases'][case]['files'].append(case_file)
+                cohort_files[prog_name]['cases'][case]['file_count'] += 1
+            else:
+                cohort_files.append(case_file)
+        if as_dict:
+            for prog in cohort_files:
+                cohort_files[prog]['case_count'] = len(cohort_files[prog]['cases'])
+
+    except Exception as e:
+        logger.error("[ERROR] While trying to fetch cohort case list:")
+        logger.exception(e)
+
+    return cohort_files
 
