@@ -151,10 +151,16 @@ def make_id(length):
     return ''.join(random.sample(string.ascii_lowercase, length))
 
 
-def hash_program_attrs(prog_name,source_type,for_faceting,data_type_list=None):
+def hash_program_attrs(prog_name, source_type, for_faceting, data_type_list=None):
     if not data_type_list:
         data_type_list = [DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA,DataSetType.MUTATION_DATA]
     return str(hash("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list))))
+
+
+def hash_source_attr(attr_list, source_names):
+    attrs = ";".join(attr_list)
+    source_names = "-".join(source_names)
+    return str(hash("{}:{}".format(attrs, source_names)))
 
 
 # Database connection
