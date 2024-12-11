@@ -23,6 +23,7 @@ from time import sleep
 
 import django
 import re
+from django.conf import settings
 from .metadata_helpers import *
 from metadata_utils import *
 from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Display_Values, DataSourceJoin
@@ -317,7 +318,7 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
 #     'params': <BigQuery API v2 compatible parameter set> }
 def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sources_and_attrs=None, group_by=None, limit=0,
                     offset=0, order_by=None, order_asc=True, paginated=False, no_submit=False, field_data_type=None,
-                    search_child_records_by=None, static_fields=None, reformatted_fields=None,
+                    search_child_records_by=None, static_fields=None, reformatted_fields=None, join_type="",
                     with_v2_api=False, comb_mut_filters='OR', cohort_id=None, program_id=None):
 
     logger.info("[STATUS] Entering BQ metadata counter")
@@ -330,20 +331,25 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
         start = time.time()
         cohort = Cohort.objects.get(id=cohort_id) if cohort_id else None
         programs = Program.objects.filter(id=program_id) if program_id else None
+        aggregate_filters = {}
         prog_filters = {}
         progs = []
+        filter_attr_list = []
         filters = {}
         # Divide our filters into 'mutation' and 'non-mutation' sets per program
         if inc_filters:
             for key in inc_filters:
-                # The number proceeding the attribute name is either its ID, or, the ID of the program it's from
+                # Attribute names can be preceeded by a number or *.
+                # A number proceeding the attribute name is either its ID, or, the ID of the program it's from
                 # If no program_id or cohort_id is provided, we assume the number is the program_id which sourced this
                 # attribute
-                prog = int(key.split(":")[0])
+                # * preceeding the attribute name implies this is a program agnostic filter meant to be applied over
+                # the whole dataset
+                prog = key.split(":")[0]
+                prog = int(prog) if prog != "*" else prog
                 if not cohort_id and program_id:
                     prog = program_id
 
-                progs.append(prog)
                 if 'MUT:' in key:
                     # if not prog_filters[prog]['mutation_filters']:
                     #     prog_filters[prog]['mutation_filters'] = {}
@@ -354,14 +360,20 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
                     logger.info("[STATUS] Mutation filters are currently unsupported.")
                 else:
                     attr_fltr_name = key.split(':')[-1]
-                    if attr_fltr_name not in prog_filters:
-                        prog_filters[attr_fltr_name] = {}
-                    if prog not in prog_filters[attr_fltr_name]:
-                        prog_filters[attr_fltr_name][prog] = {
-                            'filters': None
-                        }
-                    prog_filters[attr_fltr_name][prog]['filters'] = inc_filters[key]
+                    if prog == "*":
+                        aggregate_filters[attr_fltr_name] = inc_filters[key]
+                    else:
+                        progs.append(prog)
+                        if attr_fltr_name not in prog_filters:
+                            prog_filters[attr_fltr_name] = {}
+                        if prog not in prog_filters[attr_fltr_name]:
+                            prog_filters[attr_fltr_name][prog] = {
+                                'filters': None
+                            }
+                        prog_filters[attr_fltr_name][prog]['filters'] = inc_filters[key]
+                    filter_attr_list.append(attr_fltr_name)
 
+        filter_attr_list = set(filter_attr_list)
         versions = data_versions or DataVersion.objects.filter(active=True)
         programs = Program.objects.filter(active=1, is_public=1, id__in=set(progs)) if not program_id else programs
 
@@ -387,8 +399,6 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
 
         build_bq_flt_and_params = build_bq_filter_and_params_ if with_v2_api else BigQuerySupport.build_bq_filter_and_params
 
-        filter_attr_by_bq = {}
-        field_attr_by_bq = {}
         child_record_search_field = ""
 
         query_base = """
@@ -430,10 +440,8 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
             GROUP BY {search_by}  
         """
 
-        join_type = ""
-
         join_clause_base = """
-            {join_type}JOIN `{filter_table}` {filter_alias}
+            {join_type} JOIN `{filter_table}` {filter_alias}
             ON {field_alias}.{field_join_id} = {filter_alias}.{filter_join_id}
         """
 
@@ -465,7 +473,7 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
             group_by = set(group_by)
 
         if not sources_and_attrs:
-            filter_attr_by_bq = _build_attr_by_source(list(prog_filters.keys()), versions, DataSource.BIGQUERY, attr_data_filters)
+            filter_attr_by_bq = _build_attr_by_source(filter_attr_list, versions, DataSource.BIGQUERY, attr_data_filters)
             field_attr_by_bq = _build_attr_by_source(fields, versions, DataSource.BIGQUERY, attr_data_fields)
         else:
             filter_attr_by_bq = sources_and_attrs['filters']
@@ -479,7 +487,7 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
         # If search_child_records_by isn't None--meaning we want all members of a study or series
         # rather than just the instances--our query is a set of intersections to ensure we find the right
         # series or study
-        may_need_intersect = search_child_records_by and bool(len(filter_attr_names) > 1)
+        may_need_intersect = search_child_records_by and bool(len(filter_attr_list) > 1)
 
         table_info = {
             x: {
@@ -520,28 +528,28 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
         if group_by:
             new_groups = []
             for grouping in group_by:
-                group_table = None
+                group_tables = []
                 if sources_and_attrs:
                     source_set = list(sources_and_attrs['filters']['sources'].keys())
                     source_set.extend(list(sources_and_attrs['fields']['sources'].keys()))
-                    group_table = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(
+                    group_tables = Attribute.objects.get(active=True, name=grouping).data_sources.all().filter(
                         id__in=set(source_set)
-                    ).distinct().first()
+                    ).distinct().values_list('name', flat=True)
                 else:
                     for id, source in attr_data_fields['sources'].items():
                         if grouping in source['list']:
-                            group_table = source['name']
-                            break
-                if not group_table:
+                            group_tables.append(source['name'])
+                if not len(group_tables):
                     logger.warning(
                         "[WARNING] Fields `{}` not found in any datasource! It will be dropped.".format(grouping))
                 else:
-                    new_groups.append("{}.{}".format(table_info[group_table]['alias'], grouping))
+                    new_groups.extend(["{}.{}".format(table_info[x]['alias'], grouping) for x in group_tables])
             group_by = new_groups
 
         # Filters are program-reliant, and in order to properly group then in SQL format we need to
         # produce the whole set, then properly join them once ALL filter strings are made
         prog_filter_clauses = {}
+        aggregate_filter_clauses = []
         # We join case tables to corresponding ancillary tables, and union between case tables
         for case_table in case_tables:
             tables_in_query = []
@@ -553,6 +561,7 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
                 child_record_search_field = search_child_records_by
             if case_table in filter_attr_by_bq['sources']:
                 filter_set = [x for x in prog_filters if x in filter_attr_by_bq['sources'][case_table]['list']]
+                filter_set.extend([x for x in aggregate_filters if x in filter_attr_by_bq['sources'][case_table]['list']])
                 non_related_filters = filter_set
                 if len(filter_set):
                     filter_clauses[case_table] = {}
@@ -591,14 +600,18 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
                                 params.extend(bq_filter['parameters'])
                     else:
                         prog_filter_sets = {}
+                        agg_filter_set = {}
                         for fltr_attr in filter_set:
-                            filter = prog_filters[fltr_attr]
-                            for prog in filter:
-                                if prog not in prog_filter_sets:
-                                    prog_filter_sets[prog] = {
-                                        'program_name': prog_id_to_name[prog]
-                                    }
-                                prog_filter_sets[prog][fltr_attr] = filter[prog]['filters']
+                            if fltr_attr in aggregate_filters:
+                                agg_filter_set[fltr_attr] = aggregate_filters[fltr_attr]
+                            else:
+                                filter = prog_filters[fltr_attr]
+                                for prog in filter:
+                                    if prog not in prog_filter_sets:
+                                        prog_filter_sets[prog] = {
+                                            'program_name': prog_id_to_name[prog]
+                                        }
+                                    prog_filter_sets[prog][fltr_attr] = filter[prog]['filters']
                         prog_params = []
                         for prog in prog_filter_sets:
                             if prog not in prog_filter_clauses:
@@ -611,6 +624,14 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
                             prog_filter_clauses[prog].append(prog_fltr_and_params['filter_string'])
                             prog_params.extend(prog_fltr_and_params['parameters'])
                         filter_clauses[case_table]['parameters'] = prog_params
+                        if len(agg_filter_set.keys()):
+                            agg_fltr_and_params = build_bq_flt_and_params(agg_filter_set,
+                                param_suffix="all_{}".format(str(param_sfx)),
+                                field_prefix=table_info[case_table]['alias'], case_insens=True,
+                                type_schema=TYPE_SCHEMA
+                            )
+                            aggregate_filter_clauses.append(agg_fltr_and_params['filter_string'])
+                            filter_clauses[case_table]['parameters'].extend(agg_fltr_and_params['parameters'])
                     param_sfx += 1
                     # If we weren't running on intersected sets, append them here as simple filters
                     if filter_clauses.get(case_table, None):
@@ -621,15 +642,21 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
                     if filter_bqtable in field_clauses and len(field_clauses[filter_bqtable]):
                         fields.append(field_clauses[filter_bqtable])
                     filter_set = [x for x in prog_filters if x in filter_attr_by_bq['sources'][filter_bqtable]['list']]
+                    filter_set.extend(
+                        [x for x in aggregate_filters if x in filter_attr_by_bq['sources'][filter_bqtable]['list']])
                     if len(filter_set):
                         filter_clauses[filter_bqtable] = {}
                         prog_filter_sets = {}
+                        agg_filter_set = {}
                         for fltr_attr in filter_set:
-                            filter = prog_filters[fltr_attr]
-                            for prog in filter:
-                                if prog not in prog_filter_sets:
-                                    prog_filter_sets[prog] = {}
-                                prog_filter_sets[prog][fltr_attr] = filter[prog]['filters']
+                            if fltr_attr in aggregate_filters:
+                                agg_filter_set[fltr_attr] = aggregate_filters[fltr_attr]
+                            else:
+                                filter = prog_filters[fltr_attr]
+                                for prog in filter:
+                                    if prog not in prog_filter_sets:
+                                        prog_filter_sets[prog] = {}
+                                    prog_filter_sets[prog][fltr_attr] = filter[prog]['filters']
                         prog_params = []
                         for prog in prog_filter_sets:
                             prog_fltr_and_params = build_bq_flt_and_params(
@@ -640,14 +667,20 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
                             prog_filter_clauses[prog].append(prog_fltr_and_params['filter_string'])
                             prog_params.extend(prog_fltr_and_params['parameters'])
                         filter_clauses[filter_bqtable]['parameters'] = prog_params
-
+                        if len(agg_filter_set.keys()):
+                            agg_fltr_and_params = build_bq_flt_and_params(agg_filter_set,
+                                param_suffix="all_{}".format(str(param_sfx)),
+                                field_prefix=table_info[filter_bqtable]['alias'], case_insens=True,
+                                type_schema=TYPE_SCHEMA
+                            )
+                            aggregate_filter_clauses.append(agg_fltr_and_params['filter_string'])
+                            filter_clauses[filter_bqtable]['parameters'].extend(agg_fltr_and_params['parameters'])
                         param_sfx += 1
                         source_join = DataSourceJoin.objects.get(
                             from_src__in=[table_info[filter_bqtable]['id'], table_info[case_table]['id']],
                             to_src__in=[table_info[filter_bqtable]['id'], table_info[case_table]['id']]
                         )
 
-                        join_type = ""
                         joins.append(join_clause_base.format(
                             join_type=join_type,
                             filter_alias=table_info[filter_bqtable]['alias'],
@@ -691,9 +724,16 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
 
             where_clause = ""
             if len(inc_filters):
+                prog_filters = []
                 for prog, prog_clauses in prog_filter_clauses.items():
-                    query_filters.append("({})".format(") AND (".join(prog_clauses)))
-                where_clause = "WHERE ({})".format(") OR (".join(query_filters))
+                    prog_filters.append("({})".format(") AND (".join(prog_clauses)))
+                full_filters = []
+                if len(aggregate_filters.keys()):
+                    full_filters.append("({})".format(") AND (".join(aggregate_filter_clauses)))
+                if len(prog_filters):
+                    full_filters.append("({})".format(") OR (".join(prog_filters)))
+                full_clause = "({})".format(") AND (".join(full_filters))
+                where_clause = "WHERE {}".format(full_clause)
 
             for_union.append(query_base.format(
                 field_clause=",".join(fields),
@@ -719,7 +759,7 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
         """ + """UNION DISTINCT""".join(for_union)
 
         settings.DEBUG and logger.debug("[STATUS] get_bq_metadata: {}".format(full_query_str))
-        print(params)
+        settings.DEBUG and logger.debug("[STATUS] {}".format(params))
 
         if no_submit:
             results = {"sql_string": full_query_str, "params": params}
@@ -842,3 +882,92 @@ def public_metadata_counts(req_filters, cohort_id, user, program_id, limit=None,
     return counts_and_total
 
 '''------------------------------------- End metadata counting methods -------------------------------------'''
+
+
+def get_full_case_metadata(ids, source_type, source):
+    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
+
+    try:
+        results = {
+            'total_found': 0
+        }
+
+        id_type = "case_node_id" if source_type == "node" else "case_barcode"
+        filter_type = "*" if source_type == "node" else str(Program.objects.get(name=source).id)
+
+        filters = {
+            "{}:{}".format(filter_type, id_type): ids
+        }
+
+        if source_type == "node":
+            filters["{}:{}".format(filter_type, source_type)] = source
+
+        # TODO: This should pull the full attr sets
+
+        result = get_bq_metadata(filters, [
+            "case_barcode", "case_node_id", "sample_barcode", "sample_node_id", "program_name", "project_short_name_gdc",
+            "project_short_name_pdc", "node", "data_format", "data_type", "data_category", "access", "platform",
+            "experimental_strategy", "build", "disease_type_pdc", "disease_type_gdc", "primary_site_pdc", "primary_site_gdc",
+            "gender_gdc", "gender_pdc", "vital_status", "BodyPartExamined", "tcia_tumorLocation", "Modality"
+        ], field_data_type=[DataSetType.CLINICAL_DATA, DataSetType.FILE_TYPE_DATA], join_type="LEFT")
+
+        case_idx = {}
+        image_idx = {}
+        file_avail_idx = {}
+        sample_idx = {}
+        id_col = -1
+        for idx, col in enumerate(result['schema']):
+            idx_dict = case_idx
+            if col.name in ["BodyPartExamined", "tcia_tumorLocation", "Modality"]:
+                idx_dict = image_idx
+            elif col.name in ["node", "data_format", "data_type", "data_category", "access", "platform", "experimental_strategy", "build"]:
+                idx_dict = file_avail_idx
+            elif col.name in ["sample_barcode", "sample_node_id"]:
+                idx_dict = sample_idx
+            elif col.name == id_type:
+                id_col = idx
+            idx_dict[idx] = col.name
+
+        cases = {}
+        for row in result['rows']:
+            case_id = row[id_col]
+            if case_id not in cases:
+                cases[case_id] = { id_type: case_id, "clinical_data": {}, "image_data": {}, "data_details": {}, "samples": {} }
+            case = cases[case_id]
+            for idx, val in enumerate(row):
+                data_store = case['clinical_data']
+                col_name = case_idx
+                if idx in image_idx:
+                    data_store = case['image_data']
+                    col_name = image_idx
+                elif idx in file_avail_idx:
+                    col_name = file_avail_idx
+                    data_store = case['data_details']
+                elif idx in sample_idx:
+                    col_name = sample_idx
+                    data_store = case['samples']
+                val = val.split("|") if isinstance(val, str) and re.search(r'\|', val) else val
+                if col_name[idx] not in data_store:
+                    data_store[col_name[idx]] = val
+                else:
+                    if isinstance(data_store[col_name[idx]], list):
+                        if isinstance(val, list):
+                            data_store[col_name[idx]].extend(val)
+                        else:
+                            data_store[col_name[idx]].append(val)
+                        data_store[col_name[idx]] = list(set(data_store[col_name[idx]]))
+                    elif data_store[col_name[idx]] != val:
+                        data_store[col_name[idx]] = [data_store[col_name[idx]], val]
+
+        not_found = [x for x in ids if x not in cases]
+
+        if len(not_found):
+            results['not_found'] = not_found
+        results['total_found'] = len(list(cases.keys()))
+        results['cases'] = [case for key, case in cases.items()]
+
+        return results
+
+    except Exception as e:
+        logger.error("[ERROR] While fetching case metadata:")
+        logger.exception(e)

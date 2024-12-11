@@ -33,6 +33,7 @@ from .utils import build_bq_filter_and_params as build_bq_flt_prm, build_bq_wher
 logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
+MAX_RESULTS = settings.MAX_FILE_LIST_REQUEST
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
 
 
@@ -249,6 +250,8 @@ class BigQuerySupport(BigQueryABC):
         # Parse the final disposition
         if job_is_done_.done():
             if query_job.errors or query_job.error_result:
+                print(str(job_is_done_.error_result))
+                print(str(job_is_done_.errors))
                 job_is_done_.error_result and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.error_result)))
                 job_is_done_.errors and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.errors)))
                 logger.error("[ERROR] Error'd out query: {}".format(query))
@@ -285,7 +288,7 @@ class BigQuerySupport(BigQueryABC):
             'rows': []
         }
 
-        fetch_size = fetch_size or 5000
+        fetch_size = fetch_size or MAX_RESULTS
         not_done = True
         next_page_token = None
 
@@ -295,7 +298,7 @@ class BigQuerySupport(BigQueryABC):
             for x in row_iter:
                 result['rows'].append(x)
             next_page_token = row_iter.next_page_token
-            not_done = next_page_token is not None and not paginated
+            not_done = next_page_token is not None and len(result['rows']) < MAX_RESULTS and not paginated
 
         if paginated:
             result['next_page_token'] = next_page_token
