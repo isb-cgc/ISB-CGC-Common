@@ -23,7 +23,7 @@ from builtins import object
 
 from .models import Cohort, Cohort_Perms, Filter, Cohort_Comments, Filter_Group
 from .metadata_helpers import *
-from .metadata_counting import count_public_metadata_solr, get_bq_metadata
+from .metadata_counting import count_public_metadata_solr, get_bq_metadata, get_full_case_metadata
 from projects.models import Program, CgcDataVersion
 from google_helpers.bigquery.cohort_support import BigQueryCohortSupport
 from django.contrib.auth.models import User
@@ -227,7 +227,7 @@ def get_cohort_cases(cohort_id=0, filters=None, as_dict=False):
     return cohort_cases
 
 
-def get_cohort_files(cohort_id=0, filters=None, offset=None, page=None, fetch_count=5000):
+def get_cohort_files(cohort_id=0, filters=None, offset=None, page=None, as_dict=False, fetch_count=5000):
     try:
         if cohort_id:
             # Ignore filters if we have a cohort_id, because this allows us to get a proper
@@ -240,9 +240,10 @@ def get_cohort_files(cohort_id=0, filters=None, offset=None, page=None, fetch_co
             "platform", "experimental_strategy", "file_size",  "file_name", "file_name_key", "index_file_id",
             "index_file_name_key", "build"
         ]
+
         result = get_bq_metadata(filters, fields=fields,
             order_by=["program_name", "case_barcode", "sample_barcode", "node"],
-            field_data_type=[DataSetType.FILE_DATA], paginated=True
+            field_data_type=[DataSetType.FILE_DATA], offset=offset, limit=fetch_count
          )
 
         cohort_files = []
@@ -265,7 +266,7 @@ def get_cohort_files(cohort_id=0, filters=None, offset=None, page=None, fetch_co
                     'files': [],
                     'file_count': 0
                 }
-            case_file = {schema_map[x]: row[x] for x in row}
+            case_file = {schema_map[idx]: x for idx, x in enumerate(row)}
             if as_dict:
                 cohort_files[prog_name]['cases'][case]['files'].append(case_file)
                 cohort_files[prog_name]['cases'][case]['file_count'] += 1
