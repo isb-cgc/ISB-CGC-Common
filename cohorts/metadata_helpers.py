@@ -31,7 +31,7 @@ import string
 import time
 from time import sleep
 import re
-from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Tooltips, DataSetType
+from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Tooltips, DataSetType, CgcDataVersion
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
 from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -934,7 +934,7 @@ def get_paths_by_uuid(uuids):
 
     query_base = """
         SELECT file_node_id, file_name_key, index_file_name_key
-        FROM `{bq_project}.{bq_dataset}.{table_name}`
+        FROM `{table_clause}`
         WHERE {where_clause}
     """
 
@@ -942,30 +942,32 @@ def get_paths_by_uuid(uuids):
 
     where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
 
-    tables = [{'table': y.data_table, 'dataset': y.bq_dataset} for x in Program.get_public_programs() for y in x.get_data_tables()]
+    version = CgcDataVersion.objects.filter(active=True)
+    sources = version.get_data_sources(source_type=DataSource.BIGQUERY, data_type=DataSetType.FILE_DATA)
 
     query = """ UNION DISTINCT """.join(
         [query_base.format(
-            bq_project=settings.BIGQUERY_DATA_PROJECT_ID,
-            bq_dataset=table['dataset'],
-            table_name=table['table'].lower(),
+            table_clause=source.name,
             where_clause=where_clause['filter_string']
-        ) for table in tables]
+        ) for source in sources]
     )
 
     results = BigQuerySupport.execute_query_and_fetch_results(query, where_clause['parameters'])
-    
+
     if results:
-        for row in results:
-            item = {
-                'file_node_id': row.get("file_node_id"),
-                'gcs_path': row.get("gcs_path")
-            }
-            if row.get("index_file_path", None) and len(row.get("index_file_path")) > 1:
-                item['index_file_path'] = row.get("index_file_path")
-            
+        col_idx = {}
+        for idx, col in enumerate(results['schema']):
+            if col.name == 'file_name_key':
+                col_idx[idx] = 'file_path'
+            elif col.name == 'index_file_name_key':
+                col_idx[idx] = 'index_file_path'
+            else:
+                col_idx[idx] = col.name
+        for row in results['rows']:
+            item = {}
+            for idx, val in enumerate(row):
+                item[col_idx[idx]] = val if val is not None else "N/A"
             paths.append(item)
-            
-    not_found = [x for x in uuids if x not in [x['file_node_id'] for x in paths]]
+    not_found = [x for x in uuids if x not in set([x['file_node_id'] for x in paths])]
 
     return paths, not_found
