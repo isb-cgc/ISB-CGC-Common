@@ -399,7 +399,7 @@ class DataSetType(models.Model):
 class CgcDataVersionQuerySet(models.QuerySet):
 
     # Return all the data sources corresponding to this queryset
-    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None):
+    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None, data_type=None):
         sources = None
         cgcdvs = self.all()
         source_qs = Q()
@@ -416,6 +416,8 @@ class CgcDataVersionQuerySet(models.QuerySet):
                 sources = sources | versions.get_data_sources()
         if source_type:
             source_qs &= Q(source_type=source_type)
+        if data_type:
+            source_qs &= Q(datasettypes__data_type=data_type)
         if aggregate_level:
             aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             source_qs &= Q(aggregate_level__in=aggregate_level)
@@ -461,7 +463,6 @@ class CgcDataVersion(models.Model):
         versions = self.dataversion_set.filter(active=active).distinct() if active is not None else self.dataversion_set.all().distinct()
 
         return versions.get_data_sources(source_type=source_type, aggregate_level=aggregate_level).distinct()
-
 
     def get_display(self):
         return self.__str__()
