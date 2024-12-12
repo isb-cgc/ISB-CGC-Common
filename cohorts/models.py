@@ -114,6 +114,9 @@ class Cohort(models.Model):
         cohort_filters = Filter.objects.select_related('program').filter(resulting_cohort=self)
         return Program.objects.filter(id__in=cohort_filters.values_list('program__id', flat=True))
 
+    def get_program_names(self):
+        return self.get_programs().values_list('name', flat=True)
+
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     def get_data_sources(self, source_type=DataSource.SOLR, active=None, current=True, aggregate_level=None):
 
@@ -335,7 +338,7 @@ class FilterQuerySet(models.QuerySet):
         q_objs = Q()
         if active_only:
             q_objs = Q(attribute__active=True)
-        for fltr in self.select_related('attribute').filter(q_objs):
+        for fltr in self.select_related('attribute').select_related('program').filter(q_objs):
             flat_dict = fltr.get_filter_flat()
             flat_dict.update({
                 'id': fltr.attribute.id,
@@ -449,8 +452,8 @@ class Filter(models.Model):
 
     def __repr__(self):
         if self.operator not in [self.OR, self.BTW]:
-            return "{ %s: {'op': %s, 'values': %s }" % (self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
-        return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
+            return "{ %s:%s: {'op': %s, 'values': %s }" % (self.program.name, self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
+        return "{ %s }" % ("\"{}:{}\": [{}]".format(self.program.name, self.get_attr_name(), self.value))
 
     def __str__(self):
         return self.__repr__()
