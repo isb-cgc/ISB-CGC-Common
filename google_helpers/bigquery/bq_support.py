@@ -245,15 +245,13 @@ class BigQuerySupport(BigQueryABC):
                     'total_bytes_processed': query_job.total_bytes_processed
                 }
 
-        job_is_done_ = self.await_job_is_done(query_job)
+        query_job = self.await_job_is_done(query_job)
 
         # Parse the final disposition
-        if job_is_done_.done():
+        if query_job.done():
             if query_job.errors or query_job.error_result:
-                print(str(job_is_done_.error_result))
-                print(str(job_is_done_.errors))
-                job_is_done_.error_result and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.error_result)))
-                job_is_done_.errors and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.errors)))
+                query_job.error_result and logger.error("[ERROR] During query job {}: {}".format(job_id, str(query_job.error_result)))
+                query_job.errors and logger.error("[ERROR] During query job {}: {}".format(job_id, str(query_job.errors)))
                 logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
@@ -264,8 +262,8 @@ class BigQuerySupport(BigQueryABC):
                          "If you check job ID {} manually you can wait for it to finish.".format(job_id))
             logger.error("[ERROR] Timed out query: {}".format(query))
 
-        if job_is_done_.timeline and len(job_is_done_.timeline):
-            logger.debug("Elapsed: {}".format(str(job_is_done_.timeline[-1].elapsed_ms)))
+        if query_job.timeline and len(query_job.timeline):
+            logger.debug("Elapsed: {}".format(str(query_job.timeline[-1].elapsed_ms)))
 
         return query_results
 
@@ -401,7 +399,7 @@ class BigQuerySupport(BigQueryABC):
             else:
                 raw_rows = bqs.bq_client.list_rows("{}.{}.{}".format(projectId, datasetId, tableId), max_results=max_rows)
 
-            if raw_rows.total_rows > 0:
+            if raw_rows and raw_rows.total_rows > 0:
                 result = {
                     'rows': [{key: val for key, val in x.items() } for x in raw_rows],
                     'status': 200

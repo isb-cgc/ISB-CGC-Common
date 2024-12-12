@@ -767,7 +767,8 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
             results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
 
         stop = time.time()
-        results['elapsed_time'] = "{}s".format(str(stop-start))
+        if results:
+            results['elapsed_time'] = "{}s".format(str(stop-start))
         logger.info("[STATUS] Exiting BQ metadata counter")
 
     except Exception as e:
@@ -946,18 +947,19 @@ def get_full_case_metadata(ids, source_type, source):
                 elif idx in sample_idx:
                     col_name = sample_idx
                     data_store = case['samples']
-                val = val.split("|") if isinstance(val, str) and re.search(r'\|', val) else val
+                val = val.split("|") if isinstance(val, str) and re.search(r'\|', val) else [val]
                 if col_name[idx] not in data_store:
-                    data_store[col_name[idx]] = val
-                else:
-                    if isinstance(data_store[col_name[idx]], list):
-                        if isinstance(val, list):
-                            data_store[col_name[idx]].extend(val)
-                        else:
-                            data_store[col_name[idx]].append(val)
-                        data_store[col_name[idx]] = list(set(data_store[col_name[idx]]))
-                    elif data_store[col_name[idx]] != val:
-                        data_store[col_name[idx]] = [data_store[col_name[idx]], val]
+                    data_store[col_name[idx]] = []
+                data_store[col_name[idx]].extend(val)
+        for case, case_data in cases.items():
+            for data_type, data in case_data.items():
+                if data_type != id_type:
+                    for col_name, vals in data.items():
+                        data[col_name] = list(set(vals))
+                        if None in data[col_name] and len(data[col_name]) > 1:
+                            data[col_name].remove(None)
+                        if len(data[col_name]) == 1:
+                            data[col_name] = vals[0] if vals[0] is not None else "N/A"
 
         not_found = [x for x in ids if x not in cases]
 
