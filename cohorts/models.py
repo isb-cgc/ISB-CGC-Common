@@ -131,14 +131,15 @@ class Cohort(models.Model):
 
         return sources
 
-    def get_filters_for_counts(self):
+    def get_filters_for_counts(self, no_vals=False):
         filters = {}
         cohort_filters = Filter.objects.select_related('attribute', 'program').filter(resulting_cohort=self)
         for fltr in cohort_filters:
             prog_attr = "{}:{}".format(fltr.program.id, fltr.attribute.name)
             if prog_attr not in filters:
-                filters[prog_attr] = {'values': []}
-            filters[prog_attr]['values'].extend(fltr.value.split(fltr.value_delimiter))
+                filters[prog_attr] = {'values': []} if not no_vals else []
+            vals = filters[prog_attr]['values'] if not no_vals else filters[prog_attr]
+            vals.extend(fltr.value.split(fltr.value_delimiter))
 
         return filters
 
