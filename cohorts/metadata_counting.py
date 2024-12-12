@@ -956,12 +956,10 @@ def get_full_case_metadata(ids, source_type, source):
                 if data_type != id_type:
                     for col_name, vals in data.items():
                         data[col_name] = list(set(vals))
-                        if None in data[col_name]:
+                        if None in data[col_name] and len(data[col_name]) > 1:
                             data[col_name].remove(None)
                         if len(data[col_name]) == 1:
-                            data[col_name] = vals[0]
-                        elif not len(data[col_name]):
-                            data[col_name] = "N/A"
+                            data[col_name] = vals[0] if vals[0] is not None else "N/A"
 
         not_found = [x for x in ids if x not in cases]
 
