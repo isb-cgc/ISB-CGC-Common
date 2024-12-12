@@ -767,7 +767,8 @@ def get_bq_metadata(inc_filters, fields, data_versions=None, data_type=None, sou
             results = BigQuerySupport.execute_query_and_fetch_results(full_query_str, params, paginated=paginated)
 
         stop = time.time()
-        results['elapsed_time'] = "{}s".format(str(stop-start))
+        if results:
+            results['elapsed_time'] = "{}s".format(str(stop-start))
         logger.info("[STATUS] Exiting BQ metadata counter")
 
     except Exception as e:

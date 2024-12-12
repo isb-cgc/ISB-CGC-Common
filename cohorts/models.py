@@ -140,7 +140,6 @@ class Cohort(models.Model):
                 filters[prog_attr] = {'values': []} if not no_vals else []
             vals = filters[prog_attr]['values'] if not no_vals else filters[prog_attr]
             vals.extend(fltr.value.split(fltr.value_delimiter))
-
         return filters
 
     # Returns the set of filters defining this cohort as a dict organized by data source
