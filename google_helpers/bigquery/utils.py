@@ -151,6 +151,7 @@ def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with
             # If the values are arrays we assume the first value in the first array is indicative of all
             # other values (since we don't support multi-typed fields)
             type_check = values[0] if type(values[0]) is not list else values[0][0]
+            type_check = values[0] if type(values[0]) is not list else values[0][0]
             parameter_type = (
                 'STRING' if (
                         type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(
