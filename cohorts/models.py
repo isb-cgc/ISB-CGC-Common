@@ -290,6 +290,9 @@ class Cohort_Perms(models.Model):
     user = models.ForeignKey(User, null=False, blank=True, on_delete=models.CASCADE)
     perm = models.CharField(max_length=10, choices=PERMISSIONS, default=READER)
 
+    def __str__(self):
+        return "Cohort ID {} - {} - {}".format(str(self.cohort.id), self.user.email, self.perm)
+
 
 class Filter_Group(models.Model):
     AND = 'A'
