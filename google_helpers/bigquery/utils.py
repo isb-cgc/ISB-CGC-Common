@@ -22,6 +22,15 @@ from google.cloud.bigquery import ArrayQueryParameter, ScalarQueryParameter, Str
 
 logger = logging.getLogger(__name__)
 
+
+TYPE_SCHEMA = {
+    'sample_type': 'STRING',
+    'SOPInstanceUID': 'STRING',
+    'SeriesInstanceUID': 'STRING',
+    'StudyInstanceUID': 'STRING',
+    'SOPClassUID': 'STRING'
+}
+
 # Some attribute types will fool the type checker due to their content; we hard code
 # these as STRING
 FIXED_TYPES = {
@@ -62,12 +71,16 @@ MOLECULAR_CATEGORIES = {
 #     eg. {"age_at_diagnosis_gte": [50,]}
 # Support for BETWEEN via _btw in attr name, eg. ("wbc_at_diagnosis_btw": [800,1200]}
 # Support for providing an explicit schema of the fields being searched
+# Support for specifying a set of continuous numeric attributes to be presumed for BETWEEN clauses
 #
 # TODO: add support for DATES
 
 
 def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False,
                                field_prefix=None, type_schema=None, case_insens=True):
+    if field_prefix and field_prefix[-1] != ".":
+        field_prefix += "."
+
     result = {
         'filter_string': '',
         'parameters': []
@@ -80,6 +93,9 @@ def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with
 
     mutation_filters = {}
     other_filters = {}
+
+    if param_suffix:
+        param_suffix = re.sub(r'[^A-Za-z0-9_]', "_", param_suffix)
 
     # Split mutation filters into their own set, because of repeat use of the same attrs
     for attr in filters:
@@ -135,6 +151,7 @@ def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with
             # If the values are arrays we assume the first value in the first array is indicative of all
             # other values (since we don't support multi-typed fields)
             type_check = values[0] if type(values[0]) is not list else values[0][0]
+            type_check = values[0] if type(values[0]) is not list else values[0][0]
             parameter_type = (
                 'STRING' if (
                         type(type_check) not in [int, float, complex] and re.compile(r'[^0-9\.,]', re.UNICODE).search(
@@ -144,7 +161,7 @@ def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with
             )
 
         filter_string = ''
-        param_name = attr + '{}'.format('_{}'.format(param_suffix) if param_suffix else '')
+        param_name = attr + '{}'.format('_{}'.format(param_suffix) if param_suffix is not None else '')
 
         query_param = ScalarQueryParameter(param_name, parameter_type, None)
 

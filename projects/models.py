@@ -17,6 +17,7 @@
 import time
 from builtins import object
 import operator
+import re
 from django.db import models
 from django.contrib.auth.models import User
 from django.db.models import Q, Prefetch
@@ -29,6 +30,10 @@ logger = logging.getLogger(__name__)
 class ProgramQuerySet(models.QuerySet):
     def get_projects(self):
         return Project.objects.select_related('program').filter(program__in=self.all())
+
+    def name_id_map(self):
+        id_map = {x.name: x.id for x in self}
+        return id_map
 
     def get_data_sources(self, versions=None, data_type=None, source_type=None):
         sources = None
@@ -138,10 +143,6 @@ class ProgramQuerySet(models.QuerySet):
 class ProgramManager(models.Manager):
     def get_queryset(self):
         return ProgramQuerySet(self.model, using=self._db)
-
-    def name_id_map(self):
-        id_map = {x.name: x.id for x in self}
-        return id_map
 
     def search(self, search_terms):
         terms = [term.strip() for term in search_terms.split()]
@@ -398,7 +399,7 @@ class DataSetType(models.Model):
 class CgcDataVersionQuerySet(models.QuerySet):
 
     # Return all the data sources corresponding to this queryset
-    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None):
+    def get_data_sources(self, source_type=None, active=None, current=None, aggregate_level=None, data_type=None):
         sources = None
         cgcdvs = self.all()
         source_qs = Q()
@@ -415,6 +416,8 @@ class CgcDataVersionQuerySet(models.QuerySet):
                 sources = sources | versions.get_data_sources()
         if source_type:
             source_qs &= Q(source_type=source_type)
+        if data_type:
+            source_qs &= Q(datasettypes__data_type=data_type)
         if aggregate_level:
             aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             source_qs &= Q(aggregate_level__in=aggregate_level)
@@ -461,7 +464,6 @@ class CgcDataVersion(models.Model):
 
         return versions.get_data_sources(source_type=source_type, aggregate_level=aggregate_level).distinct()
 
-
     def get_display(self):
         return self.__str__()
 
@@ -473,15 +475,18 @@ class CgcDataVersion(models.Model):
 
 
 class DataVersionQuerySet(models.QuerySet):
-    def get_data_sources(self, source_type=None, aggregate_level=None):
+    def get_data_sources(self, source_type=None, aggregate_level=None, current=None):
         sources = None
         q_objs = Q()
+        q_dv = Q()
         if aggregate_level:
             aggregate_level = aggregate_level if isinstance(aggregate_level, list) else [aggregate_level]
             q_objs &= Q(aggregate_level__in=aggregate_level)
         if source_type:
             q_objs &= Q(source_type=source_type)
-        dvs = self.all()
+        if current is not None:
+            q_dv &= Q(active=True)
+        dvs = self.filter(q_dv)
         for dv in dvs:
             if not sources:
                 sources = dv.datasource_set.filter(q_objs)
@@ -610,7 +615,8 @@ class DataSourceQuerySet(models.QuerySet):
     #      }
     #   }
     #
-    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, active_only=False):
+    def get_source_attrs(self, for_ui=None, for_faceting=True, by_source=True, named_set=None, active_only=False,
+                         datasettypes=None):
         start = time.time()
         # Simple string list of attribute names (warning: will not properly resolve for collision)
         attrs = { 'list': None, 'ids': None, 'attrs': None }
@@ -618,8 +624,7 @@ class DataSourceQuerySet(models.QuerySet):
         if by_source:
             attrs['sources'] = {}
 
-        sources = self.all()
-
+        sources = self.prefetch_related('datasettypes').filter(datasettypes__in=datasettypes) if datasettypes is not None else self.all()
         for ds in sources:
             q_objects = Q()
             if for_ui is not None:
@@ -641,6 +646,7 @@ class DataSourceQuerySet(models.QuerySet):
                     'attrs': attr_set.distinct(),
                     'id': ds.id,
                     'name': ds.name,
+                    'data_sets': ds.datasettypes.all(),
                     'count_col': ds.count_col
                 }
 
@@ -763,6 +769,9 @@ class DataSourceJoin(models.Model):
         elif source_name == self.to_src.name:
             return self.to_src_col
         return None
+
+    def __str__(self):
+        return "DataSourceJoin: {}.{} on {}.{}".format(self.from_src.name, self.from_src_col, self.to_src.name, self.to_src_col)
 
 
 class DataNodeQuerySet(models.QuerySet):
@@ -986,6 +995,11 @@ class Attribute(models.Model):
     programs = models.ManyToManyField(Program)
     units = models.CharField(max_length=256, blank=True, null=True)
     objects = AttributeManager()
+
+    @classmethod
+    def get_clean_attr_names(cls, names_list):
+        names = [re.sub(r'_btw|_[lg]te?', '', x) for x in names_list]
+        return names
 
     @classmethod
     def get_ranged_attrs(cls, as_list=True):

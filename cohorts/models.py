@@ -114,6 +114,9 @@ class Cohort(models.Model):
         cohort_filters = Filter.objects.select_related('program').filter(resulting_cohort=self)
         return Program.objects.filter(id__in=cohort_filters.values_list('program__id', flat=True))
 
+    def get_program_names(self):
+        return self.get_programs().values_list('name', flat=True)
+
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     def get_data_sources(self, source_type=DataSource.SOLR, active=None, current=True, aggregate_level=None):
 
@@ -128,15 +131,15 @@ class Cohort(models.Model):
 
         return sources
 
-    def get_filters_for_counts(self):
+    def get_filters_for_counts(self, no_vals=False):
         filters = {}
         cohort_filters = Filter.objects.select_related('attribute', 'program').filter(resulting_cohort=self)
         for fltr in cohort_filters:
             prog_attr = "{}:{}".format(fltr.program.id, fltr.attribute.name)
             if prog_attr not in filters:
-                filters[prog_attr] = {'values': []}
-            filters[prog_attr]['values'].extend(fltr.value.split(fltr.value_delimiter))
-
+                filters[prog_attr] = {'values': []} if not no_vals else []
+            vals = filters[prog_attr]['values'] if not no_vals else filters[prog_attr]
+            vals.extend(fltr.value.split(fltr.value_delimiter))
         return filters
 
     # Returns the set of filters defining this cohort as a dict organized by data source
@@ -290,6 +293,9 @@ class Cohort_Perms(models.Model):
     user = models.ForeignKey(User, null=False, blank=True, on_delete=models.CASCADE)
     perm = models.CharField(max_length=10, choices=PERMISSIONS, default=READER)
 
+    def __str__(self):
+        return "Cohort ID {} - {} - {}".format(str(self.cohort.id), self.user.email, self.perm)
+
 
 class Filter_Group(models.Model):
     AND = 'A'
@@ -332,7 +338,7 @@ class FilterQuerySet(models.QuerySet):
         q_objs = Q()
         if active_only:
             q_objs = Q(attribute__active=True)
-        for fltr in self.select_related('attribute').filter(q_objs):
+        for fltr in self.select_related('attribute').select_related('program').filter(q_objs):
             flat_dict = fltr.get_filter_flat()
             flat_dict.update({
                 'id': fltr.attribute.id,
@@ -446,8 +452,8 @@ class Filter(models.Model):
 
     def __repr__(self):
         if self.operator not in [self.OR, self.BTW]:
-            return "{ %s: {'op': %s, 'values': %s }" % (self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
-        return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
+            return "{ %s:%s: {'op': %s, 'values': %s }" % (self.program.name, self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
+        return "{ %s }" % ("\"{}:{}\": [{}]".format(self.program.name, self.get_attr_name(), self.value))
 
     def __str__(self):
         return self.__repr__()
