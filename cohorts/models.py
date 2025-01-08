@@ -107,6 +107,14 @@ class Cohort(models.Model):
             return None
         return (self.last_exported_date+datetime.timedelta(days=settings.BIGQUERY_USER_MANIFEST_TIMEOUT)) > datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
 
+    # Returns the data versions identified in the filter groups for this cohort
+    # Returns a DataVersion QuerySet
+    def get_data_versions(self, active=None):
+        data_versions = CgcDataVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True)) \
+            if active is None else CgcDataVersion.objects.filter(active=active, id__in=self.filter_group_set.all().values_list('data_version',flat=True))
+
+        return data_versions.distinct()
+
     def only_active_versions(self):
         return bool(len(self.get_data_versions(active=False)) <= 0)
 
