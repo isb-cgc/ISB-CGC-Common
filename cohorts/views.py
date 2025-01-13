@@ -926,6 +926,25 @@ def unshare_cohort(request, cohort_id=0):
             'result': result
         })
 
+def get_case_ids(request):
+    filters = json.loads(request.GET.get('filters', '{}'))
+    comb_mut_filters = request.GET.get('mut_filter_combine', 'OR')
+    limit = request.GET.get('limit', None)
+    program_id = request.GET.get('program_id', None)
+
+    program_id = int(program_id) if program_id is not None else None
+
+    if request.user.is_authenticated:
+        user = Django_User.objects.get(id=request.user.id)
+    else:
+        user = AnonymousUser
+
+    results = count_public_metadata_solr(user, program_id=program_id,
+                               source_type=DataSource.SOLR, comb_mut_filters='OR', with_records=True, with_counts=False,
+                               fields=['PatientID'], data_type=None, with_totals=True, fq_operand='AND', with_tags=True,
+                               limit=limit)
+
+    return JsonResponse(results)
 
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
