@@ -227,8 +227,6 @@ class BigQueryExport(BigQueryExportABC, BigQuerySupport):
         return result
 
     def _query_to_table(self, query, parameters, export_type, write_disp, to_temp=False):
-        print(query)
-        print(parameters)
         query_job = self.insert_bq_query_job(query, parameters, write_disposition=write_disp)
 
         query_job = self.await_job_is_done(query_job)

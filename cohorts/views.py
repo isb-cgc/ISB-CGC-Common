@@ -610,8 +610,6 @@ def filelist(request, cohort_id=None, panel_type=None):
 
         metadata_data_attr = fetch_file_data_attr(panel_type)
 
-        has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
-
         items = None
 
         if panel_type:
@@ -620,7 +618,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             if request.GET.get('case_barcode', None):
                 inc_filters['case_barcode'] = request.GET.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, access=has_access, data_type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -718,14 +716,12 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
             sort_order = int(request.GET.get('sort_order'))
             params['sort_order'] = sort_order
 
-        has_access = False if request.user.is_anonymous else auth_dataset_whitelists_for_user(request.user.id)
-
         inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, access=has_access,
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters,
                               data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that

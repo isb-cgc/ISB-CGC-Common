@@ -107,12 +107,23 @@ class Cohort(models.Model):
             return None
         return (self.last_exported_date+datetime.timedelta(days=settings.BIGQUERY_USER_MANIFEST_TIMEOUT)) > datetime.datetime.utcnow().replace(tzinfo=pytz.utc)
 
+    # Returns the data versions identified in the filter groups for this cohort
+    # Returns a DataVersion QuerySet
+    def get_data_versions(self, active=None):
+        data_versions = CgcDataVersion.objects.filter(id__in=self.filter_group_set.all().values_list('data_version',flat=True)) \
+            if active is None else CgcDataVersion.objects.filter(active=active, id__in=self.filter_group_set.all().values_list('data_version',flat=True))
+
+        return data_versions.distinct()
+
     def only_active_versions(self):
         return bool(len(self.get_data_versions(active=False)) <= 0)
 
     def get_programs(self):
         cohort_filters = Filter.objects.select_related('program').filter(resulting_cohort=self)
         return Program.objects.filter(id__in=cohort_filters.values_list('program__id', flat=True))
+
+    def get_program_names(self):
+        return self.get_programs().values_list('name', flat=True)
 
     # Returns the list of data sources used by this cohort, as a function of the filters which define it
     def get_data_sources(self, source_type=DataSource.SOLR, active=None, current=True, aggregate_level=None):
@@ -128,15 +139,15 @@ class Cohort(models.Model):
 
         return sources
 
-    def get_filters_for_counts(self):
+    def get_filters_for_counts(self, no_vals=False):
         filters = {}
         cohort_filters = Filter.objects.select_related('attribute', 'program').filter(resulting_cohort=self)
         for fltr in cohort_filters:
             prog_attr = "{}:{}".format(fltr.program.id, fltr.attribute.name)
             if prog_attr not in filters:
-                filters[prog_attr] = {'values': []}
-            filters[prog_attr]['values'].extend(fltr.value.split(fltr.value_delimiter))
-
+                filters[prog_attr] = {'values': []} if not no_vals else []
+            vals = filters[prog_attr]['values'] if not no_vals else filters[prog_attr]
+            vals.extend(fltr.value.split(fltr.value_delimiter))
         return filters
 
     # Returns the set of filters defining this cohort as a dict organized by data source
@@ -157,13 +168,13 @@ class Cohort(models.Model):
         return result
 
     # Returns a dict of the filters defining this cohort organized by filter group
-    def get_filters_as_dict_simple(self):
+    def get_filters_as_dict_simple(self, by_prog=False):
         result = []
 
         filter_groups = self.filter_group_set.all()
 
         for fg in filter_groups:
-            filter_group = fg.filter_set.all().get_filter_set()
+            filter_group = fg.filter_set.all().get_filter_set(by_prog=by_prog)
             result.append(filter_group)
         return result
 
@@ -290,6 +301,9 @@ class Cohort_Perms(models.Model):
     user = models.ForeignKey(User, null=False, blank=True, on_delete=models.CASCADE)
     perm = models.CharField(max_length=10, choices=PERMISSIONS, default=READER)
 
+    def __str__(self):
+        return "Cohort ID {} - {} - {}".format(str(self.cohort.id), self.user.email, self.perm)
+
 
 class Filter_Group(models.Model):
     AND = 'A'
@@ -321,10 +335,18 @@ class Filter_Group(models.Model):
 
 
 class FilterQuerySet(models.QuerySet):
-    def get_filter_set(self):
+
+    # Returns this queryset of filters, optionally broken out by program
+    def get_filter_set(self, by_prog=False):
         filters = {}
-        for fltr in self.all():
-            filters.update(fltr.get_filter())
+        for fltr in self.select_related('program', 'attribute').all():
+            if by_prog:
+                prog = fltr.program.name if fltr.program else '*'
+                if prog not in filters:
+                    filters[prog] = {}
+                filters[prog][fltr.get_attr_name()] = fltr.value.split(fltr.value_delimiter)
+            else:
+                filters.update(fltr.get_filter())
         return filters
 
     def get_filter_set_array(self, active_only=False):
@@ -332,7 +354,7 @@ class FilterQuerySet(models.QuerySet):
         q_objs = Q()
         if active_only:
             q_objs = Q(attribute__active=True)
-        for fltr in self.select_related('attribute').filter(q_objs):
+        for fltr in self.select_related('attribute').select_related('program').filter(q_objs):
             flat_dict = fltr.get_filter_flat()
             flat_dict.update({
                 'id': fltr.attribute.id,
@@ -428,13 +450,13 @@ class Filter(models.Model):
         return self.OP_TO_STR[self.operator]
 
     def get_filter(self):
-        if self.operator not in [self.OR, self.BTW]:
-            return {
-                self.get_attr_name(): { 'op': self.get_operator(), 'values': self.value.split(self.value_delimiter) }
-            }
-        return {
-            self.get_attr_name(): self.value.split(self.value_delimiter)
+        prog = self.program.name if self.program else None
+        filter = {
+            self.get_attr_name(): {'values': self.value.split(self.value_delimiter), 'program': prog }
         }
+        if self.operator not in [self.OR, self.BTW]:
+            filter['op'] = self.get_operator()
+        return filter
 
     def get_filter_flat(self):
         return {
@@ -446,8 +468,8 @@ class Filter(models.Model):
 
     def __repr__(self):
         if self.operator not in [self.OR, self.BTW]:
-            return "{ %s: {'op': %s, 'values': %s }" % (self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
-        return "{ %s }" % ("\"{}\": [{}]".format(self.get_attr_name(), self.value))
+            return "{ %s:%s: {'op': %s, 'values': %s }" % (self.program.name, self.get_attr_name(), self.get_operator(), "[{}]".format(self.value))
+        return "{ %s }" % ("\"{}:{}\": [{}]".format(self.program.name, self.get_attr_name(), self.value))
 
     def __str__(self):
         return self.__repr__()

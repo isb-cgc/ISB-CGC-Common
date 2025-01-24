@@ -33,6 +33,7 @@ from .utils import build_bq_filter_and_params as build_bq_flt_prm, build_bq_wher
 logger = logging.getLogger(__name__)
 
 MAX_INSERT = settings.MAX_BQ_INSERT
+MAX_RESULTS = settings.MAX_FILE_LIST_REQUEST
 BQ_ATTEMPT_MAX = settings.BQ_MAX_ATTEMPTS
 
 
@@ -227,9 +228,9 @@ class BigQuerySupport(BigQueryABC):
     # If self.project_id, self.dataset_id, and self.table_id are set they
     # will be used as the destination table for the query
     # WRITE_DISPOSITION is assumed to be for an empty table unless specified
-    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False):
+    def execute_query(self, query, parameters=None, write_disposition='WRITE_EMPTY', cost_est=False, paginated=False):
 
-        query_job = self.insert_bq_query_job(query,parameters,write_disposition,cost_est)
+        query_job = self.insert_bq_query_job(query, parameters, write_disposition, cost_est)
 
         job_id = query_job.job_id
 
@@ -244,25 +245,25 @@ class BigQuerySupport(BigQueryABC):
                     'total_bytes_processed': query_job.total_bytes_processed
                 }
 
-        job_is_done_ = self.await_job_is_done(query_job)
+        query_job = self.await_job_is_done(query_job)
 
         # Parse the final disposition
-        if job_is_done_.done():
+        if query_job.done():
             if query_job.errors or query_job.error_result:
-                job_is_done_.error_result and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.error_result)))
-                job_is_done_.errors and logger.error("[ERROR] During query job {}: {}".format(job_id, str(job_is_done_.errors)))
+                query_job.error_result and logger.error("[ERROR] During query job {}: {}".format(job_id, str(query_job.error_result)))
+                query_job.errors and logger.error("[ERROR] During query job {}: {}".format(job_id, str(query_job.errors)))
                 logger.error("[ERROR] Error'd out query: {}".format(query))
             else:
                 logger.info("[STATUS] Query {} done, fetching results...".format(job_id))
-                query_results = self.fetch_job_results(query_job)
+                query_results = self.fetch_job_results(query_job, paginated=paginated)
                 logger.info("[STATUS] {} results found for query {}.".format(str(len(query_results)), job_id))
         else:
             logger.error("[ERROR] Query took longer than the allowed time to execute. " +
                          "If you check job ID {} manually you can wait for it to finish.".format(job_id))
             logger.error("[ERROR] Timed out query: {}".format(query))
 
-        if job_is_done_.timeline and len(job_is_done_.timeline):
-            logger.debug("Elapsed: {}".format(str(job_is_done_.timeline[-1].elapsed_ms)))
+        if query_job.timeline and len(query_job.timeline):
+            logger.debug("Elapsed: {}".format(str(query_job.timeline[-1].elapsed_ms)))
 
         return query_results
 
@@ -280,18 +281,26 @@ class BigQuerySupport(BigQueryABC):
 
     # Fetch the results of a job based on the reference provided
     # fetch_size: maximum number of rows to fetch per API call (overrides API default)
-    def fetch_job_results(self, query_job, fetch_size=None):
-        result = []
-        page_token = None
+    def fetch_job_results(self, query_job, fetch_size=None, paginated=False):
+        result = {
+            'rows': []
+        }
 
+        fetch_size = fetch_size or MAX_RESULTS
         not_done = True
         next_page_token = None
+
         while not_done:
             row_iter = self.bq_client.list_rows(query_job.destination, max_results=fetch_size, page_token=next_page_token)
+            result['schema'] = row_iter.schema
             for x in row_iter:
-                result.extend(x)
+                result['rows'].append(x)
             next_page_token = row_iter.next_page_token
-            not_done = next_page_token is not None
+            not_done = next_page_token is not None and len(result['rows']) < MAX_RESULTS and not paginated
+
+        if paginated:
+            result['next_page_token'] = next_page_token
+            result['query_job'] = query_job
 
         return result
 
@@ -315,10 +324,11 @@ class BigQuerySupport(BigQueryABC):
         return bqs._streaming_insert(rows)
 
     # Execute a query, optionally parameterized, and fetch its results
+    # TODO: implement pagination
     @classmethod
-    def execute_query_and_fetch_results(cls, query, parameters=None):
+    def execute_query_and_fetch_results(cls, query, parameters=None, paginated=None):
         bqs = cls(None, None, None)
-        return bqs.execute_query(query, parameters)
+        return bqs.execute_query(query, parameters, paginated=paginated)
 
     @classmethod
     # Execute a query, optionally parameterized, to be saved on a temp table
@@ -389,7 +399,7 @@ class BigQuerySupport(BigQueryABC):
             else:
                 raw_rows = bqs.bq_client.list_rows("{}.{}.{}".format(projectId, datasetId, tableId), max_results=max_rows)
 
-            if raw_rows.total_rows > 0:
+            if raw_rows and raw_rows.total_rows > 0:
                 result = {
                     'rows': [{key: val for key, val in x.items() } for x in raw_rows],
                     'status': 200
@@ -459,7 +469,8 @@ class BigQuerySupport(BigQueryABC):
     def build_bq_filter_and_params(filters, comb_with='AND', param_suffix=None, with_count_toggle=False,
                                field_prefix=None, type_schema=None, case_insens=True):
 
-        return build_bq_flt_prm(filters, comb_with, param_suffix, with_count_toggle, field_prefix, type_schema, case_insens)
+        return build_bq_flt_prm(filters, comb_with, param_suffix, with_count_toggle, field_prefix, type_schema,
+                                case_insens)
 
     # Builds a BQ WHERE clause from a set of filters of the form:
     # {

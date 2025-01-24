@@ -39,7 +39,7 @@ FILTER_DATA_TYPE = {
 
 
 def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
-                 sort_order=0, access=None, data_type=None, do_filter_count=True):
+                 sort_order=0, data_type=None, do_filter_count=True):
 
     if cohort_id and (not user or user.is_anonymous):
         raise Exception("A user must be supplied to view a cohort's files.")
@@ -222,13 +222,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'program': entry.get('program_name', 'N/A')
                     })
                 else:
-                    whitelist_found = False
-                    # If this is a controlled-access entry, check for the user's access to it
-                    if entry['access'] == 'controlled' and access:
-                        whitelists = entry['acl'].split(';')
-                        for whitelist in whitelists:
-                            if whitelist in access:
-                                whitelist_found = True
                     for key in entry:
                         if type(entry[key]) is list:
                             entry[key] = ", ".join([str(x) for x in entry[key]]) if len(entry[key]) > 1 else entry[key][0]
@@ -240,7 +233,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                         'cloudstorage_location': entry.get('file_name_key', 'N/A'),
                         'index_name': entry.get('index_file_name_key', 'N/A'),
                         'access': entry.get('access', 'N/A'),
-                        'user_access': str(entry.get('access', 'N/A') != 'controlled' or whitelist_found),
                         'filename': entry.get('file_name', None) or entry.get('file_name_key', '').split("/")[-1] or 'N/A',
                         'filesize': entry.get('file_size', 'N/A'),
                         'modality': entry.get('modality', 'N/A'),

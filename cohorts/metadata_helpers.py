@@ -31,7 +31,7 @@ import string
 import time
 from time import sleep
 import re
-from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Tooltips, DataSetType
+from projects.models import Program, Project, DataSource, DataVersion, Attribute, Attribute_Tooltips, DataSetType, CgcDataVersion
 from metadata_utils import sql_age_by_ranges, sql_bmi_by_ranges, sql_simple_days_by_ranges, sql_simple_number_by_200, sql_year_by_ranges, MOLECULAR_CATEGORIES
 from solr_helpers import query_solr_and_format_result, build_solr_facets, build_solr_query
 from google_helpers.bigquery.bq_support import BigQuerySupport
@@ -151,10 +151,16 @@ def make_id(length):
     return ''.join(random.sample(string.ascii_lowercase, length))
 
 
-def hash_program_attrs(prog_name,source_type,for_faceting,data_type_list=None):
+def hash_program_attrs(prog_name, source_type, for_faceting, data_type_list=None):
     if not data_type_list:
         data_type_list = [DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA,DataSetType.MUTATION_DATA]
     return str(hash("{}:{}:{}:{}".format(prog_name,source_type,str(for_faceting),"-".join(data_type_list))))
+
+
+def hash_source_attr(attr_list, source_names):
+    attrs = ";".join(attr_list)
+    source_names = "-".join(source_names)
+    return str(hash("{}:{}".format(attrs, source_names)))
 
 
 # Database connection
@@ -856,122 +862,6 @@ def get_full_sample_metadata(barcodes):
         logger.exception(e)
 
 
-def get_full_case_metadata(barcodes):
-    if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
-    result = {
-        'total_found': 0
-    }
-
-    try:
-        barcodes_by_program = {}
-
-        for barcode in barcodes:
-            dash = barcode.find("-")
-            if dash >= 0:
-                prog = barcode[0:dash]
-                if prog not in ['TCGA', 'TARGET']:
-                    prog = 'CCLE'
-            else:
-                prog = 'CCLE'
-            if prog not in barcodes_by_program:
-                barcodes_by_program[prog] = []
-            barcodes_by_program[prog].append(barcode)
-
-        programs = Program.objects.filter(name__in=list(barcodes_by_program.keys()), active=True, is_public=True)
-
-        items = {}
-
-        for program in programs:
-            program_tables = program.get_metadata_tables()
-            program_data_tables = program.get_data_tables()
-            
-            bq_search = BigQuerySupport.build_bq_filter_and_params({'case_barcode': barcodes_by_program[program.name]})
-
-            case_job = BigQuerySupport.insert_query_job("""
-                #standardSQL
-                SELECT clin.case_barcode as cb, clin.*
-                FROM `{}` clin
-                WHERE {}
-            """.format("{}.{}.{}".format(
-                settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.clin_bq_table),
-                bq_search['filter_string']), bq_search['parameters'])
-
-            bq_results = BigQuerySupport.wait_for_done_and_get_results(case_job)
-
-            skip = ['endpoint_type', 'metadata_clinical_id', 'metadata_biospecimen_id', 'cb', 'summary_file_count']
-
-            for row in bq_results:
-                items[row.get("case_barcode", "N/A")] = {
-                    'case_barcode': row.get("case_barcode", "N/A"),
-                    'samples': [],
-                    'data_details': {
-                        x.build: [] for x in program_data_tables
-                    },
-                    'clinlical_data': {key: val for key, val in row.items() if key not in skip}
-                }
-
-            if len(list(items.keys())):
-                queries = []
-                
-                for build_table in program_data_tables:
-                    logger.info(str(build_table))
-                    queries.append({
-                        'query': """
-                            #standardSQL
-                            SELECT md.case_barcode as cb, md.*
-                            FROM `{}` md
-                            WHERE {} AND (md.sample_barcode = '' OR md.sample_barcode IS NULL OR md.sample_barcode = 'NA')                     
-                        """.format(
-                            "{}.{}.{}".format(
-                                settings.BIGQUERY_DATA_PROJECT_ID, build_table.bq_dataset, build_table.data_table.lower()),
-                            bq_search['filter_string']),
-                        'parameters': bq_search['parameters'],
-                        'query_type': 'data_details',
-                        'build': build_table.build
-                    })
-
-                queries.append({
-                    'query': """
-                        #standardSQL
-                        SELECT case_barcode, sample_barcode
-                        FROM `{}` 
-                        WHERE {}
-                    """.format("{}.{}.{}".format(
-                        settings.BIGQUERY_DATA_PROJECT_ID, program_tables.bq_dataset, program_tables.biospec_bq_table,
-                       ), bq_search['filter_string']),
-                    'parameters': bq_search['parameters'],
-                    'query_type': 'samples'
-                })
-
-                results = BigQuerySupport.insert_job_batch_and_get_results(queries)
-
-                for bq_result in results:
-                    result_schema = bq_result['result_schema']
-                    bq_results = bq_result['bq_results']
-                    if bq_result['query_type'] == 'samples':
-                        for row in bq_results:
-                            items[row.get("case_barcode","N/A")]['samples'].append(row.append("sample_barcode","N/A"))
-                    else:
-                        for row in bq_results:
-                            items[row.get("case_barcode","N/A")]['data_details'][bq_result['build']].append({
-                                key: val for key, val in row.items() if key not in skip
-                            })
-
-                result['total_found'] += 1
-                result['cases'] = [item for item in list(items.values())]
-
-        not_found = [x for x in barcodes if x not in items]
-
-        if len(not_found):
-            result['not_found'] = not_found
-
-        return result
-
-    except Exception as e:
-        logger.error("[ERROR] While fetching sample metadata for {}:".format(barcode))
-        logger.exception(e)
-
-
 def get_sample_metadata(barcode):
     if debug: logger.debug('Called ' + sys._getframe().f_code.co_name)
     result = {}
@@ -1044,7 +934,7 @@ def get_paths_by_uuid(uuids):
 
     query_base = """
         SELECT file_node_id, file_name_key, index_file_name_key
-        FROM `{bq_project}.{bq_dataset}.{table_name}`
+        FROM `{table_clause}`
         WHERE {where_clause}
     """
 
@@ -1052,30 +942,32 @@ def get_paths_by_uuid(uuids):
 
     where_clause = BigQuerySupport.build_bq_filter_and_params(uuid_filters)
 
-    tables = [{'table': y.data_table, 'dataset': y.bq_dataset} for x in Program.get_public_programs() for y in x.get_data_tables()]
+    version = CgcDataVersion.objects.filter(active=True)
+    sources = version.get_data_sources(source_type=DataSource.BIGQUERY, data_type=DataSetType.FILE_DATA)
 
     query = """ UNION DISTINCT """.join(
         [query_base.format(
-            bq_project=settings.BIGQUERY_DATA_PROJECT_ID,
-            bq_dataset=table['dataset'],
-            table_name=table['table'].lower(),
+            table_clause=source.name,
             where_clause=where_clause['filter_string']
-        ) for table in tables]
+        ) for source in sources]
     )
 
     results = BigQuerySupport.execute_query_and_fetch_results(query, where_clause['parameters'])
-    
+
     if results:
-        for row in results:
-            item = {
-                'file_node_id': row.get("file_node_id"),
-                'gcs_path': row.get("gcs_path")
-            }
-            if row.get("index_file_path", None) and len(row.get("index_file_path")) > 1:
-                item['index_file_path'] = row.get("index_file_path")
-            
+        col_idx = {}
+        for idx, col in enumerate(results['schema']):
+            if col.name == 'file_name_key':
+                col_idx[idx] = 'file_path'
+            elif col.name == 'index_file_name_key':
+                col_idx[idx] = 'index_file_path'
+            else:
+                col_idx[idx] = col.name
+        for row in results['rows']:
+            item = {}
+            for idx, val in enumerate(row):
+                item[col_idx[idx]] = val if val is not None else "N/A"
             paths.append(item)
-            
-    not_found = [x for x in uuids if x not in [x['file_node_id'] for x in paths]]
+    not_found = [x for x in uuids if x not in set([x['file_node_id'] for x in paths])]
 
     return paths, not_found
