@@ -467,10 +467,10 @@ class CgcDataVersion(models.Model):
     def get_display(self):
         return self.__str__()
 
-    def get_sub_version_displays(self, active=None):
+    def get_sub_version_displays(self, active=None, for_app=True):
         sub_versions = self.dataversion_set.filter(
             active=active).distinct() if active is not None else self.dataversion_set.all().distinct()
-        return sub_versions.get_displays()
+        return sub_versions.get_displays(for_app=for_app)
 
     def __repr__(self):
         return self.__str__()
@@ -510,8 +510,8 @@ class DataVersionQuerySet(models.QuerySet):
 
         return cgc_versions
 
-    def get_displays(self, with_active=False):
-        return [dv.get_display(with_active) for dv in self.all()]
+    def get_displays(self, with_active=False, for_app=False):
+        return [dv.get_display(with_active, for_app) for dv in self.all()]
 
 
 class DataVersionManager(models.Manager):
@@ -529,15 +529,21 @@ class DataVersion(models.Model):
     cgc_versions = models.ManyToManyField(CgcDataVersion)
     objects = DataVersionManager()
 
-    def __str__(self, with_active=True):
+    def __str__(self, with_active=True, for_app=False):
+        if for_app:
+            return "{}: {}".format(
+                self.name,
+                "" if not with_active else (" (Active)" if self.active else " (Inactive)")
+        )
+
         return "{}: {}{}".format(
             self.name,
             self.version,
             "" if not with_active else (" (Active)" if self.active else " (Inactive)")
         )
 
-    def get_display(self, with_active=False):
-        return self.__str__(with_active)
+    def get_display(self, with_active=False, for_app=False):
+        return self.__str__(with_active, for_app)
 
 
 class DataSourceQuerySet(models.QuerySet):
