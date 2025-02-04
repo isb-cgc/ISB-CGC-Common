@@ -531,9 +531,9 @@ class DataVersion(models.Model):
 
     def __str__(self, with_active=True, for_app=False):
         if for_app:
-            return "{}: {}".format(
+            return "{}{}".format(
                 self.name,
-                "" if not with_active else (" (Active)" if self.active else " (Inactive)")
+                "" if not with_active else (": (Active)" if self.active else ": (Inactive)")
         )
 
         return "{}: {}{}".format(
