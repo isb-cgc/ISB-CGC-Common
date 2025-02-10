@@ -50,11 +50,14 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
 
         totals = ["case_barcode"]
 
+        print(filters)
+
         for prog in filters:
             if prog not in stats['programs']:
                 stats['programs'][prog] = {}
 
-            result = count_public_metadata_solr(None, inc_filters=filters, program_id=prog, with_counts=False)
+            result = count_public_metadata_solr(None, inc_filters=filters[prog], program_id=prog, with_counts=False)
+            print(result)
             prog_totals = result.get('programs', {}).get(prog,{}).get('totals',None)
             if prog_totals:
                 for total_count in prog_totals:
