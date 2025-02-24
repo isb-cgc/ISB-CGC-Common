@@ -168,13 +168,13 @@ class Cohort(models.Model):
         return result
 
     # Returns a dict of the filters defining this cohort organized by filter group
-    def get_filters_as_dict_simple(self):
+    def get_filters_as_dict_simple(self, by_prog=False):
         result = []
 
         filter_groups = self.filter_group_set.all()
 
         for fg in filter_groups:
-            filter_group = fg.filter_set.all().get_filter_set()
+            filter_group = fg.filter_set.all().get_filter_set(by_prog=by_prog)
             result.append(filter_group)
         return result
 
@@ -335,10 +335,18 @@ class Filter_Group(models.Model):
 
 
 class FilterQuerySet(models.QuerySet):
-    def get_filter_set(self):
+
+    # Returns this queryset of filters, optionally broken out by program
+    def get_filter_set(self, by_prog=False):
         filters = {}
-        for fltr in self.all():
-            filters.update(fltr.get_filter())
+        for fltr in self.select_related('program', 'attribute').all():
+            if by_prog:
+                prog = fltr.program.name if fltr.program else '*'
+                if prog not in filters:
+                    filters[prog] = {}
+                filters[prog][fltr.get_attr_name()] = fltr.value.split(fltr.value_delimiter)
+            else:
+                filters.update(fltr.get_filter())
         return filters
 
     def get_filter_set_array(self, active_only=False):
@@ -442,13 +450,13 @@ class Filter(models.Model):
         return self.OP_TO_STR[self.operator]
 
     def get_filter(self):
-        if self.operator not in [self.OR, self.BTW]:
-            return {
-                self.get_attr_name(): { 'op': self.get_operator(), 'values': self.value.split(self.value_delimiter) }
-            }
-        return {
-            self.get_attr_name(): self.value.split(self.value_delimiter)
+        prog = self.program.name if self.program else None
+        filter = {
+            self.get_attr_name(): {'values': self.value.split(self.value_delimiter), 'program': prog }
         }
+        if self.operator not in [self.OR, self.BTW]:
+            filter['op'] = self.get_operator()
+        return filter
 
     def get_filter_flat(self):
         return {

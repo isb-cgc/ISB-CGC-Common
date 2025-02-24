@@ -46,7 +46,7 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
             raise Exception("If you don't provide a cohort ID, you must provide filters!")
 
         if not filters:
-            filters = cohort.get_filters_as_dict_simple()[0]
+            filters = cohort.get_filters_for_counts()
 
         totals = ["case_barcode"]
 
@@ -98,7 +98,7 @@ def delete_cohort(user, cohort_id):
             cohort.save()
             cohort_info = {
                 'notes': 'Cohort {} (\'{}\') has been deleted.'.format(cohort_id, cohort.name),
-                'data': {'filters': cohort.get_filters_as_dict_simple()},
+                'data': {'filters': cohort.get_filters_as_dict_simple(by_prog=True)},
             }
         except ObjectDoesNotExist:
             cohort_info = {
@@ -106,7 +106,8 @@ def delete_cohort(user, cohort_id):
             }
     return cohort_info
 
-
+# Expects a filter format of:
+# { program.id: { attribute.id: { 'values': [...] }, [...] }, [...] }
 def create_cohort(user, filters=None, name=None, desc=None, source_id=None, version=None, stats=None, case_insens=True):
 
     if not filters and not name and not desc:
