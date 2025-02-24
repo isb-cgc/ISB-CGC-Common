@@ -571,8 +571,8 @@ def get_cohort_ids(request, cohort_id=None):
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
         req = request.GET if request.GET else request.POST
         filters = json.loads(req.get('filters', '{}'))
-        program_ids =  json.loads(req.get('program_ids', '[]'))
-
+        program_ids = json.loads(req.get('program_ids', '[]'))
+        downloadToken = req.get('downloadToken','')
 
         if (cohort_id is None):
             cohort = None
@@ -610,7 +610,7 @@ def get_cohort_ids(request, cohort_id=None):
         else:
             filename = 'cohort_{}_ids_{}.csv'.format(cohort.id, timestamp)
         response['Content-Disposition'] = 'attachment; filename=' + filename
-        response.set_cookie("downloadToken", request.GET.get('downloadToken'))
+        response.set_cookie("downloadToken", downloadToken)
 
     except ObjectDoesNotExist as e:
         logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
