@@ -54,7 +54,7 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
             if prog not in stats['programs']:
                 stats['programs'][prog] = {}
 
-            result = count_public_metadata_solr(None, inc_filters=filters[prog], program_id=prog, with_counts=False)
+            result = count_public_metadata_solr(None, inc_filters=filters[prog], program_ids=[prog], with_counts=False)
             prog_totals = result.get('programs', {}).get(prog,{}).get('totals',None)
             if prog_totals:
                 for total_count in prog_totals:
@@ -186,13 +186,14 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
     return {'cohort_id': cohort.id}
 
 
-def get_cohort_cases(cohort_id=0, filters=None, as_dict=False, source=DataSource.SOLR):
+def get_cohort_cases(cohort_id=0, filters=None,  program_ids=None, as_dict=False, source=DataSource.SOLR):
     try:
+
         if cohort_id:
             filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts(no_vals=bool(source == DataSource.BIGQUERY))
 
         if source == DataSource.SOLR:
-            result = count_public_metadata_solr(None, cohort_id, None, None, fields=["case_barcode"],
+            result = count_public_metadata_solr(None, cohort_id, program_ids=program_ids, inc_filters=filters, fields=["case_barcode"],
                                                     with_counts=False, with_records=True, limit=64000)
             cohort_cases = []
             for prog in result['programs']:

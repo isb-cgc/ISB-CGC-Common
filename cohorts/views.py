@@ -549,21 +549,48 @@ def save_comment(request):
     return HttpResponse(json.dumps(return_obj), status=200)
 
 
+
+def cohort_ids_nologin(request):
+    response = get_cohort_ids(request)
+    return response
+
+
 @login_required
 @otp_required
 @csrf_protect
 def cohort_ids(request, cohort_id):
+    response = get_cohort_ids(request, cohort_id)
+    return response
+
+
+def get_cohort_ids(request, cohort_id=None):
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
-        if cohort_id:
+        req = request.GET if request.GET else request.POST
+        filters = json.loads(req.get('filters', '{}'))
+        program_ids =  json.loads(req.get('program_ids', '[]'))
+
+
+        if (cohort_id is None):
+            cohort = None
+            rows = (["Case listing for unnamed cohort"],)
+            rows += (["Filters: {}".format(filters)],)
+            #rows += (["Programs: {}".format(prog_id)],)
+
+        elif cohort_id:
+            filters = None
+            program_ids = None
             Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=request.user.id)
+            cohort = Cohort.objects.get(id=cohort_id)
+            rows = (["Case listing for Cohort '{}'".format(cohort.name)],)
+            rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
+            rows += (["Programs: {}".format(", ".join(list(cohort.get_programs().values_list('name', flat=True))))],)
 
-        cohort = Cohort.objects.get(id=cohort_id)
-        ids = get_cohort_cases(cohort_id)
 
-        rows = (["Case listing for Cohort '{}'".format(cohort.name)],)
-        rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
-        rows += (["Programs: {}".format(", ".join(list(cohort.get_programs().values_list('name', flat=True))))],)
+        ids = get_cohort_cases(cohort_id,filters=filters, program_ids=program_ids)
+
+
+
         rows += (["Program","Case Barcode"],)
 
         for id in ids:
@@ -575,7 +602,10 @@ def cohort_ids(request, cohort_id):
                                          content_type="text/csv")
 
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-        filename = 'cohort_{}_ids_{}.csv'.format(cohort.id, timestamp)
+        if (cohort == None):
+            filename = 'unsaved_cohort_ids_{}.csv'.format(timestamp)
+        else:
+            filename = 'cohort_{}_ids_{}.csv'.format(cohort.id, timestamp)
         response['Content-Disposition'] = 'attachment; filename=' + filename
         response.set_cookie("downloadToken", request.GET.get('downloadToken'))
 

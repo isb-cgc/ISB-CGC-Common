@@ -50,7 +50,7 @@ urlpatterns = [
     url(r'^download_filelist/$',                    views.streaming_csv_view, name='download_filelist'),
     url(r'^export_file_manifest/$',                    views.export_data, name='export_file_manifest'),
     url(r'^download_ids/(?P<cohort_id>\d+)/$',      views.cohort_ids, name='download_ids'),
-
+    url(r'^download_ids_nologin/$',      views.cohort_ids_nologin, name='download_ids_nologin'),
     url(r'^download_filelist/(?P<cohort_id>\d+)/',  views.streaming_csv_view, name='download_cohort_filelist'),
 
     url(r'^get_metadata_ajax/$',                                                         views.get_metadata, name='metadata_count_ajax'),
