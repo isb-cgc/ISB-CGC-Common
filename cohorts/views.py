@@ -198,6 +198,7 @@ def new_cohort(request):
         program_list = Program.objects.filter(active=True, is_public=True)
 
         all_nodes, all_programs = DataNode.get_node_programs([DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA], True)
+        curr_version = CgcDataVersion.objects.get(active=1)
 
         template_values = {
             'request': request,
@@ -206,15 +207,17 @@ def new_cohort(request):
             'programs': program_list,
             'program_prefixes': {x.name: True for x in program_list},
             'all_nodes': all_nodes,
-            'all_programs': all_programs
+            'all_programs': all_programs,
+            'data_version': curr_version,
+            'data_version_info': curr_version.get_sub_version_displays()
         }
 
         template = 'cohorts/new_cohort.html'
 
     except Exception as e:
-        logger.error("[ERROR] Exception while trying to new a cohort:")
+        logger.error("[ERROR] Exception in the new_cohort view:")
         logger.exception(e)
-        messages.error(request, "There was an error while trying to load new cohort's details page.")
+        messages.error(request, "There was an error while trying to load the cohort builder and data browser page.")
         if request.user.is_authenticated:
             return redirect('cohort_list')
         else:
