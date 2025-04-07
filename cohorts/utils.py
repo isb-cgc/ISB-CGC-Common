@@ -46,7 +46,13 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
             raise Exception("If you don't provide a cohort ID, you must provide filters!")
 
         if not filters:
-            filters = cohort.get_filters_for_counts()
+            filters_wrong_format = cohort.get_filters_for_counts()
+            filters={}
+            for filt in filters_wrong_format:
+                prog= int(filt.split(":")[0])
+                if not prog in filters:
+                    filters[prog]={}
+                filters[prog][filt]=filters_wrong_format[filt]
 
         totals = ["case_barcode"]
 
