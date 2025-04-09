@@ -237,7 +237,7 @@ def cohort_detail(request, cohort_id):
     try:
 
         program_list = Program.objects.filter(active=True, is_public=True)
-        req = request.GET if request.GET else request.POST
+        req = request.GET if request.method == 'GET' else request.POST
         update = True if ((req.get('update', 'false').lower())=='true') else False
 
         all_nodes, all_programs = DataNode.get_node_programs([DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA])
@@ -309,7 +309,7 @@ def get_stats_from_cohort_filter(request, cohort_id):
 def copy_cohort(request, cohort_id):
     redirect_url = reverse('cohort_list')
     try:
-        req = request.GET if request.GET else request.POST
+        req = request.GET if request.method == 'GET' else request.POST
         name = req.get('name','')
         desc = req.get('desc','')
         blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
@@ -658,7 +658,7 @@ def case_ids_by_cohort_filter(request, cohort_id):
 def get_filter_ids(request, cohort_id=None):
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
-        req = request.GET if request.GET else request.POST
+        req = request.GET if request.method == 'GET' else request.POST
         filters = json.loads(req.get('filters', '{}'))
         program_ids = json.loads(req.get('program_ids', '[]'))
         downloadToken = req.get('downloadToken','')
@@ -1240,7 +1240,7 @@ def export_data(request, cohort_id=None, export_type=None, versions=None):
 
     try:
         req_user = User.objects.get(id=request.user.id)
-        req = request.GET or request.POST
+        req = request.GET if request.method == 'GET' else request.POST
 
         if export_type not in ["file_manifest", "cohort"]:
             raise Exception("Unrecognized export type seen: {}".format(export_type))
