@@ -327,7 +327,7 @@ def copy_cohort(request, cohort_id):
                            "Your cohort's name and/or description contain invalid characters; please edit them.")
             return redirect(redirect_url)
 
-        filters_as_dict=Cohort.objects.get(id=35).get_filters_as_dict()[0]['filters'];
+        filters_as_dict=Cohort.objects.get(id=cohort_id).get_filters_as_dict()[0]['filters'];
         filter_obj={}
         attr_ids = []
         for filt in filters_as_dict:
