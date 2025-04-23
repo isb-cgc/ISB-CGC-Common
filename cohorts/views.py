@@ -327,7 +327,7 @@ def copy_cohort(request, cohort_id):
                            "Your cohort's name and/or description contain invalid characters; please edit them.")
             return redirect(redirect_url)
 
-        filters_as_dict=Cohort.objects.get(id=35).get_filters_as_dict()[0]['filters'];
+        filters_as_dict=Cohort.objects.get(id=cohort_id).get_filters_as_dict()[0]['filters'];
         filter_obj={}
         attr_ids = []
         for filt in filters_as_dict:
@@ -709,6 +709,7 @@ def get_filter_ids(request, cohort_id=None):
     return response
 
 
+
 @csrf_protect
 def filelist(request, cohort_id=None, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -730,17 +731,21 @@ def filelist(request, cohort_id=None, panel_type=None):
             messages.error(request, 'To view a cohort\'s files you must be logged in.')
             return redirect(reverse('landing_page'))
 
+        req = request.GET if request.method == 'GET' else request.POST
+
+
         metadata_data_attr = fetch_file_data_attr(panel_type)
 
         items = None
 
         if panel_type:
-            inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
-                request.POST.get('filters', '{}'))
-            if request.GET.get('case_barcode', None):
-                inc_filters['case_barcode'] = request.GET.get('case_barcode')
+            inc_filters = json.loads(req.get('filters', '{}'))
+            case_filters=json.loads(req.get('case_filters', '{}'));
+            program_ids=json.loads(req.get('program_ids', '{}'));
+            if req.get('case_barcode', None):
+                inc_filters['case_barcode'] = req.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, data_type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, case_filters=case_filters, program_ids=program_ids, user=request.user, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -766,12 +771,22 @@ def filelist(request, cohort_id=None, panel_type=None):
 
         cohort = None
         programs_this_cohort = []
+        case_filters={}
+        program_ids =[]
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
             export_url = reverse("export_cohort_data", kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
         else:
+            case_filters = json.loads(req.get('case_filters', '{}'))
+            program_ids = json.loads(req.get('program_ids', '[]'))
+            for progid in program_ids:
+                prog_filters = filters[progid]
+                attrs = Attribute.objects.filter(id__in=[int(x) for x in prog_filters.keys()])
+                for attr in attrs:
+                    filter_values = prog_filters[attr.id]['values']
+
             download_url = reverse("download_filelist")
             export_url = reverse("export_data", kwargs={'export_type': 'file_manifest'})
         logger.debug("[STATUS] Returning response from cohort_filelist")
@@ -781,6 +796,8 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
                                             'export_url': export_url,
+                                             'case_filters':case_filters,
+                                             'program_ids':program_ids,
                                             'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
