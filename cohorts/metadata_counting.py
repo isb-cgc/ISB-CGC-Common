@@ -111,7 +111,7 @@ def _build_attr_by_source(attrs, data_version, source_type=DataSource.BIGQUERY, 
 
 
 # ------------------------------------- Begin metadata counting methods -------------------------------------
-def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_id=None, versions=None,
+def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_ids=None, versions=None,
                                source_type=DataSource.SOLR, comb_mut_filters='OR', with_records=False, with_counts=True,
                                fields=None, data_type=None, with_totals=True, fq_operand='AND', with_tags=True,
                                limit=1000):
@@ -139,8 +139,8 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
                 # The number proceeding the attribute name is either its ID, or, the ID of the program it's from
                 # If no program_id or cohort_id is provided, we assume the number is the program_id which sourced this attribute
                 prog = int(key.split(":")[0])
-                if not cohort_id and program_id:
-                    prog = program_id
+                if not cohort_id and program_ids and (len(program_ids)==1):
+                    prog = program_ids[0]
 
                 if prog not in prog_filters:
                     prog_filters[prog] = {
@@ -161,11 +161,11 @@ def count_public_metadata_solr(user, cohort_id=None, inc_filters=None, program_i
         versions = versions or DataVersion.objects.filter(active=True)
         programs = Program.objects.filter(active=1,is_public=1)
 
-        if program_id:
-            programs = programs.filter(id=program_id)
+        if program_ids:
+            programs = programs.filter(id__in=program_ids)
 
         if cohort_id:
-            if not program_id:
+            if not program_ids:
                 programs = programs.filter(id__in=Cohort.objects.get(id=cohort_id).get_programs())
 
         for prog in programs:
@@ -786,7 +786,7 @@ def count_public_metadata(user, cohort_id=None, inc_filters=None, program_id=Non
 
         versions = DataVersion.objects.filter(version__in=versions) if versions and len(versions) else DataVersion.objects.filter(
             active=True)
-        solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, program_id, versions=versions, comb_mut_filters=comb_mut_filters)
+        solr_res = count_public_metadata_solr(user, cohort_id, inc_filters, [program_id], versions=versions, comb_mut_filters=comb_mut_filters)
         facet_types = {
             'facets': {},
             'filtered_facets': None if not inc_filters and not cohort_id else {}
