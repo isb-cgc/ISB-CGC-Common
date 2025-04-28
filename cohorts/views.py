@@ -773,6 +773,7 @@ def filelist(request, cohort_id=None, panel_type=None):
         programs_this_cohort = []
         case_filters={}
         program_ids =[]
+        case_filters_disp = {}
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
@@ -781,11 +782,16 @@ def filelist(request, cohort_id=None, panel_type=None):
         else:
             case_filters = json.loads(req.get('case_filters', '{}'))
             program_ids = json.loads(req.get('program_ids', '[]'))
-            for progid in program_ids:
-                prog_filters = filters[progid]
-                attrs = Attribute.objects.filter(id__in=[int(x) for x in prog_filters.keys()])
-                for attr in attrs:
-                    filter_values = prog_filters[attr.id]['values']
+
+            for case_filterids in case_filters:
+                progid, attr_nm=case_filterids.split(':')
+                prognm=Program.objects.get(id=progid).name
+                if not prognm in case_filters_disp:
+                    case_filters_disp[prognm]=[]
+                attr = Attribute.objects.get(name=attr_nm)
+                attr_disp=attr.display_name
+                filter_values = case_filters[case_filterids]['values']
+                case_filters_disp[prognm].append({"attr_nm":attr_disp, 'values':filter_values})
 
             download_url = reverse("download_filelist")
             export_url = reverse("export_data", kwargs={'export_type': 'file_manifest'})
@@ -797,6 +803,7 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'download_url': download_url,
                                             'export_url': export_url,
                                              'case_filters':case_filters,
+                                             'case_filters_disp':case_filters_disp,
                                              'program_ids':program_ids,
                                             'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
