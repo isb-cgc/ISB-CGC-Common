@@ -445,7 +445,6 @@ def save_cohort(request):
             #solr_filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }
             results = get_cohort_stats(filters=solr_filters, sources=data_sources)
 
-            #results = get_cohort_stats(filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }, sources=data_sources)
 
             # Do not allow 0 case cohorts
             if not results["case_barcode"]:
