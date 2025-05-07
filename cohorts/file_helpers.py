@@ -154,12 +154,19 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
 
             file_collection_name = file_collection.name.lower()
 
-            if file_collection_name.startswith('files'):
-                cohort_cases = get_cohort_cases(cohort_id)
-                solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
+            #GW - this conditional is messing up cohort files. Is it necessary??
+            #if file_collection_name.startswith('files'):
+            cohort_cases = get_cohort_cases(cohort_id)
+            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
+
         elif case_filters is not None:
             if not solr_query:
                 solr_query = {'queries': {}}
+            if program_ids is None:
+                program_ids=[]
+                for keyset in case_filters:
+                    progid=keyset.split(":")[0]
+                    program_ids.append(progid)
             cohort_cases  =get_cohort_cases(None, filters=case_filters, program_ids=program_ids)
             solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
 
