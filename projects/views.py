@@ -41,8 +41,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-BLACKLIST_RE = settings.BLACKLIST_RE
-
 
 @login_required
 @otp_required

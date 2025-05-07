@@ -312,7 +312,7 @@ def copy_cohort(request, cohort_id):
         req = request.GET if request.method == 'GET' else request.POST
         name = req.get('name','')
         desc = req.get('desc','')
-        blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
+        blacklist = re.compile(BLACKLIST_RE, flags=re.UNICODE|re.IGNORECASE)
         match_name = blacklist.search(str(name))
         match_desc = blacklist.search(str(desc))
         if match_name or match_desc:
@@ -381,7 +381,7 @@ def save_cohort(request):
 
             name = request.POST.get('name')
             desc = request.POST.get('desc')
-            blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+            blacklist = re.compile(BLACKLIST_RE, flags=re.UNICODE|re.IGNORECASE)
             match_name = blacklist.search(str(name))
             match_desc = blacklist.search(str(desc))
             if match_name or match_desc:
