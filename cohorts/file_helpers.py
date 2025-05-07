@@ -38,7 +38,7 @@ FILTER_DATA_TYPE = {
 }
 
 
-def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
+def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=None,user=None, limit=25, page=1, offset=0, sort_column='col-program',
                  sort_order=0, data_type=None, do_filter_count=True):
 
     if cohort_id and (not user or user.is_anonymous):
@@ -154,9 +154,21 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
 
             file_collection_name = file_collection.name.lower()
 
-            if file_collection_name.startswith('files'):
-                cohort_cases = get_cohort_cases(cohort_id)
-                solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
+            #GW - this conditional is messing up cohort files. Is it necessary??
+            #if file_collection_name.startswith('files'):
+            cohort_cases = get_cohort_cases(cohort_id)
+            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
+
+        elif case_filters is not None:
+            if not solr_query:
+                solr_query = {'queries': {}}
+            if program_ids is None:
+                program_ids=[]
+                for keyset in case_filters:
+                    progid=keyset.split(":")[0]
+                    program_ids.append(progid)
+            cohort_cases  =get_cohort_cases(None, filters=case_filters, program_ids=program_ids)
+            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
 
         if format_filter:
             format_query = build_solr_query(format_filter, with_tags_for_ex=False)
