@@ -212,10 +212,6 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
             query_params.update({
                 "unique": "StudyInstanceUID"
             })
-        elif data_type == 'all' or data_type == 'pdf':
-            query_params.update({
-                "unique": "file_name"
-            })
         file_query_result = query_solr_and_format_result(query_params)
 
         total_file_count = file_query_result.get('numFound', 0)
