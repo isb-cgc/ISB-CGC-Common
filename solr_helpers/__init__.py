@@ -133,7 +133,7 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
     # Note that collapse does NOT allow for proper faceted counting of facets where documents may have more than one entry
     # in such a case, build a unique facet in the facet builder
     if collapse_on:
-        collapse = '{!collapse field=%s}' % collapse_on
+        collapse = '{!tag=collapsetag}{!collapse field=%s}' % collapse_on
         if fqs:
             payload['filter'].append(collapse)
         else:
@@ -163,7 +163,7 @@ def query_solr(collection=None, fields=None, query_string=None, fqs=None, facets
 # filter_tags: If there are filters to be excluded via tagging, this is the dict mapping attribute name to filter tag
 # include_nulls: will include missing=True for facets where data wasn't included
 # unique: If counts need to be calculated against a specific field, this is that field as a string (otherwise counts are document-wise)
-def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, total_facets=None):
+def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, total_facets=None, collapse=False):
     facets = {}
     for attr in attrs:
         facet_type = DataSource.get_facet_type(attr)
@@ -184,11 +184,18 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                         'limit': -1,
                         'q': "{}:{}{} TO {}{}".format(attr.name, l_boundary, str(lower), str(upper), u_boundary)
                     }
-                    if filter_tags and attr.name in filter_tags:
+                    if collapse:
                         facets[facet_name]['domain'] = {
-                            "excludeTags": filter_tags[attr.name]
+                            "excludeTags": "collapse"
                         }
-
+                    if filter_tags and attr.name in filter_tags:
+                        exclusion = facets[facet_name].get('domain',{}).get('excludeTags', None)
+                        if exclusion:
+                            facets[facet_name]['domain']['excludeTags'] += ",{}".format(filter_tags[attr.name])
+                        else:
+                            facets[facet_name]['domain'] = {
+                                "excludeTags": filter_tags[attr.name]
+                            }
                     if unique:
                         facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
@@ -228,10 +235,18 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'limit': -1,
                             'q': "{}:{}{} TO {}{}".format(attr.name, l_boundary, str(lower), str(upper), u_boundary)
                         }
-                        if filter_tags and attr.name in filter_tags:
+                        if collapse:
                             facets[facet_name]['domain'] = {
-                                "excludeTags": filter_tags[attr.name]
+                                "excludeTags": "collapse"
                             }
+                        if filter_tags and attr.name in filter_tags:
+                            exclusion = facets[facet_name].get('domain', {}).get('excludeTags', None)
+                            if exclusion:
+                                facets[facet_name]['domain']['excludeTags'] += ",{}".format(filter_tags[attr.name])
+                            else:
+                                facets[facet_name]['domain'] = {
+                                    "excludeTags": filter_tags[attr.name]
+                                }
                         if unique:
                             facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
 
@@ -252,11 +267,18 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'limit': -1,
                             'q': "{}:{}{} TO {}]".format(attr.name, l_boundary, str(attr_range.last), "*")
                         }
-
-                        if filter_tags and attr.name in filter_tags:
+                        if collapse:
                             facets[facet_name]['domain'] = {
-                                "excludeTags": filter_tags[attr.name]
+                                "excludeTags": "collapse"
                             }
+                        if filter_tags and attr.name in filter_tags:
+                            exclusion = facets[facet_name].get('domain', {}).get('excludeTags', None)
+                            if exclusion:
+                                facets[facet_name]['domain']['excludeTags'] += ",{}".format(filter_tags[attr.name])
+                            else:
+                                facets[facet_name]['domain'] = {
+                                    "excludeTags": filter_tags[attr.name]
+                                }
 
                         if unique:
                             facets[facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
@@ -270,10 +292,18 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                             'q': '-{}:[* TO *]'.format(attr.name)
                         }
 
-                        if filter_tags and attr.name in filter_tags:
+                        if collapse:
                             facets[none_facet_name]['domain'] = {
-                                "excludeTags": filter_tags[attr.name]
+                                "excludeTags": "collapse"
                             }
+                        if filter_tags and attr.name in filter_tags:
+                            exclusion = facets[none_facet_name].get('domain', {}).get('excludeTags', None)
+                            if exclusion:
+                                facets[none_facet_name]['domain']['excludeTags'] += ",{}".format(filter_tags[attr.name])
+                            else:
+                                facets[none_facet_name]['domain'] = {
+                                    "excludeTags": filter_tags[attr.name]
+                                }
 
                         if unique:
                             facets[none_facet_name]['facet'] = {"unique_count": "unique({})".format(unique)}
@@ -284,10 +314,18 @@ def build_solr_facets(attrs, filter_tags=None, include_nulls=True, unique=None, 
                 'limit': -1
             }
 
-            if filter_tags and attr.name in filter_tags:
+            if collapse:
                 facets[attr.name]['domain'] = {
-                    "excludeTags": filter_tags[attr.name]
+                    "excludeTags": "collapse"
                 }
+            if filter_tags and attr.name in filter_tags:
+                exclusion = facets[attr.name].get('domain', {}).get('excludeTags', None)
+                if exclusion:
+                    facets[attr.name]['domain']['excludeTags'] += ",{}".format(filter_tags[attr.name])
+                else:
+                    facets[attr.name]['domain'] = {
+                        "excludeTags": filter_tags[attr.name]
+                    }
 
             if include_nulls:
                 facets[attr.name]['missing'] = True

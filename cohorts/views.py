@@ -365,7 +365,6 @@ def copy_cohort(request, cohort_id):
     return redirect(redirect_url)
 
 
-
 @login_required
 @otp_required
 @csrf_protect
@@ -378,7 +377,6 @@ def save_cohort(request):
     try:
 
         if request.POST:
-
             name = request.POST.get('name')
             desc = request.POST.get('desc')
             blacklist = re.compile(BLACKLIST_RE, flags=re.UNICODE|re.IGNORECASE)
@@ -444,7 +442,6 @@ def save_cohort(request):
                     solr_filters[prog_id]["{}:{}".format(prog_id, attrs[filt].name)] = filter_obj[prog_id][filt]
             #solr_filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }
             results = get_cohort_stats(filters=solr_filters, sources=data_sources)
-
 
             # Do not allow 0 case cohorts
             if not results["case_barcode"]:
@@ -640,7 +637,6 @@ def save_comment(request):
     return HttpResponse(json.dumps(return_obj), status=200)
 
 
-
 def case_ids_byfilter_nologin(request):
     response = get_filter_ids(request)
     return response
@@ -708,7 +704,6 @@ def get_filter_ids(request, cohort_id=None):
     return response
 
 
-
 @csrf_protect
 def filelist(request, cohort_id=None, panel_type=None):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
@@ -731,7 +726,6 @@ def filelist(request, cohort_id=None, panel_type=None):
             return redirect(reverse('landing_page'))
 
         req = request.GET if request.method == 'GET' else request.POST
-
 
         metadata_data_attr = fetch_file_data_attr(panel_type)
 
@@ -774,6 +768,8 @@ def filelist(request, cohort_id=None, panel_type=None):
         program_ids =[]
         case_filters_disp = {}
         current_case_filters_disp ={}
+        total_samples = 0
+        total_cases = 0
 
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
@@ -787,7 +783,7 @@ def filelist(request, cohort_id=None, panel_type=None):
             case_filters = json.loads(req.get('case_filters', '{}'))
             program_ids = json.loads(req.get('program_ids', '[]'))
 
-            solr_filters={}
+            solr_filters = {}
             for case_filterids in case_filters:
                 progid, attr_nm=case_filterids.split(':')
                 progid=int(progid)
@@ -801,7 +797,6 @@ def filelist(request, cohort_id=None, panel_type=None):
                     current_case_filters_disp[prognm]=[]
                 attr = Attribute.objects.get(name=attr_nm)
                 #attr_node=attr.name.split("_")[1].upper()
-
 
                 attr_disp=attr.display_name
                 #if "_" in attr.name:
@@ -818,9 +813,10 @@ def filelist(request, cohort_id=None, panel_type=None):
                     data_type__in=[DataSetType.CLINICAL_DATA, DataSetType.FILE_TYPE_DATA]))
             ).filter(datasettypes__set_type__in=[DataSetType.CASE_SET, DataSetType.FILE_AVAIL_SET]).distinct()
 
-            results = get_cohort_stats(filters=solr_filters, sources=data_sources)
-            total_samples=results['sample_barcode']
-            total_cases=results['case_barcode']
+            if len(solr_filters):
+                results = get_cohort_stats(filters=solr_filters, sources=data_sources)
+                total_samples = results['sample_barcode']
+                total_cases = results['case_barcode']
 
             download_url = reverse("download_filelist")
             export_url = reverse("export_data", kwargs={'export_type': 'file_manifest'})
