@@ -185,7 +185,6 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
                 facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique, include_nulls=False,
                 collapse=(collapse is not None)
             )
-            print(facets)
 
         filter_counts = {}
 
@@ -237,8 +236,8 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
                     })
                 else:
                     for key in entry:
-                        if type(entry[key]) is list:
-                            entry[key] = ", ".join([str(x) for x in entry[key]]) if len(entry[key]) > 1 else entry[key][0]
+                        if type(entry[key]) is list and len(entry[key]) <= 1:
+                            entry[key] = entry[key][0]
                     if entry.get('data_format', None) == 'BigQuery':
                         entry['case_barcode'] = "{} case(s)".format(entry['file_size'])
                         entry['file_size'] = 'N/A'
