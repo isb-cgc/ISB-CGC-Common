@@ -42,7 +42,7 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
                  sort_order=0, data_type=None, do_filter_count=True):
 
     # TODO: calls to this method should NOT pass in empty arrays or dicts for inc_ or case_filters, determine where those are coming from and stop them!
-    case_filters = case_filters if len(case_filters.keys()) > 0 else None
+    case_filters = case_filters if case_filters and len(case_filters.keys()) > 0 else None
     if cohort_id and (not user or user.is_anonymous):
         raise Exception("A user must be supplied to view a cohort's files.")
 
