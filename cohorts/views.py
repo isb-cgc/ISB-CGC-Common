@@ -733,8 +733,8 @@ def filelist(request, cohort_id=None, panel_type=None):
 
         if panel_type:
             inc_filters = json.loads(req.get('filters', '{}'))
-            case_filters=json.loads(req.get('case_filters', '{}'));
-            program_ids=json.loads(req.get('program_ids', '{}'));
+            case_filters = json.loads(req.get('case_filters', None))
+            program_ids = json.loads(req.get('program_ids', '{}'))
             if req.get('case_barcode', None):
                 inc_filters['case_barcode'] = req.get('case_barcode')
 
@@ -764,8 +764,8 @@ def filelist(request, cohort_id=None, panel_type=None):
 
         cohort = None
         programs_this_cohort = []
-        case_filters={}
-        program_ids =[]
+        case_filters = None
+        program_ids = []
         case_filters_disp = {}
         current_case_filters_disp ={}
         total_samples = 0
@@ -893,9 +893,9 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
-        case_filters=None
+        case_filters = None
         if request.GET.get('case_filters', None):
-            case_filters = json.loads(request.GET.get('case_filters','{}'))
+            case_filters = json.loads(request.GET.get('case_filters', '{}'))
 
         result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, case_filters=case_filters,
                               data_type=panel_type, do_filter_count=do_filter_count, **params)

@@ -41,6 +41,8 @@ FILTER_DATA_TYPE = {
 def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=None,user=None, limit=25, page=1, offset=0, sort_column='col-program',
                  sort_order=0, data_type=None, do_filter_count=True):
 
+    # TODO: calls to this method should NOT pass in empty arrays or dicts for inc_ or case_filters, determine where those are coming from and stop them!
+    case_filters = case_filters if len(case_filters.keys()) > 0 else None
     if cohort_id and (not user or user.is_anonymous):
         raise Exception("A user must be supplied to view a cohort's files.")
 
@@ -64,9 +66,9 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
         # key: html column attribute 'columnId'
         # value: db table column name
         col_map = {
-                'col-program': 'program_name',
-                'col-barcode': 'case_barcode'
-            }
+            'col-program': 'program_name',
+            'col-barcode': 'case_barcode'
+        }
 
         facet_attr = None
         format_filter = None
@@ -133,8 +135,7 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
             if do_filter_count:
                 facet_names = [
                     'project_short_name_gdc', 'project_short_name_pdc', 'node', 'build', 'data_format',
-                    'data_category', 'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform',
-                    'program_name', 'access'
+                    'data_category', 'experimental_strategy', 'platform', 'data_type', 'program_name', 'access'
                 ]
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
@@ -149,11 +150,6 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
             cohort = Cohort.objects.get(id=cohort_id)
             if not solr_query:
                 solr_query = {'queries': {}}
-
-            file_collection_name = file_collection.name.lower()
-
-            #GW - this conditional is messing up cohort files. Is it necessary??
-            #if file_collection_name.startswith('files'):
             cohort_cases = get_cohort_cases(cohort_id)
             solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
 
@@ -185,6 +181,7 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
                 facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique, include_nulls=False,
                 collapse=(collapse is not None)
             )
+        print(solr_query)
 
         filter_counts = {}
 
@@ -217,6 +214,7 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
                 "unique": "file_node_id",
                 "collapse_on": collapse
             })
+        print(query_params)
         file_query_result = query_solr_and_format_result(query_params)
 
         total_file_count = file_query_result.get('numFound', 0)
@@ -268,6 +266,7 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
 
         if 'facets' in file_query_result:
             filter_counts = file_query_result['facets']
+            print(filter_counts)
 
         resp = {
             'total_file_count': total_file_count,
