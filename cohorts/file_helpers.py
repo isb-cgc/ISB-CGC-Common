@@ -181,8 +181,6 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
                 facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique, include_nulls=False,
                 collapse=(collapse is not None)
             )
-        print(solr_query)
-
         filter_counts = {}
 
         sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
@@ -214,7 +212,7 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
                 "unique": "file_node_id",
                 "collapse_on": collapse
             })
-        print(query_params)
+
         file_query_result = query_solr_and_format_result(query_params)
 
         total_file_count = file_query_result.get('numFound', 0)
@@ -266,7 +264,6 @@ def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=Non
 
         if 'facets' in file_query_result:
             filter_counts = file_query_result['facets']
-            print(filter_counts)
 
         resp = {
             'total_file_count': total_file_count,
