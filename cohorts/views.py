@@ -312,7 +312,7 @@ def copy_cohort(request, cohort_id):
         req = request.GET if request.method == 'GET' else request.POST
         name = req.get('name','')
         desc = req.get('desc','')
-        blacklist = re.compile(BLACKLIST_RE, re.UNICODE)
+        blacklist = re.compile(BLACKLIST_RE, flags=re.UNICODE|re.IGNORECASE)
         match_name = blacklist.search(str(name))
         match_desc = blacklist.search(str(desc))
         if match_name or match_desc:
@@ -365,7 +365,6 @@ def copy_cohort(request, cohort_id):
     return redirect(redirect_url)
 
 
-
 @login_required
 @otp_required
 @csrf_protect
@@ -378,10 +377,9 @@ def save_cohort(request):
     try:
 
         if request.POST:
-
             name = request.POST.get('name')
             desc = request.POST.get('desc')
-            blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+            blacklist = re.compile(BLACKLIST_RE, flags=re.UNICODE|re.IGNORECASE)
             match_name = blacklist.search(str(name))
             match_desc = blacklist.search(str(desc))
             if match_name or match_desc:
@@ -444,8 +442,6 @@ def save_cohort(request):
                     solr_filters[prog_id]["{}:{}".format(prog_id, attrs[filt].name)] = filter_obj[prog_id][filt]
             #solr_filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }
             results = get_cohort_stats(filters=solr_filters, sources=data_sources)
-
-            #results = get_cohort_stats(filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }, sources=data_sources)
 
             # Do not allow 0 case cohorts
             if not results["case_barcode"]:
@@ -641,7 +637,6 @@ def save_comment(request):
     return HttpResponse(json.dumps(return_obj), status=200)
 
 
-
 def case_ids_byfilter_nologin(request):
     response = get_filter_ids(request)
     return response
@@ -730,17 +725,20 @@ def filelist(request, cohort_id=None, panel_type=None):
             messages.error(request, 'To view a cohort\'s files you must be logged in.')
             return redirect(reverse('landing_page'))
 
+        req = request.GET if request.method == 'GET' else request.POST
+
         metadata_data_attr = fetch_file_data_attr(panel_type)
 
         items = None
 
         if panel_type:
-            inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
-                request.POST.get('filters', '{}'))
-            if request.GET.get('case_barcode', None):
-                inc_filters['case_barcode'] = request.GET.get('case_barcode')
+            inc_filters = json.loads(req.get('filters', '{}'))
+            case_filters = json.loads(req.get('case_filters', None))
+            program_ids = json.loads(req.get('program_ids', '{}'))
+            if req.get('case_barcode', None):
+                inc_filters['case_barcode'] = req.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, data_type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, case_filters=case_filters, program_ids=program_ids, user=request.user, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -766,12 +764,60 @@ def filelist(request, cohort_id=None, panel_type=None):
 
         cohort = None
         programs_this_cohort = []
+        case_filters = None
+        program_ids = []
+        case_filters_disp = {}
+        current_case_filters_disp ={}
+        total_samples = 0
+        total_cases = 0
+
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
             export_url = reverse("export_cohort_data", kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
+            current_case_filters_disp= cohort.get_filters_for_ui(True)
+            total_samples=cohort.sample_count
+            total_cases=cohort.case_count
         else:
+            case_filters = json.loads(req.get('case_filters', '{}'))
+            program_ids = json.loads(req.get('program_ids', '[]'))
+
+            solr_filters = {}
+            for case_filterids in case_filters:
+                progid, attr_nm=case_filterids.split(':')
+                progid=int(progid)
+                prognm=Program.objects.get(id=progid).name
+
+                if not progid in solr_filters:
+                    solr_filters[progid]={}
+                solr_filters[progid][case_filterids]=case_filters[case_filterids]
+
+                if not prognm in current_case_filters_disp:
+                    current_case_filters_disp[prognm]=[]
+                attr = Attribute.objects.get(name=attr_nm)
+                #attr_node=attr.name.split("_")[1].upper()
+
+                attr_disp=attr.display_name
+                #if "_" in attr.name:
+                #    attr_disp = "[" + attr.name.split("_")[1].upper() + "]" + attr_disp
+
+                filter_values = case_filters[case_filterids]['values']
+
+                disp_val=[{"values":val, "display_val":val} for val in filter_values]
+                current_case_filters_disp[prognm].append({"id":attr.id, "attr_name":attr.name, "name":attr.name, "display_name":attr_disp, "op":'OR', "values":disp_val})
+
+            data_sources = DataSource.objects.select_related("version").filter(source_type=DataSource.SOLR,
+                                                                               version__active=True).prefetch_related(
+                Prefetch('datasettypes', queryset=DataSetType.objects.filter(
+                    data_type__in=[DataSetType.CLINICAL_DATA, DataSetType.FILE_TYPE_DATA]))
+            ).filter(datasettypes__set_type__in=[DataSetType.CASE_SET, DataSetType.FILE_AVAIL_SET]).distinct()
+
+            if len(solr_filters):
+                results = get_cohort_stats(filters=solr_filters, sources=data_sources)
+                total_samples = results['sample_barcode']
+                total_cases = results['case_barcode']
+
             download_url = reverse("download_filelist")
             export_url = reverse("export_data", kwargs={'export_type': 'file_manifest'})
         logger.debug("[STATUS] Returning response from cohort_filelist")
@@ -781,6 +827,11 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
                                             'export_url': export_url,
+                                            'total_samples': total_samples,
+                                            'total_cases': total_cases,
+                                            'current_case_filters_disp': current_case_filters_disp,
+                                            'case_filters':case_filters,
+                                            'program_ids':program_ids,
                                             'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
@@ -842,8 +893,11 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
+        case_filters = None
+        if request.GET.get('case_filters', None):
+            case_filters = json.loads(request.GET.get('case_filters', '{}'))
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters,
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, case_filters=case_filters,
                               data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that

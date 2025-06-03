@@ -38,9 +38,11 @@ FILTER_DATA_TYPE = {
 }
 
 
-def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offset=0, sort_column='col-program',
+def cohort_files(cohort_id, inc_filters=None, case_filters=None, program_ids=None,user=None, limit=25, page=1, offset=0, sort_column='col-program',
                  sort_order=0, data_type=None, do_filter_count=True):
 
+    # TODO: calls to this method should NOT pass in empty arrays or dicts for inc_ or case_filters, determine where those are coming from and stop them!
+    case_filters = case_filters if case_filters and len(case_filters.keys()) > 0 else None
     if cohort_id and (not user or user.is_anonymous):
         raise Exception("A user must be supplied to view a cohort's files.")
 
@@ -64,14 +66,14 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
         # key: html column attribute 'columnId'
         # value: db table column name
         col_map = {
-                'col-program': 'program_name',
-                'col-barcode': 'case_barcode'
-            }
+            'col-program': 'program_name',
+            'col-barcode': 'case_barcode'
+        }
 
         facet_attr = None
-        collapse = None
         format_filter = None
         type_filter = None
+        collapse = None
 
         if data_type in ('igv', 'pdf'):
             format_filter = {'data_format': FILTER_DATA_FORMAT[data_type]} if data_type in FILTER_DATA_FORMAT else None
@@ -98,8 +100,6 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                     "program_name", "collection_id", "Modality", "BodyPartExamined", "tcia_tumorLocation",
                     "primaryAnatomicStructure", "CancerType"]
                 )
-
-            # collapse = "StudyInstanceUID"
             unique = "StudyInstanceUID"
 
         else:
@@ -135,13 +135,12 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             if do_filter_count:
                 facet_names = [
                     'project_short_name_gdc', 'project_short_name_pdc', 'node', 'build', 'data_format',
-                    'data_category', 'experimental_strategy', 'platform', 'data_type', 'data_type', 'platform',
-                    'program_name', 'access'
+                    'data_category', 'experimental_strategy', 'platform', 'data_type', 'program_name', 'access'
                 ]
 
                 facet_attr = Attribute.objects.filter(name__in=facet_names)
 
-            unique = "file_name"
+            unique = "file_node_id"
 
         if 'case_barcode' in inc_filters:
             inc_filters['case_barcode'] = ["*{}*".format(x) for x in inc_filters['case_barcode']]
@@ -151,12 +150,19 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             cohort = Cohort.objects.get(id=cohort_id)
             if not solr_query:
                 solr_query = {'queries': {}}
+            cohort_cases = get_cohort_cases(cohort_id)
+            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
 
-            file_collection_name = file_collection.name.lower()
-
-            if file_collection_name.startswith('files'):
-                cohort_cases = get_cohort_cases(cohort_id)
-                solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
+        elif case_filters is not None:
+            if not solr_query:
+                solr_query = {'queries': {}}
+            if program_ids is None:
+                program_ids=[]
+                for keyset in case_filters:
+                    progid=keyset.split(":")[0]
+                    program_ids.append(progid)
+            cohort_cases = get_cohort_cases(None, filters=case_filters, program_ids=program_ids)
+            solr_query['queries']['cohort'] = "{!terms f=case_barcode}" + "{}".format(",".join([x['case_barcode'] for x in cohort_cases]))
 
         if format_filter:
             format_query = build_solr_query(format_filter, with_tags_for_ex=False)
@@ -171,8 +177,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             solr_query['queries']['data_type'] = type_query['queries']['data_type']
 
         if do_filter_count:
-            facets = build_solr_facets(facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique, include_nulls=False)
-
+            facets = build_solr_facets(
+                facet_attr, solr_query['filter_tags'] if inc_filters else None, unique=unique, include_nulls=False,
+                collapse=(collapse is not None)
+            )
         filter_counts = {}
 
         sort = "{} {}".format(col_map[sort_column], "DESC" if sort_order == 1 else "ASC")
@@ -193,8 +201,7 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                 "sort": sort,
                 "offset": offset,
                 "limit": limit,
-                "counts_only": False,
-                "collapse_on": collapse
+                "counts_only": False
         }
         if data_type == 'dicom':
             query_params.update({
@@ -202,8 +209,10 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
             })
         elif data_type == 'all' or data_type == 'pdf':
             query_params.update({
-                "unique": "file_name"
+                "unique": "file_node_id",
+                "collapse_on": collapse
             })
+
         file_query_result = query_solr_and_format_result(query_params)
 
         total_file_count = file_query_result.get('numFound', 0)
@@ -223,8 +232,11 @@ def cohort_files(cohort_id, inc_filters=None, user=None, limit=25, page=1, offse
                     })
                 else:
                     for key in entry:
-                        if type(entry[key]) is list:
-                            entry[key] = ", ".join([str(x) for x in entry[key]]) if len(entry[key]) > 1 else entry[key][0]
+                        if type(entry[key]) is list and len(entry[key]) <= 1:
+                            entry[key] = entry[key][0]
+                    if entry.get('data_format', None) == 'BigQuery':
+                        entry['case_barcode'] = "{} case(s)".format(entry['file_size'])
+                        entry['file_size'] = 'N/A'
 
                     file_list.append({
                         'sample': entry.get('sample_barcode', 'N/A'),
