@@ -55,8 +55,7 @@ FILE_LIST_EXPORT_SCHEMA = {
             'mode': 'REQUIRED'
         }, {
             'name': 'build',
-            'type': 'STRING',
-            'mode': 'REQUIRED'
+            'type': 'STRING'
         }, {
             'name': 'file_node_id',
             'type': 'STRING'
