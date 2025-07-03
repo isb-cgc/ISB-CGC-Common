@@ -680,7 +680,7 @@ class DataSourceQuerySet(models.QuerySet):
 
         attrs['list'] = attrs['list'] and list(set(attrs['list']))
         attrs['ids'] = attrs['ids'] and list(set(attrs['ids']))
-        attrs['attrs'].distinct()
+        attrs['attrs'] = attrs['attrs'].distinct() if attrs['attrs'] and len(attrs['attrs']) else None
         stop = time.time()
         logger.debug("[STATUS] Time to build source attribute sets: {}".format(str(stop-start)))
 

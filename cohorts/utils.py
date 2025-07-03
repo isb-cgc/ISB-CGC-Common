@@ -46,7 +46,13 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
             raise Exception("If you don't provide a cohort ID, you must provide filters!")
 
         if not filters:
-            filters = cohort.get_filters_for_counts()
+            filters_wrong_format = cohort.get_filters_for_counts()
+            filters={}
+            for filt in filters_wrong_format:
+                prog= int(filt.split(":")[0])
+                if not prog in filters:
+                    filters[prog]={}
+                filters[prog][filt]=filters_wrong_format[filt]
 
         totals = ["case_barcode"]
 
@@ -54,7 +60,7 @@ def get_cohort_stats(cohort_id=0, filters=None, sources=None):
             if prog not in stats['programs']:
                 stats['programs'][prog] = {}
 
-            result = count_public_metadata_solr(None, inc_filters=filters[prog], program_id=prog, with_counts=False)
+            result = count_public_metadata_solr(None, inc_filters=filters[prog], program_ids=[prog], with_counts=False)
             prog_totals = result.get('programs', {}).get(prog,{}).get('totals',None)
             if prog_totals:
                 for total_count in prog_totals:
@@ -108,7 +114,7 @@ def delete_cohort(user, cohort_id):
 
 # Expects a filter format of:
 # { program.id: { attribute.id: { 'values': [...] }, [...] }, [...] }
-def create_cohort(user, filters=None, name=None, desc=None, source_id=None, version=None, stats=None, case_insens=True):
+def create_cohort(user, filters=None, name=None, desc=None, source_id=None, version=None, stats=None, case_insens=True, persist=True):
 
     if not filters and not name and not desc:
         logger.error("[ERROR] Can't create/edit a cohort when nothing is being changed!")
@@ -143,11 +149,12 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
         settings['sample_count'] = stats.get('sample_barcode', 0)
 
     cohort = Cohort.objects.create(**settings)
-    cohort.save()
+    if persist:
+        cohort.save()
 
-    # Set permission for user to be owner
-    perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
-    perm.save()
+        # Set permission for user to be owner
+        perm = Cohort_Perms(cohort=cohort, user=user, perm=Cohort_Perms.OWNER)
+        perm.save()
 
     # TODO: Need to convert filters into a datasource attribute set
     # Make and save filters
@@ -187,13 +194,14 @@ def create_cohort(user, filters=None, name=None, desc=None, source_id=None, vers
     return {'cohort_id': cohort.id}
 
 
-def get_cohort_cases(cohort_id=0, filters=None, as_dict=False, source=DataSource.SOLR):
+def get_cohort_cases(cohort_id=0, filters=None,  program_ids=None, as_dict=False, source=DataSource.SOLR):
     try:
+
         if cohort_id:
             filters = Cohort.objects.get(id=cohort_id).get_filters_for_counts(no_vals=bool(source == DataSource.BIGQUERY))
 
         if source == DataSource.SOLR:
-            result = count_public_metadata_solr(None, cohort_id, None, None, fields=["case_barcode"],
+            result = count_public_metadata_solr(None, cohort_id, program_ids=program_ids, inc_filters=filters, fields=["case_barcode"],
                                                     with_counts=False, with_records=True, limit=64000)
             cohort_cases = []
             for prog in result['programs']:

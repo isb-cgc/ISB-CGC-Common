@@ -270,24 +270,29 @@ class Cohort(models.Model):
     # for use in UI display
     def get_filters_for_ui(self, with_display_vals=False):
         cohort_filters = self.get_filters_as_dict()
-        ui_filters = {}
-        attribute_display_vals = {}
-
-        for fg in cohort_filters:
-            for filter in fg['filters']:
-                if filter['program_name'] not in ui_filters:
-                    ui_filters[filter['program_name']] = []
-                ui_filter = filter
-                if filter['id'] not in attribute_display_vals:
-                    attr = Attribute.objects.get(id=filter['id'])
-                    attribute_display_vals[attr.id] = attr.get_display_values()
-                values = filter['values']
-                ui_filter['values'] = []
-                for val in values:
-                    ui_filter['values'].append({'value': val, 'display_val': attribute_display_vals[filter['id']].get(val,val) })
-                ui_filters[filter['program_name']].append(ui_filter)
-
+        ui_filters=get_filters_for_ui(cohort_filters,with_display_vals=False)
         return ui_filters
+
+def get_filters_for_ui(cohort_filters,with_display_vals=False):
+    ui_filters = {}
+    attribute_display_vals = {}
+
+    for fg in cohort_filters:
+        for filter in fg['filters']:
+            if filter['program_name'] not in ui_filters:
+                ui_filters[filter['program_name']] = []
+            ui_filter = filter
+            if filter['id'] not in attribute_display_vals:
+                attr = Attribute.objects.get(id=filter['id'])
+                attribute_display_vals[attr.id] = attr.get_display_values()
+            values = filter['values']
+            ui_filter['values'] = []
+            for val in values:
+                ui_filter['values'].append(
+                    {'value': val, 'display_val': attribute_display_vals[filter['id']].get(val, val)})
+            ui_filters[filter['program_name']].append(ui_filter)
+
+    return ui_filters
 
 
 class Cohort_Perms(models.Model):
