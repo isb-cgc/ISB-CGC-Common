@@ -54,7 +54,7 @@ from .metadata_counting import *
 from .utils import create_cohort, get_cohort_cases
 from .file_helpers import *
 from sharing.service import create_share
-from .models import Cohort, Cohort_Perms, Filter, Cohort_Comments
+from .models import Cohort, Cohort_Perms, Filter, Filter_Group,Cohort_Comments
 from projects.models import Program, Project, DataNode, DataSetType
 from accounts.sa_utils import auth_dataset_whitelists_for_user
 from .utils import delete_cohort as utils_delete_cohort, get_cohort_stats
@@ -171,9 +171,11 @@ def cohorts_list(request, is_public=False):
                 shared_users[int(item.id)] = serializers.serialize('json', item.shared_with_users, fields=('last_name', 'first_name', 'email'))
 
     # Used for autocomplete listing
-    cohort_id_names = Cohort.objects.filter(id__in=cohort_perms, active=True).values('id', 'name')
+    cohort_id_names = Cohort.objects.filter(id__in=cohort_perms).values('id', 'name', 'active')
     cohort_listing = []
     for cohort in cohort_id_names:
+        #version = Cohort.objects.filter(id=cohort['id']).first().get_data_versions().values('name', 'version_number').first()
+
         cohort_listing.append({
             'value': int(cohort['id']),
             'label': escape(cohort['name'])
@@ -233,7 +235,10 @@ def cohort_detail(request, cohort_id):
 
     logger.info("[STATUS] Called cohort_detail")
     try:
+
         program_list = Program.objects.filter(active=True, is_public=True)
+        req = request.GET if request.method == 'GET' else request.POST
+        update = True if ((req.get('update', 'false').lower())=='true') else False
 
         all_nodes, all_programs = DataNode.get_node_programs([DataSetType.CLINICAL_DATA,DataSetType.FILE_TYPE_DATA])
 
@@ -262,7 +267,10 @@ def cohort_detail(request, cohort_id):
         shared_with_ids = Cohort_Perms.objects.filter(cohort=cohort, perm=Cohort_Perms.READER).values_list('user', flat=True)
         shared_with_users = User.objects.filter(id__in=shared_with_ids)
 
-        template = 'cohorts/cohort_details.html'
+        if update:
+            template = 'cohorts/new_cohort.html'
+        else:
+            template = 'cohorts/cohort_details.html'
         template_values.update({
             'cohort': cohort,
             'export_url': reverse('export_cohort_data', kwargs={'cohort_id': cohort.id, 'export_type': "cohort"}),
@@ -290,6 +298,76 @@ def cohort_detail(request, cohort_id):
 @login_required
 @otp_required
 @csrf_protect
+def get_stats_from_cohort_filter(request, cohort_id):
+    results=get_cohort_stats(cohort_id)
+    return HttpResponse(json.dumps(results), status=200)
+
+
+@login_required
+@otp_required
+@csrf_protect
+def copy_cohort(request, cohort_id):
+    redirect_url = reverse('cohort_list')
+    try:
+        req = request.GET if request.method == 'GET' else request.POST
+        name = req.get('name','')
+        desc = req.get('desc','')
+        blacklist = re.compile(BLACKLIST_RE, flags=re.UNICODE|re.IGNORECASE)
+        match_name = blacklist.search(str(name))
+        match_desc = blacklist.search(str(desc))
+        if match_name or match_desc:
+            # XSS risk, log and fail this cohort save
+            match_name = blacklist.findall(str(name))
+            match_desc = blacklist.findall(str(desc))
+            match_name and logger.error(
+                    '[ERROR] While saving a cohort, saw a malformed name: ' + name + ', characters: ' + str(match_name))
+            match_desc and logger.error(
+                    '[ERROR] While saving a cohort, saw a malformed name: ' + desc + ', characters: ' + str(match_desc))
+            messages.error(request,
+                           "Your cohort's name and/or description contain invalid characters; please edit them.")
+            return redirect(redirect_url)
+
+        filters_as_dict=Cohort.objects.get(id=cohort_id).get_filters_as_dict()[0]['filters'];
+        filter_obj={}
+        attr_ids = []
+        for filt in filters_as_dict:
+
+            prog_id = filt['program']
+            if not prog_id in filter_obj:
+                filter_obj[prog_id]={}
+            attr_id = filt["id"]
+            if not attr_id in filter_obj[prog_id]:
+                attr_ids.append(attr_id)
+                filter_obj[prog_id][attr_id] = {}
+            filter_obj[prog_id][attr_id]['values'] = filt['values']
+
+
+        attrs = {x.id: x for x in Attribute.objects.filter(id__in=attr_ids)}
+        solr_filters = {}
+        for prog_id in filter_obj:
+            solr_filters[prog_id] = {}
+            for filt in filter_obj[prog_id]:
+                solr_filters[prog_id]["{}:{}".format(prog_id, attrs[filt].name)] = filter_obj[prog_id][filt]
+            # solr_filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }
+        data_sources = DataSource.objects.select_related("version").filter(source_type=DataSource.SOLR,
+                                                                           version__active=True).prefetch_related(Prefetch('datasettypes', queryset=DataSetType.objects.filter(
+                data_type__in=[DataSetType.CLINICAL_DATA, DataSetType.FILE_TYPE_DATA]))).filter(datasettypes__set_type__in=[DataSetType.CASE_SET, DataSetType.FILE_AVAIL_SET]).distinct()
+
+        results = get_cohort_stats(filters=solr_filters, sources=data_sources)
+        create_cohort(request.user, filter_obj, name, desc, stats=results, case_insens=True)
+
+    except Exception as e:
+        redirect_url = reverse('cohort_list')
+        messages.error(request, "There was an error saving your cohort; it may not have been saved correctly.")
+        logger.error('[ERROR] Exception while saving a cohort:')
+        logger.exception(e)
+
+    return redirect(redirect_url)
+
+
+@login_required
+@otp_required
+@csrf_protect
 def save_cohort(request):
     if debug: logger.debug('Called '+sys._getframe().f_code.co_name)
 
@@ -301,7 +379,7 @@ def save_cohort(request):
         if request.POST:
             name = request.POST.get('name')
             desc = request.POST.get('desc')
-            blacklist = re.compile(BLACKLIST_RE,re.UNICODE)
+            blacklist = re.compile(BLACKLIST_RE, flags=re.UNICODE|re.IGNORECASE)
             match_name = blacklist.search(str(name))
             match_desc = blacklist.search(str(desc))
             if match_name or match_desc:
@@ -316,7 +394,8 @@ def save_cohort(request):
 
             # If we're just editing a cohort's name or description, that ID is provided as the 'source'
             source = request.POST.get('source')
-            filters = request.POST.getlist('filters')
+            #filters = request.POST.getlist('filters')
+            filters = json.loads(request.POST.get('filters'))
             apply_name = request.POST.getlist('apply-name')
             apply_desc = request.POST.getlist('apply-desc')
             mut_comb_with = request.POST.get('mut_filter_combine')
@@ -332,7 +411,8 @@ def save_cohort(request):
 
             if len(filters) > 0:
                 for this_filter in filters:
-                    tmp = json.loads(this_filter)
+                    #tmp = json.loads(this_filter)
+                    tmp=this_filter
                     key = tmp['feature']['id']
                     val = tmp['value']['name']
                     program_id = tmp['program']['id']
@@ -355,8 +435,13 @@ def save_cohort(request):
                    version__active=True).prefetch_related(
                 Prefetch('datasettypes', queryset=DataSetType.objects.filter(data_type__in=[DataSetType.CLINICAL_DATA, DataSetType.FILE_TYPE_DATA]))
             ).filter(datasettypes__set_type__in=[DataSetType.CASE_SET, DataSetType.FILE_AVAIL_SET]).distinct()
-
-            results = get_cohort_stats(filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }, sources=data_sources)
+            solr_filters={}
+            for prog_id in filter_obj:
+                solr_filters[prog_id]={}
+                for filt in filter_obj[prog_id]:
+                    solr_filters[prog_id]["{}:{}".format(prog_id, attrs[filt].name)] = filter_obj[prog_id][filt]
+            #solr_filters={x: {"{}:{}".format(x, attrs[w].name): z} for x, y in filter_obj.items() for w,z in y.items() }
+            results = get_cohort_stats(filters=solr_filters, sources=data_sources)
 
             # Do not allow 0 case cohorts
             if not results["case_barcode"]:
@@ -552,21 +637,47 @@ def save_comment(request):
     return HttpResponse(json.dumps(return_obj), status=200)
 
 
+def case_ids_byfilter_nologin(request):
+    response = get_filter_ids(request)
+    return response
+
+
 @login_required
 @otp_required
 @csrf_protect
-def cohort_ids(request, cohort_id):
+def case_ids_by_cohort_filter(request, cohort_id):
+    response = get_filter_ids(request, cohort_id)
+    return response
+
+
+def get_filter_ids(request, cohort_id=None):
     try:
         # Attempt to get the cohort perms - this will cause an excpetion if we don't have them
-        if cohort_id:
+        req = request.GET if request.method == 'GET' else request.POST
+        filters = json.loads(req.get('filters', '{}'))
+        program_ids = json.loads(req.get('program_ids', '[]'))
+        downloadToken = req.get('downloadToken','')
+
+        if (cohort_id is None):
+            cohort = None
+            rows = (["Case listing for unnamed cohort"],)
+            rows += (["Filters: {}".format(filters)],)
+            #rows += (["Programs: {}".format(prog_id)],)
+
+        elif cohort_id:
+            filters = None
+            program_ids = None
             Cohort_Perms.objects.get(cohort_id=cohort_id, user_id=request.user.id)
+            cohort = Cohort.objects.get(id=cohort_id)
+            rows = (["Case listing for Cohort '{}'".format(cohort.name)],)
+            rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
+            rows += (["Programs: {}".format(", ".join(list(cohort.get_programs().values_list('name', flat=True))))],)
 
-        cohort = Cohort.objects.get(id=cohort_id)
-        ids = get_cohort_cases(cohort_id)
 
-        rows = (["Case listing for Cohort '{}'".format(cohort.name)],)
-        rows += (["Filters: {}".format(cohort.get_filter_display_string())],)
-        rows += (["Programs: {}".format(", ".join(list(cohort.get_programs().values_list('name', flat=True))))],)
+        ids = get_cohort_cases(cohort_id,filters=filters, program_ids=program_ids)
+
+
+
         rows += (["Program","Case Barcode"],)
 
         for id in ids:
@@ -578,9 +689,12 @@ def cohort_ids(request, cohort_id):
                                          content_type="text/csv")
 
         timestamp = datetime.datetime.fromtimestamp(time.time()).strftime('%Y%m%d_%H%M%S')
-        filename = 'cohort_{}_ids_{}.csv'.format(cohort.id, timestamp)
+        if (cohort == None):
+            filename = 'unsaved_cohort_ids_{}.csv'.format(timestamp)
+        else:
+            filename = 'cohort_{}_ids_{}.csv'.format(cohort.id, timestamp)
         response['Content-Disposition'] = 'attachment; filename=' + filename
-        response.set_cookie("downloadToken", request.GET.get('downloadToken'))
+        response.set_cookie("downloadToken", downloadToken)
 
     except ObjectDoesNotExist as e:
         logger.error("[ERROR] Permissions exception when retrieving cohort file list for cohort {}:".format(str(cohort_id)))
@@ -611,17 +725,20 @@ def filelist(request, cohort_id=None, panel_type=None):
             messages.error(request, 'To view a cohort\'s files you must be logged in.')
             return redirect(reverse('landing_page'))
 
+        req = request.GET if request.method == 'GET' else request.POST
+
         metadata_data_attr = fetch_file_data_attr(panel_type)
 
         items = None
 
         if panel_type:
-            inc_filters = json.loads(request.GET.get('filters', '{}')) if request.GET else json.loads(
-                request.POST.get('filters', '{}'))
-            if request.GET.get('case_barcode', None):
-                inc_filters['case_barcode'] = request.GET.get('case_barcode')
+            inc_filters = json.loads(req.get('filters', '{}'))
+            case_filters = json.loads(req.get('case_filters', None))
+            program_ids = json.loads(req.get('program_ids', '{}'))
+            if req.get('case_barcode', None):
+                inc_filters['case_barcode'] = req.get('case_barcode')
 
-            items = cohort_files(cohort_id, inc_filters=inc_filters, user=request.user, data_type=panel_type)
+            items = cohort_files(cohort_id, inc_filters=inc_filters, case_filters=case_filters, program_ids=program_ids, user=request.user, data_type=panel_type)
 
             for attr in items['metadata_data_counts']:
                 if attr in metadata_data_attr:
@@ -647,12 +764,60 @@ def filelist(request, cohort_id=None, panel_type=None):
 
         cohort = None
         programs_this_cohort = []
+        case_filters = None
+        program_ids = []
+        case_filters_disp = {}
+        current_case_filters_disp ={}
+        total_samples = 0
+        total_cases = 0
+
         if cohort_id:
             cohort = Cohort.objects.get(id=cohort_id, active=True)
             programs_this_cohort = [x for x in cohort.get_programs().values_list('name', flat=True)]
             download_url = reverse("download_cohort_filelist", kwargs={'cohort_id': cohort_id})
             export_url = reverse("export_cohort_data", kwargs={'cohort_id': cohort_id, 'export_type': 'file_manifest'})
+            current_case_filters_disp= cohort.get_filters_for_ui(True)
+            total_samples=cohort.sample_count
+            total_cases=cohort.case_count
         else:
+            case_filters = json.loads(req.get('case_filters', '{}'))
+            program_ids = json.loads(req.get('program_ids', '[]'))
+
+            solr_filters = {}
+            for case_filterids in case_filters:
+                progid, attr_nm=case_filterids.split(':')
+                progid=int(progid)
+                prognm=Program.objects.get(id=progid).name
+
+                if not progid in solr_filters:
+                    solr_filters[progid]={}
+                solr_filters[progid][case_filterids]=case_filters[case_filterids]
+
+                if not prognm in current_case_filters_disp:
+                    current_case_filters_disp[prognm]=[]
+                attr = Attribute.objects.get(name=attr_nm)
+                #attr_node=attr.name.split("_")[1].upper()
+
+                attr_disp=attr.display_name
+                #if "_" in attr.name:
+                #    attr_disp = "[" + attr.name.split("_")[1].upper() + "]" + attr_disp
+
+                filter_values = case_filters[case_filterids]['values']
+
+                disp_val=[{"values":val, "display_val":val} for val in filter_values]
+                current_case_filters_disp[prognm].append({"id":attr.id, "attr_name":attr.name, "name":attr.name, "display_name":attr_disp, "op":'OR', "values":disp_val})
+
+            data_sources = DataSource.objects.select_related("version").filter(source_type=DataSource.SOLR,
+                                                                               version__active=True).prefetch_related(
+                Prefetch('datasettypes', queryset=DataSetType.objects.filter(
+                    data_type__in=[DataSetType.CLINICAL_DATA, DataSetType.FILE_TYPE_DATA]))
+            ).filter(datasettypes__set_type__in=[DataSetType.CASE_SET, DataSetType.FILE_AVAIL_SET]).distinct()
+
+            if len(solr_filters):
+                results = get_cohort_stats(filters=solr_filters, sources=data_sources)
+                total_samples = results['sample_barcode']
+                total_cases = results['case_barcode']
+
             download_url = reverse("download_filelist")
             export_url = reverse("export_data", kwargs={'export_type': 'file_manifest'})
         logger.debug("[STATUS] Returning response from cohort_filelist")
@@ -662,6 +827,11 @@ def filelist(request, cohort_id=None, panel_type=None):
                                             'total_file_count': (items['total_file_count'] if items else 0),
                                             'download_url': download_url,
                                             'export_url': export_url,
+                                            'total_samples': total_samples,
+                                            'total_cases': total_cases,
+                                            'current_case_filters_disp': current_case_filters_disp,
+                                            'case_filters':case_filters,
+                                            'program_ids':program_ids,
                                             'metadata_data_attr': metadata_data_attr,
                                             'file_list': (items['file_list'] if items else []),
                                             'file_list_max': MAX_FILE_LIST_ENTRIES,
@@ -723,8 +893,11 @@ def filelist_ajax(request, cohort_id=None, panel_type=None):
             request.POST.get('filters', '{}'))
         if request.GET.get('case_barcode', None):
             inc_filters['case_barcode'] = [request.GET.get('case_barcode')]
+        case_filters = None
+        if request.GET.get('case_filters', None):
+            case_filters = json.loads(request.GET.get('case_filters', '{}'))
 
-        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters,
+        result = cohort_files(cohort_id, user=request.user, inc_filters=inc_filters, case_filters=case_filters,
                               data_type=panel_type, do_filter_count=do_filter_count, **params)
 
         # If nothing was found, our  total file count will reflect that
@@ -929,6 +1102,25 @@ def unshare_cohort(request, cohort_id=0):
             'result': result
         })
 
+def get_case_ids(request):
+    filters = json.loads(request.GET.get('filters', '{}'))
+    comb_mut_filters = request.GET.get('mut_filter_combine', 'OR')
+    limit = request.GET.get('limit', None)
+    program_id = request.GET.get('program_id', None)
+
+    program_id = int(program_id) if program_id is not None else None
+
+    if request.user.is_authenticated:
+        user = Django_User.objects.get(id=request.user.id)
+    else:
+        user = AnonymousUser
+
+    results = count_public_metadata_solr(user, program_id=program_id,
+                               source_type=DataSource.SOLR, comb_mut_filters='OR', with_records=True, with_counts=False,
+                               fields=['PatientID'], data_type=None, with_totals=True, fq_operand='AND', with_tags=True,
+                               limit=limit)
+
+    return JsonResponse(results)
 
 def get_metadata(request):
     filters = json.loads(request.GET.get('filters', '{}'))
@@ -1102,7 +1294,7 @@ def export_data(request, cohort_id=None, export_type=None, versions=None):
 
     try:
         req_user = User.objects.get(id=request.user.id)
-        req = request.GET or request.POST
+        req = request.GET if request.method == 'GET' else request.POST
 
         if export_type not in ["file_manifest", "cohort"]:
             raise Exception("Unrecognized export type seen: {}".format(export_type))
